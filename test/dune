@@ -431,266 +431,6 @@
 ; ============================================================
 ; Focused single-module tests
 ; ============================================================
-(test
- (name test_track2_sync_boundary)
- (modules test_track2_sync_boundary)
- (libraries masc_test_deps))
-
-(test
- (name test_meta_cognition_snapshot)
- (modules test_meta_cognition_snapshot)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_turn_fsm_tla_parity)
- (modules test_keeper_turn_fsm_tla_parity)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_receipt_outcome_tla_parity)
- (modules test_keeper_receipt_outcome_tla_parity)
- (libraries masc_test_deps))
-
-(test
- (name test_tla_literal_parity)
- (modules test_tla_literal_parity)
- (libraries masc_test_deps autonomous resilience))
-
-(test
- (name test_keeper_receipt_authoritative)
- (modules test_keeper_receipt_authoritative)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_receipt_authoritative_matrix)
- (modules test_keeper_receipt_authoritative_matrix)
- (libraries masc_test_deps))
-
-(test
- (name test_telemetry_task_transition_10358)
- (modules test_telemetry_task_transition_10358)
- (libraries masc_test_deps))
-
-(test
- (name test_base_path_prod_guard)
- (modules test_base_path_prod_guard)
- (libraries masc_test_deps))
-
-(test
- (name test_dashboard_keeper_metrics_10286)
- (modules test_dashboard_keeper_metrics_10286)
- (libraries masc_test_deps))
-
-(test
- (name test_distributed_lock_acquire_failed_counter)
- (modules test_distributed_lock_acquire_failed_counter)
- (libraries masc_test_deps))
-
-(test
- (name test_distributed_lock_backoff_jitter_9645)
- (modules test_distributed_lock_backoff_jitter_9645)
- (libraries masc_test_deps))
-
-(test
- (name test_timeout_policy_overshoot_counter)
- (modules test_timeout_policy_overshoot_counter)
- (libraries masc_test_deps))
-
-(test
- (name test_join_required_guard_counter)
- (modules test_join_required_guard_counter)
- (libraries masc_test_deps))
-
-(test
- (name test_auth_token_uniqueness_audit)
- (modules test_auth_token_uniqueness_audit)
- (libraries masc_test_deps))
-
-(test
- (name test_auth_rotate_shared_tokens_10304)
- (modules test_auth_rotate_shared_tokens_10304)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_semaphore_wait_counter)
- (modules test_keeper_semaphore_wait_counter)
- (libraries masc_test_deps))
-
-(test
- (name test_fsm_drift_per_agent_counter)
- (modules test_fsm_drift_per_agent_counter)
- (libraries masc_test_deps))
-
-(test
- (name test_supervisor_start_predicate)
- (modules test_supervisor_start_predicate)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_context_bounds_ssot)
- (modules test_keeper_context_bounds_ssot)
- (libraries masc_test_deps))
-
-(test
- (name test_fs_compat_home_guard)
- (modules test_fs_compat_home_guard)
- (libraries masc_test_deps))
-
-(test
- (name test_hebbian_first_consolidation)
- (modules test_hebbian_first_consolidation)
- (libraries masc_test_deps))
-
-(test
- (name test_heuristic_metrics_scrub)
- (modules test_heuristic_metrics_scrub)
- (libraries masc_test_deps))
-
-(test
- (name test_governance_cases_snapshot)
- (modules test_governance_cases_snapshot)
- (libraries masc_test_deps))
-
-(test
- (name test_sandbox_clone_conflict)
- (modules test_sandbox_clone_conflict)
- (libraries masc_test_deps))
-
-(test
- (name test_personality_text_equal)
- (modules test_personality_text_equal)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-personality-text-equal
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-text-equal
-    (run %{test}))))
- (libraries masc_test_deps))
-
-(test
- (name test_personality_diff_summary_10269)
- (modules test_personality_diff_summary_10269)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-personality-diff-summary-10269
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-diff-summary-10269
-    (run %{test}))))
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_personality_round_trip)
- (modules test_keeper_personality_round_trip)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-personality-round-trip
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-keeper-personality-round-trip
-    (run %{test}))))
- (libraries masc_test_deps))
-
-
-; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads — the top-level Masc_mcp init includes
-; [Cdal_verdict_gate.default_base_path] which triggers the #9903
-; prod-guard when base_path resolves to the operator's HOME.
-(test
- (name test_require_tool_use_violation_counter_10091)
- (modules test_require_tool_use_violation_counter_10091)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-require-tool-use-violation-counter-10091
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-require-tool-use-violation-counter-10091
-    (run %{test}))))
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_turn_up_create_meta_retry)
- (modules test_keeper_turn_up_create_meta_retry)
- (libraries masc_test_deps))
-
-; #10097: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads — same reason as test_require_tool_use_
-; violation_counter_10091 above.  See that stanza's comment.
-(test
- (name test_codex_cli_omission_dedup_10097)
- (modules test_codex_cli_omission_dedup_10097)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-codex-cli-omission-dedup-10097
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-codex-cli-omission-dedup-10097
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #9953: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads. Same rationale as #10091/#10097/#10101.
-(test
- (name test_context_max_observed_9953)
- (modules test_context_max_observed_9953)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-context-max-observed-9953
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-context-max-observed-9953
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #10121: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads. Same rationale as #10091/#10097/#10101.
-(test
- (name test_keeper_turn_livelock_10121)
- (modules test_keeper_turn_livelock_10121)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-turn-livelock-10121
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-keeper-turn-livelock-10121
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #10101: same rationale as #10091 / #10097 — Masc_mcp module
-; init triggers #9903 prod-guard on HOME; setenv before exec.
-(test
- (name test_tool_help_registry_shard_coverage_10101)
- (modules test_tool_help_registry_shard_coverage_10101)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-tool-help-registry-shard-coverage-10101
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-tool-help-registry-shard-coverage-10101
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #10113: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads. Same rationale as #10091/#10097/#10101.
-(test
- (name test_anti_rationalization_gate2_advisory_10113)
- (modules test_anti_rationalization_gate2_advisory_10113)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-anti-rat-gate2-advisory-10113
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-anti-rat-gate2-advisory-10113
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #10094: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads.  Same rationale as #10091/#10097/#10101.
-(test
- (name test_oas_bridge_timeout_ssot_10094)
- (modules test_oas_bridge_timeout_ssot_10094)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-timeout-ssot-10094
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-timeout-ssot-10094
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #9629: judge callers (Governance_judge, Operator_judge) added to
-; the OAS bridge SSOT.  Dedicated stanza for the same MASC_BASE_PATH
-; reason as #10094.
-(test
- (name test_oas_bridge_judge_callers_9629)
- (modules test_oas_bridge_judge_callers_9629)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-judge-callers-9629
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-judge-callers-9629
-    (run %{test}))))
- (libraries masc_test_deps))
-
-; #10115: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads. Same rationale as #10091/#10097/#10101.
-(test
- (name test_cdal_ledger_health_10115)
- (modules test_cdal_ledger_health_10115)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-cdal-ledger-health-10115
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-cdal-ledger-health-10115
-    (run %{test}))))
- (libraries masc_test_deps))
 
 ; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
@@ -1087,172 +827,6 @@
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
 
-(test
- (name test_keeper_mutex_coverage)
- (modules test_keeper_mutex_coverage)
- (libraries masc_test_deps))
-
-(test
- (name test_dashboard_goals)
- (modules test_dashboard_goals)
- (libraries masc_test_deps))
-
-; Tool diversity: Shannon entropy + QCheck PBT
-(test
- (name test_tool_diversity)
- (modules test_tool_diversity)
- (libraries masc_test_deps))
-
-; Static validity check for the committed config/cascade.json.
-; Feeds every profile's model string list through the OAS parser
-; (parse_model_string_exn) so unknown provider names fail at test time
-; rather than when a keeper actually tries to resolve the cascade at
-; runtime. Path is injected via env var, not hardcoded.
-;
-; The test uses parse_model_string_exn and explicitly accepts the
-; "provider unavailable" error path, so the file-level (ZAI_API_KEY "")
-; default does NOT need to be overridden here — a known provider with
-; an unset API key is a soft pass, only unknown providers hard-fail.
-(test
- (name test_cascade_config_validity)
- (modules test_cascade_config_validity)
- (deps %{workspace_root}/config/cascade.json)
- (action
-  (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
-   (run %{test})))
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_runtime)
- (modules test_cascade_runtime)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_kimi_max_context_ssot)
- (modules test_cascade_kimi_max_context_ssot)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_catalog_runtime)
- (modules test_cascade_catalog_runtime)
- (libraries masc_test_deps))
-
-; Issue #8159: gemini: prefix must resolve to Gemini kind, not OpenAI_compat.
-(test
- (name test_provider_kind_resolution)
- (modules test_provider_kind_resolution)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_exec_tools)
- (modules test_keeper_exec_tools)
- (libraries masc_test_deps))
-
-; Ratchet for gh_min_timeout_sec (#8688). 41 gh_command_timed_out
-; rejections on 2026-04-17/18 at timeout_sec=5. Floor must stay
-; at/above network latency budget.
-(test
- (name test_keeper_gh_timeout_floor)
- (modules test_keeper_gh_timeout_floor)
- (libraries masc_test_deps))
-
-; Regression for Tool_task.completion_rejection_message — every
-; rejection must embed completion_notes_example so the keeper sees
-; a concrete density of accepted notes (#8688 root-cause sweep).
-(test
- (name test_tool_task_completion_example)
- (modules test_tool_task_completion_example)
- (libraries masc_test_deps))
-
-; Precondition pin: parse_verdict "" must return exactly
-; Error "empty review output" so the liveness-approve branch in
-; Anti_rationalization.review keeps matching (#8688).
-(test
- (name test_anti_rationalization_empty_liveness)
- (modules test_anti_rationalization_empty_liveness)
- (libraries masc_test_deps))
-
-; Regression for readonly_hint_of_category — every named category
-; must carry a concrete Good:/Bad: example so small-LLM keepers can
-; self-correct (#8688 root-cause sweep follow-up).
-(test
- (name test_keeper_readonly_hints)
- (modules test_keeper_readonly_hints)
- (libraries masc_test_deps))
-(test
- (name test_cascade_health_tracker)
- (modules test_cascade_health_tracker)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_inventory)
- (modules test_cascade_inventory)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_strategy)
- (modules test_cascade_strategy)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_fsm)
- (modules test_cascade_fsm)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_trust_persist)
- (modules test_cascade_trust_persist)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_model_resolve)
- (modules test_cascade_model_resolve)
- (libraries masc_test_deps unix))
-
-(test
- (name test_dashboard_tla_specs)
- (modules test_dashboard_tla_specs)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_ollama_probe)
- (modules test_cascade_ollama_probe)
- (libraries masc_test_deps))
-
-; ── Tool_name variant roundtrip + coverage ──────────────
-(test
- (name test_tool_name)
- (modules test_tool_name)
- (libraries masc_test_deps))
-
-; ── Event_kind variant roundtrip (#8455) ────────────────
-(test
- (name test_event_kind)
- (modules test_event_kind)
- (libraries masc_test_deps))
-
-; ── Core Triad: State x Decision x Cascade ──────────────
-(test
- (name test_keeper_cascade_routing)
- (modules test_keeper_cascade_routing)
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_capability_gate)
- (modules test_cascade_capability_gate)
- (libraries masc_test_deps))
-
-(test
- (name test_keeper_error_classify_recoverable)
- (modules test_keeper_error_classify_recoverable)
- (libraries masc_test_deps))
-
-; task-074: pin the two predicates the cascade auto-pause guard depends on.
-(test
- (name test_keeper_cascade_auto_pause_task074)
- (modules test_keeper_cascade_auto_pause_task074)
- (libraries masc_test_deps))
-
 ; ============================================================
 ; Group 4: Coverage tests (generated by Agent Autonomy)
 ; ============================================================
@@ -1335,110 +909,7 @@
 
 ; test_cp_unit_descendant_ids removed (CP purge)
 
-; RFC-MASC-001 Phase 1: structured working_context in Checkpoint.
-; Round-trip, envelope, patch_checkpoint, dual-source read.
-(test
- (name test_keeper_state_snapshot_json)
- (modules test_keeper_state_snapshot_json)
- (libraries masc_test_deps))
-
-; RFC-MASC-001 Phase 1 prose echo guard: prompt-time summary filter
-; strips backward-looking fields (Done, Decisions, Progress) while
-; preserving forward-looking ones (Goal, Next plan, Next, etc.).
-(test
- (name test_continuity_forward_filter)
- (modules test_continuity_forward_filter)
- (libraries masc_test_deps))
-
-; Gen4 compaction-layer [STATE] guard: keeper_summarizer scrubs
-; [STATE]...[/STATE] from Text blocks before OAS default extractive
-; summarization. Registered via Builder.with_summarizer (OAS 0.152.0).
-(test
- (name test_keeper_summarizer)
- (modules test_keeper_summarizer)
- (libraries masc_test_deps))
-
-; Gen7 persistence-layer guard: cap_snapshot bounds string/list
-; growth before continuity_summary is rendered + persisted. Stops
-; monotonic growth when the LLM produces ever-longer [STATE] blocks.
-(test
- (name test_snapshot_size_cap)
- (modules test_snapshot_size_cap)
- (libraries masc_test_deps))
-
-; Gen8 persistence-layer guard: cap_social_state bounds the BDI
-; speech v1 narrative fields (belief_summary, active_desire,
-; current_intention, blocker, need) carried across turns via
-; previous_state. Stays silent does not clear state, so without
-; this cap the narrative accumulates monotonically.
-(test
- (name test_social_state_cap)
- (modules test_social_state_cap)
- (libraries masc_test_deps))
-
-; Gen12 load-path guard: checkpoint JSON deserialization also
-; truncates narrative fields so pre-Gen8 snapshots do not
-; reintroduce unbounded strings into meta.runtime.
-(test
- (name test_social_state_cap_on_load)
- (modules test_social_state_cap_on_load)
- (libraries masc_test_deps))
-
-; Gen13 second-model coverage: Magentic ledger v1 overlays the
-; narrative fields after Bdi returns; this test locks the cap
-; invariant at the emission point so both speech models honour the
-; same budget.
-(test
- (name test_magentic_ledger_cap)
- (modules test_magentic_ledger_cap)
- (libraries masc_test_deps))
-
-; Keeper_checkpoint_store.is_not_found_detail classifier
-; regression (observed 334-retry loop on trace-1775487505102-6a347
-; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
-(test
- (name test_keeper_checkpoint_classify)
- (modules test_keeper_checkpoint_classify)
- (libraries masc_test_deps))
-
-; Keeper autonomous semaphore fairness cooldown (#6810)
-(test
- (name test_keeper_semaphore_fairness)
- (modules test_keeper_semaphore_fairness)
- (libraries masc_test_deps))
-
-; Dashboard_governance_metrics — tool rejection ring + approval queue
-(test
- (name test_dashboard_governance_metrics)
- (modules test_dashboard_governance_metrics)
- (libraries masc_test_deps))
-; Operator Control (7 modules)
-(test
- (name test_operator_control)
- (modules test_operator_control
-          test_operator_control_support
-          test_operator_control_snapshot
-          test_operator_control_actions
-          test_operator_control_judgment
-          test_operator_control_confirm
-          test_operator_control_keeper)
- (libraries masc_test_deps)
- (enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))
-
-; Normalized actor (operator_pending_confirm)
-(test
- (name test_normalized_actor)
- (modules test_normalized_actor)
- (libraries masc_test_deps))
-
 ; test_failover_leader removed (CP purge)
-
-; MCP Tool Matrix (2 modules + generated names + runner dep)
-(test
- (name test_mcp_tool_matrix)
- (modules test_mcp_tool_matrix)
- (deps tool_matrix_case_runner.exe)
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; Keeper Tool Matrix — shared case modules as a library
 (library
@@ -1447,23 +918,9 @@
  (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
-; Keeper Tool Matrix (test driver + runner dep)
-(test
- (name test_keeper_tool_matrix)
- (modules test_keeper_tool_matrix)
- (deps keeper_tool_matrix_case_runner.exe)
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
-
 ; ============================================================
 ; Special: Custom compiler flags
 ; ============================================================
-
-; OAS Worker (suppresses warning 32)
-(test
- (name test_oas_worker)
- (modules test_oas_worker)
- (ocamlopt_flags (:standard -w -32))
- (libraries masc_test_deps))
 
 ; ============================================================
 ; Special: E2E tests requiring server binary
@@ -1471,291 +928,12 @@
 ; Skip by default; run with: MASC_E2E_TESTS=true dune test
 ; ============================================================
 
-(test
- (name test_mcp_post_sse_e2e)
- (modules test_mcp_post_sse_e2e)
- (libraries alcotest yojson unix)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
-(test
- (name test_sse_storm_e2e)
- (modules test_sse_storm_e2e)
- (libraries alcotest yojson unix)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
-(test
- (name test_board_api_e2e)
- (modules test_board_api_e2e)
- (libraries alcotest unix)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
-(test
- (name test_openapi_api_e2e)
- (modules test_openapi_api_e2e)
- (libraries alcotest yojson unix)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
-(test
- (name test_operator_mcp_e2e)
- (modules test_operator_mcp_e2e)
- (libraries masc_test_deps)
- (deps
-  ../bin/main_eio.exe
-  (source_tree ../config))
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
-(test
- (name test_dashboard_keeper_routes)
- (modules test_dashboard_keeper_routes)
- (libraries masc_test_deps)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
-
 ; ============================================================
 ; Special: Minimal dependency tests (CI scripts, governance)
 ; ============================================================
-
-(test
- (name test_ci_hardening_source)
- (modules test_ci_hardening_source)
- (libraries alcotest unix str))
-
-(test
- (name test_keeper_pause_silent_failure_source)
- (modules test_keeper_pause_silent_failure_source)
- (libraries alcotest unix str))
-
-(test
- (name test_keeper_supervisor_write_meta_source)
- (modules test_keeper_supervisor_write_meta_source)
- (libraries alcotest unix str))
-
-(test
- (name test_keeper_agent_run_sandbox_source)
- (modules test_keeper_agent_run_sandbox_source)
- (libraries alcotest unix))
-
-(test
- (name test_keeper_fs_write_containment)
- (modules test_keeper_fs_write_containment)
- (libraries masc_test_deps))
-
-(test
- (name test_channel_gate)
- (modules test_channel_gate)
- (libraries masc_test_deps))
-
-(test
- (name test_channel_gate_metrics)
- (modules test_channel_gate_metrics)
- (libraries masc_test_deps))
-
-(test
- (name test_channel_gate_discord_state)
- (modules test_channel_gate_discord_state)
- (libraries masc_test_deps))
-
-(test
- (name test_gate_protocol)
- (modules test_gate_protocol)
- (libraries masc_test_deps))
-
-(test
- (name test_local_review_script)
- (modules test_local_review_script)
- (libraries alcotest unix yojson))
-
-(test
- (name test_ci_run_tests_script)
- (modules test_ci_run_tests_script)
- (libraries alcotest unix))
-
-(test
- (name test_git_fetch_retry_script)
- (modules test_git_fetch_retry_script)
- (libraries alcotest unix))
-
-(test
- (name test_pr_open_script)
- (modules test_pr_open_script)
- (libraries alcotest unix))
-
-(test
- (name test_release_train_guard_script)
- (modules test_release_train_guard_script)
- (libraries alcotest unix))
-
-(test
- (name test_start_masc_mcp_script)
- (modules test_start_masc_mcp_script)
- (libraries alcotest masc_core unix))
-
-(test
- (name test_tool_call_replay_harness)
- (modules test_tool_call_replay_harness)
- (libraries masc_mcp fs_compat alcotest yojson unix))
-
-
-(test
- (name test_dated_jsonl)
- (modules test_dated_jsonl)
- (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
-
-(test
- (name test_goal_phase_awaiting_verification_10411)
- (modules test_goal_phase_awaiting_verification_10411)
- (libraries masc_mcp alcotest))
-
-(test
- (name test_dated_jsonl_mutex_registry_10372)
- (modules test_dated_jsonl_mutex_registry_10372)
- (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
-
-(test
- (name test_anti_rationalization_korean_10385)
- (modules test_anti_rationalization_korean_10385)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_keeper_path_roots_leak_10349)
- (modules test_keeper_path_roots_leak_10349)
- (libraries
-  masc_mcp
-  fs_compat
-  astring
-  alcotest
-  eio
-  eio_main
-  unix))
-
-(test
- (name test_keeper_cwd_response)
- (modules test_keeper_cwd_response)
- (libraries masc_mcp astring alcotest yojson))
-
-(test
- (name test_keeper_exec_shell_cwd_response)
- (modules test_keeper_exec_shell_cwd_response)
- (libraries astring alcotest))
-
-(test
- (name test_keeper_shell_docker_cwd_response)
- (modules test_keeper_shell_docker_cwd_response)
- (libraries masc_mcp masc_test_deps astring alcotest yojson unix))
-
-(test
- (name test_keeper_memory_bank_consensus_re_10399)
- (modules test_keeper_memory_bank_consensus_re_10399)
- (libraries masc_mcp alcotest eio eio_main))
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================
-
-(test
- (name test_work_as_heartbeat)
- (modules test_work_as_heartbeat)
- (libraries masc_mcp masc_mcp.config alcotest eio_main unix))
-
-(test
- (name test_phase2_self_preservation)
- (modules test_phase2_self_preservation)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-phase2
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-phase2
-    (run %{test}))))
- (libraries masc_test_deps masc_mcp masc_mcp.config alcotest eio eio_main unix fs_compat))
-
-(test
- (name test_heartbeat_integration)
- (modules test_heartbeat_integration)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-heartbeat-integ
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-heartbeat-integ
-    (run %{test}))))
- (libraries masc_test_deps masc_mcp masc_mcp.config fs_compat alcotest eio eio_main unix))
-
-(test
- (name test_smart_heartbeat_keepalive)
- (modules test_smart_heartbeat_keepalive)
- (libraries masc_mcp masc_mcp.config masc_coord masc_types alcotest unix))
-
-(test
- (name test_oas_timeout_budget_strike)
- (modules test_oas_timeout_budget_strike)
- (libraries masc_mcp alcotest eio eio_main))
-
-(test
- (name test_keeper_fs)
- (modules test_keeper_fs)
- (libraries masc_mcp alcotest yojson unix eio eio_main))
-
-(test
- (name test_keeper_meta_heartbeat_retain_9733)
- (modules test_keeper_meta_heartbeat_retain_9733)
- (libraries masc_mcp masc_test_deps fs_compat alcotest eio eio_main unix))
-
-(test
- (name test_keeper_meta_canonical_seed)
- (modules test_keeper_meta_canonical_seed)
- (libraries masc_mcp alcotest))
-
-(test
- (name test_keeper_paused_cas_retain_9733)
- (modules test_keeper_paused_cas_retain_9733)
- (libraries masc_mcp masc_test_deps fs_compat alcotest eio eio_main unix))
-
-(test
- (name test_keeper_compaction_noop_counter_9943)
- (modules test_keeper_compaction_noop_counter_9943)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_keeper_usage_trust_anthropic_cache_9959)
- (modules test_keeper_usage_trust_anthropic_cache_9959)
- (libraries masc_mcp alcotest))
-
-(test
- (name test_governance_response_model_empty_9880)
- (modules test_governance_response_model_empty_9880)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_keeper_autoboot_supervisor_start_10125)
- (modules test_keeper_autoboot_supervisor_start_10125)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-autoboot-sup-10125
-   (run %{test})))
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_fs_atomic_orphan_sweep_10130)
- (modules test_fs_atomic_orphan_sweep_10130)
- (libraries fs_compat alcotest unix))
-
-(test
- (name test_keeper_long_turn_9943)
- (modules test_keeper_long_turn_9943)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-long-turn-9943
-   (run %{test})))
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_keeper_supervisor_observability_10125)
- (modules test_keeper_supervisor_observability_10125)
- (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-supervisor-obs-10125
-   (run %{test})))
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_auth_bearer_mismatch_9786)
- (modules test_auth_bearer_mismatch_9786)
- (libraries masc_mcp masc_types alcotest unix))
 
 
 ; ============================================================
@@ -1784,21 +962,6 @@
  (modules test_a12_e2e_demo)
  (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
-(test
- (name test_k2_pipeline_e2e)
- (modules test_k2_pipeline_e2e)
- (libraries masc_test_deps multimodal shared_types yojson))
-
-(test
- (name test_k3_tool_pipeline_e2e)
- (modules test_k3_tool_pipeline_e2e)
- (libraries masc_test_deps multimodal shared_types yojson))
-
-(test
- (name test_keeper_tool_emission_hook)
- (modules test_keeper_tool_emission_hook)
- (libraries masc_test_deps multimodal))
-
 (executable
  (name test_concurrent_distributed)
  (modules test_concurrent_distributed)
@@ -1819,11 +982,6 @@
  (modules test_masc_context_injector)
  (libraries masc_test_deps))
 
-(test
- (name test_worker_safety_gates)
- (modules test_worker_safety_gates)
- (libraries masc_test_deps))
-
 (executable
  (name tool_matrix_manifest)
  (modules tool_matrix_manifest)
@@ -1834,132 +992,168 @@
  (modules tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
-; Context Isolation (multi-keeper)
-(test
- (name test_keeper_context_isolation)
- (modules test_keeper_context_isolation)
- (libraries masc_test_deps))
-
-; Transport_bridge.seal guard
-(test
- (name test_transport_bridge_seal)
- (modules test_transport_bridge_seal)
- (libraries masc_test_deps))
-
-; OpenTelemetry trace context (W3C traceparent)
-(test
- (name test_otel_trace_context)
- (modules test_otel_trace_context)
- (libraries masc_test_deps))
-
-; OpenTelemetry GenAI semantic convention helpers
-(test
- (name test_otel_genai)
- (modules test_otel_genai)
- (libraries masc_test_deps))
-
-(test
- (name test_server_state_product)
- (modules test_server_state_product)
- (libraries masc_test_deps))
-
-; #9571 SSOT enforcement — no inline ".masc" literal outside Common.masc_dirname
-(test
- (name test_masc_dirname_ssot)
- (modules test_masc_dirname_ssot)
- (libraries masc_test_deps unix str))
-
-; Timeout policy SSOT (#9639, #9662)
-(test
- (name test_timeout_policy)
- (modules test_timeout_policy)
- (libraries masc_test_deps))
-
-; write_meta CAS field-merge (#9769)
-(test
- (name test_keeper_meta_merge)
- (modules test_keeper_meta_merge)
- (libraries masc_test_deps))
-
-; Instrumentation-theatre guard (#7718)
-(test
- (name test_heuristic_metrics_diagnostics)
- (modules test_heuristic_metrics_diagnostics)
- (libraries masc_test_deps))
-
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
-; Per-caller subprocess exec timeout SSOT (#10426)
-(test
- (name test_env_config_exec_timeout_10426)
- (modules test_env_config_exec_timeout_10426)
- (libraries masc_test_deps))
-
-; Sandbox configuration SSOT (P2a follow-up to #10426)
-(test
- (name test_env_config_sandbox)
- (modules test_env_config_sandbox)
- (libraries masc_test_deps))
-
-; KeeperPollIntervals SSOT (companion to #10740 KeeperWatchdog)
-(test
- (name test_env_config_keeper_poll_intervals)
- (modules test_env_config_keeper_poll_intervals)
- (libraries masc_test_deps))
-
-; Keeper bootstrap polling/settle interval SSOT
-(test
- (name test_env_config_keeper_bootstrap_intervals)
- (modules test_env_config_keeper_bootstrap_intervals)
- (libraries masc_test_deps))
-
-; Dashboard shell-cache pre-warm timeout SSOT
-(test
- (name test_env_config_dashboard_shell_prewarm)
- (modules test_env_config_dashboard_shell_prewarm)
- (libraries masc_test_deps))
-
-; Sidecar subprocess timeout SSOT
-(test
- (name test_env_config_sidecar_timeouts)
- (modules test_env_config_sidecar_timeouts)
- (libraries masc_test_deps))
-
-; Voice bridge HTTP/audio timeout SSOT
-(test
- (name test_env_config_voice_bridge_timeouts)
- (modules test_env_config_voice_bridge_timeouts)
- (libraries masc_test_deps))
-
-; Dashboard execution-surface timeout SSOT
-(test
- (name test_env_config_dashboard_execution_timeouts)
- (modules test_env_config_dashboard_execution_timeouts)
- (libraries masc_test_deps))
-
-; Dashboard mission/shell/render compute-timeout SSOT
-(test
- (name test_env_config_dashboard_compute_timeouts)
- (modules test_env_config_dashboard_compute_timeouts)
- (libraries masc_test_deps))
-
-; Coord local git operation timeout SSOT
-(test
- (name test_env_config_coord_git_local_timeout)
- (modules test_env_config_coord_git_local_timeout)
- (libraries masc_test_deps))
-
-; Process_eio subprocess default timeout SSOT
-(test
- (name test_process_eio_default_timeout)
- (modules test_process_eio_default_timeout)
- (libraries masc_test_deps))
-
-; IR-3: checkpoint save error promotion
-(test
- (name test_oas_worker_exec_checkpoint)
- (modules test_oas_worker_exec_checkpoint)
- (libraries masc_test_deps))
+; ============================================================
+; Individual test stanzas — each in its own file to prevent
+; merge conflicts when multiple PRs add tests concurrently.
+; To add a new test: create test/stanzas/test_name.inc and
+; add one (include stanzas/test_name.inc) line below,
+; sorted alphabetically.
+; ============================================================
+(include stanzas/test_anti_rationalization_empty_liveness.inc)
+(include stanzas/test_anti_rationalization_gate2_advisory_10113.inc)
+(include stanzas/test_anti_rationalization_korean_10385.inc)
+(include stanzas/test_auth_bearer_mismatch_9786.inc)
+(include stanzas/test_auth_rotate_shared_tokens_10304.inc)
+(include stanzas/test_auth_token_uniqueness_audit.inc)
+(include stanzas/test_base_path_prod_guard.inc)
+(include stanzas/test_board_api_e2e.inc)
+(include stanzas/test_cascade_capability_gate.inc)
+(include stanzas/test_cascade_catalog_runtime.inc)
+(include stanzas/test_cascade_config_validity.inc)
+(include stanzas/test_cascade_fsm.inc)
+(include stanzas/test_cascade_health_tracker.inc)
+(include stanzas/test_cascade_inventory.inc)
+(include stanzas/test_cascade_kimi_max_context_ssot.inc)
+(include stanzas/test_cascade_model_resolve.inc)
+(include stanzas/test_cascade_ollama_probe.inc)
+(include stanzas/test_cascade_runtime.inc)
+(include stanzas/test_cascade_strategy.inc)
+(include stanzas/test_cascade_trust_persist.inc)
+(include stanzas/test_cdal_ledger_health_10115.inc)
+(include stanzas/test_channel_gate.inc)
+(include stanzas/test_channel_gate_discord_state.inc)
+(include stanzas/test_channel_gate_metrics.inc)
+(include stanzas/test_ci_hardening_source.inc)
+(include stanzas/test_ci_run_tests_script.inc)
+(include stanzas/test_codex_cli_omission_dedup_10097.inc)
+(include stanzas/test_context_max_observed_9953.inc)
+(include stanzas/test_continuity_forward_filter.inc)
+(include stanzas/test_dashboard_goals.inc)
+(include stanzas/test_dashboard_governance_metrics.inc)
+(include stanzas/test_dashboard_keeper_metrics_10286.inc)
+(include stanzas/test_dashboard_keeper_routes.inc)
+(include stanzas/test_dashboard_tla_specs.inc)
+(include stanzas/test_dated_jsonl.inc)
+(include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
+(include stanzas/test_distributed_lock_acquire_failed_counter.inc)
+(include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
+(include stanzas/test_env_config_coord_git_local_timeout.inc)
+(include stanzas/test_env_config_dashboard_compute_timeouts.inc)
+(include stanzas/test_env_config_dashboard_execution_timeouts.inc)
+(include stanzas/test_env_config_dashboard_shell_prewarm.inc)
+(include stanzas/test_env_config_exec_timeout_10426.inc)
+(include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
+(include stanzas/test_env_config_keeper_poll_intervals.inc)
+(include stanzas/test_env_config_sandbox.inc)
+(include stanzas/test_env_config_sidecar_timeouts.inc)
+(include stanzas/test_env_config_voice_bridge_timeouts.inc)
+(include stanzas/test_event_kind.inc)
+(include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
+(include stanzas/test_fs_compat_home_guard.inc)
+(include stanzas/test_fsm_drift_per_agent_counter.inc)
+(include stanzas/test_gate_protocol.inc)
+(include stanzas/test_git_fetch_retry_script.inc)
+(include stanzas/test_goal_phase_awaiting_verification_10411.inc)
+(include stanzas/test_governance_cases_snapshot.inc)
+(include stanzas/test_governance_response_model_empty_9880.inc)
+(include stanzas/test_heartbeat_integration.inc)
+(include stanzas/test_hebbian_first_consolidation.inc)
+(include stanzas/test_heuristic_metrics_diagnostics.inc)
+(include stanzas/test_heuristic_metrics_scrub.inc)
+(include stanzas/test_join_required_guard_counter.inc)
+(include stanzas/test_k2_pipeline_e2e.inc)
+(include stanzas/test_k3_tool_pipeline_e2e.inc)
+(include stanzas/test_keeper_agent_run_sandbox_source.inc)
+(include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
+(include stanzas/test_keeper_cascade_auto_pause_task074.inc)
+(include stanzas/test_keeper_cascade_routing.inc)
+(include stanzas/test_keeper_checkpoint_classify.inc)
+(include stanzas/test_keeper_compaction_noop_counter_9943.inc)
+(include stanzas/test_keeper_context_bounds_ssot.inc)
+(include stanzas/test_keeper_context_isolation.inc)
+(include stanzas/test_keeper_cwd_response.inc)
+(include stanzas/test_keeper_error_classify_recoverable.inc)
+(include stanzas/test_keeper_exec_shell_cwd_response.inc)
+(include stanzas/test_keeper_exec_tools.inc)
+(include stanzas/test_keeper_fs.inc)
+(include stanzas/test_keeper_fs_write_containment.inc)
+(include stanzas/test_keeper_gh_timeout_floor.inc)
+(include stanzas/test_keeper_long_turn_9943.inc)
+(include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
+(include stanzas/test_keeper_meta_canonical_seed.inc)
+(include stanzas/test_keeper_meta_heartbeat_retain_9733.inc)
+(include stanzas/test_keeper_meta_merge.inc)
+(include stanzas/test_keeper_mutex_coverage.inc)
+(include stanzas/test_keeper_path_roots_leak_10349.inc)
+(include stanzas/test_keeper_pause_silent_failure_source.inc)
+(include stanzas/test_keeper_paused_cas_retain_9733.inc)
+(include stanzas/test_keeper_personality_round_trip.inc)
+(include stanzas/test_keeper_readonly_hints.inc)
+(include stanzas/test_keeper_receipt_authoritative.inc)
+(include stanzas/test_keeper_receipt_authoritative_matrix.inc)
+(include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
+(include stanzas/test_keeper_semaphore_fairness.inc)
+(include stanzas/test_keeper_semaphore_wait_counter.inc)
+(include stanzas/test_keeper_shell_docker_cwd_response.inc)
+(include stanzas/test_keeper_state_snapshot_json.inc)
+(include stanzas/test_keeper_summarizer.inc)
+(include stanzas/test_keeper_supervisor_observability_10125.inc)
+(include stanzas/test_keeper_supervisor_write_meta_source.inc)
+(include stanzas/test_keeper_tool_emission_hook.inc)
+(include stanzas/test_keeper_tool_matrix.inc)
+(include stanzas/test_keeper_turn_fsm_tla_parity.inc)
+(include stanzas/test_keeper_turn_livelock_10121.inc)
+(include stanzas/test_keeper_turn_up_create_meta_retry.inc)
+(include stanzas/test_keeper_usage_trust_anthropic_cache_9959.inc)
+(include stanzas/test_local_review_script.inc)
+(include stanzas/test_magentic_ledger_cap.inc)
+(include stanzas/test_masc_dirname_ssot.inc)
+(include stanzas/test_mcp_post_sse_e2e.inc)
+(include stanzas/test_mcp_tool_matrix.inc)
+(include stanzas/test_meta_cognition_snapshot.inc)
+(include stanzas/test_normalized_actor.inc)
+(include stanzas/test_oas_bridge_judge_callers_9629.inc)
+(include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
+(include stanzas/test_oas_timeout_budget_strike.inc)
+(include stanzas/test_oas_worker.inc)
+(include stanzas/test_oas_worker_exec_checkpoint.inc)
+(include stanzas/test_openapi_api_e2e.inc)
+(include stanzas/test_operator_control.inc)
+(include stanzas/test_operator_mcp_e2e.inc)
+(include stanzas/test_otel_genai.inc)
+(include stanzas/test_otel_trace_context.inc)
+(include stanzas/test_personality_diff_summary_10269.inc)
+(include stanzas/test_personality_text_equal.inc)
+(include stanzas/test_phase2_self_preservation.inc)
+(include stanzas/test_pr_open_script.inc)
+(include stanzas/test_process_eio_default_timeout.inc)
+(include stanzas/test_provider_kind_resolution.inc)
+(include stanzas/test_release_train_guard_script.inc)
+(include stanzas/test_require_tool_use_violation_counter_10091.inc)
+(include stanzas/test_sandbox_clone_conflict.inc)
+(include stanzas/test_server_state_product.inc)
+(include stanzas/test_smart_heartbeat_keepalive.inc)
+(include stanzas/test_snapshot_size_cap.inc)
+(include stanzas/test_social_state_cap.inc)
+(include stanzas/test_social_state_cap_on_load.inc)
+(include stanzas/test_sse_storm_e2e.inc)
+(include stanzas/test_start_masc_mcp_script.inc)
+(include stanzas/test_supervisor_start_predicate.inc)
+(include stanzas/test_telemetry_task_transition_10358.inc)
+(include stanzas/test_timeout_policy.inc)
+(include stanzas/test_timeout_policy_overshoot_counter.inc)
+(include stanzas/test_tla_literal_parity.inc)
+(include stanzas/test_tool_call_replay_harness.inc)
+(include stanzas/test_tool_diversity.inc)
+(include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
+(include stanzas/test_tool_name.inc)
+(include stanzas/test_tool_task_completion_example.inc)
+(include stanzas/test_track2_sync_boundary.inc)
+(include stanzas/test_transport_bridge_seal.inc)
+(include stanzas/test_work_as_heartbeat.inc)
+(include stanzas/test_worker_safety_gates.inc)

@@ -1195,6 +1195,29 @@ let test_human_approval_credential_boundary_contracts () =
     (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
        "human-approval")
 
+let test_human_approval_environment_check_contracts () =
+  check bool "human approval environment check script exists" true
+    (Sys.file_exists
+       (source_path "scripts/check-human-approval-env.sh"));
+  check bool "human approval environment check reads GitHub Environment" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "repos/$REPO/environments/$ENVIRONMENT");
+  check bool "human approval environment check requires reviewer rule" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "required_reviewers");
+  check bool "human approval environment check fails empty reviewer rule" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "required reviewer protection rule missing or empty");
+  check bool "human approval environment check can require named reviewer" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--require-reviewer");
+  check bool "human approval environment check can require prevent self-review" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--require-prevent-self-review");
+  check bool "human approval environment check warns when self-review remains allowed" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "prevent_self_review is false")
+
 let () =
   run "ci_hardening_source"
     [
@@ -1257,5 +1280,7 @@ let () =
              test_ssot_fingerprint_gate_contracts;
            test_case "human approval credential boundary contracts (#9733)" `Quick
              test_human_approval_credential_boundary_contracts;
+           test_case "human approval environment check contracts (#12561)" `Quick
+             test_human_approval_environment_check_contracts;
          ]);
     ]

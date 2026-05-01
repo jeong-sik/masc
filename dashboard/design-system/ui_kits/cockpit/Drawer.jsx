@@ -372,9 +372,22 @@ function Drawer() {
   if (window.__drawerHotkey) return;
   window.__drawerHotkey = true;
 
-  // ctrl/cmd + ` toggles open/closed
+  const isEditableTarget = (target) => {
+    const tag = target && target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+      (target && target.isContentEditable) ||
+      (target && target.closest && target.closest("[contenteditable]:not([contenteditable='false'])"));
+  };
+
+  const isDrawerHotkey = (e) => {
+    const altGraph = e.getModifierState && e.getModifierState("AltGraph");
+    return !altGraph && (e.ctrlKey || e.metaKey) && e.code === "Backquote";
+  };
+
+  // ctrl/cmd + physical Backquote toggles open/closed
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "`") {
+    if (isDrawerHotkey(e)) {
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));
     }
@@ -383,13 +396,7 @@ function Drawer() {
   // listen for programmatic events (from IDE's drawer hint button etc.)
   window.addEventListener("masc-drawer-toggle", () => {
     if (!window.useCockpitState) return;
-    // bypass hook: read singleton directly via the module-internal __state
-    const ev = window.__cockpit_state || null;
-    // simpler: push a custom postMessage that any mounted Drawer hook will receive via state singleton
-    // we trigger by directly invoking the persist with a flipped open flag
-    const cur = (window.MASC_EXT && window.MASC_EXT.initialState) ? null : null;
-    // Use a global helper installed below
-    if (window.__drawerToggle) window.__drawerToggle();
+    window.__drawerToggle?.();
   });
   window.addEventListener("masc-drawer-set", (e) => {
     if (window.__drawerSet) window.__drawerSet(e.detail || {});

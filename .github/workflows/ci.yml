@@ -17,6 +17,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Draft PRs are collaboration scratch space. Keep only the lightweight
+# PR-sync/CI-Gate path there, then run the full matrix on ready_for_review.
 jobs:
   pr-sync-check:
     name: PR Sync Check
@@ -45,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [pr-sync-check]
-    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     outputs:
       build: ${{ steps.scope.outputs.build }}
       lint: ${{ steps.scope.outputs.lint }}
@@ -205,7 +207,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -304,7 +306,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.health == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.health == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -365,7 +367,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     outputs:
       advisory_status: ${{ steps.build_advisory_status.outputs.advisory_status }}
 
@@ -615,7 +617,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.lint == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.lint == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -697,7 +699,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.dashboard == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.dashboard == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -743,7 +745,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -766,7 +768,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     needs: [pr-sync-check]
-    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -780,7 +782,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout

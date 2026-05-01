@@ -111,6 +111,74 @@ let test_pricing_for_model_opt_contract () =
     true (Option.is_none
             (Pricing.pricing_for_model_opt "totally-unknown-pricing-probe"))
 
+(* ── cost_status_for_event ─────────────────────────────────────── *)
+
+let test_unpriced_model_with_trusted_usage_gives_unpriced () =
+  (* The core "fake success" scenario: usage_trusted=true, but the model
+     has no pricing catalog entry. cost_status must be unpriced_model,
+     NOT reported_or_estimated. *)
+  let status =
+    Hooks.cost_status_for_event
+      ~provider:"some-provider"
+      ~pricing_model:"unpriced-model-xyz-2026"
+      ~usage_missing:false
+      ~usage_trusted:true
+      ~input_tokens:10_000
+      ~output_tokens:2_000
+      ~cost_usd:0.0
+  in
+  Alcotest.(check string)
+    "unpriced model → Cost_unpriced_model"
+    "unpriced_model" (Hooks.cost_status_to_string status)
+
+let test_known_model_with_trusted_usage_gives_priced () =
+  let status =
+    Hooks.cost_status_for_event
+      ~provider:"anthropic"
+      ~pricing_model:"claude-sonnet-4-6"
+      ~usage_missing:false
+      ~usage_trusted:true
+      ~input_tokens:10_000
+      ~output_tokens:2_000
+      ~cost_usd:0.045
+  in
+  Alcotest.(check string)
+    "known model with cost > 0 → priced"
+    "priced" (Hooks.cost_status_to_string status)
+
+let test_known_model_zero_cost_with_tokens_gives_known_free () =
+  (* Known model, trusted usage, but cost_usd=0 (e.g. catalog hit but
+     input/output are both zero-cost tiers). Still classified as
+     "priced" because the catalog was found. *)
+  let status =
+    Hooks.cost_status_for_event
+      ~provider:"ollama"
+      ~pricing_model:"qwen3.6:35b-a3b-mlx-bf16-64k"
+      ~usage_missing:false
+      ~usage_trusted:true
+      ~input_tokens:10_000
+      ~output_tokens:2_000
+      ~cost_usd:0.0
+  in
+  Alcotest.(check string)
+    "known-free model → known_free"
+    "known_free" (Hooks.cost_status_to_string status)
+
+let test_missing_usage_gives_usage_missing () =
+  let status =
+    Hooks.cost_status_for_event
+      ~provider:"anthropic"
+      ~pricing_model:"claude-sonnet-4-6"
+      ~usage_missing:true
+      ~usage_trusted:false
+      ~input_tokens:0
+      ~output_tokens:0
+      ~cost_usd:0.0
+  in
+  Alcotest.(check string)
+    "missing usage → usage_missing"
+    "usage_missing" (Hooks.cost_status_to_string status)
+
 let () =
   Alcotest.run "keeper_hooks_oas_pricing"
     [
@@ -131,5 +199,20 @@ let () =
             `Quick test_unknown_model_repeated_calls_accumulate;
           Alcotest.test_case "known free (ollama) does NOT trip miss"
             `Quick test_ollama_model_known_free_no_catalog_miss;
+        ] );
+      ( "cost_status_for_event",
+        [
+          Alcotest.test_case
+            "unpriced model + trusted usage → unpriced_model"
+            `Quick test_unpriced_model_with_trusted_usage_gives_unpriced;
+          Alcotest.test_case
+            "known model + cost > 0 → priced"
+            `Quick test_known_model_with_trusted_usage_gives_priced;
+          Alcotest.test_case
+            "known-free model + zero cost → known_free"
+            `Quick test_known_model_zero_cost_with_tokens_gives_known_free;
+          Alcotest.test_case
+            "missing usage → usage_missing"
+            `Quick test_missing_usage_gives_usage_missing;
         ] );
     ]

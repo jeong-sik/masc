@@ -650,9 +650,10 @@ let emit_cost_event
   let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
   let safe_input_tokens = if usage_trusted then input_tokens else 0 in
   let safe_output_tokens = if usage_trusted then output_tokens else 0 in
-  let safe_cost_usd = if usage_trusted then cost_usd else 0.0 in
   let provider = provider_of_model_with_telemetry ~model ~telemetry in
   let pricing_model = pricing_model_for_ledger ~model ~telemetry in
+  (* Classify cost_status using raw cost_usd so pricing catalog
+     lookup is independent of the safe_value mask below. *)
   let cost_status =
     cost_status_for_event
       ~provider
@@ -661,7 +662,14 @@ let emit_cost_event
       ~usage_trusted
       ~input_tokens
       ~output_tokens
-      ~cost_usd:safe_cost_usd
+      ~cost_usd
+  in
+  let safe_cost_usd =
+    match cost_status with
+    | Cost_reported_or_estimated -> cost_usd
+    | Cost_known_free | Cost_no_tokens -> 0.0
+    | Cost_usage_missing | Cost_usage_untrusted -> 0.0
+    | Cost_provider_unknown | Cost_unpriced_model -> 0.0
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
@@ -705,7 +713,7 @@ let emit_cost_event
   in
   let cost_usd_source =
     classify_cost_usd_source ~usage_missing ~usage_trusted
-      ~provider ~model:pricing_model ~cost_usd:safe_cost_usd
+      ~provider ~model:pricing_model ~cost_usd
   in
   record_cost_emit_source cost_usd_source;
   let entry = `Assoc ([

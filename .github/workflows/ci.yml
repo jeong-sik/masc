@@ -20,9 +20,6 @@ concurrency:
   # behind it to run the ready/full-matrix path.
   cancel-in-progress: ${{ github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action) }}
 
-# Draft/ready policy lives in PR Automation. CI still listens for readiness
-# events so draft PRs can run the full matrix when promoted, without letting
-# state flips cancel build jobs for the same PR group.
 jobs:
   pr-sync-check:
     name: PR Sync Check

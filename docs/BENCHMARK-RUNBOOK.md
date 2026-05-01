@@ -376,3 +376,46 @@ LLAMA_SWARM_MODEL=<exact-model-id> \
 
 - [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md)
 - [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md)
+
+## Eval Pipeline (Quality Scoring)
+
+Keeper의 tool call 품질을 정량 평가하는 파이프라인. 세 가지 평가 경로가 `Reward_advice_artifact.reward_advice_artifact`로 수렴한다.
+
+### 구조
+
+```
+Post_verifier     →  of_post_verifier_verdict  →  reward_advice_artifact
+  (turn 출력 검사)       (content quality)
+
+Benchmark         →  of_benchmark_case_score    →  reward_advice_artifact
+  (tool call 정밀도)     (composite_score → multiplier band)
+
+Task verifier     →  (future)                   →  reward_advice_artifact
+```
+
+### Verdict → Multiplier 매핑
+
+| Verdict | Multiplier | 설명 |
+|---------|-----------|------|
+| `Pass` | 1.0 (post_verifier), 1.1 (benchmark) | 정상 동작 |
+| `Warn` | 0.8 (post_verifier), 0.9 (benchmark) | 품질 저하 |
+| `Fail` | 0.4 (post_verifier), 0.5 (benchmark) | 심각한 문제 |
+
+### 코드 위치
+
+| 모듈 | 역할 |
+|------|------|
+| `reward_advice_artifact.ml` | 평가 결과 record, JSON serialization, verdict→multiplier |
+| `post_verifier.ml` | keeper turn 출력 품질 검사 (공백/의미없는 응답 탐지) |
+| `tool_call_quality_benchmark.ml` | tool call 정밀도 벤치마크 (case_score → reward_advice) |
+| `tool_call_quality_benchmark_types.ml` | case_score, benchmark_case 등 타입 정의 |
+| `tool_call_quality_benchmark_scoring.ml` | composite_score 산출 |
+| `tool_call_quality_benchmark_loader.ml` | 벤치마크 case/evidence 파일 로딩 |
+| `tool_call_quality_benchmark_render.ml` | 벤치마크 결과 렌더링 |
+
+### 테스트
+
+```bash
+dune runtest test/test_reward_advice_artifact.ml
+dune runtest test/test_post_verifier.ml
+```

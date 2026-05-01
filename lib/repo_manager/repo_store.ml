@@ -5,6 +5,9 @@ let ( let* ) = Result.bind
 let repos_toml_path base_path =
   Filename.concat base_path ".masc/config/repositories.toml"
 
+let repositories_toml_exists base_path =
+  Sys.file_exists (repos_toml_path base_path)
+
 let default_local_path id = Filename.concat ".masc/repos" id
 
 let now_unix_seconds () = Int64.of_float (Unix.time ())
@@ -301,10 +304,17 @@ let run_read_line cmd =
   with Sys_error msg -> Error msg
 
 let discover_repositories ~base_path =
+  let toml_exists = repositories_toml_exists base_path in
   let existing_paths =
     match load_all ~base_path with
     | Ok repos ->
-        List.map (fun (r : repository) -> local_path ~base_path r) repos
+        repos
+        |> List.filter (fun (r : repository) ->
+            not
+              ((not toml_exists)
+               && String.equal r.id "default"
+               && String.equal (local_path ~base_path r) base_path))
+        |> List.map (fun (r : repository) -> local_path ~base_path r)
     | Error _ -> []
   in
   let git_dirs =
@@ -371,11 +381,24 @@ let discover_repositories ~base_path =
 
 let register_discovered ~base_path =
   let* candidates = discover_repositories ~base_path in
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | candidate :: rest -> (
-        match add ~base_path candidate with
-        | Ok registered -> loop (registered :: acc) rest
-        | Error _ -> loop acc rest)
+  let* existing =
+    if repositories_toml_exists base_path then load_all ~base_path else Ok []
   in
-  loop [] candidates
+  let existing_ids = List.map (fun (r : repository) -> r.id) existing in
+  let timestamp = now_unix_seconds () in
+  let rec collect seen_ids acc = function
+    | [] -> List.rev acc
+    | (candidate : repository) :: rest ->
+        if List.exists (String.equal candidate.id) seen_ids then
+          collect seen_ids acc rest
+        else
+          let registered =
+            { candidate with created_at = timestamp; updated_at = timestamp }
+          in
+          collect (candidate.id :: seen_ids) (registered :: acc) rest
+  in
+  match collect existing_ids [] candidates with
+  | [] -> Ok []
+  | registered ->
+      let* () = save_all ~base_path (existing @ registered) in
+      Ok registered

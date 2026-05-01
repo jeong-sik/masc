@@ -357,6 +357,38 @@ let test_register_discovered_auto_adds () =
             | Ok loaded ->
                 Alcotest.(check int) "persisted 2 repos" 2 (List.length loaded))
 
+let test_register_discovered_includes_legacy_root_repo () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_b = Filename.concat base_path "project-b" in
+        Unix.mkdir repo_b 0o755;
+        init_git_repo base_path "https://github.com/test/root-repo";
+        init_git_repo repo_b "https://github.com/test/project-b";
+        match Repo_store.register_discovered ~base_path with
+        | Error e -> Alcotest.fail ("register_discovered failed: " ^ e)
+        | Ok registered ->
+            Alcotest.(check int) "registered 2 repos" 2 (List.length registered);
+            let ids = List.map (fun (r : repository) -> r.id) registered in
+            let has_root =
+              List.exists
+                (fun (r : repository) -> String.equal r.local_path base_path)
+                registered
+            in
+            Alcotest.(check bool) "has root repo at base_path" true has_root;
+            Alcotest.(check bool) "has project-b" true (List.mem "project-b" ids);
+            match Repo_store.load_all ~base_path with
+            | Error e -> Alcotest.fail ("load after register failed: " ^ e)
+            | Ok loaded ->
+                let persisted_root =
+                  List.exists
+                    (fun (r : repository) -> String.equal r.local_path base_path)
+                    loaded
+                in
+                Alcotest.(check int) "persisted 2 repos" 2 (List.length loaded);
+                Alcotest.(check bool) "persisted root repo at base_path" true
+                  persisted_root)
+
 let test_register_discovered_skips_existing () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -434,6 +466,8 @@ let () =
             test_migration_preserves_existing_toml;
           Alcotest.test_case "register_discovered auto-adds" `Quick
             test_register_discovered_auto_adds;
+          Alcotest.test_case "register_discovered includes legacy root repo" `Quick
+            test_register_discovered_includes_legacy_root_repo;
           Alcotest.test_case "register_discovered skips existing" `Quick
             test_register_discovered_skips_existing;
         ] );

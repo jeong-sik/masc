@@ -83,8 +83,10 @@ let allowed = Keeper_repo_mapping.is_allowed
   ~base_path
 ```
 
-An empty mapping means "allow all" (open fallback). As soon as you assign at
-least one keeper to a repository, only listed keepers may access it.
+If no mapping exists for a keeper, access falls back to "allow all" for backward
+compatibility. Once keeper-repository mappings are configured, access is
+restricted to the repositories explicitly listed for that keeper; an explicit
+empty mapping grants access to no repositories.
 
 ## Rollback
 

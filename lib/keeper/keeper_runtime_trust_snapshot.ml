@@ -952,17 +952,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json ~config meta
   in
-  let runtime_presence_missing =
-    Option.is_none registry_entry
-    && Option.is_none latest_decision
-    && Option.is_none latest_tool_call
-    && Option.is_none latest_receipt
-  in
   let fallback_disposition, fallback_disposition_reason =
-    if runtime_presence_missing then
-      ("Pause", "runtime_presence_missing")
-    else
-      disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
+    disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
   in
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
@@ -975,16 +966,10 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
     || String.equal disposition "Alert"
   in
   let attention_reason =
-    match assoc_string_opt "attention_reason" attention_fields with
-    | Some _ as reason -> reason
-    | None when runtime_presence_missing -> Some "runtime_presence_missing"
-    | None -> None
+    assoc_string_opt "attention_reason" attention_fields
   in
   let next_human_action =
-    match assoc_string_opt "next_human_action" attention_fields with
-    | Some _ as action -> action
-    | None when runtime_presence_missing -> Some "inspect_keeper_runtime_presence"
-    | None -> None
+    assoc_string_opt "next_human_action" attention_fields
   in
   let approval_state =
     approval_state_json ~pending_approval_count ~latest_tool_call

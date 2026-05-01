@@ -2,6 +2,11 @@
 const { useState } = React;
 const _Wx = (props) => (window.WxHead ? React.createElement(window.WxHead, props) : null);
 const _useCol = (id) => (window.useCollapsed ? window.useCollapsed(id) : [false, () => {}]);
+const _isToggleKey = (e) => e.key === "Enter" || e.key === " " || e.key === "Spacebar";
+const _fromNestedControl = (e) =>
+  e.target !== e.currentTarget &&
+  e.target.closest &&
+  e.target.closest("a,button,input,textarea,select");
 
 const keeperTone = { "nick0cave":"brass", "masc-improver":"ok", "sangsu":"info", "qa-king":"err", "rama":"stalled", "scholar":"idle", "taskmaster":"idle", "velvet-hammer":"idle" };
 const statusColor = s => ({ running:"running", ok:"ok", pending:"info", fail:"err", stalled:"stalled", idle:"idle", queued:"queued", done:"done", active:"active" }[s] || "idle");
@@ -10,8 +15,15 @@ const statusColor = s => ({ running:"running", ok:"ok", pending:"info", fail:"er
 // Section header — collapsible per-section, no outer wx-head wrapper
 function SideSectHead({ id, label, count, right, onCollapseAll, popoutId }) {
   const [col, toggle] = _useCol(id);
+  const onKeyDown = (e) => {
+    if (_fromNestedControl(e)) return;
+    if (_isToggleKey(e)) {
+      e.preventDefault();
+      toggle();
+    }
+  };
   return (
-    <div className="side-sect-h sx" onClick={toggle} role="button" aria-expanded={!col}>
+    <div className="side-sect-h sx" onClick={toggle} onKeyDown={onKeyDown} role="button" tabIndex={0} aria-expanded={!col}>
       <span className="sx-chev">{col ? "▸" : "▾"}</span>
       <span className="sx-lbl">{label}</span>
       {count != null && <span className="count">{count}</span>}
@@ -315,8 +327,15 @@ function Deck({ tasks, goals, providers, cascade }) {
 // ============== Rail ==============
 function RailSectHead({ id, label, count, right, onCollapseAll, popoutId }) {
   const [col, toggle] = _useCol(id);
+  const onKeyDown = (e) => {
+    if (_fromNestedControl(e)) return;
+    if (_isToggleKey(e)) {
+      e.preventDefault();
+      toggle();
+    }
+  };
   return (
-    <div className="rail-sect-h sx" onClick={toggle} role="button" aria-expanded={!col}>
+    <div className="rail-sect-h sx" onClick={toggle} onKeyDown={onKeyDown} role="button" tabIndex={0} aria-expanded={!col}>
       <span className="sx-chev">{col ? "▸" : "▾"}</span>
       <span className="sx-lbl">{label}</span>
       {count != null && <span className="count">{count}</span>}

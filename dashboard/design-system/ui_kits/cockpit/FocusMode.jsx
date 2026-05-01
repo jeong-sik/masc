@@ -85,7 +85,7 @@ function FocusToggle() {
         className={"focus-toggle " + (focus ? "on" : "") + (open ? " menu-open" : "")}
         onClick={() => setOpen(!open)}
         title="view options"
-        aria-pressed={focus}
+        aria-haspopup="menu"
         aria-expanded={open}>
         <span className="focus-icon">⛶</span>
         <span className="focus-label">{focus ? "exit focus" : "focus"}</span>

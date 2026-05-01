@@ -119,7 +119,24 @@ function KpiStrip() {
   }
   return (
     <div className={"kpi" + (col ? " wx-collapsed" : "")}>
-      <div className="kpi-collapse-tab" onClick={toggle} title={col ? "expand KPI" : "collapse KPI"}>
+      <div
+        className="kpi-collapse-tab"
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (
+            e.target !== e.currentTarget &&
+            e.target.closest &&
+            e.target.closest("a,button,input,textarea,select")
+          ) return;
+          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+        title={col ? "expand KPI" : "collapse KPI"}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!col}>
         {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : "8 metrics") : "▾"}
         {!col && (
           <a className="wx-popout"

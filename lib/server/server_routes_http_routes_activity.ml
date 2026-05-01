@@ -167,6 +167,166 @@ let add_routes ~sw ~clock router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/audit" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
+         let actor_filter    = query_param req "actor" in
+         let kind_filter     = query_param req "kind" in
+         let severity_filter = query_param req "severity" in
+         let since_filter =
+           query_param req "since"
+           |> Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let until_filter =
+           query_param req "until"
+           |> Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let fetch_limit = match actor_filter, kind_filter, severity_filter with
+           | None, None, None -> limit
+           | _ -> min 5000 (limit * 20)
+         in
+         let all_entries = Audit_log.read_entries ~n:fetch_limit config in
+         let filtered =
+           all_entries
+           |> (match actor_filter with
+               | None -> Fun.id
+               | Some a ->
+                   let a = String.trim a in
+                   List.filter (fun (e : Audit_log.audit_entry) -> e.agent_id = a))
+           |> (match kind_filter with
+               | None -> Fun.id
+               | Some k ->
+                   let k = String.trim k in
+                   List.filter (fun (e : Audit_log.audit_entry) ->
+                     String.starts_with ~prefix:k
+                       (Audit_log.action_to_string e.action)))
+           |> (match since_filter with
+               | None -> Fun.id
+               | Some ts ->
+                   List.filter (fun (e : Audit_log.audit_entry) ->
+                     e.timestamp >= ts))
+           |> (match until_filter with
+               | None -> Fun.id
+               | Some ts ->
+                   List.filter (fun (e : Audit_log.audit_entry) ->
+                     e.timestamp <= ts))
+         in
+         let entry_severity (e : Audit_log.audit_entry) =
+           match e.outcome with
+           | Audit_log.Failure _ -> (match e.action with
+             | Audit_log.AuthFailure | Audit_log.CircuitOpen -> "error"
+             | _ -> "warn")
+           | Audit_log.Success -> (match e.action with
+             | Audit_log.GovernanceDecision (Audit_log.Governance_deny)
+             | Audit_log.GovernanceDecision (Audit_log.Governance_unauthorized)
+             | Audit_log.CircuitClose -> "warn"
+             | _ -> "info")
+         in
+         let get_detail_str k (e : Audit_log.audit_entry) =
+           match e.details with
+           | `Assoc fields -> (match List.assoc_opt k fields with
+             | Some (`String v) ->
+               Some (String.sub v 0 (min (String.length v) 80))
+             | _ -> None)
+           | _ -> None
+         in
+         let entry_target (e : Audit_log.audit_entry) =
+           match e.action with
+           | Audit_log.ToolCall n -> Some n
+           | Audit_log.GovernanceDecision _ -> get_detail_str "action_type" e
+           | Audit_log.ClaimTask | Audit_log.StartTask
+           | Audit_log.DoneTask | Audit_log.CancelTask
+           | Audit_log.ReleaseTask -> get_detail_str "task_id" e
+           | Audit_log.Suspend -> get_detail_str "target_agent" e
+           | Audit_log.Custom _ -> get_detail_str "tool_name" e
+           | _ -> None
+         in
+         let entry_summary (e : Audit_log.audit_entry) kind =
+           match e.action with
+           | Audit_log.ToolCall n ->
+             (match get_detail_str "error_msg" e with
+              | Some msg -> Printf.sprintf "tool_call:%s failed: %s" n msg
+              | None -> Printf.sprintf "tool_call:%s" n)
+           | Audit_log.Broadcast ->
+             (match get_detail_str "preview" e with
+              | Some p -> Printf.sprintf "broadcast: %s" p
+              | None -> "broadcast")
+           | Audit_log.Suspend ->
+             (match get_detail_str "target_agent" e with
+              | Some t -> Printf.sprintf "suspend %s" t
+              | None -> "suspend")
+           | Audit_log.CancelTask ->
+             (match get_detail_str "task_id" e with
+              | Some tid -> Printf.sprintf "cancel_task %s" tid
+              | None -> "cancel_task")
+           | Audit_log.GovernanceDecision d ->
+             let decision = Audit_log.governance_audit_decision_to_string d in
+             (match get_detail_str "action_type" e with
+              | Some at -> Printf.sprintf "governance %s: %s" decision at
+              | None -> Printf.sprintf "governance %s" decision)
+           | _ -> kind
+         in
+         let total = List.length filtered in
+         let drop_n = max 0 (total - limit) in
+         let rec drop_front n l =
+           if n <= 0 then l
+           else match l with [] -> [] | _ :: tl -> drop_front (n - 1) tl
+         in
+         let page = drop_front drop_n filtered in
+         let entries_json =
+           List.filter_map (fun (e : Audit_log.audit_entry) ->
+             let kind = Audit_log.action_to_string e.action in
+             let severity = entry_severity e in
+             match severity_filter with
+             | Some sf when String.trim sf <> severity -> None
+             | _ ->
+               let ms = Int64.of_float (e.timestamp *. 1000.0) in
+               let hash =
+                 Digest.to_hex
+                   (Digest.string
+                      (e.agent_id ^ kind
+                       ^ Printf.sprintf "%.6f" e.timestamp))
+               in
+               let id =
+                 Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
+               in
+               let t = Int64.to_int (Int64.of_float e.timestamp) in
+               let tm = Unix.gmtime (float_of_int t) in
+               let ts =
+                 Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                   (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+                   tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+                   tm.Unix.tm_sec
+               in
+               let target = entry_target e in
+               let summary = entry_summary e kind in
+               let fields = [
+                 ("id",       `String id);
+                 ("ts",       `String ts);
+                 ("actor",    `String e.agent_id);
+                 ("kind",     `String kind);
+                 ("summary",  `String summary);
+                 ("severity", `String severity);
+               ] in
+               let fields = match target with
+                 | Some tgt -> ("target", `String tgt) :: fields
+                 | None     -> fields
+               in
+               let fields =
+                 if e.details = `Null then fields
+                 else ("payload", e.details) :: fields
+               in
+               Some (`Assoc fields)) page
+         in
+         let json = `Assoc [
+           ("entries", `List entries_json);
+           ("count",   `Int (List.length entries_json));
+         ] in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in

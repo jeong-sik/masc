@@ -12,6 +12,7 @@ import {
   normalizeJournalSource,
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
+import { appendAuditEntry } from './live-store'
 import { parseSSEMessage } from './schemas/sse'
 import { RingBuffer } from './lib/ring-buffer'
 
@@ -910,6 +911,29 @@ function handleEvent(event: SSEEvent): void {
       addTypedJournalEntry(agent, type, 'oas', 'oas_event', {
         severity: event.severity,
         source: event.source,
+      })
+      break
+    }
+    case 'audit_event': {
+      // Global audit ledger event pushed via SSE (O2 Phase 2).
+      // Payload fields mirror the /api/v1/audit entry shape.
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const auditId = (event.audit_id ?? (p.id as string)) ?? ''
+      const auditTs = (event.audit_ts ?? (p.ts as string)) ?? new Date().toISOString()
+      const auditActor = (event.audit_actor ?? (p.actor as string)) ?? agent
+      const auditKind = (event.audit_kind ?? (p.kind as string)) ?? type
+      const auditTarget = event.audit_target ?? (p.target as string | undefined)
+      const auditSummary = (event.audit_summary ?? (p.summary as string)) ?? auditKind
+      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? 'info'
+      appendAuditEntry({
+        id: auditId,
+        ts: auditTs,
+        actor: auditActor,
+        kind: auditKind,
+        target: auditTarget,
+        summary: auditSummary,
+        severity: auditSeverity,
+        payload: event.audit_payload ?? p.payload,
       })
       break
     }

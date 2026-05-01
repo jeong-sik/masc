@@ -151,6 +151,27 @@ val publish_agent_action_executed :
                as 'mark scaffolding' tier of #8857; planned \
                wiring in Thompson autonomy RFC (open)."]
 
+(** {1 Audit Ledger Events} *)
+
+val publish_audit_event :
+  id:string ->
+  ts:string ->
+  actor:string ->
+  kind:string ->
+  ?target:string ->
+  summary:string ->
+  severity:string ->
+  ?payload:Yojson.Safe.t ->
+  unit ->
+  unit
+(** Publishes [masc.audit_event] to the MASC Event_bus.
+
+    Emitted by {!Audit_log.log_action} after each entry is persisted.
+    Dashboard clients receive a real-time stream of global audit events
+    via SSE without polling.
+
+    Shape: [{id, ts, actor, kind, target?, summary, severity, payload?}]. *)
+
 (** {1 Phase 4 social (deprecated — no producer)} *)
 
 val publish_trust_updated :

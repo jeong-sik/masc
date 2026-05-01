@@ -2873,12 +2873,14 @@ export function fetchTlcResults(
 }
 
 export interface AuditEntry {
-  timestamp: number
-  key: string
-  old_value: unknown
-  new_value: unknown
+  id: string
+  ts: string
   actor: string
-  case_id?: string
+  kind: string
+  target?: string
+  summary: string
+  severity: string
+  payload?: unknown
 }
 
 export interface AuditLedgerResponse {
@@ -2886,11 +2888,28 @@ export interface AuditLedgerResponse {
   count: number
 }
 
+export interface AuditLedgerParams {
+  limit?: number
+  actor?: string
+  kind?: string
+  severity?: string
+  since?: number
+  until?: number
+}
+
 export function fetchAuditLedger(
-  limit = 50,
+  params: AuditLedgerParams = {},
   opts?: { signal?: AbortSignal },
 ): Promise<AuditLedgerResponse> {
-  return get<AuditLedgerResponse>(`/api/v1/governance/params/audit?limit=${limit}`, {
+  const { limit = 100, actor, kind, severity, since, until } = params
+  const qs = new URLSearchParams()
+  qs.set('limit', String(limit))
+  if (actor) qs.set('actor', actor)
+  if (kind) qs.set('kind', kind)
+  if (severity) qs.set('severity', severity)
+  if (since != null) qs.set('since', String(since))
+  if (until != null) qs.set('until', String(until))
+  return get<AuditLedgerResponse>(`/api/v1/audit?${qs.toString()}`, {
     signal: opts?.signal,
   })
 }

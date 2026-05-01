@@ -128,9 +128,10 @@ let parse_list_value s =
 
 (** Extract variable names from a template string.
     Matches {{variable_name}} patterns. *)
+let template_variable_regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
+
 let extract_variables template =
-  let regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile in
-  let vars = Re.all regex template
+  let vars = Re.all template_variable_regex template
     |> List.map (fun g -> Re.Group.get g 1)
   in
   (* Remove duplicates and sort alphabetically *)
@@ -438,10 +439,12 @@ let replace_substring_all ~pattern ~replacement s =
     loop 0
 
 (** Render a prompt template with the given variables *)
-let render_template ~template ~vars () : (string, string) result =
+let render_template ?template_variables ~template ~vars () : (string, string) result =
   try
     let missing =
-      extract_variables template
+      (match template_variables with
+       | Some variables -> variables
+       | None -> extract_variables template)
       |> List.filter (fun name -> not (List.mem_assoc name vars))
     in
     if missing <> [] then
@@ -462,7 +465,10 @@ let render_template ~template ~vars () : (string, string) result =
 let render ~id ?version ~vars () : (string, string) result =
   match get ~id ?version () with
   | None -> Error (Printf.sprintf "Prompt '%s' not found" id)
-  | Some entry -> render_template ~template:entry.template ~vars ()
+  | Some entry ->
+      render_template
+        ~template_variables:entry.variables
+        ~template:entry.template ~vars ()
 
 (** {1 Statistics} *)
 
@@ -795,11 +801,16 @@ let resolve_prompt key =
 let get_prompt key = (resolve_prompt key).effective
 
 let render_prompt_template key vars =
-  let template = get_prompt key in
-  if String.trim template = "" then
+  let resolved = resolve_prompt key in
+  if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)
   else
-    render_template ~template ~vars ()
+    let template_variables =
+      with_mutex (fun () ->
+          Hashtbl.find_opt meta_tbl key
+          |> Option.map (fun meta -> meta.template_variables))
+    in
+    render_template ?template_variables ~template:resolved.effective ~vars ()
 
 (** Validate and apply a single override entry (shared logic for
     [set_override] and [restore_overrides]).  Caller must NOT hold [mu].

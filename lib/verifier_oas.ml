@@ -33,7 +33,27 @@ let parse_verdict_from_json = Verifier_core.parse_verdict_from_json
 (* ================================================================ *)
 
 let build_prompt (req : verification_request) : string =
-  sprintf
+  let context_truncated =
+    String_util.utf8_safe ~max_bytes:303 ~suffix:"..." req.context_summary
+    |> String_util.to_string
+  in
+  let result_truncated =
+    String_util.utf8_safe ~max_bytes:503 ~suffix:"..." req.action_result
+    |> String_util.to_string
+  in
+  let vars =
+    [ ("goal", req.goal)
+    ; ("context", context_truncated)
+    ; ("action_taken", req.action_description)
+    ; ("result", result_truncated)
+    ]
+  in
+  match
+    Prompt_registry.render_prompt_template "verification.action_verifier" vars
+  with
+  | Ok p -> p
+  | Error _ ->
+    sprintf
 {|You are a verification agent. Evaluate whether this action was correct.
 
 Goal: %s
@@ -50,12 +70,10 @@ WARN: <reason> - if the action is acceptable but has concerns
 FAIL: <reason> - if the action is wrong or harmful
 
 One line only.|}
-    req.goal
-    (String_util.utf8_safe ~max_bytes:303 ~suffix:"..." req.context_summary
-     |> String_util.to_string)
-    req.action_description
-    (String_util.utf8_safe ~max_bytes:503 ~suffix:"..." req.action_result
-     |> String_util.to_string)
+      req.goal
+      context_truncated
+      req.action_description
+      result_truncated
 
 (* ================================================================ *)
 (* Core: verify                                                     *)

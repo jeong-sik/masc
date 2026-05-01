@@ -66,7 +66,10 @@ let should_orchestrate ~min_priority room_config =
 
 (** The orchestrator prompt - MCP tools are now available via --allowedTools! *)
 let make_orchestrator_prompt ~port:_ =
-  {|You are the MASC Orchestrator Agent.
+  let p = Prompt_registry.get_prompt "system.orchestrator" in
+  if String.trim p <> "" then p
+  else
+    {|You are the MASC Orchestrator Agent.
 
 You have access to MASC MCP tools via mcp__masc__* prefix.
 

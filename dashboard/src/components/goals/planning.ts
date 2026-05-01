@@ -29,7 +29,7 @@ import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
 
-function PlanningStat({
+export function PlanningStat({
   label,
   value,
   tone = 'default',

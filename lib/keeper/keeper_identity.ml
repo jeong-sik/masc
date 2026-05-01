@@ -230,12 +230,15 @@ let strip_nickname_once name =
    ergonomics where [~base_path] is set explicitly without spinning up
    the full resolver chain). *)
 let persona_path_for ~base_path persona_name =
-  match Config_dir_resolver.personas_dir_opt () with
-  | Some dir -> Filename.concat dir persona_name
-  | None ->
-      Filename.concat
-        (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
-        persona_name
+  let persona_dir =
+    match Config_dir_resolver.personas_dir_opt () with
+    | Some dir -> Filename.concat dir persona_name
+    | None ->
+        Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
+          persona_name
+  in
+  Filename.concat persona_dir "profile.json"
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
     ?(check_persona = false) ?(check_credential = false) () :

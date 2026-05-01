@@ -151,6 +151,39 @@ let credential_path base stem =
   Filename.concat base
     (Filename.concat ".masc" (Filename.concat "auth" (Filename.concat "agents" (stem ^ ".json"))))
 
+let persona_profile_path personas_dir name =
+  Filename.concat (Filename.concat personas_dir name) "profile.json"
+
+let with_env key value f =
+  let original = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      (match original with
+       | Some v -> Unix.putenv key v
+       | None -> Unix.putenv key "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      (match value with
+       | Some v -> Unix.putenv key v
+       | None -> Unix.putenv key "");
+      Config_dir_resolver.reset ();
+      f ())
+
+let with_personas_dir f =
+  with_tmp_base (fun base ->
+      let personas_dir = Filename.concat base "personas" in
+      mkdir_p personas_dir;
+      with_env "MASC_PERSONAS_DIR" (Some personas_dir) (fun () ->
+          f personas_dir))
+
+let write_persona_profile personas_dir name =
+  let profile_path = persona_profile_path personas_dir name in
+  mkdir_p (Filename.dirname profile_path);
+  let ch = open_out profile_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr ch)
+    (fun () -> output_string ch "{}")
+
 let test_check_credential_present () =
   with_tmp_base (fun base ->
       let path = credential_path base "sangsu" in
@@ -209,6 +242,60 @@ let test_check_credential_wrapper_input () =
                "wrapper input with present credential should Ok, got %s"
                (Keeper_identity.show_validation_error e)))
 
+let test_check_persona_profile_present () =
+  with_personas_dir (fun personas_dir ->
+      write_persona_profile personas_dir "qa-king";
+      match
+        Keeper_identity.normalize_all_names
+          ~input_agent_name:"keeper-qa-king-agent"
+          ~base_path:"/unused" ~check_persona:true ()
+      with
+      | Ok b ->
+          check string "keeper_name" "qa-king" b.keeper_name;
+          check string "persona_name" "qa-king" b.persona_name
+      | Error e ->
+          fail
+            (Printf.sprintf "expected Ok with persona profile present, got %s"
+               (Keeper_identity.show_validation_error e)))
+
+let test_check_persona_profile_missing () =
+  with_personas_dir (fun personas_dir ->
+      let expected_path = persona_profile_path personas_dir "ghost-keeper" in
+      match
+        Keeper_identity.normalize_all_names
+          ~input_agent_name:"ghost-keeper"
+          ~base_path:"/unused" ~check_persona:true ()
+      with
+      | Ok _ -> fail "expected Persona_not_found when profile is absent"
+      | Error (Keeper_identity.Persona_not_found { searched; resolved; input }) ->
+          check string "searched path" expected_path searched;
+          check string "resolved" "ghost-keeper" resolved;
+          check string "input" "ghost-keeper" input
+      | Error other ->
+          fail
+            (Printf.sprintf "expected Persona_not_found, got %s"
+               (Keeper_identity.show_validation_error other)))
+
+let test_check_persona_directory_without_profile_missing () =
+  with_personas_dir (fun personas_dir ->
+      let persona_dir = Filename.concat personas_dir "empty-persona" in
+      mkdir_p persona_dir;
+      let expected_path = persona_profile_path personas_dir "empty-persona" in
+      match
+        Keeper_identity.normalize_all_names
+          ~input_agent_name:"empty-persona"
+          ~base_path:"/unused" ~check_persona:true ()
+      with
+      | Ok _ -> fail "expected Persona_not_found when profile.json is absent"
+      | Error (Keeper_identity.Persona_not_found { searched; resolved; input }) ->
+          check string "searched path" expected_path searched;
+          check string "resolved" "empty-persona" resolved;
+          check string "input" "empty-persona" input
+      | Error other ->
+          fail
+            (Printf.sprintf "expected Persona_not_found, got %s"
+               (Keeper_identity.show_validation_error other)))
+
 (* --------------------------------------------------------------------- *)
 (* Test runner                                                            *)
 (* --------------------------------------------------------------------- *)
@@ -246,5 +333,12 @@ let () =
           test_case "credential missing" `Quick test_check_credential_missing;
           test_case "wrapper input → canonical stem" `Quick
             test_check_credential_wrapper_input;
+        ] );
+      ( "persona_check",
+        [
+          test_case "profile present" `Quick test_check_persona_profile_present;
+          test_case "profile missing" `Quick test_check_persona_profile_missing;
+          test_case "directory without profile" `Quick
+            test_check_persona_directory_without_profile_missing;
         ] );
     ]

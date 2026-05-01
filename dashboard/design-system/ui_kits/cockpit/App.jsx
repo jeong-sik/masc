@@ -2,12 +2,15 @@
           MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane,
           ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
 const { useState, useCallback, useEffect } = React;
+const useCockpitLayoutProfile = window.useLayoutProfile || function useCockpitLayoutProfileNoop() {
+  return undefined;
+};
 
 function App() {
   // sync mode/branch with the cockpit-state singleton (URL+localStorage)
   const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
-  // run layout profile — always call (no-ops when not installed) to satisfy Rules of Hooks
-  (window.useLayoutProfile || (() => {}))();
+  // Always call the same hook-shaped function so hook order stays stable.
+  useCockpitLayoutProfile();
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");

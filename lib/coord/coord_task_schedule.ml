@@ -140,10 +140,10 @@ let keeper_receipt_candidate_names config ~agent_name =
   |> List.sort_uniq String.compare
 
 let directory_exists path =
-  try Sys.file_exists path && Sys.is_directory path with _ -> false
+  try Sys.file_exists path && Sys.is_directory path with Sys_error _ -> false
 
 let directory_entries path =
-  try Sys.readdir path |> Array.to_list with _ -> []
+  try Sys.readdir path |> Array.to_list with Sys_error _ -> []
 
 let jsonl_files_under base_dir =
   if not (directory_exists base_dir) then []

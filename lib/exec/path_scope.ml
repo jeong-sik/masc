@@ -43,10 +43,9 @@ let starts_with_sandbox abs =
 (** Normalize [raw] against [cwd] using [Unix.realpath] on the parent
     directory, then re-attach the basename.  This resolves symlinks
     and [..]/[.] traversal in every component except the final one,
-    which may not exist (e.g. write target).  An [_ -> None] catch-all
-    keeps the classifier fail-closed: paths whose parent does not
-    resolve land in [Absolute_unknown] and are denied by the policy
-    gate. *)
+    which may not exist (e.g. write target).  Paths whose parent does
+    not resolve, or malformed path inputs rejected by [Filename], land
+    in [Absolute_unknown] and are denied by the policy gate. *)
 let normalize_path ~cwd raw =
   let abs =
     if Filename.is_relative raw then Filename.concat cwd raw
@@ -59,11 +58,13 @@ let normalize_path ~cwd raw =
     Some
       (if basename = "." || basename = "" then parent_real
        else Filename.concat parent_real basename)
-  with _ -> None
+  with
+  | Unix.Unix_error _ | Invalid_argument _ -> None
 
 let normalize_cwd cwd =
   try Unix.realpath cwd
-  with _ -> cwd
+  with
+  | Unix.Unix_error _ | Invalid_argument _ -> cwd
 
 let starts_with_dir ~prefix abs =
   abs = prefix || String.starts_with ~prefix:(prefix ^ "/") abs

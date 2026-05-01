@@ -8,6 +8,11 @@ open Keeper_types
 open Keeper_exec_context
 module EC = Keeper_error_classify
 
+(* Absolute floor for context overflow retry when the API does not report
+   the actual token limit.  Prevents retrying with an unreasonably small
+   context window. *)
+let fallback_context_overflow_floor_tokens = 4096
+
 type cascade_execution = {
   cascade_name : Keeper_cascade_profile.runtime_name;
   max_context_resolution : Keeper_exec_context.max_context_resolution;
@@ -331,8 +336,8 @@ let recover_context_overflow_retry
     | Agent_sdk.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
     | _ ->
       (* Overflow detected but limit not available -- use 80% of cascade max
-         as a conservative fallback. *)
-      max 4096 (max_cascade_context * 4 / 5)
+         as a conservative fallback, with an absolute floor. *)
+      max fallback_context_overflow_floor_tokens (max_cascade_context * 4 / 5)
   in
   let retry_max_context =
     if max_cascade_context <= 0 then actual_limit

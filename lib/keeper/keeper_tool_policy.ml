@@ -8,6 +8,16 @@
 
 open Keeper_types
 open Keeper_alerting
+
+(* Config defaults when no policy_config is loaded. *)
+let default_clone_timeout_sec = 120.0
+let default_push_timeout_sec = 60.0
+let default_pr_create_timeout_sec = 30.0
+let default_gh_cache_ttl_sec = 120.0
+let default_gh_cache_fetch_page_size = 100
+let default_gh_cache_fetch_timeout_sec = 10.0
+let default_gh_cache_max_alternatives = 20
+let default_gh_cache_max_output_bytes = 8192
 open Keeper_tool_registry
 
 (* -- E6: .masc/ write protection whitelist ----------------------------- *)
@@ -106,44 +116,44 @@ let clone_depth () : int =
 
 let clone_timeout_sec () : float =
   match !policy_config with
-  | None -> 120.0
+  | None -> default_clone_timeout_sec
   | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
 
 let push_timeout_sec () : float =
   match !policy_config with
-  | None -> 60.0
+  | None -> default_push_timeout_sec
   | Some cfg -> Keeper_tool_policy_config.push_timeout_sec cfg
 
 let pr_create_timeout_sec () : float =
   match !policy_config with
-  | None -> 30.0
+  | None -> default_pr_create_timeout_sec
   | Some cfg -> Keeper_tool_policy_config.pr_create_timeout_sec cfg
 
 (* ── GH cache config accessors (config-driven) ─────────────── *)
 
 let gh_cache_ttl_sec () : float =
   match !policy_config with
-  | None -> 120.0
+  | None -> default_gh_cache_ttl_sec
   | Some cfg -> Keeper_tool_policy_config.gh_cache_ttl_sec cfg
 
 let gh_cache_fetch_page_size () : int =
   match !policy_config with
-  | None -> 100
+  | None -> default_gh_cache_fetch_page_size
   | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_page_size cfg
 
 let gh_cache_fetch_timeout_sec () : float =
   match !policy_config with
-  | None -> 10.0
+  | None -> default_gh_cache_fetch_timeout_sec
   | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_timeout_sec cfg
 
 let gh_cache_max_alternatives () : int =
   match !policy_config with
-  | None -> 20
+  | None -> default_gh_cache_max_alternatives
   | Some cfg -> Keeper_tool_policy_config.gh_cache_max_alternatives cfg
 
 let gh_cache_max_output_bytes () : int =
   match !policy_config with
-  | None -> 8192
+  | None -> default_gh_cache_max_output_bytes
   | Some cfg -> Keeper_tool_policy_config.gh_cache_max_output_bytes cfg
 
 (* ── Preset subsumption (config-driven) ──────────────────────── *)

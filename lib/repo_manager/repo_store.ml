@@ -184,7 +184,10 @@ let save_all ~base_path (repos : repository list) =
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content);
     Ok ()
-  with Sys_error msg -> Error msg
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+  | Failure msg -> Error msg
 
 let find ~base_path id =
   let* repos = load_all ~base_path in
@@ -340,7 +343,8 @@ let discover_repositories ~base_path =
             | exception End_of_file -> List.rev acc
           in
           read_lines [])
-    with _ -> []
+    with
+    | Sys_error _ | Unix.Unix_error _ | Failure _ -> []
   in
   let is_masc_dir path =
     let masc_prefix = Filename.concat base_path ".masc" in

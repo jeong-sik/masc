@@ -263,7 +263,9 @@ let test_structured_oas_timeout_budget () =
     KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
   in
   check string "code" "oas_timeout_budget" (terminal_code terminal);
-  check string "severity" "warn" (KT.severity_to_string (terminal_severity terminal))
+  check string "severity" "warn" (KT.severity_to_string (terminal_severity terminal));
+  check (option string) "next action" (Some "inspect_timeout_budget")
+    (terminal_next_action terminal)
 
 let test_structured_turn_wall_clock_timeout () =
   let err =

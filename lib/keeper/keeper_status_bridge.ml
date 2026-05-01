@@ -221,6 +221,10 @@ type runtime_blocker_surface = {
   continue_gate : bool;
 }
 
+let is_timeout_budget_blocker_class blocker_class =
+  String.equal blocker_class (blocker_class_to_string Oas_timeout_budget)
+  || String.equal blocker_class (blocker_class_to_string Turn_timeout)
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class) :
     runtime_blocker_surface =
   let str = blocker_class_to_string cls in
@@ -358,6 +362,9 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
           (true, Some "continue_gate_required", Some "approve_or_reject_continue")
       | Some _ when meta.paused ->
           (true, Some "paused_blocked", Some "inspect_runtime_blocker")
+      | Some blocker
+        when is_timeout_budget_blocker_class blocker.blocker_class ->
+          (true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget")
       | Some _ ->
           (true, Some "runtime_blocked", Some "inspect_runtime_blocker")
       | None when meta.paused ->

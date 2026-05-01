@@ -1186,9 +1186,7 @@ let run_turn
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = acc.tool_surface.approval_mode_effective;
         approval_profile_derived = acc.tool_surface.approval_mode_derived;
-        cascade_name =
-          Keeper_execution_receipt.cascade_name_of_string
-            cascade_name_string;
+        cascade_name;
         cascade_selected_model =
           Option.bind cascade_observation (fun obs -> obs.selected_model);
         cascade_attempt_count =

@@ -953,6 +953,12 @@ let init () =
   add metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
+  (* P-DASH-13: provider block duration histogram.
+     Records the duration (in seconds) for which a provider is placed in
+     cooldown each time a cooldown is applied or extended.  Labels: provider. *)
+  register_histogram ~name:metric_keeper_provider_block_duration_sec
+    ~help:"Duration in seconds for which a provider is placed into cooldown \
+           (observed each time a cooldown is applied or extended). Labels: provider." ();
   add metric_timeout_policy_overshoot
     "Total cooperative-cancel timeout overshoots \
      (labels: layer, origin)"

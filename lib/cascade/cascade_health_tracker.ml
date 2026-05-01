@@ -405,9 +405,12 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
       if state.consecutive_failures >= cooldown_threshold then begin
-        state.cooldown_until <- now +. cooldown_sec;
-        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
-          ~labels:[("provider", provider_key)] cooldown_sec
+        let new_until = now +. cooldown_sec in
+        if new_until > state.cooldown_until then begin
+          state.cooldown_until <- new_until;
+          Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+            ~labels:[("provider", provider_key)] cooldown_sec
+        end
       end
     | Soft_rate_limited ->
       (* Transient HTTP 429.  Apply an immediate short cooldown so the

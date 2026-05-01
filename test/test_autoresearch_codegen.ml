@@ -12,66 +12,46 @@ let contains haystack needle =
   in
   loop 0
 
-let count_occurrences ~needle haystack =
-  let nlen = String.length needle in
-  if nlen = 0 then 0
-  else
-    let len_h = String.length haystack in
-    let rec loop i acc =
-      if i + nlen > len_h then acc
-      else if String.sub haystack i nlen = needle then loop (i + nlen) (acc + 1)
-      else loop (i + 1) acc
-    in
-    loop 0 0
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
 
-let load_source rel =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root rel in
-  if not (Sys.file_exists path) then
-    failwith (Printf.sprintf "source file not found: %s" path)
-  else
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> In_channel.input_all ic)
-
-let target_file = "lib/autoresearch_codegen.ml"
+let autoresearch_warnings_since seq =
+  Log.Ring.recent ~limit:20 ~module_filter:"Autoresearch" ~since_seq:seq ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+       String.equal entry.normalized_level "WARN")
 
 (* ------------------------------------------------------------------ *)
 (* has_background_capacity: fail-safe + noisy contract (#9537)         *)
 (* ------------------------------------------------------------------ *)
 
-(** The wildcard branch of [has_background_capacity] must return [false]
-    (fail-safe / fail-closed) and emit a warning log — not silently
-    skip.  Silent skip was the anti-pattern tracked in #9537 comment
-    "Finding 2". *)
-let test_capacity_wildcard_branch_logs_warning () =
-  let src = load_source target_file in
-  (* Must have a warn call in the vicinity of the wildcard branch *)
-  check bool "wildcard branch emits Log.Autoresearch.warn" true
-    (count_occurrences
-       ~needle:"Log.Autoresearch.warn"
-       src
-     >= 2);  (* one for capacity exception, one for missing context *)
-  check bool "wildcard branch message mentions skipped" true
-    (count_occurrences
-       ~needle:"capacity check skipped"
-       src
-     >= 1)
-
-(** The wildcard branch must not simply return [true] (permissive default).
-    [false] is the only acceptable constant in that arm. *)
-let test_capacity_wildcard_branch_is_fail_safe () =
-  let src = load_source target_file in
-  (* The wildcard arm in has_background_capacity must end with [false].
-     We assert the log message is present (established above) and that
-     there is no bare `| _ -> true` in the function body. *)
-  check bool "no permissive `| _ -> true` in capacity check" true
-    (not (contains src "| _ -> true"))
+(** When no Eio switch/net context is installed, [generate_code_change]
+    must fail closed before model dispatch and emit an operator-visible
+    Autoresearch warning.  Silent skip was the anti-pattern tracked in
+    #9537 comment "Finding 2". *)
+let test_capacity_missing_context_fails_closed_and_logs_warning () =
+  let before_seq = latest_log_seq () in
+  match
+    Lib.Autoresearch.generate_code_change
+      ~goal:"Improve throughput"
+      ~baseline:1.25
+      ~lower_is_better:false
+      ~history:[]
+      ~insights:[]
+      ~file_content:"let batch = 32\n"
+      ~target_file:"main.py"
+  with
+  | Ok _ -> fail "expected missing runtime capacity context to fail closed"
+  | Error msg ->
+      check bool "returns saturated/backoff error" true
+        (contains msg "local slots saturated");
+      let warnings = autoresearch_warnings_since before_seq in
+      check bool "logs capacity skip warning" true
+        (List.exists
+           (fun (entry : Log.Ring.entry) ->
+             contains entry.message "capacity check skipped")
+           warnings)
 
 let test_prompt_requires_strict_json () =
   let prompt =
@@ -162,10 +142,8 @@ let () =
     [
       ( "capacity-fail-safe",
         [
-          test_case "wildcard branch logs warning (not silent)" `Quick
-            test_capacity_wildcard_branch_logs_warning;
-          test_case "wildcard branch is fail-safe (not permissive)" `Quick
-            test_capacity_wildcard_branch_is_fail_safe;
+          test_case "missing context fails closed and logs warning" `Quick
+            test_capacity_missing_context_fails_closed_and_logs_warning;
         ] );
       ( "prompt",
         [

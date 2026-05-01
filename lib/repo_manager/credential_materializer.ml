@@ -156,7 +156,7 @@ let read_operator_ambient_token () : string option =
       (try
          while true do Buffer.add_channel buf ic 64 done
        with End_of_file -> ());
-      (try close_in ic with _ -> ());
+      close_in_noerr ic;
       let status = snd (Unix.waitpid [] pid) in
       (match status with
        | Unix.WEXITED 0 ->
@@ -383,7 +383,7 @@ let provision_via_with_token ?credential_id ?identity_label
                  output_char oc '\n';
                  close_out oc
                with _ ->
-                 (try close_out_noerr oc with _ -> ()));
+                 close_out_noerr oc);
               let status = snd (Unix.waitpid [] pid) in
               (match status with
                | Unix.WEXITED 0 ->

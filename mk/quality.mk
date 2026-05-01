@@ -59,14 +59,14 @@ check-memory-leak:
 	bash scripts/check-memory-leak.sh
 
 # Silent failure gate — wildcard fallback + default value pattern grep.
-# Runs all three complementary lints:
-#   1. scripts/check_silent_failure.sh           — try/ignore + Result.iter_error swallows
+# Runs all three complementary lints as hard-fail checks:
+#   1. scripts/check_silent_failure.sh --strict  — try/ignore + Result.iter_error swallows
 #   2. scripts/ci/check-silent-failure-patterns.sh — try/ignore, wildcard->(), Hashtbl.find, Option.get
 #   3. scripts/lint/no-unknown-permissive-default.sh — string-parsing match `| _ -> ConcreteDefault`
 # Meta-issue: #9517
 check-silent:
 	@echo "=== check-silent: noisy-by-default contract sweep ==="
-	bash scripts/check_silent_failure.sh
+	bash scripts/check_silent_failure.sh --strict
 	bash scripts/ci/check-silent-failure-patterns.sh
 	bash scripts/lint/no-unknown-permissive-default.sh
 	@echo "=== check-silent: PASS ==="

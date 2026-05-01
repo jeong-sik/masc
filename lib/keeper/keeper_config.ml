@@ -117,6 +117,7 @@ let validate_name name =
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 120
 let default_proactive_cooldown_sec = 300
+let approval_queue_stale_max_wait_sec = 600.0
 let default_room_signal_prompt_enabled = false
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6

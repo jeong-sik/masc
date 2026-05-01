@@ -320,6 +320,33 @@ let run_keepalive_unified_turn
   then meta_after_triage
   else (
     try
+      (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
+         per turn. The stimulus payload is observed for telemetry
+         only (consumer-side wiring lives in a follow-up). The
+         dequeue itself pins the [Conservation] invariant from
+         [KeeperEventQueue.tla] (dequeued_total <= enqueued_total)
+         in production, and the [TickQueueOverride] action becomes
+         a real runtime transition: a stimulus that triggered the
+         heartbeat override (PR-C2 #12412) is now actually consumed
+         here. *)
+      (match
+         Keeper_registry.dequeue_event
+           ~base_path:ctx.config.base_path
+           meta_after_triage.name
+       with
+       | None -> ()
+       | Some stim ->
+           let urgency_str =
+             match stim.urgency with
+             | Keeper_event_queue.Immediate -> "immediate"
+             | Keeper_event_queue.Normal -> "normal"
+             | Keeper_event_queue.Low -> "low"
+           in
+           Log.Keeper.info
+             "turn entry: consumed stimulus post=%s urgency=%s payload_len=%d (keeper=%s)"
+             stim.post_id urgency_str
+             (String.length stim.payload)
+             meta_after_triage.name);
       let obs =
         let allowed_tool_names =
           Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage

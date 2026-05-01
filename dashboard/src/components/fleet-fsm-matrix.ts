@@ -357,7 +357,7 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
     return 'provider auth/model/config receipt 확인'
   }
-  if (execution.terminal_reason_code === 'api_error_timeout') {
+  if (execution.terminal_reason_code === 'provider_timeout' || execution.terminal_reason_code === 'api_error_timeout') {
     return 'provider timeout budget/cascade lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {

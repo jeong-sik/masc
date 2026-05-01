@@ -65,7 +65,6 @@ let is_turn_wall_clock_timeout_message message =
 
 let is_structural_oas_timeout_message message =
   is_oas_timeout_budget_message message
-  || is_turn_wall_clock_timeout_message message
 
 type timeout_failure_class =
   | Provider_timeout

@@ -345,7 +345,7 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: true,
       execution: execution({
         outcome: 'error',
-        terminal_reason_code: 'api_error_timeout',
+        terminal_reason_code: 'provider_timeout',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
         tool_contract_result: 'unknown',

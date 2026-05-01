@@ -61,7 +61,7 @@ let test_emit_and_read_tool_outcome () =
       ~agent_id:"agent-alpha"
       ~tool_name:"masc_board_post"
       ~success:false
-      ~error_kind:"validation_error"
+      ~error_kind:(Reputation_ledger_v2.error_kind_of_string "validation_error")
       ~raw_trace_run_id:"run-001"
       ();
     let events =

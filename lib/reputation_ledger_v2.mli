@@ -11,12 +11,18 @@
 
 (** {1 Event kinds} *)
 
+type error_kind = private Error_kind of string
+(** Stable tool outcome error family. Render only at JSON/log boundaries. *)
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 (** A tool call outcome recorded in the ledger. *)
 type tool_outcome_event = {
   agent_id : string;
   tool_name : string;
   success : bool;
-  error_kind : string option;  (** Structured error label when [success = false]. *)
+  error_kind : error_kind option;  (** Structured error label when [success = false]. *)
   raw_trace_run_id : string option;
   timestamp : float;
 }
@@ -54,7 +60,7 @@ val emit_tool_outcome :
   agent_id:string ->
   tool_name:string ->
   success:bool ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?raw_trace_run_id:string ->
   unit ->
   unit

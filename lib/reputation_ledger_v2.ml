@@ -8,11 +8,16 @@
 
 (** {1 Types} *)
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
 type tool_outcome_event = {
   agent_id : string;
   tool_name : string;
   success : bool;
-  error_kind : string option;
+  error_kind : error_kind option;
   raw_trace_run_id : string option;
   timestamp : float;
 }
@@ -87,7 +92,8 @@ let tool_outcome_to_json (e : tool_outcome_event) : Yojson.Safe.t =
     ; ("ts", `Float e.timestamp)
     ; ("ts_iso", `String (iso8601_of_unix e.timestamp))
     ]
-    @ opt_string_field "error_kind" e.error_kind
+    @ opt_string_field "error_kind"
+        (Option.map error_kind_to_string e.error_kind)
     @ opt_string_field "raw_trace_run_id" e.raw_trace_run_id)
 
 let goal_completion_to_json (e : goal_completion_event) : Yojson.Safe.t =
@@ -131,7 +137,9 @@ let ledger_event_of_json json : ledger_event option =
         agent_id;
         tool_name;
         success = Safe_ops.json_bool ~default:false "success" json;
-        error_kind = Safe_ops.json_string_opt "error_kind" json;
+        error_kind =
+          Option.map error_kind_of_string
+            (Safe_ops.json_string_opt "error_kind" json);
         raw_trace_run_id = Safe_ops.json_string_opt "raw_trace_run_id" json;
         timestamp = ts;
       })

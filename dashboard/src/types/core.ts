@@ -608,6 +608,7 @@ export type KeeperPhase =
   | 'Crashed'
   | 'Restarting'
   | 'Dead'
+  | 'Zombie'
 
 export interface Keeper {
   name: string

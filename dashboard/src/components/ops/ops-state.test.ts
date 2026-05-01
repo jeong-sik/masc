@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 

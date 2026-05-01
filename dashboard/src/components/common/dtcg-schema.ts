@@ -21,7 +21,7 @@ export interface DTCGToken {
 }
 
 export interface DTCGTokenGroup {
-  [key: string]: DTCGToken | DTCGTokenGroup
+  [key: string]: DTCGToken | DTCGTokenGroup | DTCGTokenType | string | undefined
   $type?: DTCGTokenType
   $description?: string
 }

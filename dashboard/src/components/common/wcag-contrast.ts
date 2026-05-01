@@ -18,10 +18,15 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   if (!m) return null
 
   const digits = m[1]
+  if (!digits) return null
   if (digits.length === 3) {
-    const [r, g, b] = [0, 1, 2].map((i) =>
-      parseInt(digits[i].repeat(2), 16)
-    )
+    const rDigit = digits[0]
+    const gDigit = digits[1]
+    const bDigit = digits[2]
+    if (!rDigit || !gDigit || !bDigit) return null
+    const r = parseInt(rDigit.repeat(2), 16)
+    const g = parseInt(gDigit.repeat(2), 16)
+    const b = parseInt(bDigit.repeat(2), 16)
     return { r, g, b }
   }
   if (digits.length === 6) {
@@ -85,8 +90,11 @@ export function validateWCAGContrast(
 
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
-      const [nameA, valueA] = entries[i]
-      const [nameB, valueB] = entries[j]
+      const entryA = entries[i]
+      const entryB = entries[j]
+      if (!entryA || !entryB) continue
+      const [nameA, valueA] = entryA
+      const [nameB, valueB] = entryB
 
       const ratio = contrastRatio(valueA, valueB)
       if (ratio == null) continue

@@ -2,6 +2,7 @@
 // Kimi sec06 ARIA pattern: search. Enter submits query, Escape clears.
 
 import { html } from 'htm/preact'
+import type { FunctionComponent } from 'preact'
 import { useCallback, useRef, useState } from 'preact/hooks'
 
 interface SearchProps {
@@ -19,14 +20,14 @@ const INPUT_CLS =
   'hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] ' +
   'focus-visible:border-[rgba(71,184,255,0.6)] outline-none'
 
-export function Search({
+export const Search: FunctionComponent<SearchProps> = ({
   value: controlled,
   onSearch,
   onChange,
   placeholder,
   'aria-label': ariaLabel = 'Search',
   class: cx,
-}: SearchProps) {
+}) => {
   const [uncontrolled, setUncontrolled] = useState('')
   const isControlled = controlled !== undefined
   const query = isControlled ? controlled! : uncontrolled

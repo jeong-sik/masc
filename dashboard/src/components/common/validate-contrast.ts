@@ -20,8 +20,11 @@ export function validateTokenContrast(
 
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
-      const [nameA, valueA] = entries[i]
-      const [nameB, valueB] = entries[j]
+      const entryA = entries[i]
+      const entryB = entries[j]
+      if (!entryA || !entryB) continue
+      const [nameA, valueA] = entryA
+      const [nameB, valueB] = entryB
 
       const colorA = oklch(valueA)
       const colorB = oklch(valueB)

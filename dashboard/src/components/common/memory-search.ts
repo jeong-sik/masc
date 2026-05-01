@@ -3,6 +3,7 @@
 // Kimi design system sec03 reference: 3.1.2 vector similarity search UX.
 
 import { html } from 'htm/preact'
+import type { FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 
 export interface MemorySearchResult {
@@ -20,13 +21,13 @@ interface MemorySearchProps {
   testId?: string
 }
 
-export function MemorySearch({
+export const MemorySearch: FunctionComponent<MemorySearchProps> = ({
   query = '',
   results = [],
   loading = false,
   onQueryChange,
   testId,
-}: MemorySearchProps) {
+}) => {
   const [localQuery, setLocalQuery] = useState(query)
 
   const handleInput = (e: InputEvent) => {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'

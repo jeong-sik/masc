@@ -27,7 +27,7 @@ export function useIntersectionObserver<T extends HTMLElement = HTMLElement>(
 
     const observer = new IntersectionObserver(
       ([observedEntry]) => {
-        setEntry(observedEntry)
+        if (observedEntry) setEntry(observedEntry)
       },
       {
         threshold: options.threshold,

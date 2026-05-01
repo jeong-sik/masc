@@ -42,7 +42,6 @@ export function BreadcrumbHistory({ items, onNavigate, testId }: BreadcrumbHisto
         role="list"
       >
         ${items.map((item, idx) => {
-          const isLast = idx === items.length - 1
           const activeCls = item.active
             ? 'text-[var(--color-accent)] font-medium'
             : 'text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]'

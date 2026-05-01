@@ -74,11 +74,11 @@ export function useTreeNav({ items }: TreeNavOptions): TreeNavResult {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         const next = Math.min(idx + 1, visible.length - 1)
-        if (next >= 0) setActiveId(visible[next])
+        if (next >= 0) setActiveId(visible[next] ?? null)
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         const next = Math.max(idx - 1, 0)
-        if (next >= 0) setActiveId(visible[next])
+        if (next >= 0) setActiveId(visible[next] ?? null)
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         if (activeId && hasChildren(items, activeId) && !expandedIds.has(activeId)) {
@@ -92,15 +92,15 @@ export function useTreeNav({ items }: TreeNavOptions): TreeNavResult {
           } else {
             // move to parent logic omitted for simplicity; jump to previous visible
             const next = Math.max(idx - 1, 0)
-            if (next >= 0) setActiveId(visible[next])
+            if (next >= 0) setActiveId(visible[next] ?? null)
           }
         }
       } else if (e.key === 'Home') {
         e.preventDefault()
-        if (visible.length > 0) setActiveId(visible[0])
+        if (visible.length > 0) setActiveId(visible[0] ?? null)
       } else if (e.key === 'End') {
         e.preventDefault()
-        if (visible.length > 0) setActiveId(visible[visible.length - 1])
+        if (visible.length > 0) setActiveId(visible[visible.length - 1] ?? null)
       }
     },
     [items, activeId, expandedIds, toggleExpand]

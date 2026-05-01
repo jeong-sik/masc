@@ -3,7 +3,6 @@
 // Zero-dependency fallback (no external graph library).
 
 import { html } from 'htm/preact'
-import type { ComponentChildren } from 'preact'
 
 export interface ConversationMessage {
   id: string

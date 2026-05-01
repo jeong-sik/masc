@@ -32,7 +32,7 @@ let _stack: number[] = []
 
 /** Allocate a z-index for the given layer type. */
 export function pushLayer(layer: LayerKey): number {
-  const base = LAYERS[layer]
+  const base = LAYERS[layer] ?? 0
   const top = _stack[_stack.length - 1] ?? 0
   const zIndex = Math.max(top + 1, base)
   _stack.push(zIndex)

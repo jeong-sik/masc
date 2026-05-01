@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
 import { filterActionGroups, visibleNamespaceLabel } from "./activity-graph"

@@ -5,10 +5,10 @@
 import { cloneElement } from 'preact'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useId, useRef, useState } from 'preact/hooks'
-import type { VNode } from 'preact'
+import type { ComponentChildren, FunctionComponent, VNode } from 'preact'
 
 interface TooltipProps {
-  children: VNode
+  children?: ComponentChildren
   content: string
   testId?: string
 }
@@ -20,7 +20,11 @@ function compose<T extends Event>(a?: (e: T) => void, b?: (e: T) => void) {
   }
 }
 
-export function Tooltip({ children, content, testId }: TooltipProps) {
+function isVNode(child: ComponentChildren): child is VNode {
+  return typeof child === 'object' && child !== null && 'props' in child && 'type' in child
+}
+
+export const Tooltip: FunctionComponent<TooltipProps> = ({ children, content, testId }) => {
   const id = useId()
   const [visible, setVisible] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -47,6 +51,8 @@ export function Tooltip({ children, content, testId }: TooltipProps) {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
   }, [])
+
+  if (!isVNode(children)) return null
 
   const childProps = (children.props as Record<string, unknown>) || {}
   const trigger = cloneElement(children, {

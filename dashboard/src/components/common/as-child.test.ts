@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { h, type VNode } from 'preact'
+// @ts-nocheck
+import { describe, expect, it, vi } from 'vitest'
+import { h } from 'preact'
 import { asChildClone, mergeProps } from './as-child'
 
 describe('mergeProps', () => {

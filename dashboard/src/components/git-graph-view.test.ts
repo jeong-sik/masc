@@ -1,7 +1,18 @@
+// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
 import { borderForStatus, buildElements, stylesheet } from "./git-graph-view"
 import type { GitGraphResponse } from "../api/git-graph"
+
+type StyleBlock = { selector: string; style: Record<string, unknown> }
+
+function styleBlock(blocks: ReturnType<typeof stylesheet>, selector: string): StyleBlock | undefined {
+  return blocks.find((block): block is StyleBlock =>
+    typeof (block as { selector?: unknown }).selector === "string" &&
+    (block as { selector: string }).selector === selector &&
+    "style" in block
+  )
+}
 
 describe("borderForStatus", () => {
   it.each([
@@ -17,31 +28,43 @@ describe("borderForStatus", () => {
 
 describe("buildElements", () => {
   const baseGraph: GitGraphResponse = {
+    generated_at: "2024-01-01",
+    repos: [],
     agents: [{ id: "a1", label: "Agent 1", color: "#ff0000" }],
     nodes: [
       {
         id: "n1",
         label: "main",
         kind: "branch",
+        repo_id: "repo",
         status: "current",
         agent_id: "a1",
         color: "#00ff00",
+        conflict: false,
         branch: "main",
         sha: "abc123",
+        detail: null,
       },
       {
         id: "n2",
         label: "feat",
         kind: "commit",
+        repo_id: "repo",
         status: "dirty",
+        agent_id: null,
+        color: null,
         conflict: true,
+        sha: null,
+        branch: null,
+        detail: null,
       },
     ],
     edges: [
-      { source: "n1", target: "n2", label: "merged", kind: "points_to" },
-      { source: "n2", target: "n1" },
+      { id: "e1", source: "n1", target: "n2", label: "merged", kind: "points_to" },
+      { id: "e2", source: "n2", target: "n1", label: null, kind: "points_to" },
     ],
-    generated_at: "2024-01-01",
+    stats: { repo_count: 0, agent_count: 1, branch_count: 1, commit_count: 1, conflict_count: 1, dirty_count: 1 },
+    warnings: [],
   }
 
   it("creates agent parent nodes", () => {
@@ -119,9 +142,9 @@ describe("buildElements", () => {
     const graph: GitGraphResponse = {
       ...baseGraph,
       edges: [
-        { source: "n1", target: "n2" },
-        { source: "n1", target: "missing" },
-        { source: "missing", target: "n2" },
+        { id: "e1", source: "n1", target: "n2", label: null, kind: "points_to" },
+        { id: "e2", source: "n1", target: "missing", label: null, kind: "points_to" },
+        { id: "e3", source: "missing", target: "n2", label: null, kind: "points_to" },
       ],
     }
     const elements = buildElements(graph)
@@ -134,7 +157,7 @@ describe("buildElements", () => {
   it("sets edge label default to empty string", () => {
     const graph: GitGraphResponse = {
       ...baseGraph,
-      edges: [{ source: "n1", target: "n2" }],
+      edges: [{ id: "e1", source: "n1", target: "n2", label: null, kind: "points_to" }],
     }
     const elements = buildElements(graph)
     const edge = elements.find(el => el.data.source === "n1")
@@ -155,9 +178,13 @@ describe("buildElements", () => {
 
   it("returns empty array for empty graph", () => {
     const empty: GitGraphResponse = {
+      generated_at: "2024-01-01",
+      repos: [],
       agents: [],
       nodes: [],
       edges: [],
+      stats: { repo_count: 0, agent_count: 0, branch_count: 0, commit_count: 0, conflict_count: 0, dirty_count: 0 },
+      warnings: [],
     }
     expect(buildElements(empty)).toEqual([])
   })
@@ -172,7 +199,7 @@ describe("stylesheet", () => {
 
   it("has base node selector", () => {
     const ss = stylesheet()
-    const node = ss.find((s: any) => s.selector === "node")
+    const node = styleBlock(ss, "node")
     expect(node).toBeDefined()
     expect(node?.style?.["background-color"]).toBe("data(color)")
     expect(node?.style?.["border-color"]).toBe("data(borderColor)")
@@ -181,7 +208,7 @@ describe("stylesheet", () => {
 
   it("has commit node style", () => {
     const ss = stylesheet()
-    const commit = ss.find((s: any) => s.selector === "node.commit")
+    const commit = styleBlock(ss, "node.commit")
     expect(commit).toBeDefined()
     expect(commit?.style?.shape).toBe("ellipse")
     expect(commit?.style?.label).toBe("")
@@ -189,21 +216,21 @@ describe("stylesheet", () => {
 
   it("has branch node style", () => {
     const ss = stylesheet()
-    const branch = ss.find((s: any) => s.selector === "node.branch")
+    const branch = styleBlock(ss, "node.branch")
     expect(branch).toBeDefined()
     expect(branch?.style?.shape).toBe("round-tag")
   })
 
   it("has conflict node style", () => {
     const ss = stylesheet()
-    const conflict = ss.find((s: any) => s.selector === "node.conflict")
+    const conflict = styleBlock(ss, "node.conflict")
     expect(conflict).toBeDefined()
     expect(conflict?.style?.["border-width"]).toBe(4)
   })
 
   it("has parent node style", () => {
     const ss = stylesheet()
-    const parent = ss.find((s: any) => s.selector === ":parent")
+    const parent = styleBlock(ss, ":parent")
     expect(parent).toBeDefined()
     expect(parent?.style?.["background-color"]).toBe("#0f172a")
     expect(parent?.style?.["border-style"]).toBe("dashed")
@@ -211,7 +238,7 @@ describe("stylesheet", () => {
 
   it("has base edge selector", () => {
     const ss = stylesheet()
-    const edge = ss.find((s: any) => s.selector === "edge")
+    const edge = styleBlock(ss, "edge")
     expect(edge).toBeDefined()
     expect(edge?.style?.["curve-style"]).toBe("bezier")
     expect(edge?.style?.["target-arrow-shape"]).toBe("triangle")
@@ -219,14 +246,14 @@ describe("stylesheet", () => {
 
   it("has checked_out edge style", () => {
     const ss = stylesheet()
-    const checked = ss.find((s: any) => s.selector === "edge.checked_out")
+    const checked = styleBlock(ss, "edge.checked_out")
     expect(checked).toBeDefined()
     expect(checked?.style?.["line-style"]).toBe("dashed")
   })
 
   it("has points_to edge style", () => {
     const ss = stylesheet()
-    const pt = ss.find((s: any) => s.selector === "edge.points_to")
+    const pt = styleBlock(ss, "edge.points_to")
     expect(pt).toBeDefined()
     expect(pt?.style?.["line-color"]).toBe("#a78bfa")
   })

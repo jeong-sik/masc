@@ -25,10 +25,14 @@ export function validateTokenReferences(
   const PROP_USAGE_RE = /(?<![a-zA-Z0-9_-])--([a-zA-Z0-9_-]+)(?![a-zA-Z0-9_-])/g
 
   for (const file of sourceFiles) {
-    for (const [, name] of file.content.matchAll(VAR_USAGE_RE)) {
+    for (const match of file.content.matchAll(VAR_USAGE_RE)) {
+      const name = match[1]
+      if (!name) continue
       if (definedSet.has(name)) usedTokens.add(name)
     }
-    for (const [, name] of file.content.matchAll(PROP_USAGE_RE)) {
+    for (const match of file.content.matchAll(PROP_USAGE_RE)) {
+      const name = match[1]
+      if (!name) continue
       if (definedSet.has(name)) usedTokens.add(name)
     }
   }

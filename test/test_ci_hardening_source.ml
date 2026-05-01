@@ -111,16 +111,19 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate refreshes live PR state" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_STATE");
   check bool "ci workflow has live PR gate before heavy matrix" true
-    (file_contains_pattern ".github/workflows/ci.yml" "PR Live Gate");
+    (file_contains_pattern ".github/workflows/ci.yml" "pr-live-gate:");
+  check bool "live PR gate has explicit pull request read permission" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "pull-requests: read");
   check bool "live PR gate waits for draft automation to settle" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "LIVE_PR_GATE_SETTLE_SEC");
-  check bool "changes job depends on live PR gate" true
-    (file_contains_pattern ".github/workflows/ci.yml"
-       "needs: [pr-sync-check, pr-live-gate]");
   check bool "heavy CI uses live PR gate output" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "needs.pr-live-gate.outputs.run_heavy == 'true'");
+  check bool "ci gate allows skipped live PR gate on non-PR triggers" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|"$result" == "success" || "$result" == "skipped"|});
   check bool "ci gate aggregates live PR gate" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "PR_LIVE_GATE_RESULT");

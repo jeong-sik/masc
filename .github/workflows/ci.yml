@@ -51,6 +51,8 @@ jobs:
     needs: [pr-sync-check]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     timeout-minutes: 2
+    permissions:
+      pull-requests: read
     outputs:
       run_heavy: ${{ steps.live.outputs.run_heavy }}
       live_is_draft: ${{ steps.live.outputs.live_is_draft }}
@@ -984,6 +986,8 @@ jobs:
             fi
           }
           check "pr-sync-check"   "$PR_SYNC_RESULT"
+          # pr-live-gate is pull_request-only; on push/workflow_dispatch it is
+          # skipped, and check() intentionally treats skipped as non-blocking.
           check "pr-live-gate"    "$PR_LIVE_GATE_RESULT"
           check "changes"         "$CHANGES_RESULT"
           check "meta"            "$META_RESULT"

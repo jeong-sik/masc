@@ -64,7 +64,7 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
 
 Clone-then-worktree (one turn is fine when the task is clear):
 1. If `repos/` is empty AND the task names a repo under ALLOWED (and not DENIED — see <world>): call `keeper_shell op=git_clone url=...` first.
-2. In the SAME turn, call `masc_worktree_create task_id=<id> repo_name=<dir>` (repo_name is required to select the target clone). `masc_worktree_create` resolves repos/<repo_name>/ at call time, so the clone you just issued is visible.
+2. In the SAME turn, call `masc_worktree_create task_id=<id>` (infers the repo from task repo/path evidence, or pass `repo_name=<dir>` to pick a specific one). `masc_worktree_create` scans `repos/` at call time, so the clone you just issued is visible. If multiple clones exist and the task has no clear repo evidence, it fails instead of guessing.
 3. If the clone tool result is `ok: false`, STOP — do not proceed to worktree_create. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 4. Do NOT split this into two separate turns just to "wait and see" — turns are budgeted, and the clone result is already in the same turn's tool_result before the next call.
 

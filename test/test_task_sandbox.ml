@@ -15,6 +15,18 @@ module Coord = Masc_mcp.Coord
 
 let temp_counter = ref 0
 
+let contains needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (** Create a temp directory with a unique name. *)
 let make_temp_dir () =
   incr temp_counter;
@@ -177,6 +189,62 @@ let seed_playground_clone ~base_path ~agent_name ~source_repo =
     (Filename.quote source_repo) (Filename.quote clone_path));
   clone_path
 
+let setup_named_repo_with_file ~base_path ~repo_name ~file_path =
+  let bare_dir =
+    Filename.concat base_path (Printf.sprintf ".remote-%s.git" repo_name)
+  in
+  let repo =
+    Filename.concat base_path
+      (Filename.concat "sources" repo_name)
+  in
+  Fs_compat.mkdir_p (Filename.dirname repo);
+  run_cmd
+    (Printf.sprintf "git init --bare --initial-branch=main %s"
+       (Filename.quote bare_dir));
+  run_cmd
+    (Printf.sprintf "git clone %s %s"
+       (Filename.quote bare_dir) (Filename.quote repo));
+  run_cmd
+    (Printf.sprintf "git -C %s config user.email test@test.com"
+       (Filename.quote repo));
+  run_cmd
+    (Printf.sprintf "git -C %s config user.name test"
+       (Filename.quote repo));
+  let full_path = Filename.concat repo file_path in
+  Fs_compat.mkdir_p (Filename.dirname full_path);
+  let oc = open_out full_path in
+  output_string oc "test fixture\n";
+  close_out oc;
+  run_cmd (Printf.sprintf "git -C %s add ." (Filename.quote repo));
+  run_cmd
+    (Printf.sprintf "git -C %s commit -m init" (Filename.quote repo));
+  run_cmd (Printf.sprintf "git -C %s push origin main" (Filename.quote repo));
+  repo
+
+let task ?worktree ?(files = []) ~id ~title ~description () : Types.task =
+  {
+    id;
+    title;
+    description;
+    task_status = Types.Todo;
+    priority = 3;
+    files;
+    created_at = "2026-05-01T00:00:00Z";
+    created_by = None;
+    worktree;
+    goal_id = None;
+    stage = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    do_not_reclaim_reason = None;
+  }
+
+let write_tasks config tasks =
+  let backlog = Coord.read_backlog config in
+  Coord.write_backlog config
+    { Types.tasks = tasks; last_updated = Types.now_iso (); version = backlog.version + 1 }
+
 let test_full_lifecycle () =
   let base = make_temp_dir () in
   let dir = base in
@@ -273,6 +341,142 @@ let test_full_lifecycle () =
            Printf.eprintf "[WARN] cleanup error (acceptable in CI): %s\n%!" e)
     )
   )
+
+let test_create_infers_repo_from_task_file_evidence () =
+  let base = make_temp_dir () in
+  let dir = base in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        let proc_mgr = Eio.Stdenv.process_mgr env in
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Stdenv.cwd env in
+        Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
+        Unix.putenv "MASC_BASE_PATH" dir;
+        let config = Coord.default_config dir in
+        let _msg = Coord.init config ~agent_name:None in
+        let _join =
+          Coord.join config ~agent_name:"router-agent" ~capabilities:[ "test" ] ()
+        in
+        let grpc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"grpc-direct"
+            ~file_path:"lib/grpc_eio/health.ml"
+        in
+        let masc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"masc-mcp"
+            ~file_path:"lib/tool_call_quality_benchmark_loader.ml"
+        in
+        let grpc_clone =
+          seed_playground_clone ~base_path:dir ~agent_name:"router-agent"
+            ~source_repo:grpc_repo
+        in
+        let _masc_clone =
+          seed_playground_clone ~base_path:dir ~agent_name:"router-agent"
+            ~source_repo:masc_repo
+        in
+        let stale_worktree : Types.worktree_info =
+          {
+            branch = "router-agent/task-route";
+            path = ".worktrees/router-agent-task-route";
+            git_root = grpc_clone;
+            repo_name = "grpc-direct";
+          }
+        in
+        write_tasks config
+          [
+            task ~id:"task-route" ~title:"benchmark loader migration"
+              ~description:
+                "Migrate lib/tool_call_quality_benchmark_loader.ml from invalid_arg to Result."
+              ~worktree:stale_worktree ();
+          ];
+        match
+          Task_sandbox.create ~config ~task_id:"task-route"
+            ~agent_name:"router-agent" ()
+        with
+        | Error e -> fail (Printf.sprintf "sandbox create failed: %s" e)
+        | Ok sb ->
+            check bool "picked masc-mcp repo" true
+              (contains "/repos/masc-mcp/.worktrees/" sb.worktree_path);
+            let persisted =
+              Coord.read_backlog config
+              |> fun backlog ->
+              List.find
+                (fun (t : Types.task) -> String.equal t.id "task-route")
+                backlog.tasks
+            in
+            (match persisted.worktree with
+             | Some wt -> check string "persisted repo" "masc-mcp" wt.repo_name
+             | None -> fail "expected linked worktree metadata");
+            ignore
+              (Task_sandbox.cleanup ~config ~agent_name:"router-agent" sb)))
+
+let test_create_fails_ambiguous_multi_repo_without_evidence () =
+  let base = make_temp_dir () in
+  let dir = base in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        let proc_mgr = Eio.Stdenv.process_mgr env in
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Stdenv.cwd env in
+        Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
+        Unix.putenv "MASC_BASE_PATH" dir;
+        let config = Coord.default_config dir in
+        let _msg = Coord.init config ~agent_name:None in
+        let _join =
+          Coord.join config ~agent_name:"ambiguous-agent"
+            ~capabilities:[ "test" ] ()
+        in
+        let grpc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"grpc-direct"
+            ~file_path:"README.md"
+        in
+        let masc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"masc-mcp"
+            ~file_path:"README.md"
+        in
+        ignore
+          (seed_playground_clone ~base_path:dir ~agent_name:"ambiguous-agent"
+             ~source_repo:grpc_repo);
+        ignore
+          (seed_playground_clone ~base_path:dir ~agent_name:"ambiguous-agent"
+             ~source_repo:masc_repo);
+        write_tasks config
+          [
+            task ~id:"task-ambiguous" ~title:"generic cleanup"
+              ~description:"No repo or file evidence." ();
+          ];
+        match
+          Task_sandbox.create ~config ~task_id:"task-ambiguous"
+            ~agent_name:"ambiguous-agent" ()
+        with
+        | Ok sb ->
+            ignore
+              (Task_sandbox.cleanup ~config ~agent_name:"ambiguous-agent" sb);
+            fail "expected ambiguous repo routing error"
+        | Error e ->
+            check bool "reports ambiguous repo" true
+              (contains "ambiguous_task_repo" e)))
 
 let test_with_sandbox_lifecycle () =
   let base = make_temp_dir () in
@@ -421,6 +625,10 @@ let () =
     ];
     "integration", [
       test_case "full_lifecycle" `Quick test_full_lifecycle;
+      test_case "infer_repo_from_task_file_evidence" `Quick
+        test_create_infers_repo_from_task_file_evidence;
+      test_case "ambiguous_multi_repo_without_evidence" `Quick
+        test_create_fails_ambiguous_multi_repo_without_evidence;
       test_case "with_sandbox_result" `Quick test_with_sandbox_lifecycle;
       test_case "exception_cleanup" `Quick test_with_sandbox_cleans_up_on_exception;
     ];

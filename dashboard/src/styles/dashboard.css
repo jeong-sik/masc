@@ -249,3 +249,66 @@
     background: var(--white-20);
   }
 }
+
+/* ── IDE Plane Shell ── */
+.ide-plane-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.ide-plane-tree {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.ide-plane-editor {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.ide-plane-conversation {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.ide-plane-activity {
+  grid-column: 3;
+  grid-row: 2;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .ide-plane-shell {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .ide-plane-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .ide-plane-tree,
+  .ide-plane-editor,
+  .ide-plane-conversation,
+  .ide-plane-activity {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .ide-plane-tree,
+  .ide-plane-conversation,
+  .ide-plane-activity {
+    max-height: 22rem;
+    overflow: auto;
+  }
+
+  .ide-plane-editor {
+    overflow-x: auto;
+  }
+}

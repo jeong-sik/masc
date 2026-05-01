@@ -16,6 +16,7 @@ type SurfaceSectionId =
   | 'observatory'
   | 'journey'
   | 'agents'
+  | 'cognition'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
@@ -130,7 +131,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultTab: 'code',
     defaultParams: { section: 'ide-shell' },
     tabs: ['code'],
-    hidden: true,
   },
   {
     id: 'logs',
@@ -170,6 +170,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Agent Directory',
       description: 'Live runtime-backed roster and process state.',
       params: { section: 'agents' },
+    },
+    {
+      id: 'cognition',
+      label: 'Cognition',
+      description: 'Keeper BDI, token load, memory, decisions, and autoresearch loops.',
+      params: { section: 'cognition' },
     },
     {
       id: 'runtime',
@@ -266,7 +272,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Code IDE',
       description: 'Keeper collaboration code-review IDE shell.',
       params: { section: 'ide-shell' },
-      hidden: true,
     },
   ],
 }

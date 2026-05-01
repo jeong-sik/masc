@@ -123,7 +123,7 @@ else
   [ -f "$KP_TS"  ] || echo "WARN: ${KP_TS} not found — skipping phase check"
 fi
 
-# ── Check 2: turn_phase (OCaml) vs KTC labels in TLA+ flowchart ──────────────
+# ── Check 2: turn_phase (OCaml) vs TurnPhaseSet in TLA+ ─────────────────────
 
 echo ""
 echo "=== Check 2: turn_phase (OCaml) vs KeeperCompositeLifecycle.tla domain ==="
@@ -138,13 +138,15 @@ if [ -f "$KR_ML" ]; then
 
   if [ -n "$ocaml_turn" ]; then
     if [ -f "$KCL_TLA" ]; then
-      # TLA+ turn_phase domain (quoted lowercase strings like "idle", "executing")
-      tla_turn=$(rg '"(idle|prompting|executing|compacting|finalizing)"' "$KCL_TLA" \
-        -o -r '$1' 2>/dev/null | sort -u || true)
+      # Extract from the TurnPhaseSet == {"..."} definition in the TLA+ spec.
+      # Reads the canonical set literal — no hardcoded values needed here.
+      tla_turn=$(rg 'TurnPhaseSet\s*==\s*\{([^}]+)\}' "$KCL_TLA" -o -r '$1' 2>/dev/null \
+        | rg '"([a-z_]+)"' -o -r '$1' | sort -u || true)
       if [ -n "$tla_turn" ]; then
-        check_pair "OCaml(turn_phase)" "$ocaml_turn" "TLA+(turn_phase domain)" "$tla_turn"
+        check_pair "OCaml(turn_phase)" "$ocaml_turn" "TLA+(TurnPhaseSet)" "$tla_turn"
       else
-        echo "INFO: TLA+ turn_phase domain literals not found in ${KCL_TLA} — spec may use variable names only"
+        echo "INFO: TurnPhaseSet definition not found in ${KCL_TLA} — turn_phase check skipped"
+        echo "      (Add 'TurnPhaseSet == {\"idle\", ...}' to the spec for automated sync)"
       fi
     else
       echo "INFO: ${KCL_TLA} not found — TLA+ turn_phase check skipped"
@@ -156,7 +158,7 @@ else
   echo "WARN: ${KR_ML} not found — turn_phase check skipped"
 fi
 
-# ── Check 3: cascade_state (OCaml) vs KCL labels in TLA+ ────────────────────
+# ── Check 3: cascade_state (OCaml) vs CascadeSet in TLA+ ────────────────────
 
 echo ""
 echo "=== Check 3: cascade_state (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
@@ -167,12 +169,15 @@ if [ -f "$KR_ML" ]; then
 
   if [ -n "$ocaml_cascade" ]; then
     if [ -f "$KCL_TLA" ]; then
-      tla_cascade=$(rg '"(idle|selecting|trying|done|exhausted)"' "$KCL_TLA" \
-        -o -r '$1' 2>/dev/null | sort -u || true)
+      # Extract from the CascadeSet == {"..."} definition in the TLA+ spec.
+      # Reads the canonical set literal — no hardcoded values needed here.
+      tla_cascade=$(rg 'CascadeSet\s*==\s*\{([^}]+)\}' "$KCL_TLA" -o -r '$1' 2>/dev/null \
+        | rg '"([a-z_]+)"' -o -r '$1' | sort -u || true)
       if [ -n "$tla_cascade" ]; then
-        check_pair "OCaml(cascade_state)" "$ocaml_cascade" "TLA+(cascade_state domain)" "$tla_cascade"
+        check_pair "OCaml(cascade_state)" "$ocaml_cascade" "TLA+(CascadeSet)" "$tla_cascade"
       else
-        echo "INFO: TLA+ cascade_state domain literals not found in ${KCL_TLA}"
+        echo "INFO: CascadeSet definition not found in ${KCL_TLA} — cascade_state check skipped"
+        echo "      (Add 'CascadeSet == {\"idle\", ...}' to the spec for automated sync)"
       fi
     else
       echo "INFO: ${KCL_TLA} not found — TLA+ cascade_state check skipped"

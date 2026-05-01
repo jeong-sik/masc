@@ -77,7 +77,9 @@ done
 echo ""
 echo "=== Scan: unexplained wildcard _ in match expressions ==="
 # A wildcard in a match is only acceptable with a justification comment.
-# Heuristic: flag `| _ ->` lines that have no inline comment on the same line.
+# Heuristic: flag `| _ ->` lines that have no inline `(*` comment on the same line.
+# Limitation: multi-line justification comments (on the next line) are not detected.
+# If _ is intentional, add an inline comment: `| _ -> ... (* justification: ... *)`
 unexplained_wildcards=$(
   rg '^\s*\|\s+_\s*->' lib/keeper/ --type ml -n 2>/dev/null \
     | grep -v '(\*' || true

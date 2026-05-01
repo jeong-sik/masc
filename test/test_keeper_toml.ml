@@ -749,19 +749,37 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None ->
+      (* This OCaml Unix module does not expose [unsetenv]. Config_dir_resolver
+         normalizes empty env values to [None], so this restores the effective
+         resolver state for these tests. *)
+      Unix.putenv name ""
+
 let with_personas_dir f =
   with_temp_dir "keeper-personas" @@ fun personas_dir ->
   let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
   Fun.protect
     ~finally:(fun () ->
-      (match original with
-      | Some value -> Unix.putenv "MASC_PERSONAS_DIR" value
-      | None -> Unix.putenv "MASC_PERSONAS_DIR" "");
+      restore_env "MASC_PERSONAS_DIR" original;
       Masc_mcp.Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
+
+let with_config_dir f =
+  with_temp_dir "keeper-config" @@ fun config_dir ->
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original;
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f config_dir)
 
 (* Legacy allowed_providers is accepted for compatibility but ignored.
    Provider ownership now lives with OAS cascade resolution. *)
@@ -907,6 +925,112 @@ let test_persona_resolver_defaults_to_research_tool_access () =
         (match Yojson.Safe.Util.member "tool_preset" resolved with
          | `String _ -> true
          | _ -> false)
+
+let test_persona_resolver_rejects_operator_todo_profile () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "OPERATOR_TODO: probe display",
+  "role": "draft placeholder",
+  "keeper": {
+    "goal": "OPERATOR_TODO: fill before spawn"
+  }
+}
+|};
+  (match KTP.load_persona_summary "probe" with
+   | Some _ -> fail "placeholder persona summary should be hidden"
+   | None -> ());
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "placeholder manifest rejected" None defaults.manifest_path;
+  check (option string) "placeholder goal rejected" None defaults.goal;
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder persona should not resolve for keeper spawn"
+  | Error e ->
+      check bool "reports persona unavailable" true
+        (contains_substring e "persona not found")
+
+let test_persona_resolver_reports_placeholder_defaults_source () =
+  with_personas_dir @@ fun personas_dir ->
+  with_config_dir @@ fun config_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "role": "runtime profile",
+  "keeper": {
+    "goal": "normal persona goal"
+  }
+}
+|};
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let keeper_path = Filename.concat keepers_dir "probe.toml" in
+  write_file keeper_path
+    {|
+[keeper]
+persona_name = "probe"
+goal = "OPERATOR_TODO: replace before spawn"
+|};
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder keeper defaults should not resolve"
+  | Error e ->
+      check bool "reports keeper defaults" true
+        (contains_substring e "keeper defaults");
+      check bool "reports manifest path" true
+        (contains_substring e keeper_path);
+      check bool "reports field" true
+        (contains_substring e "keeper.goal")
+
+let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
+  with_personas_dir @@ fun personas_dir ->
+  with_config_dir @@ fun config_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "role": "runtime profile",
+  "keeper": {
+    "goal": "normal persona goal"
+  }
+}
+|};
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let keeper_path = Filename.concat keepers_dir "probe.toml" in
+  write_file keeper_path
+    {|
+[keeper]
+persona_name = "probe"
+tool_denylist = ["OPERATOR_TODO: remove before spawn"]
+|};
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder in resolved keeper args should not resolve"
+  | Error e ->
+      check bool "reports resolved args" true
+        (contains_substring e "resolved keeper args");
+      check bool "reports manifest path" true
+        (contains_substring e keeper_path);
+      check bool "reports resolved payload field" true
+        (contains_substring e "$.tool_denylist[0]")
 
 let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1246,6 +1370,26 @@ let test_persona_authoring_rejects_unknown_keeper_fields () =
         (contains_substring e "unknown keeper fields");
       check bool "mentions schema tool" true
         (contains_substring e "masc_persona_schema")
+
+let test_persona_authoring_rejects_operator_todo_placeholders () =
+  let profile =
+    `Assoc
+      [
+        ("name", `String "OPERATOR_TODO: display label");
+        ( "keeper",
+          `Assoc
+            [
+              ("goal", `String "Find weak assumptions and make concrete tasks.");
+            ] );
+      ]
+  in
+  match KPA.normalize_profile ~handle:"probe" profile with
+  | Ok _ -> fail "expected OPERATOR_TODO placeholder rejection"
+  | Error e ->
+      check bool "mentions placeholder marker" true
+        (contains_substring e "OPERATOR_TODO");
+      check bool "mentions replace action" true
+        (contains_substring e "replace placeholders")
 
 let test_persona_authoring_save_dry_run_does_not_write () =
   with_personas_dir @@ fun personas_dir ->
@@ -1611,6 +1755,12 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona resolver defaults to research tool_access" `Quick
             test_persona_resolver_defaults_to_research_tool_access;
+          test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
+            test_persona_resolver_rejects_operator_todo_profile;
+          test_case "persona resolver reports placeholder defaults source" `Quick
+            test_persona_resolver_reports_placeholder_defaults_source;
+          test_case "persona resolver rejects placeholder in resolved payload" `Quick
+            test_persona_resolver_rejects_placeholder_in_resolved_payload;
           test_case "persona resolver ignores non-public social_model arg" `Quick
             test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
@@ -1635,6 +1785,8 @@ let () =
             test_persona_authoring_normalizes_keeper_defaults;
           test_case "persona authoring rejects unknown keeper fields" `Quick
             test_persona_authoring_rejects_unknown_keeper_fields;
+          test_case "persona authoring rejects OPERATOR_TODO placeholders" `Quick
+            test_persona_authoring_rejects_operator_todo_placeholders;
           test_case "persona authoring dry-run does not write" `Quick
             test_persona_authoring_save_dry_run_does_not_write;
           test_case "persona authoring save is loader-visible" `Quick

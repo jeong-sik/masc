@@ -434,6 +434,52 @@ let test_keeper_sandbox_start_status_stop_with_fake_docker () =
         (Option.is_some
            (final_sandbox |> member "why_no_container" |> to_string_option)))
 
+let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-docker-cache" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+                ("trace_id", `String ("test-trace-" ^ keeper_name));
+                ("goal", `String "exercise turn sandbox runtime cache");
+              ])
+        with
+        | Ok m ->
+            {
+              m with
+              sandbox_profile = Keeper_types.Docker;
+              network_mode = Keeper_types.Network_none;
+            }
+        | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+      in
+      let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      let nested_cwd = Filename.concat host_root "repos/masc-mcp" in
+      ensure_dir nested_cwd;
+      let factory = Keeper_sandbox_factory.create ~config ~meta () in
+      match
+        Keeper_sandbox_factory.resolve factory ~cwd:host_root,
+        Keeper_sandbox_factory.resolve factory ~cwd:nested_cwd
+      with
+      | Some root_runtime, Some nested_runtime ->
+          Alcotest.(check bool)
+            "same turn sandbox runtime reused across playground cwd values"
+            true
+            (root_runtime == nested_runtime);
+          Keeper_sandbox_factory.cleanup factory
+      | _ -> Alcotest.fail "docker keeper should resolve a turn sandbox runtime")
+
 let test_snapshot_exposes_keeper_and_social_actions () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

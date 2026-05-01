@@ -620,7 +620,9 @@ let run_cmd host port base_path =
             (try close_all_sse_connections ()
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> ());
+            | exn ->
+                Log.Server.warn "shutdown: SSE close error: %s"
+                  (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
             (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
             (Masc_mcp.Server_mcp_transport_ws.session_count ())

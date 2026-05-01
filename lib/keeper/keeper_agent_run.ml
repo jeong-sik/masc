@@ -30,7 +30,7 @@ include Keeper_agent_checkpoint_hygiene
     @param build_turn_prompt Callback: receives the base keeper system prompt
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param cascade_name Cascade profile name for model selection
+    @param cascade_name Runtime cascade profile name for model selection
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from keeper runtime config)
     @param guardrails Optional OAS guardrails for tool safety gates
@@ -49,7 +49,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Oas.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : string)
+      ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ?world_observation
       ?(turn_affordances = [])
       ?provider_filter
@@ -96,7 +96,10 @@ let run_turn
   in
   Fun.protect ~finally:safe_emit_turn_end
   @@ fun () ->
-  let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
+  let runtime_cascade_name = cascade_name in
+  let cascade_name_string =
+    Keeper_cascade_profile.runtime_name_to_string runtime_cascade_name
+  in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx = Keeper_run_context.prepare_run_context
@@ -256,7 +259,7 @@ let run_turn
            "keeper %s (cascade=%s): cli-backed providers selected but \
             claude_mcp_config is None; MCP tool catalog will not be \
             visible to the subprocess (see issue #10049 for fix plan)"
-           meta.name cascade_name);
+           meta.name cascade_name_string);
     let cli_transport_overrides =
       let claude_mcp_config =
         match keeper_oas_context.claude_mcp_config with
@@ -340,7 +343,7 @@ let run_turn
       match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
-           ~cascade_name
+           ~cascade_name:cascade_name_string
            ~keeper_name:meta.name
            ~model_strings:meta.models
            ?provider_filter
@@ -1178,8 +1181,7 @@ let run_turn
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = acc.tool_surface.approval_mode_effective;
         approval_profile_derived = acc.tool_surface.approval_mode_derived;
-        cascade_name =
-          Keeper_execution_receipt.cascade_name_of_string cascade_name;
+        cascade_name = runtime_cascade_name;
         cascade_selected_model =
           Option.bind cascade_observation (fun obs -> obs.selected_model);
         cascade_attempt_count =

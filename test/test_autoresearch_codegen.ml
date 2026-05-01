@@ -138,19 +138,23 @@ let test_parse_model_code_response_rejects_missing_fields () =
     noisy-by-default meta-issue (#9517). *)
 let test_parse_model_code_response_rejects_unknown_shape () =
   let cases =
-    [ ({|[1, 2, 3]|},              "JSON array")
-    ; ({|"just a string"|},        "bare string")
-    ; ({|42|},                      "bare number")
-    ; ({|true|},                    "bare boolean")
-    ; ("",                          "empty string")
+    [ ({|[1, 2, 3]|},                       "JSON array",         "JSON object")
+    ; ({|"just a string"|},                  "bare string",        "JSON object")
+    ; ({|42|},                               "bare number",        "JSON object")
+    ; ({|true|},                             "bare boolean",       "JSON object")
+    ; ("",                                   "empty string",       "empty response")
+    ; ({|{"unknown_field": "value"}|},       "unknown fields obj", "hypothesis")
     ]
   in
-  List.iter (fun (input, label) ->
+  List.iter (fun (input, label, expected_fragment) ->
     match Lib.Autoresearch.parse_model_code_response input with
     | Ok _ ->
         failf "expected %s to be rejected as unknown shape" label
-    | Error _msg ->
-        ()
+    | Error msg ->
+        check bool
+          (Printf.sprintf "%s: error message mentions expected fragment" label)
+          true
+          (contains msg expected_fragment)
   ) cases
 
 let () =

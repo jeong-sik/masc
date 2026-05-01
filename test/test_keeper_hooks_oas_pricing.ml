@@ -27,19 +27,52 @@ let mk_usage
   }
 
 let check_json_string name expected field json =
+  let value = json |> Json.member field |> Json.to_string_option in
+  let actual =
+    match value with
+    | Some value -> value
+    | None ->
+        Alcotest.failf
+          "%s: expected string field %S in payload: %s"
+          name
+          field
+          (Yojson.Safe.to_string json)
+  in
   Alcotest.(check string)
     name expected
-    (json |> Json.member field |> Json.to_string)
+    actual
 
 let check_json_float name expected field json =
+  let value = json |> Json.member field |> Json.to_float_option in
+  let actual =
+    match value with
+    | Some value -> value
+    | None ->
+        Alcotest.failf
+          "%s: expected float field %S in payload: %s"
+          name
+          field
+          (Yojson.Safe.to_string json)
+  in
   Alcotest.(check (float 0.000_001))
     name expected
-    (json |> Json.member field |> Json.to_float)
+    actual
 
 let check_json_int name expected field json =
+  let value = json |> Json.member field |> Json.to_int_option in
+  let actual =
+    match value with
+    | Some value -> value
+    | None ->
+        Alcotest.failf
+          "%s: expected int field %S in payload: %s"
+          name
+          field
+          (Yojson.Safe.to_string json)
+  in
   Alcotest.(check int)
     name expected
-    (json |> Json.member field |> Json.to_int)
+    actual
 
 let catalog_miss_for model =
   Prom.metric_value_or_zero

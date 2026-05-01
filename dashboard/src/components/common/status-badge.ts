@@ -68,16 +68,13 @@ export function statusDotColor(status: string): string {
 
 export function StatusBadge({ status, label, tone, children }: StatusBadgeProps) {
   const resolvedTone = tone ?? (status != null ? statusBadgeTone(status) : 'neutral')
-  const normalizedStatusClass = status?.trim().toLowerCase().replace(/_/g, '-')
-  const statusClass =
-    normalizedStatusClass != null && normalizedStatusClass !== resolvedTone
-      ? `${resolvedTone} ${normalizedStatusClass}`
-      : resolvedTone
+  const normalizedStatus = status?.trim().toLowerCase().replace(/_/g, '-')
   const content = children ?? label ?? (status != null ? statusLabel(status) : '')
   return html`
     <span
-      class="status-badge ${statusClass}"
+      class="status-badge ${resolvedTone}"
       data-status-badge-tone=${resolvedTone}
+      data-status-badge-status=${normalizedStatus}
     >
       <span class="size-1.5 rounded-sm inline-block ${DOT_CLASS[resolvedTone]}"></span>
       ${content}

@@ -83,8 +83,9 @@ describe('StatusBadge', () => {
     const el = container.querySelector('[data-status-badge-tone]')
     expect(el?.classList.contains('status-badge')).toBe(true)
     expect(el?.getAttribute('data-status-badge-tone')).toBe('ok')
+    expect(el?.getAttribute('data-status-badge-status')).toBe('active')
     expect(el?.classList.contains('ok')).toBe(true)
-    expect(el?.classList.contains('active')).toBe(true)
+    expect(el?.classList.contains('active')).toBe(false)
   })
 
   it('keeps resolved tone styling for statuses without explicit CSS variants', () => {
@@ -92,8 +93,9 @@ describe('StatusBadge', () => {
     render(h(StatusBadge, { status: 'awaiting_verification' }), container)
     const el = container.querySelector('[data-status-badge-tone]')
     expect(el?.getAttribute('data-status-badge-tone')).toBe('info')
+    expect(el?.getAttribute('data-status-badge-status')).toBe('awaiting-verification')
     expect(el?.classList.contains('info')).toBe(true)
-    expect(el?.classList.contains('awaiting-verification')).toBe(true)
+    expect(el?.classList.contains('awaiting-verification')).toBe(false)
   })
 
   it('accepts tone plus children for caller-owned labels', () => {
@@ -108,7 +110,8 @@ describe('StatusBadge', () => {
     const container = document.createElement('div')
     render(h(StatusBadge, { status: 'offline' }), container)
     const el = container.querySelector('[data-status-badge-tone]')
-    expect(el?.classList.contains('offline')).toBe(true)
+    expect(el?.getAttribute('data-status-badge-status')).toBe('offline')
+    expect(el?.classList.contains('offline')).toBe(false)
     expect(el?.className).not.toContain('text-[var(--color-fg-disabled)]')
   })
 

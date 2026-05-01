@@ -709,6 +709,8 @@ let metric_keeper_dead_total = "masc_keeper_dead_total"
    positive/negative coverage. Labels: keeper. *)
 let metric_keeper_skip_idle_wake_resumed =
   "masc_keeper_skip_idle_wake_resumed_total"
+let metric_keeper_event_queue_override =
+  "masc_keeper_event_queue_override_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 let metric_keeper_restart_attempts =
   "masc_keeper_restart_attempts_total"
@@ -1062,6 +1064,14 @@ let init () =
      (cycle_continues_after_wake -> true). Positive signal for the \
      #12271 fix; pairs with masc_keeper_stale_termination_by_class_total \
      {class=idle_turn} which should drop in proportion. Labels: keeper."
+    Counter;
+  add metric_keeper_event_queue_override
+    "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced \
+     Heartbeat_smart.Emit because the Event Layer queue \
+     (Keeper_registry.event_queue_snapshot) was non-empty. Pairs with \
+     masc_keeper_skip_idle_wake_resumed: skip-idle-resumed measures the \
+     fiber_wakeup hint path, this measures the queue payload path. \
+     Labels: keeper."
     Counter;
   add metric_keeper_near_exhaustion_total
     "Total keeper restart attempts at restart_count = max_restarts - 1, \

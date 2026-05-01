@@ -352,6 +352,12 @@ let test_release_truth_contracts () =
     (file_not_contains_pattern ".github/workflows/ci.yml" "name: Documentation");
   check bool "ci workflow no longer installs odoc" true
     (file_not_contains_pattern ".github/workflows/ci.yml" "Install odoc");
+  check bool "odoc pages deploy is opt-in" true
+    (file_contains_pattern ".github/workflows/odoc.yml"
+       "vars.ODOC_PAGES_DEPLOY == 'true'");
+  check bool "odoc pages artifact follows deploy opt-in" true
+    (file_contains_pattern ".github/workflows/odoc.yml"
+       "Upload Pages artifact\n        if: ${{ github.ref == 'refs/heads/main' && vars.ODOC_PAGES_DEPLOY == 'true' }}");
   check bool "release/doc truth changes trigger build scope" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "docs/|README\\.md$|ROADMAP\\.md$|CHANGELOG\\.md$");

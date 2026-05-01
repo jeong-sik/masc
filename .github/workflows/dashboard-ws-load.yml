@@ -27,12 +27,11 @@ name: PR-0.2.G — Dashboard WS Load (k6)
 #   - dashboard/test/load/ws-100vu.js
 #   - .github/workflows/perf-baseline.yml          (mirror schedule pattern)
 #   - knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-QUEUE.md Q-P1-7
+#
+# Manual-only: this expects an operator-provided live dashboard endpoint, so
+# pull-request runs only consume queue while producing non-blocking artifacts.
 
 on:
-  pull_request:
-    paths:
-      - 'dashboard/test/load/**'
-      - '.github/workflows/dashboard-ws-load.yml'
   workflow_dispatch:
     inputs:
       vus:
@@ -47,6 +46,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: dashboard-ws-load-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   k6-smoke:

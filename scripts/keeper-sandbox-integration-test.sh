@@ -15,6 +15,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 playground="$tmpdir/playground"
 mkdir -p "$playground"
 
+# Extract required dune version from dune-project: (lang dune X.Y)
+req_dune_ver="$(grep -E '^\(lang dune\b' "$repo_root/dune-project" \
+                | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+
 # Seed playground with realistic repo content
 printf 'alpha\nbeta\ngamma\n' > "$playground/demo.txt"
 mkdir -p "$playground/lib/keeper"
@@ -57,6 +61,7 @@ run_test() {
       --security-opt no-new-privileges \
       --pids-limit 64 \
       --memory 512m \
+      -e "MASC_REQ_DUNE_VER=$req_dune_ver" \
       -v "$playground:/workspace:rw" \
       --workdir /workspace \
       "${extra_args[@]}" \
@@ -154,6 +159,8 @@ run_test "T16: opam" none \
   'opam --version >/dev/null' true
 run_test "T16: dune" none \
   'dune --version >/dev/null' true
+run_test "T16: dune version >= dune-project" none \
+  'actual=$(dune --version); printf "%s\n%s\n" "$MASC_REQ_DUNE_VER" "$actual" | sort -V -C' true
 
 # T17: gh check (gh binary exists)
 run_test "T17: gh binary" none \

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { ConfirmDialogOverlay, requestConfirm } from './confirm-dialog'

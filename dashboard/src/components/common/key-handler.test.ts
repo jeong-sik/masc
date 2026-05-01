@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   normalizeKey,
   isKey,
-  getNormalizedKey,
   KeyMatcher,
   createKeyHandler,
 } from './key-handler'

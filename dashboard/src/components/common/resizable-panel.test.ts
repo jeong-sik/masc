@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { ResizablePanel } from './resizable-panel'

@@ -2,7 +2,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
-import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import {
   currentZIndexMax,

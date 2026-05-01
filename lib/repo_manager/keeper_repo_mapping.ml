@@ -30,6 +30,11 @@ let mapping_of_toml toml keeper_id =
   in
   Ok { keeper_id; repository_ids; github_credential_id }
 
+let credential_type_label = function
+  | Github -> "GitHub"
+  | Gitlab -> "GitLab"
+  | Local -> "Local"
+
 let toml_of_mapping mapping =
   let fields =
     [
@@ -124,7 +129,14 @@ let credentials_for_keeper ~base_path ~keeper_id =
       (match mapping.github_credential_id with
       | Some id when String.trim id <> "" ->
           let* credential = resolve_credential id in
-          Ok [credential]
+          if credential.cred_type <> Github then
+            Error
+              (Printf.sprintf
+                 "credential %s referenced by github_credential_id for keeper %s \
+                  must be of type GitHub, got %s"
+                 id keeper_id (credential_type_label credential.cred_type))
+          else
+            Ok [credential]
       | Some _ | None ->
       let* repos = Repo_store.load_all ~base_path in
       let mapped_repos =

@@ -383,6 +383,32 @@ let test_credentials_for_keeper_direct_missing_credential () =
             "mentions missing credential"
             true (contains_substring msg "cred-missing"))
 
+let test_credentials_for_keeper_direct_wrong_type () =
+  with_temp_base_path (fun base_path ->
+      let local_cred = sample_credential "cred-local" Local in
+      (match Credential_store.add ~base_path local_cred with
+       | Error e -> Alcotest.fail ("add local credential failed: " ^ e)
+       | Ok _ ->
+           write_mapping ~credential_id:"cred-local" base_path "keeper-1" [ "*" ];
+           match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+           | Ok creds ->
+               Alcotest.failf
+                 "expected Error for non-GitHub direct credential, got %d creds"
+                 (List.length creds)
+           | Error msg ->
+               Alcotest.(check bool)
+                 "mentions credential id"
+                 true
+                 (contains_substring msg "cred-local");
+               Alcotest.(check bool)
+                 "mentions GitHub type"
+                 true
+                 (contains_substring msg "must be of type GitHub");
+               Alcotest.(check bool)
+                 "mentions actual type"
+                 true
+                 (contains_substring msg "Local")))
+
 let test_credentials_for_keeper_no_mapping () =
   with_temp_base_path (fun base_path ->
       match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"unknown" with
@@ -431,6 +457,7 @@ let () =
           Alcotest.test_case "wildcard mapping" `Quick test_credentials_for_keeper_wildcard;
           Alcotest.test_case "direct credential overrides repo" `Quick test_credentials_for_keeper_direct_credential_overrides_repo;
           Alcotest.test_case "direct credential missing" `Quick test_credentials_for_keeper_direct_missing_credential;
+          Alcotest.test_case "direct credential wrong type" `Quick test_credentials_for_keeper_direct_wrong_type;
           Alcotest.test_case "no mapping" `Quick test_credentials_for_keeper_no_mapping;
         ] );
     ]

@@ -122,6 +122,11 @@ let handle_get_mapping state keeper_id req reqd =
               }))
         reqd
 
+let credential_type_label = function
+  | Repo_manager_types.Github -> "GitHub"
+  | Repo_manager_types.Gitlab -> "GitLab"
+  | Repo_manager_types.Local -> "Local"
+
 let validate_mapping_credential ~base_path
     (mapping : Repo_manager_types.keeper_repo_mapping) =
   match mapping.github_credential_id with
@@ -136,13 +141,9 @@ let validate_mapping_credential ~base_path
           else
             Error
               (Printf.sprintf
-                 "credential_id %s is %s; keeper GitHub credential must be \
-                  Github"
-                 credential_id
-                 (match credential.cred_type with
-                 | Repo_manager_types.Github -> "Github"
-                 | Repo_manager_types.Gitlab -> "Gitlab"
-                 | Repo_manager_types.Local -> "Local")))
+                 "credential_id %s is %s; keeper credential must be of type \
+                  GitHub"
+                 credential_id (credential_type_label credential.cred_type)))
 
 let handle_save_mapping state keeper_id req reqd =
   let base_path = state.Mcp_server.room_config.base_path in

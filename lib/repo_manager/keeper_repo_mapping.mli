@@ -21,9 +21,11 @@ val credentials_for_keeper :
 
     Returns [Ok []] when the keeper has no mapping (backward-compatibility
     signal consumed by the RFC-0019 PR-A credential provider bridge).
+
+    Repository IDs from the mapping are resolved against the loaded
+    repositories; unknown repository IDs are ignored by this resolution.
     Returns [Error _] on mapping load failures (including parse/validation
-    failures) or dangling references (repository not found, credential not
-    found). *)
+    failures) or when a referenced credential cannot be found. *)
 
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool

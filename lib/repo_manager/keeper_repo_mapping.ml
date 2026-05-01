@@ -125,10 +125,12 @@ let allowed_repositories ~keeper_id ~base_path =
     bridge (RFC-0019 PR-A): a keeper without a mapping continues to use
     the legacy [Keeper_gh_env.keeper_binding] resolver.
 
+    Repository IDs from the mapping are resolved against the loaded
+    repositories; unknown repository IDs are ignored by this resolution path.
+
     Returns [Error _] on mapping load failures (including
-    parse/validation failures) or dangling references
-    (repository not found, credential not found).  Absence of mapping is
-    not an error. *)
+    parse/validation failures) or when a credential referenced by a mapped
+    repository cannot be found.  Absence of mapping is not an error. *)
 let credentials_for_keeper ~base_path ~keeper_id =
   match lookup_mapping ~base_path keeper_id with
   | Mapping_missing _ -> Ok []

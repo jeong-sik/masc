@@ -48,9 +48,19 @@ extract_ocaml_all_list() {
 extract_ocaml_type() {
   local file="$1"
   local type_name="$2"
-  awk "/^type ${type_name}[[:space:]]*=/{found=1; next} found && /^\s*\|/{print} found && /^[a-z]/{exit}" "$file" \
-    | rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' -o -r '$1' \
+  awk "/^type ${type_name}[[:space:]]*=/{found=1; next} found && /^[[:space:]]*\|/{print} found && /^[a-z]/{exit}" "$file" \
+    | rg '^[[:space:]]*\|[[:space:]]+([A-Z][a-zA-Z_0-9]*)' -o -r '$1' \
     | sort -u || true
+}
+
+assert_contains_variant() {
+  local label="$1"
+  local variants="$2"
+  local expected="$3"
+  if ! echo "$variants" | grep -qx "$expected"; then
+    echo "FAIL: ${label} extractor did not find expected constructor ${expected}"
+    exit_code=1
+  fi
 }
 
 # Extract a TypeScript union type (string literals) from a .ts file.
@@ -150,7 +160,10 @@ KCL_TLA="specs/keeper-state-machine/KeeperCascadeLifecycle.tla"
 
 if [ -f "$KR_ML" ]; then
   # turn_phase constructors (strip "Turn_" prefix, lowercase for TLA+ comparison)
-  ocaml_turn=$(extract_ocaml_type "$KR_ML" "turn_phase" \
+  ocaml_turn_constructors=$(extract_ocaml_type "$KR_ML" "turn_phase")
+  assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_idle"
+  assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_prompting"
+  ocaml_turn=$(echo "$ocaml_turn_constructors" \
     | sed 's/Turn_//' | tr '[:upper:]' '[:lower:]' | sort -u)
 
   if [ -n "$ocaml_turn" ]; then

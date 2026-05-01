@@ -108,14 +108,12 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
     "HOME", cred_root;
     "GH_CONFIG_DIR", Filename.concat cred_root ".config/gh";
     "GIT_CONFIG_GLOBAL", Filename.concat cred_root ".gitconfig";
-    "GIT_CONFIG_COUNT", "1";
-    "GIT_CONFIG_KEY_0", "safe.directory";
-    "GIT_CONFIG_VALUE_0", "*";
     "GIT_AUTHOR_NAME", git_author_name;
     "GIT_AUTHOR_EMAIL", git_author_email;
     "GIT_COMMITTER_NAME", git_author_name;
     "GIT_COMMITTER_EMAIL", git_author_email;
   ]
+  @ Keeper_gh_env.git_config_env_pairs
   @ ssh_env
   @ Env_git_noninteractive.env
 

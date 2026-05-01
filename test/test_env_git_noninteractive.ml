@@ -183,22 +183,34 @@ let test_compose_base_with_gh_config_rehomes_git_config () =
     out ("GH_CONFIG_DIR=" ^ dir);
   assert_contains ~msg:"GIT_CONFIG_GLOBAL rehomed to bundle gitconfig"
     out ("GIT_CONFIG_GLOBAL=" ^ Filename.concat bundle_root "gitconfig");
-  assert_contains ~msg:"safe.directory count pinned"
-    out "GIT_CONFIG_COUNT=1";
-  assert_contains ~msg:"safe.directory key pinned"
-    out "GIT_CONFIG_KEY_0=safe.directory";
-  assert_contains ~msg:"safe.directory value pinned"
-    out "GIT_CONFIG_VALUE_0=*";
+	  assert_contains ~msg:"git config count pinned"
+	    out "GIT_CONFIG_COUNT=4";
+	  assert_contains ~msg:"safe.directory key pinned"
+	    out "GIT_CONFIG_KEY_0=safe.directory";
+	  assert_contains ~msg:"safe.directory value pinned"
+	    out "GIT_CONFIG_VALUE_0=*";
+	  assert_contains ~msg:"ambient credential helper reset"
+	    out "GIT_CONFIG_KEY_1=credential.helper";
+	  assert_contains ~msg:"ambient credential helper reset value"
+	    out "GIT_CONFIG_VALUE_1=";
+	  assert_contains ~msg:"github helper key pinned"
+	    out "GIT_CONFIG_KEY_2=credential.https://github.com.helper";
+	  assert_contains ~msg:"github helper command pinned"
+	    out "GIT_CONFIG_VALUE_2=!gh auth git-credential";
+	  assert_contains ~msg:"useHttpPath key pinned"
+	    out "GIT_CONFIG_KEY_3=credential.useHttpPath";
+	  assert_contains ~msg:"useHttpPath value pinned"
+	    out "GIT_CONFIG_VALUE_3=true";
   assert_false "operator HOME stripped"
     (List.mem "HOME=/operator/home" out);
   assert_false "operator GH_CONFIG_DIR stripped"
     (List.mem "GH_CONFIG_DIR=/operator/gh" out);
   assert_false "operator GIT_CONFIG_GLOBAL stripped"
     (List.mem "GIT_CONFIG_GLOBAL=/operator/.gitconfig" out);
-  assert_false "operator GIT_CONFIG_KEY_N stripped"
-    (List.exists (String.starts_with ~prefix:"GIT_CONFIG_KEY_3=") out);
-  assert_false "operator GIT_CONFIG_VALUE_N stripped"
-    (List.exists (String.starts_with ~prefix:"GIT_CONFIG_VALUE_3=") out)
+	  assert_false "operator GIT_CONFIG_KEY_N stripped"
+	    (List.mem "GIT_CONFIG_KEY_3=credential.helper" out);
+	  assert_false "operator GIT_CONFIG_VALUE_N stripped"
+	    (List.mem "GIT_CONFIG_VALUE_3=osxkeychain" out)
 
 let test_no_forgotten_git_askpass_literals () =
   (* Enforcement grep: outside of the SSOT module itself, [lib/] must not

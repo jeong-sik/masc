@@ -448,37 +448,6 @@ let test_bash_legacy_skips_docker () =
     false
     (response_mentions raw "error" "docker image")
 
-let test_bash_git_creds_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
-      ()
-  in
-  Alcotest.(check bool)
-    "bash git cmd surfaces docker image config error (git-creds route fired)"
-    true
-    (response_mentions raw "error" "docker image")
-
-let test_hard_mode_blocks_raw_gh_bash () =
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground:_ ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "gh pr list") ])
-      ()
-  in
-  Alcotest.(check (option string)) "raw gh hard-mode error"
-    (Some "gh_requires_brokered_structured_tool")
-    (parse_string_field raw "error");
-  Alcotest.(check bool) "hint mentions structured op=gh" true
-    (response_mentions raw "hint" "keeper_shell op=gh")
-
 let fake_docker_echo_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -503,6 +472,149 @@ while [ \"$#\" -gt 0 ]; do\n\
 done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
+
+let test_bash_git_creds_routes_through_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
+      ()
+  in
+  Alcotest.(check bool)
+    "bash git cmd surfaces docker image config error (git-creds route fired)"
+    true
+    (response_mentions raw "error" "docker image")
+
+let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:(Some factory) ~exec_cache:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
+      ()
+  in
+  Alcotest.(check (option bool)) "git bash succeeds through one-shot docker"
+    (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  Alcotest.(check bool) "credentialed git used docker run" true
+    (contains_substring log "run --rm");
+  Alcotest.(check bool) "credentialed git did not use docker exec" false
+    (contains_substring log "\nexec ");
+  let root_gh_dir =
+    Masc_mcp.Keeper_gh_env.root_gh_config_dir config
+  in
+  Alcotest.(check bool) "one-shot run mounted GH identity bundle" true
+    (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
+
+let test_repair_container_worktree_gitdirs () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config:_ ~meta ~playground ->
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let wt = Filename.concat (Filename.concat repo ".worktrees") "task-044" in
+  let admin = Filename.concat (Filename.concat repo ".git") "worktrees/task-044" in
+  ensure_dir wt;
+  ensure_dir admin;
+  let wt_git = Filename.concat wt ".git" in
+  let admin_gitdir = Filename.concat admin "gitdir" in
+  write_file wt_git
+    (Printf.sprintf "gitdir: %s/repos/masc-mcp/.git/worktrees/task-044\n"
+       container_root);
+  write_file admin_gitdir
+    (Printf.sprintf "%s/repos/masc-mcp/.worktrees/task-044/.git\n"
+       container_root);
+  let repaired =
+    Keeper_shell_docker.repair_container_worktree_gitdirs
+      ~host_root:playground ~container_root
+  in
+  Alcotest.(check int) "repaired both gitdir pointer files" 2 repaired;
+  Alcotest.(check bool) "worktree .git uses host path" true
+    (contains_substring (read_file wt_git) playground);
+  Alcotest.(check bool) "admin gitdir uses host path" true
+    (contains_substring (read_file admin_gitdir) playground);
+  Alcotest.(check bool) "container path removed from worktree .git" false
+    (contains_substring (read_file wt_git) container_root)
+
+let test_git_worktree_add_uses_host_git_metadata () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q -b main";
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  write_file (Filename.concat repo "README.md") "# wt\n";
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "git_worktree");
+            ("action", `String "add");
+            ("branch", `String "feature/docker-wt");
+            ("base", `String "HEAD");
+            ("cwd", `String repo);
+          ])
+  in
+  Alcotest.(check (option bool)) "git_worktree add succeeds on host"
+    (Some true)
+    (parse_bool_field raw "ok");
+  let wt_git =
+    Filename.concat
+      (Filename.concat repo ".worktrees/feature-docker-wt")
+      ".git"
+  in
+  let git_marker = read_file wt_git in
+  Alcotest.(check bool) "worktree gitdir uses host repo path" true
+    (contains_substring git_marker repo);
+  Alcotest.(check bool) "worktree gitdir does not use container root" false
+    (contains_substring git_marker (Keeper_sandbox.container_root meta.name))
+
+let test_hard_mode_blocks_raw_gh_bash () =
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "gh pr list") ])
+      ()
+  in
+  Alcotest.(check (option string)) "raw gh hard-mode error"
+    (Some "gh_requires_brokered_structured_tool")
+    (parse_string_field raw "error");
+  Alcotest.(check bool) "hint mentions structured op=gh" true
+    (response_mentions raw "hint" "keeper_shell op=gh")
 
 let docker_run_line log_path =
   read_file log_path
@@ -814,12 +926,15 @@ let () =
           Alcotest.test_case
             "docker keeper bash routes through docker"
             `Quick test_bash_routes_through_docker;
-          Alcotest.test_case
-            "docker keeper bash git cmd routes through git-creds docker"
-            `Quick test_bash_git_creds_routes_through_docker;
-          Alcotest.test_case
-            "hard mode blocks raw gh keeper_bash"
-            `Quick test_hard_mode_blocks_raw_gh_bash;
+	          Alcotest.test_case
+	            "docker keeper bash git cmd routes through git-creds docker"
+	            `Quick test_bash_git_creds_routes_through_docker;
+	          Alcotest.test_case
+	            "docker keeper bash git creds bypass warm turn runtime"
+	            `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+	          Alcotest.test_case
+	            "hard mode blocks raw gh keeper_bash"
+	            `Quick test_hard_mode_blocks_raw_gh_bash;
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
@@ -857,10 +972,15 @@ let () =
             `Quick test_git_creds_uses_github_identity_mode;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
-          Alcotest.test_case "git_clone repairs existing docker clone checkout"
-            `Quick test_git_clone_repairs_existing_docker_clone_checkout;
-          Alcotest.test_case
-            "sandbox-root git with no repo blocks before docker exec"
+	          Alcotest.test_case "git_clone repairs existing docker clone checkout"
+	            `Quick test_git_clone_repairs_existing_docker_clone_checkout;
+	          Alcotest.test_case "docker worktree gitdir paths are host-repaired"
+	            `Quick test_repair_container_worktree_gitdirs;
+	          Alcotest.test_case
+	            "git_worktree add keeps host-readable metadata"
+	            `Quick test_git_worktree_add_uses_host_git_metadata;
+	          Alcotest.test_case
+	            "sandbox-root git with no repo blocks before docker exec"
             `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"

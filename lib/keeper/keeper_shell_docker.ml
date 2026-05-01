@@ -215,7 +215,10 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config)
         |> List.sort compare
       with Sys_error _ -> []
   in
-  if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
+  if cwd_normalized = host_root && cmd_targets_gh cmd
+     && Keeper_gh_shared.has_repo_flag cmd
+  then (cwd, None)
+  else if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
     match repos_in_playground () with
     | [single_repo] ->
       (Filename.concat (Filename.concat host_root "repos") single_repo, None)
@@ -300,6 +303,90 @@ let optional_ro_mount ~host ~container =
   if host = "" then []
   else if not (Sys.file_exists host) then []
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
+
+let safe_readdir dir =
+  try
+    if Sys.file_exists dir && Sys.is_directory dir then
+      Sys.readdir dir |> Array.to_list
+    else []
+  with Sys_error _ -> []
+
+let is_regular_file path =
+  try (Unix.stat path).Unix.st_kind = Unix.S_REG with
+  | Unix.Unix_error _ | Sys_error _ -> false
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) @@ fun () ->
+  output_string oc content
+
+let replace_all ~needle ~replacement source =
+  if needle = "" then source
+  else
+    let needle_len = String.length needle in
+    let source_len = String.length source in
+    let buf = Buffer.create source_len in
+    let rec loop i =
+      if i >= source_len then ()
+      else if i + needle_len <= source_len
+              && String.sub source i needle_len = needle
+      then begin
+        Buffer.add_string buf replacement;
+        loop (i + needle_len)
+      end else begin
+        Buffer.add_char buf source.[i];
+        loop (i + 1)
+      end
+    in
+    loop 0;
+    Buffer.contents buf
+
+let container_worktree_gitdir_candidates ~host_root =
+  let repos_dir = Filename.concat host_root "repos" in
+  safe_readdir repos_dir
+  |> List.concat_map (fun repo_name ->
+    let repo_root = Filename.concat repos_dir repo_name in
+    if not (Sys.file_exists repo_root && Sys.is_directory repo_root) then []
+    else
+      let worktree_gitfiles =
+        let worktrees_dir = Filename.concat repo_root ".worktrees" in
+        safe_readdir worktrees_dir
+        |> List.map (fun name ->
+          Filename.concat (Filename.concat worktrees_dir name) ".git")
+      in
+      let admin_gitdirs =
+        let admin_worktrees =
+          Filename.concat (Filename.concat repo_root ".git") "worktrees"
+        in
+        safe_readdir admin_worktrees
+        |> List.map (fun name ->
+          Filename.concat (Filename.concat admin_worktrees name) "gitdir")
+      in
+      worktree_gitfiles @ admin_gitdirs)
+
+let repair_container_worktree_gitdirs ~host_root ~container_root =
+  container_worktree_gitdir_candidates ~host_root
+  |> List.fold_left
+       (fun repaired path ->
+         if not (is_regular_file path) then repaired
+         else
+           try
+             let before = read_file path in
+             let after =
+               replace_all ~needle:container_root ~replacement:host_root before
+             in
+             if String.equal before after then repaired
+             else begin
+               write_file path after;
+               repaired + 1
+             end
+           with _ -> repaired)
+       0
 
 (* ── Docker invocation ─────────────────────────────────── *)
 
@@ -499,8 +586,19 @@ let run_docker_shell_command_with_status
          if status <> Unix.WEXITED 0 then
            Keeper_registry.record_error ~base_path:config.base_path meta.name
              (docker_exec_failure_message ~image ~status ~output)
-         else
+         else begin
+           if git_creds_enabled
+              && String_util.contains_substring_ci cmd "git worktree"
+           then
+             let repaired =
+               repair_container_worktree_gitdirs ~host_root ~container_root
+             in
+             if repaired > 0 then
+               Log.Keeper.info
+                 "%s: repaired %d docker worktree gitdir path(s) under %s"
+                 meta.name repaired host_root;
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         end;
          Ok { status; output; image; network_label }
        with
        | Failure err -> sandbox_error err)
@@ -540,45 +638,7 @@ let run_docker_with_git_bash
     match sandbox_root_git_blocker with
     | Some message -> sandbox_error_json message
     | None ->
-    match turn_sandbox_runtime with
-    | Some runtime ->
-      (match
-         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-           ~cwd ~cmd ~timeout_sec ()
-       with
-       | Error message -> sandbox_error_json message
-       | Ok (st, out) ->
-         if st <> Unix.WEXITED 0 then
-           Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (docker_exec_failure_message ~image ~status:st ~output:out)
-         else
-           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-         (* PR #11080 sibling fix: emit the in-container cwd so the
-            keeper LLM does not [cd] back to the host abs path on the
-            next turn (which fails inside the container). The runtime
-            already exposes its host→container translation via
-            [container_cwd_of_host]. *)
-         let cwd_response =
-           Keeper_cwd_response.docker
-             ~host_cwd:cwd
-             ~container_cwd:
-               (Keeper_turn_sandbox_runtime.container_cwd_of_host runtime
-                  ~host_cwd:cwd)
-         in
-         Yojson.Safe.to_string
-           (`Assoc
-              ([
-                ("ok", `Bool (st = Unix.WEXITED 0));
-                ("via", `String "docker");
-                ("cwd", Keeper_cwd_response.to_yojson_response cwd_response);
-                ("sandbox_profile", `String "docker");
-                ("git_creds_enabled", `Bool true);
-                ("network_mode", `String (network_mode_to_string Network_inherit));
-                ("effective_sandbox_image", `String image);
-                ("status", Keeper_alerting_path.process_status_to_json st);
-                ("output", `String out);
-              ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
-    | None ->
+      let _ = turn_sandbox_runtime in
       match
         run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
           ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit

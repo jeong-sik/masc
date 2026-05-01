@@ -575,10 +575,11 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "gh fails through docker route without image" false
     (json |> member "ok" |> to_bool);
-  Alcotest.(check string) "sandbox task marker" "(sandbox)"
-    (json |> member "task_id" |> to_string);
-  Alcotest.(check bool) "repo omitted when sandbox fallback has none" true
-    (json |> member "repo" = `Null);
+	  Alcotest.(check bool) "explicit --repo bypasses task context" true
+	    (json |> member "task_id" = `Null);
+	  Alcotest.(check string) "explicit repo command preserved"
+	    "gh 'pr' 'list' '--repo' 'example/project'"
+	    (json |> member "command" |> to_string);
   Alcotest.(check string) "docker image error surfaced"
     "keeper sandbox docker image is not configured"
     (json |> member "error" |> to_string)

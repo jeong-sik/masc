@@ -5,6 +5,7 @@
 
 open Alcotest
 open Masc_mcp
+open Tool_coord
 
 let temp_dir () =
   let path = Filename.temp_file "goal_fsm_bypass_10247_" "" in
@@ -42,15 +43,15 @@ let dispatch_upsert ctx args =
 
 let dispatch_upsert_must_fail ctx args =
   match dispatch_upsert ctx args with
-  | true, body ->
+  | { success = true; message = body } ->
       fail
         (Printf.sprintf "expected upsert rejection, got success: %s" body)
-  | false, body -> Yojson.Safe.from_string body
+  | { success = false; message = body } -> Yojson.Safe.from_string body
 
 let dispatch_upsert_must_succeed ctx args =
   match dispatch_upsert ctx args with
-  | true, body -> Yojson.Safe.from_string body
-  | false, body ->
+  | { success = true; message = body } -> Yojson.Safe.from_string body
+  | { success = false; message = body } ->
       fail (Printf.sprintf "expected upsert success, got error: %s" body)
 
 let body_contains json needle =
@@ -93,8 +94,8 @@ let dispatch_transition_must_succeed ctx ~goal_id ~action =
             ("actor", principal_json ~kind:"operator" ~id:"planner");
           ])
   with
-  | Some (true, _body) -> ()
-  | Some (false, body) ->
+  | Some { success = true; message = _body } -> ()
+  | Some { success = false; message = body } ->
       fail
         (Printf.sprintf "expected transition %s success, got error: %s"
            action body)

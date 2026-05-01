@@ -71,7 +71,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                         repos [%s], skipping auto-provision"
                        keeper_name task_id
                        (String.concat ", " repo_names);
-                     "skip_ambiguous"))
+                     "skip_ambiguous")))
       in
       Prometheus.inc_counter "masc_keeper_claim_auto_provision_total"
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]

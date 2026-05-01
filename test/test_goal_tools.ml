@@ -2,6 +2,7 @@
 
 open Alcotest
 open Masc_mcp
+open Tool_coord
 
 let temp_dir () =
   let path = Filename.temp_file "goal_tool_test" "" in
@@ -33,9 +34,10 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result = function
-  | true, body -> Yojson.Safe.from_string body
-  | false, body -> fail body
+let parse_json_result (result : Tool_coord.tool_result) =
+  match result with
+  | { success = true; message = body } -> Yojson.Safe.from_string body
+  | { success = false; message = body } -> fail body
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]
@@ -89,9 +91,10 @@ let create_done_task config ~goal_id ~title =
   step Types.Start "test fixture start";
   step Types.Done_action "test fixture done"
 
-let expect_error = function
-  | Some (false, body) -> Yojson.Safe.from_string body
-  | Some (true, _) -> fail "expected tool error"
+let expect_error (result : Tool_coord.tool_result option) =
+  match result with
+  | Some { success = false; message = body } -> Yojson.Safe.from_string body
+  | Some { success = true; message = _ } -> fail "expected tool error"
   | None -> fail "tool not handled"
 
 let test_goal_upsert_and_list () =

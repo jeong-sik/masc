@@ -129,13 +129,17 @@ let is_rate_limit_exempt path =
 
 (** Returns true if the request was rate-limited and a 429 response was
     sent on [reqd]. Caller should short-circuit further handling in that
-    case. Health-probe paths are always allowed through. *)
-let try_rate_limit_block ~path ~client_addr reqd =
+    case. Health-probe paths are always allowed through.
+
+    Enforces two complementary rate limits:
+    1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
+    2. Per-agent bearer token (via Authorization header) — enforces per-agent
+       quotas regardless of source IP, complementing the IP-level check. *)
+let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
     let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
-    if Masc_mcp.Rate_limit.check_global ~key:rl_key then false
-    else begin
+    if not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then begin
       let body = Masc_mcp.Rate_limit.too_many_requests_body () in
       let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
       let headers = Httpun.Headers.of_list (
@@ -146,7 +150,24 @@ let try_rate_limit_block ~path ~client_addr reqd =
       Httpun.Reqd.respond_with_string reqd
         (Httpun.Response.create ~headers `Too_many_requests) body;
       true
-    end
+    end else
+      match auth_token_from_request request with
+      | None -> false
+      | Some token ->
+          let agent_key = Masc_mcp.Rate_limit.key_of_bearer_token token in
+          if Masc_mcp.Rate_limit.check_global_agent ~key:agent_key then false
+          else begin
+            let body = Masc_mcp.Rate_limit.too_many_requests_body () in
+            let rl_headers = Masc_mcp.Rate_limit.headers_global_agent ~key:agent_key in
+            let headers = Httpun.Headers.of_list (
+              ("content-type", "application/json") ::
+              ("content-length", string_of_int (String.length body)) ::
+              rl_headers
+            ) in
+            Httpun.Reqd.respond_with_string reqd
+              (Httpun.Response.create ~headers `Too_many_requests) body;
+            true
+          end
 
 (** Path predicate: requests that go through the MCP transport surface
     (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass
@@ -279,7 +300,7 @@ let make_extended_handler routes =
     let request = Httpun.Reqd.request reqd in
     (* Rate limiting: enforce before any auth or routing. *)
     let path = Http.Request.path request in
-    if try_rate_limit_block ~path ~client_addr reqd then ()
+    if try_rate_limit_block ~path ~client_addr ~request reqd then ()
     else
     try
       let is_mcp_like = is_mcp_like_path path in

@@ -559,6 +559,25 @@ module Rate_bucket = struct
   let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
 end
 
+(** {1 Per-Agent Rate Limit Bucket Configuration}
+
+    A separate, lower-rate bucket applied per authenticated bearer token
+    (i.e. per agent identity).  This limits how many requests a single
+    agent can make regardless of how many different source IPs it uses,
+    complementing the IP-level {!Rate_bucket} above.
+
+    Configuration via environment:
+    - MASC_AGENT_RATE_LIMIT: requests per second per agent (default: 30)
+    - MASC_AGENT_RATE_BURST: burst capacity per agent (default: 60) *)
+
+module Agent_rate_bucket = struct
+  (** Requests per second per authenticated agent token. Default: 30. *)
+  let rate = get_float ~default:30.0 "MASC_AGENT_RATE_LIMIT"
+
+  (** Per-agent burst capacity. Default: 60. *)
+  let burst = get_int ~default:60 "MASC_AGENT_RATE_BURST"
+end
+
 (** {1 Worker / Local Runtime Configuration} *)
 
 module Worker = struct

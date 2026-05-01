@@ -137,31 +137,44 @@ const TAILWIND_RUNTIME_ALIAS_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 function shouldEmitTailwindRuntimeAlias(tok: TokenBase): boolean {
+  const baseName = tailwindRuntimeBaseName(tok.name);
   return tok.kind === "color"
-    && !TAILWIND_COLOR_PREFIX_OPTOUT.has(tok.name)
+    && !isTailwindColorPrefixOptOut(tok.name)
     && (
-      TAILWIND_RUNTIME_ALIAS_NAMES.has(tok.name)
-      || TAILWIND_RUNTIME_ALIAS_PREFIXES.some((prefix) => tok.name.startsWith(prefix))
+      TAILWIND_RUNTIME_ALIAS_NAMES.has(baseName)
+      || TAILWIND_RUNTIME_ALIAS_PREFIXES.some((prefix) => baseName.startsWith(prefix))
     );
+}
+
+function tailwindRuntimeBaseName(tokenName: string): string {
+  return tokenName.startsWith("color-")
+    ? tokenName.slice("color-".length)
+    : tokenName;
+}
+
+function isTailwindColorPrefixOptOut(tokenName: string): boolean {
+  return TAILWIND_COLOR_PREFIX_OPTOUT.has(tokenName)
+    || TAILWIND_COLOR_PREFIX_OPTOUT.has(tailwindRuntimeBaseName(tokenName));
 }
 
 function buildTailwindCss(): string {
   const tailwindNamed = (tok: TokenBase): string => {
     // For Tailwind v4 to expose utilities (text-*, bg-*, border-*),
-    // color tokens must be prefixed with --color-. We re-prefix only
-    // those that aren't already in --color-* form. Component/runtime
+    // color tokens must be prefixed with --color-. Component/runtime
     // slots also need raw names (`var(--button-primary-bg)`,
-    // `var(--dialog-panel-bg)`, ...), but palette atoms do not; keep
-    // raw alias emission scoped to those slot families.
+    // `var(--dialog-panel-bg)`, ...), including when the source token
+    // already has the color- prefix. Palette atoms do not; keep raw
+    // alias emission scoped to those slot families.
     const isColorish = tok.kind === "color";
-    const alreadyColorPrefixed = tok.name.startsWith("color-");
-    const optedOut = TAILWIND_COLOR_PREFIX_OPTOUT.has(tok.name);
-    if (isColorish && !alreadyColorPrefixed && !optedOut) {
-      const prefixed = `  --color-${tok.name}: ${tok.value};`;
+    const optedOut = isTailwindColorPrefixOptOut(tok.name);
+    if (isColorish && !optedOut) {
+      const baseName = tailwindRuntimeBaseName(tok.name);
+      const colorName = `color-${baseName}`;
+      const prefixed = `  --${colorName}: ${tok.value};`;
       if (shouldEmitTailwindRuntimeAlias(tok)) {
         return [
           prefixed,
-          `  --${tok.name}: var(--color-${tok.name});`,
+          `  --${baseName}: var(--${colorName});`,
         ].join("\n");
       }
       return prefixed;

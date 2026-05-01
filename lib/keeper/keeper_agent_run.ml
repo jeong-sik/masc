@@ -96,15 +96,14 @@ let run_turn
   in
   Fun.protect ~finally:safe_emit_turn_end
   @@ fun () ->
-  let runtime_cascade_name = cascade_name in
   let cascade_name_string =
-    Keeper_cascade_profile.runtime_name_to_string runtime_cascade_name
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
   in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx = Keeper_run_context.prepare_run_context
       ~config ~meta ~base_dir ~max_context
-      ~cascade_name:runtime_cascade_name
+      ~cascade_name
       ?temperature ?max_tokens ?shared_context ~generation
       ()
   in
@@ -147,7 +146,7 @@ let run_turn
       ~turn_system_prompt ~user_message ~dynamic_context
       ~history_messages ~prompt_metrics ~shared_context ~context_injector
       ~start_turn_count ~generation ~max_turns
-      ~cascade_name:runtime_cascade_name ~is_retry
+      ~cascade_name ~is_retry
       ~turn_affordances ~config_root ~cascade_config_path ~gemini_mcp_disabled
       ~approval_mode_effective ~approval_mode_derived
       ?max_cost_usd ~trajectory_acc ~tool_overlay
@@ -1187,7 +1186,9 @@ let run_turn
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = acc.tool_surface.approval_mode_effective;
         approval_profile_derived = acc.tool_surface.approval_mode_derived;
-        cascade_name = runtime_cascade_name;
+        cascade_name =
+          Keeper_execution_receipt.cascade_name_of_string
+            cascade_name_string;
         cascade_selected_model =
           Option.bind cascade_observation (fun obs -> obs.selected_model);
         cascade_attempt_count =

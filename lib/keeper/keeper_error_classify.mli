@@ -18,9 +18,12 @@ type timeout_failure_class =
   | Oas_timeout_budget
   | Turn_wall_clock_timeout
 
-(** Classify timeout-like SDK errors without stringifying the whole error.
-    Provider timeouts stay distinct from structural OAS/keeper budget
-    expiry so heartbeat strike logic only counts the latter. *)
+(** Classify timeout-like SDK errors.
+    Structured MASC internal errors take precedence.  Legacy
+    [Api (Timeout { message })] payloads are inspected only via their
+    timeout message field; the classifier does not stringify whole SDK
+    errors.  Provider timeouts stay distinct from structural OAS/keeper
+    budget expiry so heartbeat strike logic only counts the latter. *)
 val timeout_failure_class_of_error :
   Oas.Error.sdk_error -> timeout_failure_class option
 

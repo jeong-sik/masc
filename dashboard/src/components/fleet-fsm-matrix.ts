@@ -357,8 +357,11 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
     return 'provider auth/model/config receipt 확인'
   }
-  if (execution.terminal_reason_code === 'provider_timeout' || execution.terminal_reason_code === 'api_error_timeout') {
-    return 'provider timeout budget/cascade lane 확인'
+  if (execution.terminal_reason_code === 'provider_timeout') {
+    return 'provider 응답 지연/네트워크 상태와 runtime receipt 확인'
+  }
+  if (execution.terminal_reason_code === 'api_error_timeout') {
+    return 'legacy timeout receipt 확인: provider/OAS budget 분류'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'operator gate/approval 상태와 최신 receipt 확인'

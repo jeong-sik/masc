@@ -6,24 +6,32 @@
      a full light-theme token migration lands. */
   color-scheme: dark;
 
-  /* Base & Backgrounds — slightly lifted from pure dark for depth separation */
-  --bg-root: #0c1424;
-  --bg-panel: rgba(18, 27, 46, 0.94);
-  --bg-panel-hover: rgba(32, 44, 64, 0.96);
+  /* Base & Backgrounds — bridge the live dashboard shell to the generated
+     Cockpit / muted-brass token canon. */
+  --bg-root: var(--color-bg-0);
+  --bg-panel: color-mix(in srgb, var(--color-bg-1) 94%, transparent);
+  --bg-panel-hover: color-mix(in srgb, var(--color-bg-4) 96%, transparent);
+  --shell-header-bg: color-mix(in srgb, var(--color-bg-1) 72%, transparent);
+  --shell-rail-bg: color-mix(in srgb, var(--color-bg-2) 76%, transparent);
+  --shell-main-bg: color-mix(in srgb, var(--color-bg-1) 84%, transparent);
 
   /* Text & Typography */
-  /* --text-strong, --text-body, --text-muted, --text-dim lifted to source.ts (Iter 2c-6) */
+  --text-strong: var(--color-fg-1);
+  --text-body: var(--color-fg-2);
+  --text-muted: var(--color-fg-3);
+  --text-dim: var(--color-fg-4);
 
   /* Borders */
-  --border-subtle: rgba(138, 163, 211, 0.12);
-  --border-base: rgba(138, 163, 211, 0.2);
-  --border-strong: rgba(138, 163, 211, 0.35);
+  --border-subtle: color-mix(in srgb, var(--color-line-1) 70%, transparent);
+  --border-base: var(--color-line-1);
+  --border-strong: var(--color-line-2);
 
   /* Semantic Colors (Core) */
-  --accent: #47b8ff;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --bad: #ef4444;
+  --accent: var(--color-brass-1);
+  --ok: var(--color-ok);
+  --warn: var(--color-warn);
+  --err: var(--color-err);
+  --bad: var(--err);
 
   /* Status glow triplets (rgb space-separated) — for box-shadow alpha
      and translucent state-glow backgrounds (e.g. Pill atomic primitive
@@ -33,55 +41,48 @@
        box-shadow: 0 0 8px rgb(var(--ok-glow) / 0.35)
        background: rgb(var(--err-glow) / 0.08)
      SPEC source: dashboard/design-system/source_styles/tokens.css §
-     "Status glow triplets". The dashboard runtime uses brighter hues
-     than the SPEC source (Tailwind 400/500 vs muted), so the rgb
-     decomposition matches the dashboard's existing semantic colors
-     above; visual fidelity prefers consistency with the live surface
-     over the SPEC source's muted palette. */
-  --ok-glow:      74 222 128;     /* rgb(--ok #4ade80) */
-  --warn-glow:   251 191  36;     /* rgb(--warn #fbbf24) */
-  --err-glow:    239  68  68;     /* rgb(--bad #ef4444) */
-  --info-glow:    71 184 255;     /* rgb(--accent #47b8ff) */
-  --stalled-glow: 167 139 250;    /* rgb(--purple #a78bfa, see line 258) */
-  --accent-glow:  71 184 255;     /* rgb(--accent) — translucent accent
-                                     surfaces (e.g. Pill running state).
-                                     Identical to --info-glow because
-                                     info ≡ accent in SPEC §3.5. */
-  --brass-glow:  212 161  74;     /* rgb(--color-accent-brass #d4a14a) —
-                                     translucent brass for SPEC v0.4 atom
-                                     13/14 `.focusable` double-ring. */
+     "Status glow triplets". The live shell previously decomposed the
+     retired bright-blue palette; this bridge follows the generated
+     Cockpit canon instead. */
+  --ok-glow: var(--color-ok-glow);
+  --warn-glow: var(--color-warn-glow);
+  --err-glow: var(--color-err-glow);
+  --info-glow: var(--color-info-glow);
+  --stalled-glow: var(--color-stalled-glow);
+  --accent-glow: var(--color-brass-glow);
+  --brass-glow: var(--color-brass-glow);
 
-  /* Semantic - Accent (Blue) */
-  --accent-soft: rgba(71, 184, 255, 0.16);
-  --accent-6: rgba(71, 184, 255, 0.06);
-  --accent-8: rgba(71, 184, 255, 0.08);
-  --accent-10: rgba(71, 184, 255, 0.10);
-  --accent-12: rgba(71, 184, 255, 0.12);
-  --accent-20: rgba(71, 184, 255, 0.20);
-  --accent-30: rgba(71, 184, 255, 0.30);
+  /* Semantic - Accent (Brass) */
+  --accent-soft: rgb(var(--brass-glow) / 0.16);
+  --accent-6: rgb(var(--brass-glow) / 0.06);
+  --accent-8: rgb(var(--brass-glow) / 0.08);
+  --accent-10: rgb(var(--brass-glow) / 0.10);
+  --accent-12: rgb(var(--brass-glow) / 0.12);
+  --accent-20: rgb(var(--brass-glow) / 0.20);
+  --accent-30: rgb(var(--brass-glow) / 0.30);
   /* Off-alpha accent tokens absorbed from Phase B inline-rgba sweep.
-     Same blue hue, opacity buckets that were already spread across
+     Same brass hue, opacity buckets that were already spread across
      components. Naming follows the --accent-N (N = opacity %) convention.
      Note: --accent-18 was previously pruned as unused; this PR reintroduces
      it with 5 active callsites. */
-  --accent-15: rgba(71, 184, 255, 0.15);
-  --accent-18: rgba(71, 184, 255, 0.18);
-  --accent-36: rgba(71, 184, 255, 0.36);
+  --accent-15: rgb(var(--brass-glow) / 0.15);
+  --accent-18: rgb(var(--brass-glow) / 0.18);
+  --accent-36: rgb(var(--brass-glow) / 0.36);
   /* --accent-45 reserved for focus-ring strength (high-contrast keyboard
      focus halo). Distinct semantic from -30 so the role is grep-able. */
-  --accent-45: rgba(71, 184, 255, 0.45);
+  --accent-45: rgb(var(--brass-glow) / 0.45);
 
   /* Semantic - Success (Green) */
-  --ok-soft: rgba(74, 222, 128, 0.15);
-  --ok-10: rgba(74, 222, 128, 0.10);
-  --ok-20: rgba(74, 222, 128, 0.20);
-  --ok-35: rgba(74, 222, 128, 0.35);
+  --ok-soft: rgb(var(--ok-glow) / 0.15);
+  --ok-10: rgb(var(--ok-glow) / 0.10);
+  --ok-20: rgb(var(--ok-glow) / 0.20);
+  --ok-35: rgb(var(--ok-glow) / 0.35);
 
   /* Semantic - Warning (Yellow) */
   /* --warn-bright lifted to source.ts (Iter 2c-10); FSM Compacting tint */
-  --warn-soft: rgba(251, 191, 36, 0.15);
-  --warn-10: rgba(251, 191, 36, 0.10);
-  --warn-20: rgba(251, 191, 36, 0.20);
+  --warn-soft: rgb(var(--warn-glow) / 0.15);
+  --warn-10: rgb(var(--warn-glow) / 0.10);
+  --warn-20: rgb(var(--warn-glow) / 0.20);
 
   /* Vote button Reddit-pattern colors lifted to source.ts (Iter 2c-9).
      Reddit upvote = #ff4500 remains canonical; see source.ts. */
@@ -96,11 +97,13 @@
 
   /* Semantic - Critical (Red) */
   /* --bad-light lifted to source.ts (Iter 2c-10); softer red for toasts */
-  --bad-soft: rgba(239, 68, 68, 0.15);
-  --bad-6: rgba(239, 68, 68, 0.06);
-  --bad-10: rgba(239, 68, 68, 0.10);
-  --bad-20: rgba(239, 68, 68, 0.20);
-  --bad-50: rgba(239, 68, 68, 0.50);
+  --bad-soft: rgb(var(--err-glow) / 0.15);
+  --err-soft: var(--bad-soft);
+  --bad-6: rgb(var(--err-glow) / 0.06);
+  --bad-10: rgb(var(--err-glow) / 0.10);
+  --bad-20: rgb(var(--err-glow) / 0.20);
+  --bad-30: rgb(var(--err-glow) / 0.30);
+  --bad-50: rgb(var(--err-glow) / 0.50);
 
   /* Semantic - Critical Sister (Rose). Pink-red distinct from --bad
      (which leans toward warm red); used for "this provider failed"
@@ -113,9 +116,9 @@
 
   /* Extended warn off-alpha — covers densely-stacked warning chips
      where -10/-20 buckets felt either too pale or too saturated. */
-  --warn-8: rgba(251, 191, 36, 0.08);
-  --warn-14: rgba(251, 191, 36, 0.14);
-  --warn-24: rgba(251, 191, 36, 0.24);
+  --warn-8: rgb(var(--warn-glow) / 0.08);
+  --warn-14: rgb(var(--warn-glow) / 0.14);
+  --warn-24: rgb(var(--warn-glow) / 0.24);
 
   /* Semantic - Emerald. Brighter green than --ok (4ade80); used for
      "all healthy" diff badges in the config resolution panel where
@@ -160,9 +163,9 @@
      Removed from variables.css to make tokens.generated.css the single
      source. */
   /* Background gradient stops for the dashboard page bg (base.css).
-     #0c1424 mid-stop is the existing --bg-root; deep + dim flank it. */
-  --bg-root-deep: #07111f;
-  --bg-root-dim: #080e1a;
+     Deep + dim flank the generated Cockpit root. */
+  --bg-root-deep: var(--color-bg-0);
+  --bg-root-dim: var(--color-bg-1);
 
   /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct
      from --warn (251,191,36 = #fbbf24, slightly muted gold). Used for
@@ -178,7 +181,7 @@
   --amber-bright-45: rgba(245, 158, 11, 0.45);
 
   /* Semantic - Indigo. Cool blue-violet (#818cf8), distinct from
-     --accent (#47b8ff, cyan-leaning) and --purple (#a78bfa, plum-leaning).
+     --accent (brass) and --purple (#a78bfa, plum-leaning).
      Used for FSM "Awaiting" / dependency-blocked indicators.
      Base hex (--indigo) lifted to source.ts in Iter 2c-2. */
   --indigo-4: rgba(129, 140, 248, 0.04);
@@ -195,12 +198,12 @@
   --gold-15: rgba(255, 215, 0, 0.15);
 
   /* Family extensions */
-  --ok-6: rgba(74, 222, 128, 0.06);
+  --ok-6: rgb(var(--ok-glow) / 0.06);
   --emerald-30: rgba(34, 197, 94, 0.30);
   --purple-24: rgba(167, 139, 250, 0.24);
   --slate-gray-14: rgba(148, 163, 184, 0.14);
   --slate-gray-16: rgba(148, 163, 184, 0.16);
-  --accent-22: rgba(71, 184, 255, 0.22);
+  --accent-22: rgb(var(--brass-glow) / 0.22);
 
   /* Semantic - Paused (Plum). Introduced for the 12-keeper-state spec
      in the Anyang Sleepers design system. On dark theme a lightened
@@ -242,18 +245,68 @@
      cyan/purple short names lifted in Iter 2c-4; frost-100/white-pure
      lifted in Iter 2c-5 (this section now intentionally empty). */
 
-  /* Surface bases — distinct from --bg-root (#0c1424) which is the
+  /* Surface bases — distinct from --bg-root which is the
      primary panel background; these are deeper navy used for hero
      panels or modal foundations where the eye expects more depth. */
-  --panel-dark: #0f172a;
-  --bg-deepest: #0b1220;
+  --panel-dark: var(--color-bg-2);
+  --bg-deepest: var(--color-bg-0);
 
   /* Legacy Compatibility Variables — only aliases with active references kept.
      Dead aliases pruned: accent-8/12/14/18, ok-8/12/18/22/24/25/30/35/40/48,
      bad-8/12/15/30, warn-12/15/28/30, white-3h/25/30/35/40/45/55/56/60/68/72/78/82,
      border-slate-18. */
-  --bg-0: var(--bg-root);
-  --bg-1: var(--bg-panel-hover);
+  --bg-0: var(--color-bg-0);
+  --bg-1: var(--color-bg-1);
+  --bg-2: var(--color-bg-2);
+  --bg-3: var(--color-bg-3);
+  --bg-4: var(--color-bg-4);
+  --line-1: var(--color-line-1);
+  --line-2: var(--color-line-2);
+  --line-3: var(--color-line-3);
+  --fg-1: var(--color-fg-1);
+  --fg-2: var(--color-fg-2);
+  --fg-3: var(--color-fg-3);
+  --fg-4: var(--color-fg-4);
+  --brass-1: var(--color-brass-1);
+  --brass-2: var(--color-brass-2);
+  --brass-3: var(--color-brass-3);
+  --brass-soft: var(--color-brass-soft);
+  --info: var(--color-info);
+  --idle: var(--color-idle);
+  --stalled: var(--color-stalled);
+  --info-soft: var(--color-info-soft);
+  --idle-soft: var(--color-idle-soft);
+  --stalled-soft: var(--color-stalled-soft);
+  --ok-fg: var(--color-ok-fg);
+  --warn-fg: var(--color-warn-fg);
+  --err-fg: var(--color-err-fg);
+  --info-fg: var(--color-info-fg);
+  --idle-fg: var(--color-idle-fg);
+  --stalled-fg: var(--color-stalled-fg);
+  --k-1: var(--color-k-1);
+  --k-2: var(--color-k-2);
+  --k-3: var(--color-k-3);
+  --k-4: var(--color-k-4);
+  --k-5: var(--color-k-5);
+  --k-6: var(--color-k-6);
+  --k-7: var(--color-k-7);
+  --k-8: var(--color-k-8);
+  --k-9: var(--color-k-9);
+  --k-10: var(--color-k-10);
+  --k-11: var(--color-k-11);
+  --k-12: var(--color-k-12);
+  --k-1-glow: var(--color-k-1-glow);
+  --k-2-glow: var(--color-k-2-glow);
+  --k-3-glow: var(--color-k-3-glow);
+  --k-4-glow: var(--color-k-4-glow);
+  --k-5-glow: var(--color-k-5-glow);
+  --k-6-glow: var(--color-k-6-glow);
+  --k-7-glow: var(--color-k-7-glow);
+  --k-8-glow: var(--color-k-8-glow);
+  --k-9-glow: var(--color-k-9-glow);
+  --k-10-glow: var(--color-k-10-glow);
+  --k-11-glow: var(--color-k-11-glow);
+  --k-12-glow: var(--color-k-12-glow);
   --card: var(--bg-panel);
   --card-border: var(--border-base);
   --white-2: var(--white-3);
@@ -269,6 +322,7 @@
   --border-slate-22: var(--border-base);
   --border-slate-30: var(--border-strong);
   --border-slate-35: var(--border-strong);
+  --border-highlight: var(--line-2);
 
   /* Layout & Sizing */
   --radius-xl: 24px;
@@ -331,24 +385,24 @@
      See dashboard/design-system/SPEC.md. New components should prefer
      these --color-* names; legacy --text-/--border-/--bg- usage is
      migrated per-screen in Stage 2+ PRs. */
-  --color-bg-page: var(--bg-root);
-  --color-bg-surface: var(--bg-panel);
-  --color-bg-panel-alt: var(--bg-panel);
-  --color-bg-elevated: var(--bg-panel-hover);
-  --color-bg-hover: var(--bg-panel-hover);
+  --color-bg-page: var(--bg-0);
+  --color-bg-surface: var(--bg-1);
+  --color-bg-panel-alt: var(--bg-2);
+  --color-bg-elevated: var(--bg-3);
+  --color-bg-hover: var(--bg-4);
 
-  --color-fg-primary: var(--text-body);
-  --color-fg-secondary: var(--text-strong);
-  --color-fg-muted: var(--text-muted);
-  --color-fg-disabled: var(--text-dim);
+  --color-fg-primary: var(--fg-1);
+  --color-fg-secondary: var(--fg-2);
+  --color-fg-muted: var(--fg-3);
+  --color-fg-disabled: var(--fg-4);
 
-  --color-border-default: var(--border-base);
-  --color-border-strong: var(--border-strong);
-  --color-border-divider: var(--border-subtle);
+  --color-border-default: var(--line-1);
+  --color-border-strong: var(--line-2);
+  --color-border-divider: var(--line-3);
 
-  --color-accent-fg: var(--accent);
-  --color-accent-fg-dim: var(--accent-30);
-  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--brass-1);
+  --color-accent-fg-dim: var(--brass-3);
+  --color-accent-soft: var(--brass-soft);
   --color-accent-glow: var(--accent-glow);
       /* rgb triplet form for use with rgb(var(--color-accent-glow) / 0.12)
          alpha math.  Previously aliased --accent (hex), but had zero
@@ -356,10 +410,10 @@
 
   --color-status-ok: var(--ok);
   --color-status-warn: var(--warn);
-  --color-status-err: var(--bad);
-  --color-status-info: var(--accent);
-  --color-status-idle: var(--text-muted);
-  --color-status-stalled: var(--purple);
+  --color-status-err: var(--err);
+  --color-status-info: var(--info);
+  --color-status-idle: var(--idle);
+  --color-status-stalled: var(--stalled);
 
   /* Status glow channel aliases (canonical SPEC §3.5).  Use these in
      atomic primitives (Pill, future stateful tokens) so callers don't
@@ -371,7 +425,7 @@
   --color-status-info-glow:    var(--info-glow);
   --color-status-stalled-glow: var(--stalled-glow);
 
-  --color-focus-ring: var(--accent);
+  --color-focus-ring: var(--brass-1);
 
   /* SPEC v0.1 §3 — Typography & spacing scale (Phase G Step 2).
      Numeric scale matches dashboard/design-system/source_styles/tokens.css.

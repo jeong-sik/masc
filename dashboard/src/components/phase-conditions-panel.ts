@@ -7,6 +7,7 @@ import {
   asString,
   isRecord,
 } from './common/normalize'
+import { StatusChip } from './common/status-chip'
 
 export interface PhaseConditionRow {
   key: string
@@ -66,20 +67,6 @@ function rowClass(row: PhaseConditionRow): string {
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
 }
 
-function chipClass(tone: 'accent' | 'neutral' | 'ok' | 'warn'): string {
-  switch (tone) {
-    case 'accent':
-      return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
-    case 'ok':
-      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
-    case 'warn':
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
-    case 'neutral':
-    default:
-      return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
-  }
-}
-
 export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis }) {
   const executableTone = diagnosis.canExecuteTurn === true
     ? 'ok'
@@ -104,18 +91,14 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-3xs">
           ${diagnosis.currentPhase ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass('neutral')}`}>
-              current ${diagnosis.currentPhase}
-            </span>
+            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">current ${diagnosis.currentPhase}</${StatusChip}>
           ` : null}
           ${diagnosis.derivedPhase ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass('accent')}`}>
-              derived ${diagnosis.derivedPhase}
-            </span>
+            <${StatusChip} tone="info" uppercase=${false} class="font-mono">derived ${diagnosis.derivedPhase}</${StatusChip}>
           ` : null}
-          <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 ${chipClass(executableTone)}`}>
+          <${StatusChip} tone=${executableTone} uppercase=${false}>
             turn ${diagnosis.canExecuteTurn === null ? 'unknown' : diagnosis.canExecuteTurn ? 'executable' : 'blocked'}
-          </span>
+          </${StatusChip}>
         </div>
       </div>
 
@@ -127,18 +110,12 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
             aria-current=${row.determining ? 'step' : undefined}
           >
             <div class="flex flex-wrap items-center gap-2">
-              <span class="inline-flex min-w-7 items-center justify-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-1.5 py-0.5 font-mono text-3xs tabular-nums">
-                P${row.priority}
-              </span>
+              <${StatusChip} tone="neutral" uppercase=${false} class="min-w-7 justify-center font-mono tabular-nums">P${row.priority}</${StatusChip}>
               <span class="font-semibold">${row.label}</span>
               <span class="font-mono text-[var(--color-fg-muted)]">→ ${row.phase}</span>
-              <span class=${`rounded-sm border px-1.5 py-0.5 font-mono text-3xs ${chipClass(row.value ? 'ok' : 'neutral')}`}>
-                ${row.value ? 'true' : 'false'}
-              </span>
+              <${StatusChip} tone=${row.value ? 'ok' : 'neutral'} uppercase=${false} class="font-mono">${row.value ? 'true' : 'false'}</${StatusChip}>
               ${row.determining ? html`
-                <span class=${`rounded-sm border px-1.5 py-0.5 text-3xs ${chipClass('accent')}`}>
-                  determining
-                </span>
+                <${StatusChip} tone="info" uppercase=${false}>determining</${StatusChip}>
               ` : null}
             </div>
           </li>

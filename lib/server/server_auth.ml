@@ -527,12 +527,15 @@ let cors_allow_headers_value =
   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
    Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
 
+let cors_expose_headers_value =
+  "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
+
 let cors_headers origin =
   let base = [
     ("access-control-allow-origin", origin);
     ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     ("access-control-allow-headers", cors_allow_headers_value);
-    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    ("access-control-expose-headers", cors_expose_headers_value);
     ("vary", "Origin");
   ] in
   (* CORS spec: Access-Control-Allow-Credentials must not be paired with

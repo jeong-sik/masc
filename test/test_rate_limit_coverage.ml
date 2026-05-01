@@ -8,6 +8,13 @@
 open Alcotest
 
 module Rate_limit = Masc_mcp.Rate_limit
+module Server_auth = Masc_mcp.Server_auth
+
+let unique_key prefix =
+  Printf.sprintf "%s_%d" prefix (Unix.getpid ())
+
+let comma_header_values value =
+  List.map String.trim (String.split_on_char ',' value)
 
 (* ============================================================
    Constants Tests
@@ -287,6 +294,17 @@ let test_too_many_requests_body () =
     (try let _ = Str.search_forward (Str.regexp "Too Many Requests") body 0 in true
      with Not_found -> false)
 
+let test_cors_exposes_rate_limit_headers () =
+  let hdrs = Server_auth.cors_headers "http://localhost:5173" in
+  match List.assoc_opt "access-control-expose-headers" hdrs with
+  | None -> fail "expected access-control-expose-headers"
+  | Some exposed ->
+      let names = comma_header_values exposed in
+      check bool "exposes rate limit limit" true
+        (List.mem "X-RateLimit-Limit" names);
+      check bool "exposes rate limit remaining" true
+        (List.mem "X-RateLimit-Remaining" names)
+
 (* ============================================================
    key_of_sockaddr Tests
    ============================================================ *)
@@ -362,8 +380,12 @@ let test_create_agent_from_env () =
    ============================================================ *)
 
 let test_check_agent_global () =
-  let result = Rate_limit.check_agent_global ~key:"agent_global_test" in
-  check bool "agent global check returns bool" true (result || not result)
+  let key = unique_key "agent_global_check" in
+  let before = Rate_limit.remaining_agent_global ~key in
+  check bool "fresh key has agent budget" true (before > 0);
+  check bool "fresh key allowed" true (Rate_limit.check_agent_global ~key);
+  let after = Rate_limit.remaining_agent_global ~key in
+  check int "agent budget decremented" (before - 1) after
 
 let test_remaining_agent_global () =
   let rem = Rate_limit.remaining_agent_global ~key:"agent_global_new_key" in
@@ -380,16 +402,24 @@ let test_headers_agent_global_has_remaining () =
     (List.mem_assoc "X-RateLimit-Remaining" hdrs)
 
 let test_agent_limiter_separate_from_global () =
-  (* Create a limiter with burst=1 to exhaust it quickly *)
-  let agent_lim = Rate_limit.create ~rate:0.0 ~burst:1 () in
-  let global_lim = Rate_limit.create ~rate:0.0 ~burst:1 () in
-  (* Exhaust agent limiter *)
-  let _ = Rate_limit.check agent_lim ~key:"shared" in
-  let agent_blocked = not (Rate_limit.check agent_lim ~key:"shared") in
-  (* Global limiter is independent *)
-  let global_still_allows = Rate_limit.check global_lim ~key:"shared" in
-  check bool "agent limiter exhausted" true agent_blocked;
-  check bool "global limiter independent" true global_still_allows
+  let key = unique_key "shared_global_agent" in
+  let agent_before = Rate_limit.remaining_agent_global ~key in
+  let global_before = Rate_limit.remaining_global ~key in
+  check bool "fresh agent key has budget" true (agent_before > 0);
+  check bool "fresh global key has budget" true (global_before > 0);
+
+  check bool "agent global allows shared key" true
+    (Rate_limit.check_agent_global ~key);
+  check int "agent budget decremented" (agent_before - 1)
+    (Rate_limit.remaining_agent_global ~key);
+  check int "global budget untouched by agent limiter" global_before
+    (Rate_limit.remaining_global ~key);
+
+  check bool "global allows shared key" true (Rate_limit.check_global ~key);
+  check int "global budget decremented" (global_before - 1)
+    (Rate_limit.remaining_global ~key);
+  check int "agent budget untouched by global limiter" (agent_before - 1)
+    (Rate_limit.remaining_agent_global ~key)
 
 (* ============================================================
    agent_key_of_token_or_name Tests
@@ -531,6 +561,8 @@ let () =
       test_case "headers has remaining" `Quick test_headers_has_remaining;
       test_case "headers limit value" `Quick test_headers_limit_value;
       test_case "too_many_requests_body" `Quick test_too_many_requests_body;
+      test_case "cors exposes rate limit headers" `Quick
+        test_cors_exposes_rate_limit_headers;
     ];
     "key_of_sockaddr", [
       test_case "ipv4 loopback" `Quick test_key_of_sockaddr_ipv4_loopback;

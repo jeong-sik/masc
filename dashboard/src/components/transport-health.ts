@@ -17,7 +17,7 @@ import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
 import { ActionButton } from './common/button'
 
-type StatusTone = 'ok' | 'warn' | 'bad'
+export type StatusTone = 'ok' | 'warn' | 'bad'
 
 type PracticalCase = {
   id: string
@@ -124,7 +124,7 @@ async function refreshTransportHealth(): Promise<void> {
   return inflightTransportHealthRefresh
 }
 
-function shouldRefreshFromEvent(event: SSEEvent): boolean {
+export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   const type = (event.type ?? '').trim()
   if (!type) return false
   if (type === 'keeper_heartbeat') return false
@@ -137,26 +137,26 @@ function shouldRefreshFromEvent(event: SSEEvent): boolean {
   return type.startsWith('client_input_')
 }
 
-function formatLatency(seconds: number): string {
+export function formatLatency(seconds: number): string {
   if (seconds === 0) return '-'
   if (seconds < 0.001) return `${(seconds * 1_000_000).toFixed(0)}us`
   if (seconds < 1) return `${(seconds * 1000).toFixed(1)}ms`
   return `${seconds.toFixed(2)}s`
 }
 
-function formatFloat(value: number): string {
+export function formatFloat(value: number): string {
   if (value === 0) return '0'
   if (value < 1) return value.toFixed(2)
   return value.toFixed(1)
 }
 
-function formatIdle(seconds: number): string {
+export function formatIdle(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`
   return `${Math.round(seconds / 3600)}h`
 }
 
-function compactId(value: string): string {
+export function compactId(value: string): string {
   if (value.length <= 18) return value
   return `${value.slice(0, 8)}...${value.slice(-6)}`
 }
@@ -182,37 +182,37 @@ export function formatAvgBufferedBytes(sum: number, count: number): string {
   return `${(avg / (1024 * 1024)).toFixed(2)} MB`
 }
 
-function statusDot(status: StatusTone): string {
+export function statusDot(status: StatusTone): string {
   if (status === 'ok') return 'bg-[var(--color-status-ok)]'
   if (status === 'warn') return 'bg-[var(--color-status-warn)]'
   return 'bg-[var(--color-status-err)]'
 }
 
-function toneClass(status: StatusTone): string {
+export function toneClass(status: StatusTone): string {
   if (status === 'ok') return 'text-[var(--color-status-ok)]'
   if (status === 'warn') return 'text-[var(--color-status-warn)]'
   return 'text-[var(--color-status-err)]'
 }
 
-function queuePressureTone(pressure: string): StatusTone {
+export function queuePressureTone(pressure: string): StatusTone {
   if (pressure === 'high') return 'bad'
   if (pressure === 'watch') return 'warn'
   return 'ok'
 }
 
-function sseTone(data: TransportHealthData): StatusTone {
+export function sseTone(data: TransportHealthData): StatusTone {
   if (data.sse.relay_drop_total > 0) return 'bad'
   if (data.sse.relay_retry_total > 0 || data.sse.relay_queue_depth > 0) return 'warn'
   return queuePressureTone(data.summary.queue_pressure)
 }
 
-function transportTone(configured: boolean, listening: boolean, active: boolean): StatusTone {
+export function transportTone(configured: boolean, listening: boolean, active: boolean): StatusTone {
   if (!configured) return 'warn'
   if (!listening) return 'bad'
   return active ? 'ok' : 'warn'
 }
 
-function grpcTone(data: TransportHealthData): StatusTone {
+export function grpcTone(data: TransportHealthData): StatusTone {
   const base = transportTone(
     data.grpc.configured,
     data.grpc.listening,
@@ -227,7 +227,7 @@ function grpcTone(data: TransportHealthData): StatusTone {
   return base
 }
 
-function websocketTone(data: TransportHealthData): StatusTone {
+export function websocketTone(data: TransportHealthData): StatusTone {
   const base = transportTone(
     data.websocket.configured,
     data.websocket.listening,
@@ -243,13 +243,13 @@ function websocketTone(data: TransportHealthData): StatusTone {
   return base
 }
 
-function webrtcActive(data: TransportHealthData): boolean {
+export function webrtcActive(data: TransportHealthData): boolean {
   return data.webrtc.connected_channels > 0
     || data.webrtc.live_connections > 0
     || data.webrtc.active_peers > 0
 }
 
-function webrtcTone(data: TransportHealthData): StatusTone {
+export function webrtcTone(data: TransportHealthData): StatusTone {
   return transportTone(
     data.webrtc.configured,
     data.webrtc.signaling_available,
@@ -257,27 +257,27 @@ function webrtcTone(data: TransportHealthData): StatusTone {
   )
 }
 
-function http2Tone(data: TransportHealthData): StatusTone {
+export function http2Tone(data: TransportHealthData): StatusTone {
   return data.http2.multiplex_ready ? 'ok' : 'warn'
 }
 
-function staleTone(staleTotal: number): StatusTone {
+export function staleTone(staleTotal: number): StatusTone {
   if (staleTotal === 0) return 'ok'
   if (staleTotal < 3) return 'warn'
   return 'bad'
 }
 
-function agentPoolTone(data: TransportHealthData): StatusTone {
+export function agentPoolTone(data: TransportHealthData): StatusTone {
   const staleStatus = staleTone(data.agent_health.stale_total)
   if (staleStatus !== 'ok') return staleStatus
   return data.agent_health.lifecycle_dispatch_rejections_total > 0 ? 'warn' : 'ok'
 }
 
-function formatMetricValue(value: number | null): string | number {
+export function formatMetricValue(value: number | null): string | number {
   return value === null ? 'n/a' : value
 }
 
-function transportTruthLine(data: TransportHealthData): string | null {
+export function transportTruthLine(data: TransportHealthData): string | null {
   const diagnostics = data.projection_diagnostics
   if (!diagnostics) return null
   const parts = [
@@ -304,12 +304,12 @@ function MetricRow({ label, value, sub }: { label: string; value: string | numbe
   `
 }
 
-function transportEyebrow(configured: boolean, listening: boolean, port: number): string {
+export function transportEyebrow(configured: boolean, listening: boolean, port: number): string {
   if (!configured) return '비활성'
   return listening ? `:${port} 활성` : `:${port} 중단`
 }
 
-function webrtcEyebrow(data: TransportHealthData): string {
+export function webrtcEyebrow(data: TransportHealthData): string {
   if (!data.webrtc.configured) return '비활성'
   return data.webrtc.signaling_available
     ? `${data.webrtc.ice_server_count} ICE · 시그널링 준비`

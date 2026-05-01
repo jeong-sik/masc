@@ -110,12 +110,12 @@ function getDraftForKeeper(keeperId: string, fallback: Set<string> | '*'): Set<s
   return draft !== undefined ? draft : fallback
 }
 
-function isRepoSelected(_keeperId: string, repoId: string, current: Set<string> | '*'): boolean {
+export function isRepoSelected(_keeperId: string, repoId: string, current: Set<string> | '*'): boolean {
   if (current === '*') return true
   return current.has(repoId)
 }
 
-function isAllowAll(_keeperId: string, current: Set<string> | '*'): boolean {
+export function isAllowAll(_keeperId: string, current: Set<string> | '*'): boolean {
   return current === '*'
 }
 
@@ -138,11 +138,11 @@ function toggleRepo(_keeperId: string, repoId: string, current: Set<string> | '*
   return next
 }
 
-function toggleAllowAll(_keeperId: string, current: Set<string> | '*'): Set<string> | '*' {
+export function toggleAllowAll(_keeperId: string, current: Set<string> | '*'): Set<string> | '*' {
   return current === '*' ? new Set<string>() : '*'
 }
 
-function hasChanges(_keeperId: string, original: Set<string> | '*', draft: Set<string> | '*'): boolean {
+export function hasChanges(_keeperId: string, original: Set<string> | '*', draft: Set<string> | '*'): boolean {
   if (original === '*' && draft === '*') return false
   if (original === '*' || draft === '*') return true
   if (original.size !== draft.size) return true
@@ -152,7 +152,7 @@ function hasChanges(_keeperId: string, original: Set<string> | '*', draft: Set<s
   return false
 }
 
-function buildRepoSetFromMapping(mapping: KeeperRepoMapping): Set<string> | '*' {
+export function buildRepoSetFromMapping(mapping: KeeperRepoMapping): Set<string> | '*' {
   if (mapping.allow_all) return '*'
   return new Set(mapping.allowed_repos)
 }

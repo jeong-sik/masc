@@ -79,9 +79,11 @@ export function RichContent({
     .map(url => previews[url])
     .filter((preview): preview is LinkPreview => Boolean(preview))
 
+  const wrapperClass = className ? `flex flex-col gap-3 ${className}` : 'flex flex-col gap-3'
+
   return html`
-    <div class="flex flex-col gap-3">
-      <${Markdown} text=${prepared.markdownText} class=${className} />
+    <div class=${wrapperClass}>
+      <${Markdown} text=${prepared.markdownText} />
       ${cards.length > 0
         ? html`<div class="grid gap-2">${cards.map(card => previewCard(card))}</div>`
         : null}

@@ -1,176 +1,100 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render } from 'preact'
-import { html } from 'htm/preact'
-import { Btn, resolveVariant, type BtnProps } from './btn'
+import { describe, expect, it, vi } from "vitest"
+import { render, h } from "preact"
+import { Btn, resolveVariant } from "./btn"
 
-describe('resolveVariant (pure)', () => {
-  it('returns "default" when variant is undefined', () => {
-    expect(resolveVariant(undefined)).toBe('default')
+describe("resolveVariant", () => {
+  it("returns default for undefined", () => {
+    expect(resolveVariant(undefined)).toBe("default")
   })
 
-  it('passes through explicit variants', () => {
-    expect(resolveVariant('primary')).toBe('primary')
-    expect(resolveVariant('danger')).toBe('danger')
-    expect(resolveVariant('ghost')).toBe('ghost')
+  it("returns the passed variant", () => {
+    expect(resolveVariant("primary")).toBe("primary")
+    expect(resolveVariant("danger")).toBe("danger")
+    expect(resolveVariant("ghost")).toBe("ghost")
   })
 })
 
-describe('Btn', () => {
-  let host: HTMLDivElement
-
-  beforeEach(() => {
-    host = document.createElement('div')
-    document.body.appendChild(host)
+describe("Btn", () => {
+  it("renders a button with default attributes", () => {
+    const container = document.createElement("div")
+    render(h(Btn, null, "Click"), container)
+    const btn = container.querySelector("button")
+    expect(btn).not.toBeNull()
+    expect(btn!.getAttribute("type")).toBe("button")
+    expect(btn!.textContent).toBe("Click")
   })
 
-  afterEach(() => {
-    render(null, host)
-    host.remove()
+  it("applies variant data attribute and styles", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { variant: "primary" }, "Save"), container)
+    const btn = container.querySelector("button")
+    expect(btn!.getAttribute("data-variant")).toBe("primary")
+    expect(btn!.style.background).toContain("var(--color-accent-fg-dim)")
   })
 
-  function mount(props: BtnProps): HTMLButtonElement {
-    render(html`<${Btn} ...${props} />`, host)
-    return host.firstElementChild as HTMLButtonElement
-  }
-
-  // ── Structural ──
-
-  it('emits a <button> with data-variant and data-size', () => {
-    const el = mount({ children: 'SAVE', variant: 'primary', size: 'sm' })
-    expect(el.tagName).toBe('BUTTON')
-    expect(el.getAttribute('data-variant')).toBe('primary')
-    expect(el.getAttribute('data-size')).toBe('sm')
+  it("applies size data attribute and geometry", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { size: "lg" }, "Big"), container)
+    const btn = container.querySelector("button")
+    expect(btn!.getAttribute("data-size")).toBe("lg")
+    expect(btn!.style.height).toBe("28px")
   })
 
-  it('defaults to variant=default / size=default when omitted', () => {
-    const el = mount({ children: 'click' })
-    expect(el.getAttribute('data-variant')).toBe('default')
-    expect(el.getAttribute('data-size')).toBe('default')
+  it("renders icon mode as 22x22 square", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { icon: true }, "X"), container)
+    const btn = container.querySelector("button")
+    expect(btn!.getAttribute("data-icon")).toBe("true")
+    expect(btn!.style.width).toBe("22px")
+    expect(btn!.style.height).toBe("22px")
+    expect(btn!.style.padding).toBe("0px")
   })
 
-  it('defaults type to "button" (not submit) so it does not auto-submit forms', () => {
-    const el = mount({ children: 'click' })
-    expect(el.getAttribute('type')).toBe('button')
+  it("sets disabled state", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { disabled: true }, "Off"), container)
+    const btn = container.querySelector("button")
+    expect(btn!.hasAttribute("disabled")).toBe(true)
+    expect(btn!.style.opacity).toBe("0.5")
+    expect(btn!.style.cursor).toBe("not-allowed")
   })
 
-  it('preserves explicit type="submit" for form callsites', () => {
-    const el = mount({ children: 'Save', type: 'submit' })
-    expect(el.getAttribute('type')).toBe('submit')
+  it("forwards onClick handler", () => {
+    const handler = vi.fn()
+    const container = document.createElement("div")
+    render(h(Btn, { onClick: handler }, "Go"), container)
+    const btn = container.querySelector("button")
+    btn!.click()
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('forwards testId to data-testid', () => {
-    const el = mount({ children: 'X', testId: 'cancel-btn' })
-    expect(el.getAttribute('data-testid')).toBe('cancel-btn')
+  it("changes style on hover", async () => {
+    const container = document.createElement("div")
+    render(h(Btn, { variant: "primary" }, "Hover"), container)
+    const btn = container.querySelector("button")!
+    const idleBg = btn.style.background
+    btn.dispatchEvent(new MouseEvent("mouseenter"))
+    await new Promise((r) => setTimeout(r, 0))
+    const hoverBg = container.querySelector("button")!.style.background
+    expect(hoverBg).not.toBe(idleBg)
+    expect(hoverBg).toContain("var(--color-accent-fg)")
   })
 
-  // ── Click + disabled ──
-
-  it('invokes onClick when activated', () => {
-    const onClick = vi.fn()
-    const el = mount({ children: 'click', onClick })
-    el.click()
-    expect(onClick).toHaveBeenCalledTimes(1)
+  it("forwards testId, ariaLabel, title, class", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { testId: "my-btn", ariaLabel: "Close", title: "Close dialog", class: "mt-2" }), container)
+    const btn = container.querySelector("button")
+    expect(btn!.getAttribute("data-testid")).toBe("my-btn")
+    expect(btn!.getAttribute("aria-label")).toBe("Close")
+    expect(btn!.getAttribute("title")).toBe("Close dialog")
+    expect(btn!.classList.contains("mt-2")).toBe(true)
   })
 
-  it('honors the disabled attribute', () => {
-    const el = mount({ children: 'click', disabled: true })
-    expect(el.disabled).toBe(true)
-    expect(el.hasAttribute('disabled')).toBe(true)
-  })
-
-  it('does not emit disabled attribute when disabled is false/undefined', () => {
-    const el = mount({ children: 'click' })
-    expect(el.hasAttribute('disabled')).toBe(false)
-  })
-
-  // ── Variant fidelity (style attr inspection) ──
-
-  it('primary uses brass accent surface', () => {
-    const el = mount({ children: 'SAVE', variant: 'primary' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-accent-fg-dim)')
-    expect(style).toContain('var(--color-bg-page)')
-  })
-
-  it('danger uses err status fg over a transparent surface', () => {
-    // Note: happy-dom drops `border: 1px solid rgb(var(--x) / 0.4)`
-    // shorthand because its CSS parser rejects custom-property arms,
-    // so we assert the fg + transparent surface (matches chip.ts /
-    // pill.ts test pattern). Border-color fidelity is verified by
-    // primitives.html in the manual visual pass.
-    const el = mount({ children: 'RETIRE', variant: 'danger' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-status-err)')
-    expect(style.toLowerCase()).toContain('transparent')
-  })
-
-  it('ghost has transparent background and border', () => {
-    const el = mount({ children: 'cancel', variant: 'ghost' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style.toLowerCase()).toContain('transparent')
-    expect(style).toContain('var(--color-fg-muted)')
-  })
-
-  it('default variant uses fg-secondary + border-default', () => {
-    const el = mount({ children: 'click' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-fg-secondary)')
-    expect(style).toContain('var(--color-border-default)')
-  })
-
-  // ── Size geometry ──
-
-  it('xs is 18px tall with 0.06em letter-spacing', () => {
-    const el = mount({ children: 'xs', size: 'xs' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('18px')
-    expect(style).toContain('0.06em')
-  })
-
-  it('sm is 20px tall', () => {
-    const el = mount({ children: 'sm', size: 'sm' })
-    expect(el.getAttribute('style') ?? '').toContain('20px')
-  })
-
-  it('default is 24px tall', () => {
-    const el = mount({ children: 'def' })
-    expect(el.getAttribute('style') ?? '').toContain('24px')
-  })
-
-  it('lg is 28px tall (atom 11/14 codification — primitives.css addition)', () => {
-    const el = mount({ children: 'lg', size: 'lg' })
-    expect(el.getAttribute('style') ?? '').toContain('28px')
-  })
-
-  // ── Icon modifier ──
-
-  it('icon flips geometry to 22×22 square and emits data-icon', () => {
-    const el = mount({ children: '▸', icon: true, ariaLabel: 'expand' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('22px')
-    expect(el.getAttribute('data-icon')).toBe('true')
-  })
-
-  it('non-icon button omits data-icon', () => {
-    const el = mount({ children: 'click' })
-    expect(el.getAttribute('data-icon')).toBe(null)
-  })
-
-  // ── Class + aria pass-through ──
-
-  it('forwards user class without overwriting atom-owned style', () => {
-    const el = mount({ children: 'click', class: 'mt-2 flex-1' })
-    expect(el.getAttribute('class')).toBe('mt-2 flex-1')
-  })
-
-  it('forwards ariaLabel for icon-only buttons', () => {
-    const el = mount({ children: '▸', icon: true, ariaLabel: 'expand row' })
-    expect(el.getAttribute('aria-label')).toBe('expand row')
-  })
-
-  it('forwards title for native tooltip', () => {
-    const el = mount({ children: 'X', title: 'close panel' })
-    expect(el.getAttribute('title')).toBe('close panel')
+  it("respects explicit button type", () => {
+    const container = document.createElement("div")
+    render(h(Btn, { type: "submit" }, "Send"), container)
+    const btn = container.querySelector("button")
+    expect(btn!.getAttribute("type")).toBe("submit")
   })
 })

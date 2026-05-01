@@ -19,7 +19,7 @@ const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
-function isWorkSection(v: string | undefined): v is WorkSection {
+export function isWorkSection(v: string | undefined): v is WorkSection {
   return v === 'board' || v === 'planning' || v === 'repositories' || v === 'collab-mvp' || v === 'verification'
 }
 

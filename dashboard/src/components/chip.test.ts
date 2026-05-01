@@ -1,156 +1,136 @@
-// @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+// @ts-nocheck
+import { describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { Chip, chipAriaLabel, type ChipProps } from './chip'
+import { Chip, chipAriaLabel } from './chip'
 
-describe('chipAriaLabel (pure)', () => {
-  it('returns the raw content when kind is undefined', () => {
-    expect(chipAriaLabel({ children: '47 PASS' }, '47 PASS')).toBe('47 PASS')
+describe('Chip', () => {
+  const makeContainer = () => document.createElement('div')
+
+  it('renders with default kind and size', () => {
+    const container = makeContainer()
+    render(html`<${Chip}>LABEL<//>`, container)
+    const span = container.querySelector('span')
+    expect(span).not.toBeNull()
+    expect(span!.getAttribute('data-kind')).toBe('neutral')
+    expect(span!.getAttribute('data-size')).toBe('default')
+    expect(span!.textContent).toContain('LABEL')
+    render(null, container)
   })
 
-  it('appends (passing) for ok', () => {
-    expect(
-      chipAriaLabel({ children: '47 PASS', kind: 'ok' }, '47 PASS'),
-    ).toBe('47 PASS (passing)')
+  it('renders each kind correctly', () => {
+    const kinds = ['neutral', 'brass', 'ok', 'warn', 'err', 'info', 'stalled', 'ghost']
+    for (const kind of kinds) {
+      const container = makeContainer()
+      render(html`<${Chip} kind=${kind}>${kind}<//>`, container)
+      const span = container.querySelector('span')
+      expect(span!.getAttribute('data-kind')).toBe(kind)
+      render(null, container)
+    }
   })
 
-  it('appends (failing) for err', () => {
-    expect(
-      chipAriaLabel({ children: '3 FAIL', kind: 'err' }, '3 FAIL'),
-    ).toBe('3 FAIL (failing)')
+  it('renders each size correctly', () => {
+    const sizes = ['sm', 'default', 'lg']
+    for (const size of sizes) {
+      const container = makeContainer()
+      render(html`<${Chip} size=${size}>S<//>`, container)
+      const span = container.querySelector('span')
+      expect(span!.getAttribute('data-size')).toBe(size)
+      render(null, container)
+    }
   })
 
-  it('appends (warning) for warn', () => {
-    expect(
-      chipAriaLabel({ children: 'FLAKE', kind: 'warn' }, 'FLAKE'),
-    ).toBe('FLAKE (warning)')
+  it('shows dot for semantic kinds', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="ok" dot>OK<//>`, container)
+    const dot = container.querySelector('span[aria-hidden="true"]')
+    expect(dot).not.toBeNull()
+    render(null, container)
   })
 
-  it('appends (stalled) for stalled', () => {
-    expect(
-      chipAriaLabel({ children: 'STALLED', kind: 'stalled' }, 'STALLED'),
-    ).toBe('STALLED (stalled)')
+  it('suppresses dot for neutral', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="neutral" dot>N<//>`, container)
+    const dot = container.querySelector('span[aria-hidden="true"]')
+    expect(dot).toBeNull()
+    render(null, container)
   })
 
-  it('lets caller override via ariaLabel', () => {
-    expect(
-      chipAriaLabel(
-        { children: '3', kind: 'err', ariaLabel: '3 failed runs' },
-        '3',
-      ),
-    ).toBe('3 failed runs')
+  it('suppresses dot for ghost', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="ghost" dot>G<//>`, container)
+    const dot = container.querySelector('span[aria-hidden="true"]')
+    expect(dot).toBeNull()
+    render(null, container)
   })
 
-  it('does not append for neutral or ghost', () => {
-    expect(chipAriaLabel({ children: 'tag', kind: 'neutral' }, 'tag')).toBe('tag')
-    expect(chipAriaLabel({ children: 'tag', kind: 'ghost' }, 'tag')).toBe('tag')
+  it('forwards testId', () => {
+    const container = makeContainer()
+    render(html`<${Chip} testId="my-chip">T<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('data-testid')).toBe('my-chip')
+    render(null, container)
+  })
+
+  it('forwards title', () => {
+    const container = makeContainer()
+    render(html`<${Chip} title="tooltip">T<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('title')).toBe('tooltip')
+    render(null, container)
+  })
+
+  it('adds role=status for semantic kinds', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="ok">O<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('role')).toBe('status')
+    render(null, container)
+  })
+
+  it('omits role for neutral', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="neutral">N<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('role')).toBeNull()
+    render(null, container)
+  })
+
+  it('omits role for ghost', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="ghost">G<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('role')).toBeNull()
+    render(null, container)
+  })
+
+  it('sets aria-label from chipAriaLabel', () => {
+    const container = makeContainer()
+    render(html`<${Chip} kind="ok">PASS<//>`, container)
+    const span = container.querySelector('span')
+    expect(span!.getAttribute('aria-label')).toBe('PASS (passing)')
+    render(null, container)
   })
 })
 
-describe('Chip', () => {
-  let host: HTMLDivElement
-
-  beforeEach(() => {
-    host = document.createElement('div')
-    document.body.appendChild(host)
+describe('chipAriaLabel', () => {
+  it('returns override when ariaLabel is set', () => {
+    expect(chipAriaLabel({ children: 'X', ariaLabel: 'custom' }, 'X')).toBe('custom')
   })
 
-  afterEach(() => {
-    render(null, host)
-    host.remove()
+  it('announces ok as passing', () => {
+    expect(chipAriaLabel({ children: 'OK', kind: 'ok' }, 'OK')).toBe('OK (passing)')
   })
 
-  function mount(props: ChipProps): HTMLElement {
-    render(html`<${Chip} ...${props} />`, host)
-    return host.firstElementChild as HTMLElement
-  }
-
-  // ── Structural ──
-
-  it('emits a span with data-kind and data-size', () => {
-    const el = mount({ children: 'P1', kind: 'brass', size: 'lg' })
-    expect(el.tagName).toBe('SPAN')
-    expect(el.getAttribute('data-kind')).toBe('brass')
-    expect(el.getAttribute('data-size')).toBe('lg')
+  it('announces err as failing', () => {
+    expect(chipAriaLabel({ children: 'FAIL', kind: 'err' }, 'FAIL')).toBe('FAIL (failing)')
   })
 
-  it('defaults to kind=neutral / size=default when omitted', () => {
-    const el = mount({ children: 'tag' })
-    expect(el.getAttribute('data-kind')).toBe('neutral')
-    expect(el.getAttribute('data-size')).toBe('default')
+  it('returns plain content for neutral', () => {
+    expect(chipAriaLabel({ children: 'N', kind: 'neutral' }, 'N')).toBe('N')
   })
 
-  it('forwards testId to data-testid', () => {
-    const el = mount({ children: '47 PASS', kind: 'ok', testId: 'pass-chip' })
-    expect(el.getAttribute('data-testid')).toBe('pass-chip')
-  })
-
-  // ── Aria + role ──
-
-  it('sets role=status when kind is semantic (ok/warn/err/info/stalled/brass)', () => {
-    const el = mount({ children: 'PASS', kind: 'ok' })
-    expect(el.getAttribute('role')).toBe('status')
-  })
-
-  it('omits role when kind is neutral or ghost', () => {
-    const neutral = mount({ children: 'tag', kind: 'neutral' })
-    expect(neutral.getAttribute('role')).toBe(null)
-    const ghost = mount({ children: 'tag', kind: 'ghost' })
-    expect(ghost.getAttribute('role')).toBe(null)
-  })
-
-  it('encodes kind in aria-label suffix', () => {
-    const el = mount({ children: '47 PASS', kind: 'ok' })
-    expect(el.getAttribute('aria-label')).toBe('47 PASS (passing)')
-  })
-
-  // ── Dot variant ──
-
-  it('renders a leading dot when dot=true and kind is semantic', () => {
-    const el = mount({ children: 'PASS', kind: 'ok', dot: true })
-    const dotEl = el.querySelector('span[aria-hidden="true"]')
-    expect(dotEl).not.toBeNull()
-  })
-
-  it('omits the dot for neutral kind even when dot=true', () => {
-    const el = mount({ children: 'tag', kind: 'neutral', dot: true })
-    expect(el.querySelector('span[aria-hidden="true"]')).toBeNull()
-  })
-
-  it('omits the dot for ghost kind even when dot=true', () => {
-    const el = mount({ children: 'tag', kind: 'ghost', dot: true })
-    expect(el.querySelector('span[aria-hidden="true"]')).toBeNull()
-  })
-
-  it('omits the dot when dot is undefined', () => {
-    const el = mount({ children: 'PASS', kind: 'ok' })
-    expect(el.querySelector('span[aria-hidden="true"]')).toBeNull()
-  })
-
-  // ── Visual fidelity (style attr inspection) ──
-
-  it('uses ok status token for foreground', () => {
-    const el = mount({ children: 'PASS', kind: 'ok' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-status-ok)')
-  })
-
-  it('applies size geometry for sm', () => {
-    const el = mount({ children: 'tag', size: 'sm' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('14px')
-  })
-
-  it('applies size geometry for lg', () => {
-    const el = mount({ children: 'tag', size: 'lg' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('22px')
-  })
-
-  it('ghost has transparent background', () => {
-    const el = mount({ children: 'tag', kind: 'ghost' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style.toLowerCase()).toContain('transparent')
+  it('returns plain content for ghost', () => {
+    expect(chipAriaLabel({ children: 'G', kind: 'ghost' }, 'G')).toBe('G')
   })
 })

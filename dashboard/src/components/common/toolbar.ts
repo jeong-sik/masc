@@ -3,7 +3,7 @@
 // Home/End jump to first/last. Only one item is tab-accessible at a time.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren } from 'preact'
+import type { ComponentChildren, FunctionComponent } from 'preact'
 import { createContext } from 'preact'
 import { useCallback, useContext, useEffect, useRef, useState } from 'preact/hooks'
 
@@ -154,10 +154,10 @@ interface ToolbarSeparatorProps {
   class?: string
 }
 
-export function ToolbarSeparator({
+export const ToolbarSeparator: FunctionComponent<ToolbarSeparatorProps> = ({
   orientation = 'vertical',
   class: cx,
-}: ToolbarSeparatorProps) {
+}) => {
   return html`
     <div
       role="separator"

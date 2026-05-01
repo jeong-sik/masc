@@ -24,7 +24,7 @@ const LABEL_STYLES = {
   warn: 'text-[var(--color-status-warn)]',
 } as const
 
-function StatTile({ label, value, hint, variant = 'default' }: StatTileProps) {
+export function StatTile({ label, value, hint, variant = 'default' }: StatTileProps) {
   return html`
     <div class="flex flex-col items-center gap-0.5 rounded border px-4 py-3 ${VARIANT_STYLES[variant]}">
       <span class="text-base font-bold tabular-nums leading-tight">${value}</span>

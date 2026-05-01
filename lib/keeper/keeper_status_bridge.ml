@@ -342,6 +342,10 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
       match runtime_blocker with
       | Some blocker when blocker.continue_gate ->
           (true, Some "continue_gate_required", Some "approve_or_reject_continue")
+      | Some blocker
+        when String.equal blocker.blocker_class "oas_timeout_budget"
+             || String.equal blocker.blocker_class "turn_wall_clock_timeout" ->
+          (true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget")
       | Some _ when meta.paused ->
           (true, Some "paused_blocked", Some "inspect_runtime_blocker")
       | Some _ ->

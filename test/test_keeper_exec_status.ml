@@ -22,6 +22,8 @@ let make_meta ?(name = "keeper-exec-status-test")
           ("trace_id", `String trace_id);
           ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
           ("last_model_used", `String "llama:auto");
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "inherit");
         ])
   with
   | Ok meta -> meta
@@ -329,6 +331,37 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
   check bool "runtime blocker continue gate stays false"
     false
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+
+let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-oas-timeout-action-test" () in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          last_blocker =
+            "OAS budget timeout fired before the keeper hard timeout.";
+          last_blocker_class = Some KT.Oas_timeout_budget;
+        };
+    }
+  in
+  let config = Coord.default_config "/tmp/test-keeper-exec-status-oas-timeout" in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class"
+    "oas_timeout_budget"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check bool "needs attention" true
+    (runtime |> member "needs_attention" |> to_bool);
+  check string "attention reason"
+    "timeout_budget_exhausted"
+    (runtime |> member "attention_reason" |> to_string);
+  check string "next human action"
+    "inspect_timeout_budget"
+    (runtime |> member "next_human_action" |> to_string)
 
 let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   KR.clear ();
@@ -646,6 +679,9 @@ let () =
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives cascade exhausted blocker" `Quick
             test_runtime_surface_derives_cascade_exhausted_from_meta;
+          test_case "runtime surface routes OAS timeout to timeout action"
+            `Quick
+            test_runtime_surface_routes_oas_timeout_to_timeout_action;
           test_case "runtime surface keeps resumable CLI blocker redacted"
             `Quick
             test_runtime_surface_exposes_redacted_resumable_cli_session_blocker;

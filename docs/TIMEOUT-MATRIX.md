@@ -38,6 +38,23 @@ observed wall time exceeds the cap by more than `slack_s` (default 5 s). The
 warning preserves the same fields (`layer`, `origin`, `budget`, `actual`,
 `excess`, `slack`) so the condition is grep-able and can feed a metric.
 
+## Operator outcome
+
+Timeout budget failures are not global shutdown signals. A single
+`oas_timeout_budget` is scoped to the keeper turn that exhausted its OAS
+budget. The turn ledger and runtime-trust snapshot must surface
+`terminal_reason.code = "oas_timeout_budget"` with
+`latest_next_action = "inspect_timeout_budget"`, and the runtime surface marks
+the keeper as needing attention with the same timeout action. Repeated
+consecutive budget strikes are promoted by the keepalive loop to
+`Oas_timeout_budget_loop`, which the supervisor auto-pauses instead of
+restart-looping.
+
+For parallel OAS work, distinguish all-settled fanout from fail-fast race:
+`Async_agent.all` contains per-agent timeout/error results while siblings
+finish; `Async_agent.race` and tripwire guardrails intentionally cancel
+siblings when the first branch completes or trips.
+
 ## Design references
 
 - Go `context.Context.Deadline()` + `select` — propagated deadline + polled

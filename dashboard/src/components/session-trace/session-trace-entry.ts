@@ -16,6 +16,14 @@ import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 const BROADCAST_PREVIEW_MAX = 160
 
+const TRACE_TONE = {
+  brassText: 'text-[var(--color-brass-fg)]',
+  brassPanel: 'bg-[var(--color-brass-soft)] border border-[var(--color-brass-border)]',
+  infoText: 'text-[var(--color-info-fg)]',
+  infoFill: 'bg-[var(--color-info-fg)]',
+  infoPanel: 'bg-[var(--color-info-soft)] border border-[var(--color-info-border)]',
+} as const
+
 // ── Trace badge helper ──────────────────────────────────
 
 function TraceBadge({
@@ -32,7 +40,7 @@ function TraceBadge({
       case 'bad':
         return 'text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]'
       case 'ok':
-        return 'text-3xs px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]'
+        return 'text-3xs px-1.5 py-0.5 rounded bg-[var(--color-ok-soft)] text-[var(--color-status-ok)]'
       case 'neutral':
       default:
         return `text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase${wide ? ' tracking-wider' : ''}`
@@ -77,7 +85,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   return html`
     <span>${segments.map(seg =>
       seg.match
-        ? html`<mark class="bg-[rgba(99,102,241,0.25)] text-[var(--color-fg-secondary)] px-0.5 rounded">${seg.text}</mark>`
+        ? html`<mark class="bg-[var(--color-brass-soft)] text-[var(--color-fg-secondary)] px-0.5 rounded">${seg.text}</mark>`
         : seg.text
     )}</span>
   `
@@ -94,15 +102,15 @@ interface KindStyle {
 }
 
 const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
-  broadcast:  { icon: 'M', color: 'text-[var(--blue-400)]', label: '브로드캐스트' },
+  broadcast:  { icon: 'M', color: TRACE_TONE.brassText, label: '브로드캐스트' },
   task:       { icon: 'T', color: 'text-[var(--color-accent-fg)]', label: '태스크' },
   tool_call:  { icon: '>', color: 'text-[var(--color-status-ok)]', label: '도구 호출' },
   heartbeat:  { icon: 'H', color: 'text-[var(--slate-400)]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--color-status-warn)]', label: '생명주기' },
-  thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
+  thinking:   { icon: '\u{1F4AD}', color: TRACE_TONE.infoText, label: '내부 사고' },
   oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
   oas_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'OAS 턴' },
-  oas_context: { icon: 'C', color: 'text-[var(--sky-400)]', label: 'OAS 압축' },
+  oas_context: { icon: 'C', color: TRACE_TONE.infoText, label: 'OAS 압축' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -115,8 +123,8 @@ function toolStyle(name: string): { icon: string; color: string } {
 // are visually separable in the trace timeline.
 function durableStyle(kind: unknown): { icon: string; color: string } | null {
   switch (kind) {
-    case 'llm_request':      return { icon: '>', color: 'text-[var(--sky-400)]' }
-    case 'llm_response':     return { icon: '<', color: 'text-[var(--cyan)]' }
+    case 'llm_request':      return { icon: '>', color: TRACE_TONE.infoText }
+    case 'llm_response':     return { icon: '<', color: TRACE_TONE.infoText }
     case 'error_occurred':   return { icon: '!', color: 'text-[var(--color-status-err)]' }
     case 'tool_called':      return { icon: 't', color: 'text-[var(--color-status-ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--color-status-ok)]' }
@@ -239,7 +247,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
             : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
           ${shouldCollapse ? html`
-            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
+            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
           ` : null}
         </div>
         ${needsCollapse ? html`
@@ -322,7 +330,7 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
 function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   if (event.thinkingRedacted) {
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(192,132,252,0.06)] border border-[rgba(192,132,252,0.15)] text-xs text-[#c084fc] italic">
+      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.brassPanel} text-xs ${TRACE_TONE.brassText} italic">
         이 사고 과정은 비공개 처리되었습니다.
       </div>
     `
@@ -330,7 +338,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = event.thinkingContent ?? ''
   if (!content) return null
   return html`
-    <div class="mt-2 px-3 py-2 rounded bg-[rgba(192,132,252,0.04)] border border-[rgba(192,132,252,0.12)]">
+    <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.brassPanel}">
       <div class="text-sm leading-relaxed text-[var(--color-fg-primary)]">
         <${Markdown} text=${content} />
       </div>
@@ -384,7 +392,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
     const compactPhase = typeof d.phase === 'string' ? d.phase : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.15)] space-y-2">
+      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-2">
         <div class="flex items-center gap-3 text-xs">
           ${before != null ? html`<span><span class="text-[var(--color-fg-disabled)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
           <span class="text-[var(--color-fg-disabled)]">→</span>
@@ -397,9 +405,9 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
               size="md"
               trackTone="muted"
               trackClass="flex-1"
-              class="bg-[var(--sky-400)]"
+              class=${TRACE_TONE.infoFill}
             />
-            <span class="text-3xs font-mono text-[var(--sky-400)]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
+            <span class="text-3xs font-mono ${TRACE_TONE.infoText}">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
           </div>
         ` : null}
         ${compactPhase ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">단계: ${compactPhase}</div>` : null}
@@ -415,7 +423,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
     const turn = d.turn
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs">
           <span><span class="text-[var(--color-fg-disabled)]">모델:</span> <span class="font-mono">${model}</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
@@ -433,7 +441,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(34,211,238,0.04)] border border-[var(--cyan-12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs flex-wrap">
           <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>

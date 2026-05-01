@@ -145,97 +145,98 @@ let handle_join (ctx : context) : tool_result option =
   let mcp_session_id = ctx.mcp_session_id in
   let sid = Option.value ~default:"-" mcp_session_id in
   let caps = arg_get_string_list ctx "capabilities" in
-  (* RFC P3-a — preflight Keeper_identity.normalize_all_names (logging-only).
-     Reasons: (1) classify bootstrap-window silent_auth_token_resolve_error
-     bursts by normalize branch; (2) when promoted to hard-error in a
-     follow-up PR, transient-nickname joins will already use the canonical
-     keeper_name. In logging-only mode every error path emits a warn +
-     Prometheus inc and falls through with the original [agent_name]. *)
-  let resolved_agent_name =
-    match
-      Keeper_identity.normalize_all_names
-        ~input_agent_name:agent_name
-        ~base_path:config.base_path
-        ~check_persona:true ~check_credential:true ()
-    with
-    | Ok bundle ->
-        Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
-          ~labels:[ ("outcome", "ok") ] ();
-        bundle.keeper_name
-    | Error err ->
-        let outcome = Keeper_identity.validation_error_outcome_label err in
-        Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
-          ~labels:[ ("outcome", outcome) ] ();
-        Log.Misc.warn
-          "[sid=%s] [silent:coord_join_normalize] agent=%s outcome=%s detail=%s \
-           - logging-only mode, proceeding with original agent_name"
-          sid agent_name outcome
-          (Keeper_identity.show_validation_error err);
-        agent_name
+  let proceed_with_join resolved_name =
+    let result =
+      Coord.join config ~agent_name:resolved_name ~capabilities:caps ()
+    in
+    (* GC: reap zombie agents on join. Best-effort. *)
+    (try let _ = Coord.cleanup_zombies config in ()
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Stdlib.Printexc.to_string exn));
+    (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
+    let nickname =
+      try
+        let prefix = "  Nickname: " in
+        let start_idx =
+          let idx = ref 0 in
+          while !idx < String.length result - String.length prefix &&
+                not (String.equal (Stdlib.String.sub result !idx (String.length prefix)) prefix) do
+            Stdlib.incr idx
+          done;
+          !idx + String.length prefix
+        in
+        let end_idx = match String.index_from_opt result start_idx '\n' with
+          | Some idx -> idx
+          | None -> String.length result
+        in
+        String.sub result start_idx (end_idx - start_idx)
+      with Invalid_argument _ -> agent_name
+    in
+    let _ = Session.register registry ~agent_name:nickname in
+    ctx.write_mcp_session_agent nickname;
+    Log.Misc.debug "[sid=%s] masc_join: saved nickname=%s to MCP session (original=%s)" sid nickname agent_name;
+    if Option.is_none mcp_session_id then begin
+      Log.Misc.warn "[sid=%s] [deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity" sid;
+      let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
+      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+      (try
+        Fs_compat.save_file agent_file nickname
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
+        Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Stdlib.Printexc.to_string e))
+    end;
+    let institution_welcome = match state.Mcp_server.fs with
+      | Some fs ->
+          (try Institution_eio.load_and_format_for_welcome ~fs config
+           with
+           | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+               Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Stdlib.Printexc.to_string exn); "")
+      | None -> ""
+    in
+    let final_result = if String.equal institution_welcome "" then result
+      else result ^ institution_welcome in
+    let join_event = `Assoc [
+      ("type", `String "masc/agent_joined");
+      ("agent_name", `String nickname);
+      ("timestamp", `Float (Time_compat.now ()));
+    ] in
+    let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
+    Mcp_server.sse_broadcast state join_event;
+    Some (true, final_result)
   in
-  let result =
-    Coord.join config ~agent_name:resolved_agent_name ~capabilities:caps ()
-  in
-  (* GC: reap zombie agents on join. Best-effort. *)
-  (try let _ = Coord.cleanup_zombies config in ()
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Stdlib.Printexc.to_string exn));
-  (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
-  let nickname =
-    try
-      let prefix = "  Nickname: " in
-      let start_idx =
-        let idx = ref 0 in
-        while !idx < String.length result - String.length prefix &&
-              not (String.equal (Stdlib.String.sub result !idx (String.length prefix)) prefix) do
-          Stdlib.incr idx
-        done;
-        !idx + String.length prefix
-      in
-      let end_idx = match String.index_from_opt result start_idx '\n' with
-        | Some idx -> idx
-        | None -> String.length result
-      in
-      String.sub result start_idx (end_idx - start_idx)
-    with Invalid_argument _ -> agent_name
-  in
-  let _ = Session.register registry ~agent_name:nickname in
-  ctx.write_mcp_session_agent nickname;
-  Log.Misc.debug "[sid=%s] masc_join: saved nickname=%s to MCP session (original=%s)" sid nickname agent_name;
-  (* Deprecated: /tmp file agent identity. Agent_identity system is primary.
-     Remove when deprecation log shows zero hits over a release cycle. *)
-  if Option.is_none mcp_session_id then begin
-    Log.Misc.warn "[sid=%s] [deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity" sid;
-    let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
-    let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-    (try
-      Fs_compat.save_file agent_file nickname
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Stdlib.Printexc.to_string e))
-  end;
-  (* Cultural Inheritance: append institution welcome to join response *)
-  let institution_welcome = match state.Mcp_server.fs with
-    | Some fs ->
-        (try Institution_eio.load_and_format_for_welcome ~fs config
-         with
-         | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-             Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Stdlib.Printexc.to_string exn); "")
-    | None -> ""
-  in
-  let final_result = if String.equal institution_welcome "" then result
-    else result ^ institution_welcome in
-  let join_event = `Assoc [
-    ("type", `String "masc/agent_joined");
-    ("agent_name", `String nickname);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
-  Mcp_server.sse_broadcast state join_event;
-  Some (true, final_result)
+  (* RFC P3-a — fail-closed identity gate.
+     Keeper_identity.normalize_all_names validates the agent identity
+     against persona + credential filesystem checks.  When validation
+     fails, the join is rejected rather than silently accepted.
+     Previously, normalize errors were logged and the join proceeded
+     with the original agent_name (fail-open), causing persona drift
+     and downstream credential resolution failures. *)
+  match
+    Keeper_identity.normalize_all_names
+      ~input_agent_name:agent_name
+      ~base_path:config.base_path
+      ~check_persona:true ~check_credential:true ()
+  with
+  | Ok bundle ->
+      Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
+        ~labels:[ ("outcome", "ok") ] ();
+      proceed_with_join bundle.keeper_name
+  | Error err ->
+      let outcome = Keeper_identity.validation_error_outcome_label err in
+      Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
+        ~labels:[ ("outcome", outcome) ] ();
+      Log.Misc.warn
+        "[sid=%s] [fail-closed:coord_join_normalize] agent=%s outcome=%s detail=%s          - join rejected"
+        sid agent_name outcome
+        (Keeper_identity.show_validation_error err);
+      Some
+        ( false,
+          Printf.sprintf
+            "masc_join rejected: identity validation failed for '%s' — %s.              Ensure the persona and credential files exist for this agent."
+            agent_name (Keeper_identity.show_validation_error err) )
 
 (** masc_leave — leave a MASC room *)
 let handle_leave (ctx : context) : tool_result option =

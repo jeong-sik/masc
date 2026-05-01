@@ -159,9 +159,12 @@ let run_turn
     try s.Keeper_run_tools.cleanup () with
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
+      let backtrace = Printexc.get_backtrace () in
       Log.Keeper.warn
-        "%s: keeper tool bundle cleanup raised: %s"
-        meta.name (Printexc.to_string e)
+        "%s: keeper tool bundle cleanup raised: %s%s"
+        meta.name
+        (Printexc.to_string e)
+        (if String.equal backtrace "" then "" else "\n" ^ backtrace)
   in
   let run_with_setup_cleanup f =
     match f () with

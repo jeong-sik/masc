@@ -51,6 +51,11 @@ val freeze : hook_accumulator -> hook_outputs
     at the OAS call site. *)
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
+  (** Release resources owned by the prepared keeper tool bundle.
+      Callers should invoke this once after the turn consumes the setup,
+      on both success and exception paths.  Implementations must be
+      idempotent and should not raise; callers defensively catch and log
+      non-cancellation failures. *)
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t

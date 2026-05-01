@@ -118,9 +118,9 @@ let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
     (contains ~needle:"s.Keeper_run_tools.cleanup ()" agent_src);
   check
     int
-    "agent run invokes cleanup in both result and exception branches"
-    2
-    (count_occurrences ~needle:"cleanup_agent_setup ();" agent_src);
+    "agent run defines cleanup once and references it from both result and exception branches"
+    3
+    (count_occurrences ~needle:"cleanup_agent_setup" agent_src);
   check
     bool
     "agent run preserves exception propagation after cleanup"

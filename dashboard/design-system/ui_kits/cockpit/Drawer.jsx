@@ -379,9 +379,14 @@ function Drawer() {
       (target && target.closest && target.closest("[contenteditable]:not([contenteditable='false'])"));
   };
 
-  // ctrl/cmd + ` toggles open/closed
+  const isDrawerHotkey = (e) => {
+    const altGraph = e.getModifierState && e.getModifierState("AltGraph");
+    return !altGraph && (e.ctrlKey || e.metaKey) && e.code === "Backquote";
+  };
+
+  // ctrl/cmd + physical Backquote toggles open/closed
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.code === "Backquote") {
+    if (isDrawerHotkey(e)) {
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));

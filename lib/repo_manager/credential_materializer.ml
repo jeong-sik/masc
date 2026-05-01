@@ -23,6 +23,8 @@ let git_terminal_prompt_env = git_terminal_prompt_key ^ "=0"
 let now_unix_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
+let gh_hosts_yml = "hosts.yml"
+
 let close_fd_noerr fd =
   try Unix.close fd with Unix.Unix_error _ -> ()
 
@@ -127,7 +129,7 @@ let strip_value_decorations raw =
    The token value never escapes this function; callers receive only
    its [sha256_prefix]. *)
 let read_token_from_hosts_yml ~gh_config_dir =
-  let path = Filename.concat gh_config_dir "hosts.yml" in
+  let path = Filename.concat gh_config_dir gh_hosts_yml in
   if not (Sys.file_exists path) then None
   else
     try
@@ -277,7 +279,7 @@ let ensure (cred : credential) : credential =
     failure is reflected in the [state] field by the next
     [verify_state] call. *)
 let relabel_hosts_yml ~gh_config_dir ~identity_label =
-  let path = Filename.concat gh_config_dir "hosts.yml" in
+  let path = Filename.concat gh_config_dir gh_hosts_yml in
   if not (Sys.file_exists path) then ()
   else
     try

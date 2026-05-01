@@ -136,7 +136,7 @@ type fitness_weights = {
   w_reliability : float;
   w_speed : float;
   w_handoff : float;
-  
+
 }
 
 let default_fitness_weights : fitness_weights = {
@@ -144,7 +144,7 @@ let default_fitness_weights : fitness_weights = {
   w_reliability = 0.30;
   w_speed = 0.15;
   w_handoff = 0.15;
-  
+
 }
 
 (** Score function for fitness calculation.
@@ -164,7 +164,7 @@ let score_for ?(weights = default_fitness_weights) ~min_avg metrics =
     +. (weights.w_reliability *. reliability)
     +. (weights.w_speed *. speed)
     +. (weights.w_handoff *. handoff)
-    
+
   in
   (score, completion, reliability, speed, handoff)
 
@@ -198,7 +198,7 @@ let handle_agent_fitness ctx args =
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
     let min_avg = min_avg_time metrics_list in
-    
+
     let agents_json =
       List.map (fun (agent_id, metrics) ->
         let (score, completion, reliability, speed, handoff) = score_for ~min_avg metrics in
@@ -210,7 +210,7 @@ let handle_agent_fitness ctx args =
             ("reliability", `Float reliability);
             ("speed", `Float speed);
             ("handoff", `Float handoff);
-            
+
           ]);
           ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
         ]

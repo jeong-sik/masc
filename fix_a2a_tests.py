@@ -3,7 +3,7 @@ import re
 with open("test/test_error_logging_coverage.ml", "r") as f:
     content = f.read()
 
-content = re.sub(r'\(\* ============================================================\n\s*a2a_tools: submit_heartbeat_result unknown status.*?\];\n\s*\]\n', 
+content = re.sub(r'\(\* ============================================================\n\s*a2a_tools: submit_heartbeat_result unknown status.*?\];\n\s*\]\n',
 '''(* ============================================================
    Tests Suite
    ============================================================ *)

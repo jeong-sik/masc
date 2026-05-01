@@ -16,7 +16,7 @@
     ["text" | "json"]. Mirror of
     [Tool_agent.valid_collaboration_format_strings]. *)
 
-(** Tool schemas: [masc_agents], [masc_agent_update], 
+(** Tool schemas: [masc_agents], [masc_agent_update],
     [masc_agent_fitness], [masc_register_capabilities],
     [masc_get_metrics]. *)
 val schemas : Types.tool_schema list

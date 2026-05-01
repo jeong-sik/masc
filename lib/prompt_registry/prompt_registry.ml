@@ -128,10 +128,12 @@ let parse_list_value s =
 
 (** Extract variable names from a template string.
     Matches {{variable_name}} patterns. *)
+let template_variable_regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
+
 let extract_variables template =
-  let regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile in
-  let vars = Re.all regex template
-    |> List.map (fun g -> Re.Group.get g 1)
+  let vars = Re.all template_variable_regex template
+    |> List.map (fun g -> Re.Group.get g 1 |> String.trim)
+    |> List.filter (fun name -> name <> "")
   in
   (* Remove duplicates and sort alphabetically *)
   List.sort_uniq String.compare vars
@@ -400,62 +402,35 @@ let update_metrics ~id ~version ~score () : unit =
 
 (** {1 Template Rendering} *)
 
-(* Static unresolved-var detector — same pattern, hoisted out of
-   [render_template] so [Re.compile] runs once at module load instead
-   of per render call. *)
-let unresolved_var_re =
-  Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile
-
-(* Byte-wise [pattern → replacement] substring substitution.
-
-   Replaces [Re.replace_string (Re.str pattern |> Re.compile)] which
-   compiled a fresh DFA per variable.  [render_template] is hot —
-   keeper prompts call it per turn with ~15 vars, so the prior form
-   built O(vars × calls) regexes for what is just literal substring
-   replace.  Empty pattern short-circuits to the input string to match
-   [Re.str ""] semantics. *)
-let replace_substring_all ~pattern ~replacement s =
-  let plen = String.length pattern in
-  let slen = String.length s in
-  if plen = 0 then s
-  else
-    let rec match_at i j =
-      if j = plen then true
-      else if String.unsafe_get s (i + j) <> String.unsafe_get pattern j
-      then false
-      else match_at i (j + 1)
-    in
-    let buf = Buffer.create slen in
-    let last = slen - plen in
-    let rec loop i =
-      if i > last then begin
-        Buffer.add_substring buf s i (slen - i);
-        Buffer.contents buf
-      end
-      else if match_at i 0 then begin
-        Buffer.add_string buf replacement;
-        loop (i + plen)
-      end
-      else begin
-        Buffer.add_char buf (String.unsafe_get s i);
-        loop (i + 1)
-      end
-    in
-    loop 0
-
 (** Render a prompt template with the given variables *)
-let render_template ~template ~vars () : (string, string) result =
+let render_template ?template_variables ~template ~vars () : (string, string) result =
   try
-    let result = ref template in
-    List.iter (fun (name, value) ->
-      let pattern = Printf.sprintf "{{%s}}" name in
-      result := replace_substring_all ~pattern ~replacement:value !result
-    ) vars;
-    let has_unresolved = Re.execp unresolved_var_re !result in
-    if has_unresolved then
-      Error "Unresolved variables in template"
+    let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
+    let missing =
+      let effective_variables = extract_variables template in
+      let declared_variables =
+        match template_variables with
+        | Some variables ->
+            variables
+            |> List.map String.trim
+            |> List.filter (fun name -> name <> "")
+        | None -> []
+      in
+      List.sort_uniq String.compare
+        (effective_variables @ declared_variables)
+      |> List.filter (fun name -> not (List.mem_assoc name vars))
+    in
+    if missing <> [] then
+      Error
+        (Printf.sprintf "Unresolved variables in template: %s"
+           (String.concat ", " missing))
     else
-      Ok !result
+      Ok
+        (Re.replace template_variable_regex template ~f:(fun group ->
+             let name = Re.Group.get group 1 |> String.trim in
+             match List.assoc_opt name vars with
+             | Some value -> value
+             | None -> Re.Group.get group 0))
   with e ->
     Error (Printf.sprintf "Render error: %s" (Printexc.to_string e))
 
@@ -463,7 +438,10 @@ let render_template ~template ~vars () : (string, string) result =
 let render ~id ?version ~vars () : (string, string) result =
   match get ~id ?version () with
   | None -> Error (Printf.sprintf "Prompt '%s' not found" id)
-  | Some entry -> render_template ~template:entry.template ~vars ()
+  | Some entry ->
+      render_template
+        ~template_variables:entry.variables
+        ~template:entry.template ~vars ()
 
 (** {1 Statistics} *)
 
@@ -796,11 +774,37 @@ let resolve_prompt key =
 let get_prompt key = (resolve_prompt key).effective
 
 let render_prompt_template key vars =
-  let template = get_prompt key in
-  if String.trim template = "" then
+  let resolved = resolve_prompt key in
+  if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)
   else
-    render_template ~template ~vars ()
+    let effective_variables = extract_variables resolved.effective in
+    let metadata_variables =
+      with_mutex (fun () ->
+          match Hashtbl.find_opt meta_tbl key with
+          | None -> None
+          | Some meta -> (
+              match meta.template_variables with
+              | [] -> None
+              | variables -> Some variables))
+    in
+    (match metadata_variables with
+     | None -> ()
+     | Some variables ->
+         let metadata_variables =
+           variables
+           |> List.map String.trim
+           |> List.filter (fun name -> name <> "")
+           |> List.sort_uniq String.compare
+         in
+         if metadata_variables <> effective_variables then
+           Log.Misc.warn
+             "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
+             key (String.concat ", " metadata_variables)
+             (String.concat ", " effective_variables));
+    render_template
+      ~template_variables:effective_variables
+      ~template:resolved.effective ~vars ()
 
 (** Validate and apply a single override entry (shared logic for
     [set_override] and [restore_overrides]).  Caller must NOT hold [mu].

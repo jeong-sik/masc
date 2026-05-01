@@ -641,7 +641,7 @@ let prepare_agent_setup
         ~deterministic_prefilter
         ~llm_selected
         ~discovered
-      
+
     in
     let required_tool_names =
       current_task_required_tools ()
@@ -649,7 +649,7 @@ let prepare_agent_setup
     in
     let visible_required_tool_names =
       required_tool_names
-      
+
       |> validate_allow_list ~turn
       |> Keeper_types.dedupe_keep_order
     in

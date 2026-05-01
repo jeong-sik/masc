@@ -66,7 +66,12 @@ let should_orchestrate ~min_priority room_config =
 
 (** The orchestrator prompt - MCP tools are now available via --allowedTools! *)
 let make_orchestrator_prompt ~port:_ =
-  {|You are the MASC Orchestrator Agent.
+  let p = Prompt_registry.get_prompt "system.orchestrator" in
+  if String.trim p <> "" then p
+  else begin
+    Log.Orchestrator.warn
+      "system.orchestrator prompt missing or empty, using embedded fallback";
+    {|You are the MASC Orchestrator Agent.
 
 You have access to MASC MCP tools via mcp__masc__* prefix.
 
@@ -100,6 +105,7 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 - mcp__masc__masc_heartbeat - Update your heartbeat
 
 Start by calling mcp__masc__masc_status to see the current room state.|}
+  end
 
 (** Spawn the orchestrator agent. *)
 let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =

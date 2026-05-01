@@ -93,7 +93,7 @@ function mockMemoryTierFetches(usage: MemoryKindUsageEntry[]) {
     mermaid: 'graph TD',
     memory_kind_usage: usage,
   } satisfies KeeperStateDiagramResponse)
-  fetchKeeperCompositeMock.mockResolvedValue({
+  const composite = {
     correlation_id: 'keeper-1:run-1',
     run_id: 'run-1',
     ts: 0,
@@ -112,7 +112,8 @@ function mockMemoryTierFetches(usage: MemoryKindUsageEntry[]) {
     is_live: true,
     last_outcome: null,
     recommended_actions: [],
-  } as KeeperCompositeSnapshot)
+  } satisfies KeeperCompositeSnapshot
+  fetchKeeperCompositeMock.mockResolvedValue(composite)
 }
 
 afterEach(() => {

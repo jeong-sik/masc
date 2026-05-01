@@ -300,10 +300,10 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 mb-1">
         <${SectionHeader} size="xs">턴 예산 (OAS 호출당)</${SectionHeader}>
         ${hasInvalid
-          ? html`<${StatusChip} tone="bad" class="font-semibold">invalid override</${StatusChip}>`
+          ? html`<${StatusChip} tone="bad" uppercase=${true} class="font-semibold">invalid override</${StatusChip}>`
           : hasOverride
-            ? html`<${StatusChip} tone="warn" class="font-semibold">override</${StatusChip}>`
-            : html`<${StatusChip} tone="ok" class="font-medium">inherited</${StatusChip}>`}
+            ? html`<${StatusChip} tone="warn" uppercase=${true} class="font-semibold">override</${StatusChip}>`
+            : html`<${StatusChip} tone="ok" uppercase=${true} class="font-medium">inherited</${StatusChip}>`}
       </div>
       <${BudgetRow}
         label="반응형"

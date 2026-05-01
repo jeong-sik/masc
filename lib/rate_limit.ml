@@ -377,22 +377,22 @@ let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
 (** {1 Agent Key Extraction} *)
 
 (** Derive a stable per-agent rate-limit key from either a bearer token
-    (preferred — uses the first 16 hex chars of its SHA-256 to avoid storing
+    (preferred — uses the first 32 hex chars of its SHA-256 to avoid storing
     the raw credential) or an agent-name string.  Returns [None] when neither
     is provided (anonymous / loopback request). *)
 let agent_key_of_token_or_name ?token ?agent_name () =
   match token with
   | Some t when t <> "" ->
-      (* Use the first 16 hex chars (8 bytes, 64 bits) of the token's SHA-256
+      (* Use the first 32 hex chars (16 bytes, 128 bits) of the token's SHA-256
          digest as the rate-limit key.  This is sufficient for identifying
          distinct clients in a rate-limit bucket table while avoiding storage of
          raw credentials.  The reduced entropy (vs. 256 bits) is intentional and
          acceptable for a best-effort rate-limit use case: in the negligible
          collision scenario two distinct tokens would share a bucket, which is
          safe (one may consume the other's quota) but not a security hazard.
-         SHA-256 hex is always 64 chars, so String.sub 0 16 is safe. *)
+         SHA-256 hex is always 64 chars, so String.sub 0 32 is safe. *)
       let digest = Digestif.SHA256.(to_hex (digest_string t)) in
-      Some ("token:" ^ String.sub digest 0 16)
+      Some ("token:" ^ String.sub digest 0 32)
   | _ ->
       (match agent_name with
        | Some name when name <> "" -> Some ("agent:" ^ name)

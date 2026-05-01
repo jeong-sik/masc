@@ -168,7 +168,7 @@ val key_of_sockaddr : Eio.Net.Sockaddr.stream -> string
 
 val agent_key_of_token_or_name :
   ?token:string -> ?agent_name:string -> unit -> string option
-(** Derive a per-agent rate-limit key from a bearer [token] (first 16 hex
+(** Derive a per-agent rate-limit key from a bearer [token] (first 32 hex
     chars of its SHA-256, prefixed ["token:"]) or from [agent_name]
     (prefixed ["agent:"]).  [token] is tried first.  Returns [None] when
     neither is provided. *)

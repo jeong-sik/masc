@@ -20,6 +20,7 @@ val create :
   config:Coord_utils_backend_setup.config ->
   task_id:string ->
   ?base_branch:string ->
+  ?repo_name:string ->
   agent_name:string ->
   unit ->
   (sandbox, string) result
@@ -38,6 +39,7 @@ val with_sandbox :
   config:Coord_utils_backend_setup.config ->
   task_id:string ->
   ?base_branch:string ->
+  ?repo_name:string ->
   agent_name:string ->
   (sandbox -> 'a) ->
   ('a * string list, string) result

@@ -81,11 +81,11 @@ let () = test "dispatch_status" (fun () ->
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [] in
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
-  | Some (success, result) ->
+  | Some { success; message } ->
       assert success;
-      assert (str_contains result "⚡ Snapshot:");
-      assert (str_contains result "🧭 You:");
-      assert (str_contains result "💡 Suggested next:")
+      assert (str_contains message "⚡ Snapshot:");
+      assert (str_contains message "🧭 You:");
+      assert (str_contains message "💡 Suggested next:")
   | None -> failwith "dispatch returned None"
 )
 
@@ -95,7 +95,7 @@ let () = test "dispatch_coordination_fsm_snapshot" (fun () ->
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [] in
   match Tool_coord.dispatch ctx ~name:"masc_coordination_fsm_snapshot" ~args with
-  | Some (success, result) ->
+  | Some { success; message = result } ->
       assert success;
       let json = Yojson.Safe.from_string result in
       let open Yojson.Safe.Util in

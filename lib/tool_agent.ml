@@ -30,54 +30,6 @@ let result_to_response = function
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
-(* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
-   new constructor forces compilation in [agent_card_action_to_string]
-   AND extends [valid_agent_card_action_strings]; the schema in
-   [tool_schemas_agent.ml] mirrors the SSOT (cycle-aware, sync test).
-   The previous code used a string match with a wildcard `_ -> Get`
-   branch which silently routed any unknown action to Get. *)
-type agent_card_action =
-  | Get
-  | Refresh
-
-let agent_card_action_to_string = function
-  | Get -> "get"
-  | Refresh -> "refresh"
-
-let agent_card_action_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "get" | "" -> Some Get
-  | "refresh" -> Some Refresh
-  | _ -> None
-
-let all_agent_card_actions = [ Get; Refresh ]
-
-let valid_agent_card_action_strings =
-  List.map agent_card_action_to_string all_agent_card_actions
-
-(* Issue #8501: Variant SSOT for masc_collaboration_graph.format.  Same
-   pattern as agent_card_action above. The previous code used
-   [if String.equal format "json" then ... else (text)] which silently routed
-   any unknown format to text. *)
-type collaboration_format =
-  | Text
-  | Json
-
-let collaboration_format_to_string = function
-  | Text -> "text"
-  | Json -> "json"
-
-let collaboration_format_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "text" | "" -> Some Text
-  | "json" -> Some Json
-  | _ -> None
-
-let all_collaboration_formats = [ Text; Json ]
-
-let valid_collaboration_format_strings =
-  List.map collaboration_format_to_string all_collaboration_formats
-
 (** Handle masc_agents *)
 let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
@@ -269,68 +221,6 @@ let handle_agent_fitness ctx args =
     ] in
     (true, Yojson.Safe.to_string json)
 
-(** Handle masc_collaboration_graph *)
-let handle_collaboration_graph ctx args =
-  (* Issue #8501: explicit Variant fallback to Text — back-compat with
-     prior `else` branch but unknown formats are visibly mapped, not
-     silently absorbed. *)
-  let format =
-    collaboration_format_of_string_opt (get_string args "format" "text")
-    |> Option.value ~default:Text
-  in
-  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
-  let (synapses, agents) = Hebbian_eio.get_graph_data ctx.config in
-  match format with
-  | Json ->
-    let synapses = List.filteri (fun i _ -> i < limit) synapses in
-    let json = `Assoc [
-      ("agents", `List (List.map (fun a -> `String a) agents));
-      ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
-    ] in
-    (true, Yojson.Safe.to_string json)
-  | Text ->
-    let lines =
-      synapses
-      |> List.sort (fun a b -> Stdlib.Float.compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
-      |> List.filteri (fun i _ -> i < limit)
-      |> List.map (fun s ->
-          Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
-            s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
-            s.Hebbian_eio.weight s.Hebbian_eio.success_count s.Hebbian_eio.failure_count)
-    in
-    if Stdlib.List.length lines = 0 then
-      (true, "No collaboration data yet.")
-    else
-      (true, String.concat "\n" lines)
-
-(** Handle masc_agent_card *)
-let handle_agent_card _ctx args =
-  (* Issue #8501: explicit Variant fallback to Get — back-compat with
-     prior wildcard `_ -> get` but unknown actions are now mapped via
-     [Option.value], making the fallback visible at the call site. *)
-  let action =
-    agent_card_action_of_string_opt (get_string args "action" "get")
-    |> Option.value ~default:Get
-  in
-  let card = Agent_card.generate_default ~schemas:Config.raw_all_tool_schemas () in
-  let json = Agent_card.to_json card in
-  let response = match action with
-    | Refresh ->
-        `Assoc [
-          ("status", `String "refreshed");
-          ("card", json);
-          ("endpoint", `String "/.well-known/agent.json");
-          ("legacy_endpoint", `String "/.well-known/agent-card.json");
-        ]
-    | Get ->
-        `Assoc [
-          ("card", json);
-          ("endpoint", `String "/.well-known/agent.json");
-          ("legacy_endpoint", `String "/.well-known/agent-card.json");
-        ]
-  in
-  (true, Yojson.Safe.to_string response)
-
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
@@ -339,8 +229,6 @@ let dispatch ctx ~name ~args =
   | "masc_agent_update" -> Some (handle_agent_update ctx args)
   | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
-  | "masc_collaboration_graph" -> Some (handle_collaboration_graph ctx args)
-  | "masc_agent_card" -> Some (handle_agent_card ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
@@ -350,13 +238,11 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only =
-  [ "masc_agents"; "masc_agent_card" ]
+  [ "masc_agents" ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
 let tool_required_permission = function
-  | "masc_agents" | "masc_agent_card" | "masc_agent_fitness"
-  | "masc_collaboration_graph"
-  | "masc_get_metrics" ->
+  | "masc_agents" | "masc_agent_fitness" | "masc_get_metrics" ->
       Some Types.CanReadState
   | "masc_register_capabilities" | "masc_agent_update" ->
       Some Types.CanBroadcast

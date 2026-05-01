@@ -51,14 +51,12 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_observe_operations", CanReadState);
     ("masc_observe_capacity", CanReadState);
     ("masc_observe_traces", CanReadState);
-    ("masc_agent_card", CanReadState);
     ("masc_agent_fitness", CanReadState);
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
     ("masc_coordination_fsm_snapshot", CanReadState);
     ("masc_approval_pending", CanReadState);
     ("masc_approval_get", CanAdmin);
-    ("masc_collaboration_graph", CanReadState);
     ("masc_get_metrics", CanReadState);
     ("masc_plan_get_task", CanReadState);
     ("masc_plan_get", CanReadState);
@@ -125,9 +123,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_tool_revoke", CanAdmin);
     ("masc_tool_admin_snapshot", CanAdmin);
     ("masc_tool_admin_update", CanAdmin);
-    ("masc_portal_open", CanOpenPortal);
-    ("masc_portal_close", CanOpenPortal);
-    ("masc_portal_send", CanSendPortal);
     ("masc_worktree_create", CanCreateWorktree);
     ("masc_worktree_remove", CanRemoveWorktree);
   ]

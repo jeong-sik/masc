@@ -199,8 +199,7 @@ module Rest = struct
     | "masc_who"
     | "masc_messages"
     | "masc_operator_snapshot"
-    | "masc_operator_digest"
-    | "masc_agent_card" -> Some Conditional_bearer
+    | "masc_operator_digest" -> Some Conditional_bearer
     | _ -> None
 
   (** Back-compat wrapper: callers (OpenAPI doc generation) still receive a
@@ -230,7 +229,6 @@ module Rest = struct
       ("masc_webrtc_offer", [ (POST, "/webrtc/offer") ]);
       ("masc_webrtc_answer", [ (POST, "/webrtc/answer") ]);
       ("masc_broadcast", [ (POST, "/api/v1/broadcast") ]);
-      ("masc_agent_card", [ (GET, "/.well-known/agent.json") ]);
     ]
 
   let actual_rest_bindings_for_operation name =
@@ -255,7 +253,6 @@ module Rest = struct
     [
       ("GET", "/", "masc_status");
       ("POST", "/broadcast", "masc_broadcast");
-      ("GET", "/.well-known/agent-card.json", "masc_agent_card");
     ]
 
   let operation_of_legacy_rest_route ~http_method ~path =

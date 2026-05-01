@@ -208,7 +208,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_who", readonly_tool);
     ("masc_agents", readonly_tool);
     ("masc_dashboard", readonly_tool);
-    ("masc_agent_card", readonly_tool);
     ("masc_board_list", readonly_tool);
     ("masc_board_get", readonly_tool);
     ("masc_tool_help", readonly_tool);
@@ -232,12 +231,6 @@ let explicit_metadata : (string * metadata) list =
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "channel_gate",
       { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
-    ( "masc_portal_open",
-      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
-    ( "masc_portal_close",
-      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
-    ( "masc_portal_send",
-      { masc_coordination_tool with required_permission = Some Types.CanSendPortal } );
     ( "masc_room_status",
       hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
         "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
@@ -465,7 +458,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Voice_session_start
   | TN.Keeper TK.Voice_speak ->
       Some Masc_coordination
-  | TN.Masc TM.A2a_delegate
   | TN.Masc TM.Autoresearch_inject
   | TN.Masc TM.Autoresearch_start
   | TN.Masc TM.Autoresearch_stop
@@ -475,7 +467,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Spawn
   | TN.Masc TM.Start ->
       Some Main_worktree_write
-  | TN.Masc TM.Agent_card
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agents
   | TN.Masc TM.Autoresearch_search_findings
@@ -490,7 +481,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Code_read
   | TN.Masc TM.Code_search
   | TN.Masc TM.Code_symbols
-  | TN.Masc TM.Collaboration_graph
   | TN.Masc TM.Config
   | TN.Masc TM.Coordination_fsm_snapshot
   | TN.Masc TM.Dashboard
@@ -689,11 +679,10 @@ let tool_group_of_typed_tool_name = function
       | TM.Autoresearch_status
       | TM.Autoresearch_stop ) ->
       Some Masc_autoresearch
-  | TN.Masc (TM.Agent_card | TM.Agent_fitness | TM.Agent_update | TM.Agents) ->
+  | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agents) ->
       Some Masc_agent
   | TN.Masc
-      ( TM.A2a_delegate
-      | TM.Add_task
+      ( TM.Add_task
       | TM.Approval_get
       | TM.Batch_add_tasks
       | TM.Broadcast
@@ -702,7 +691,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Claim_next
       | TM.Claim_task
       | TM.Cleanup_zombies
-      | TM.Collaboration_graph
       | TM.Complete_task
       | TM.Config
       | TM.Coordination_fsm_snapshot

@@ -491,10 +491,10 @@ let test_rest_tool_to_endpoint_operator_confirm () =
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/api/v1/operator/confirm" path
 
-let test_rest_tool_to_endpoint_agent_card () =
+let test_rest_tool_to_endpoint_retired_agent_card () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_agent_card" in
-  check string "method" "GET" (Transport.Rest.method_to_string m);
-  check string "path" "/.well-known/agent.json" path
+  check string "method" "POST" (Transport.Rest.method_to_string m);
+  check string "path" "/mcp" path
 
 let test_rest_tool_to_endpoint_websocket_discovery () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_websocket_discovery" in
@@ -559,16 +559,16 @@ let test_rest_parse_request_operator_confirm () =
   in
   check string "method_name" "masc_operator_confirm" req.method_name
 
-let test_rest_parse_request_agent_card () =
+let test_rest_parse_request_agent_card_retired_legacy () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/.well-known/agent-card.json" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_agent_card" req.method_name
+  check string "method_name" "unknown" req.method_name
 
-let test_rest_parse_request_agent_card_canonical () =
+let test_rest_parse_request_agent_card_retired_canonical () =
   let req =
     Transport.Rest.parse_request ~http_method:"GET"
       ~path:"/.well-known/agent.json" ~query_params:[] ~body:""
   in
-  check string "method_name" "masc_agent_card" req.method_name
+  check string "method_name" "unknown" req.method_name
 
 let test_rest_parse_request_websocket_discovery () =
   let req =
@@ -630,7 +630,6 @@ let test_rest_parse_request_roundtrips_direct_bindings () =
       "masc_webrtc_offer";
       "masc_webrtc_answer";
       "masc_broadcast";
-      "masc_agent_card";
     ]
   in
   List.iter
@@ -963,7 +962,8 @@ let () =
         test_rest_tool_to_endpoint_operator_action;
       test_case "operator confirm" `Quick
         test_rest_tool_to_endpoint_operator_confirm;
-      test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
+      test_case "retired agent_card" `Quick
+        test_rest_tool_to_endpoint_retired_agent_card;
       test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;
       test_case "webrtc_offer" `Quick test_rest_tool_to_endpoint_webrtc_offer;
       test_case "webrtc_answer" `Quick test_rest_tool_to_endpoint_webrtc_answer;
@@ -981,9 +981,10 @@ let () =
         test_rest_parse_request_operator_action;
       test_case "operator confirm" `Quick
         test_rest_parse_request_operator_confirm;
-      test_case "agent_card" `Quick test_rest_parse_request_agent_card;
-      test_case "agent_card canonical" `Quick
-        test_rest_parse_request_agent_card_canonical;
+      test_case "retired agent_card legacy" `Quick
+        test_rest_parse_request_agent_card_retired_legacy;
+      test_case "retired agent_card canonical" `Quick
+        test_rest_parse_request_agent_card_retired_canonical;
       test_case "websocket discovery" `Quick
         test_rest_parse_request_websocket_discovery;
       test_case "webrtc offer" `Quick test_rest_parse_request_webrtc_offer;

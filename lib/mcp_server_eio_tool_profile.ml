@@ -33,7 +33,6 @@ let managed_agent_passthrough_tool_names =
                 "masc_status";
                 "masc_tasks";
                 "masc_transition";
-                "masc_a2a_delegate";
               ]))
 
 module StringSet = Set.Make (String)
@@ -210,8 +209,6 @@ let custom_tool_titles : (string * string) list = [
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
-  ("masc_a2a_delegate", "Agent-to-Agent Delegate");
-  ("masc_a2a_subscribe", "Subscribe to Agent Events");
   (* Planning *)
   ("masc_plan_init", "Initialize Plan");
   ("masc_plan_get", "Get Plan");

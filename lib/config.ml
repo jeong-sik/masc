@@ -15,7 +15,11 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 
 let retired_front_door_schema_names =
   [
+    "masc_agent_card";
     "masc_collaboration_graph";
+    "masc_team_memory_read";
+    "masc_team_memory_write";
+    "masc_team_memory_search";
   ]
 
 let filter_retired_front_door_schemas (schemas : Types.tool_schema list) =
@@ -29,9 +33,7 @@ let raw_all_tool_schemas : Types.tool_schema list =
     (dedupe_schemas
        (Tools.raw_schemas
        @ Tool_schemas_control.schemas
-       @ Tool_schemas_a2a.schemas
        @ Tool_schemas_misc.schemas
-       @ Tool_team_memory.schemas
        @ Tool_board.tools
        @ Keeper_types.schemas
        @ Tool_local_runtime.schemas

@@ -45,31 +45,7 @@ let parse schema ~tool_name json =
       Error
         (Agent_sdk.Tool_input_validation.format_errors ~tool_name errs)
 
-let schema_to_tool_schema ~name ~description schema : Types.tool_schema =
-  {
-    Types.name = name;
-    description;
-    input_schema = Sg.to_json_schema schema;
-  }
-
-let schemas =
-  [
-    schema_to_tool_schema
-      ~name:"masc_team_memory_read"
-      ~description:
-        "Read shared team memory by key from the flattened default namespace. Uses a typed lane instead of exposing a shared writable shell directory."
-      read_schema;
-    schema_to_tool_schema
-      ~name:"masc_team_memory_write"
-      ~description:
-        "Write shared team memory by key in the flattened default namespace. Traversal, symlink escape, and secret-like payloads are blocked."
-      write_schema;
-    schema_to_tool_schema
-      ~name:"masc_team_memory_search"
-      ~description:
-        "Search shared team memory in the flattened default namespace by filename or content substring."
-      search_schema;
-  ]
+let schemas : Types.tool_schema list = []
 
 let default_namespace = "default"
 
@@ -436,29 +412,4 @@ let dispatch ~(config : Coord.config) ~(agent_name : string) ~name ~args
       | Error err -> Some (false, err))
   | _ -> None
 
-let read_only_tools = [ "masc_team_memory_read"; "masc_team_memory_search" ]
-
-let tool_required_permission = function
-  | "masc_team_memory_read" | "masc_team_memory_search" ->
-      Some Types.CanReadState
-  | "masc_team_memory_write" ->
-      Some Types.CanBroadcast
-  | _ -> None
-
-let () =
-  List.iter
-    (fun (s : Types.tool_schema) ->
-      let is_ro = List.mem s.name read_only_tools in
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_misc
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:is_ro
-           ~is_idempotent:is_ro
-           ~requires_join:true
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas
+let () = ()

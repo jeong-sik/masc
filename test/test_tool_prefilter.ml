@@ -64,8 +64,6 @@ let extended_tools =
       "Create a new git worktree for an isolated branch.";
     make_schema "masc_worktree_list"
       "List all active git worktrees.";
-    make_schema "masc_agent_card"
-      "Retrieve the agent card and profile information.";
     make_schema "masc_auth_status"
       "Check authentication and token credential status.";
     make_schema "masc_web_search"

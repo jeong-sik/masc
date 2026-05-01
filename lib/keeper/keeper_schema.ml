@@ -25,7 +25,7 @@ let sandbox_profile_enum_strings =
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 let shared_memory_scope_enum_strings =
-  [ "disabled"; "room" ]
+  [ "disabled"; "room"; "keeper_only"; "room_readonly" ]
 
 (** Issue #8486: hand-mirrored from
     [Keeper_status_detail.valid_tail_order_strings].  Same cycle
@@ -405,7 +405,7 @@ let keeper_schemas : tool_schema list = [
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) shared_memory_scope_enum_strings));
-          ("description", `String "Typed shared-memory lane policy. 'room' enables keeper-authorized masc_team_memory_* access on the flattened default namespace.");
+          ("description", `String "Typed shared-memory lane policy retained for metadata compatibility. Legacy masc_team_memory_* MCP tools are retired.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

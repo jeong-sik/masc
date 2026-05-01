@@ -47,7 +47,6 @@ let all_known_tool_names =
 let strict_success_names =
   [
     "masc_add_task";
-    "masc_agent_card";
     "masc_agents";
     "masc_batch_add_tasks";
     "masc_board_comment";

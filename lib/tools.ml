@@ -2,13 +2,17 @@
 
     All schemas are now owned by individual modules.
     This file assembles cycle-free schemas; config.ml adds
-    modules that depend on Config (Tool_control, Tool_a2a, Tool_misc). *)
+    modules that depend on Config (Tool_control, Tool_misc). *)
 
 open Types
 
 let retired_front_door_schema_names =
   [
+    "masc_agent_card";
     "masc_collaboration_graph";
+    "masc_team_memory_read";
+    "masc_team_memory_write";
+    "masc_team_memory_search";
   ]
 
 let filter_retired_front_door_schemas (schemas : tool_schema list) =
@@ -40,9 +44,7 @@ let all_schemas_extended =
   filter_retired_front_door_schemas
     (all_schemas
     @ Tool_schemas_control.schemas
-    @ Tool_schemas_a2a.schemas
     @ Tool_schemas_misc.schemas
-    @ Tool_team_memory.schemas
     @ Keeper_types.schemas
     @ Tool_local_runtime.schemas @ Tool_shard.schemas
     @ Tool_autoresearch.schemas)

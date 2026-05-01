@@ -1,7 +1,5 @@
 open Alcotest
 
-module U = Yojson.Safe.Util
-
 type http_result = {
   status : int option;
   body : string;
@@ -483,41 +481,6 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
     (contains_substr "requires room auth enabled with require_token=true"
        result.body)
 
-let test_agent_json_route_served_on_canonical_path () =
-  with_server ~enable_auth:false
-  @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
-            ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
-            ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
-  (* Retry up to 3 times to allow server_state initialization after /health readiness *)
-  let rec fetch_agent_card retries =
-    let result = run_curl_get ~port ~path:"/.well-known/agent.json" () in
-    match result.status with
-    | Some 200 ->
-        let json =
-          try Yojson.Safe.from_string result.body
-          with Yojson.Json_error err ->
-            fail
-              (Printf.sprintf "agent.json invalid JSON: %s\nbody=%s" err result.body)
-        in
-        (match json |> U.member "name" |> U.to_string_option with
-        | Some name -> (json, name)
-        | None when retries > 0 ->
-            Unix.sleepf 0.5;
-            fetch_agent_card (retries - 1)
-        | None ->
-            fail
-              (Printf.sprintf "agent.json name is null after retries\nbody=%s"
-                 result.body))
-    | _ when retries > 0 ->
-        Unix.sleepf 0.5;
-        fetch_agent_card (retries - 1)
-    | _ ->
-        require_http_ok "agent.json" result;
-        fail "unreachable"
-  in
-  let (_json, name) = fetch_agent_card 3 in
-  check string "agent card name present" "MASC-MCP" name
-
 let () =
   run "operator_mcp_e2e"
     [
@@ -525,7 +488,5 @@ let () =
         [
           test_case "full mcp requires auth on non-loopback bind" `Slow
             test_mcp_requires_auth_when_bound_non_loopback;
-          test_case "canonical agent discovery route" `Quick
-            test_agent_json_route_served_on_canonical_path;
         ] );
     ]

@@ -101,7 +101,7 @@ tools = ["masc_status", "masc_web_search"]
 tools = [
   "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
-  "masc_agent_card", "masc_tool_help",
+  "masc_tool_help",
   "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
   "masc_messages", "masc_broadcast",
 ]
@@ -111,7 +111,7 @@ tools = [
 tools = [
   "masc_status", "masc_tasks", "masc_claim_next", "masc_transition",
   "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
-  "masc_agent_card", "masc_tool_help", "masc_web_search",
+  "masc_tool_help", "masc_web_search",
   "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
   "masc_messages", "masc_broadcast",
 ]
@@ -122,7 +122,6 @@ tools = [
   "masc_add_task",
   "masc_agents",
   "masc_dashboard",
-  "masc_agent_card",
   "masc_tool_help",
   "masc_keeper_msg",
   "masc_keeper_msg_result",

@@ -227,7 +227,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    | A2a_delegate
     | Cancel_task
     | Complete_task
     | Dispatch_plan
@@ -246,11 +245,9 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Tasks
     | Transition
     | Update_priority -> Some Mod_task
-    | Agent_card
     | Agent_fitness
     | Agent_update
     | Agents
-    | Collaboration_graph
     | Get_metrics
     | Register_capabilities -> Some Mod_agent
     | Autoresearch_cycle

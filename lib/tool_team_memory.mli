@@ -3,18 +3,14 @@ open Base
 (** Tool_team_memory — per-room key/value memory with safe-path
     + secret-token enforcement.
 
-    Three external entries plus the internal pipeline.  Memory is
+    The external MCP front door is retired; this module retains the
+    internal/test-visible safe-path pipeline. Memory is
     stored as plain files under
     \[<masc_dir>/shared/rooms/<room>/memory/<key>\] with strict
     path-traversal + secret-token guards.
 
-    Tools advertised to the catalog:
-    - [masc_team_memory_read]: 2 args (room, key) -> content.
-    - [masc_team_memory_write]: 3 args (room, key, content) -> ack.
-    - [masc_team_memory_search]: 2 args (room, query) -> hits.
-
     Internal: \[Sg\] (Oas tool-schema-gen alias), 4 schema field
-    builders, 3 raw schemas, [parse], [schema_to_tool_schema],
+    builders, [parse],
     [default_namespace], validation / safe-path helpers
     ([validate_team_memory_room], [validate_authorized_room_id],
     [resolve_keeper_access], [authorize_team_memory], [is_safe_subpath],
@@ -27,8 +23,7 @@ open Base
 (** {1 Catalog} *)
 
 val schemas : Types.tool_schema list
-(** Three tool schemas in declaration order: read, write, search.
-    Consumed by {!Config} and {!Tools} during catalog assembly. *)
+(** Empty: legacy team-memory MCP tools are retired. *)
 
 (** {1 Path resolution (test-visible)} *)
 

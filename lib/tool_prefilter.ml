@@ -209,8 +209,6 @@ let synonyms : (string * string list) list =
     ("masc_worktree_remove",
      [ "remove worktree"; "delete worktree"; "cleanup worktree" ]);
     (* masc_agent_* — agent management *)
-    ("masc_agent_card",
-     [ "agent card"; "agent profile"; "agent info"; "who is agent" ]);
     ("masc_agent_update",
      [ "update agent"; "change agent"; "agent modify"; "agent settings" ]);
     ("masc_agent_fitness",

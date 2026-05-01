@@ -121,13 +121,12 @@ let test_channel_gate_requires_worker () =
   check bool "Worker allows channel_gate" true
     (Tool_access_policy.allows_name worker_policy "channel_gate")
 
-let test_portal_tools_require_worker () =
-  let worker_policy = Tool_access_role.policy_for_role Worker in
+let test_retired_portal_tools_are_not_worker_tools () =
   List.iter (fun tool_name ->
-    check bool
-      (Printf.sprintf "Worker allows %s" tool_name)
-      true
-      (Tool_access_policy.allows_name worker_policy tool_name))
+    check (option testable_permission)
+      (Printf.sprintf "%s has no permission-map entry" tool_name)
+      None
+      (Tool_permission_map.permission_for_tool tool_name))
     [ "masc_portal_open"; "masc_portal_close"; "masc_portal_send" ]
 
 let test_permissions_promoted_to_metadata_ssot () =
@@ -145,12 +144,8 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_autoresearch_record_finding", Types.CanAdmin);
       ("masc_autoresearch_search_findings", Types.CanReadState);
       ("masc_autoresearch_status", Types.CanReadState);
-      ("masc_agent_card", Types.CanReadState);
       ("masc_heartbeat", Types.CanBroadcast);
       ("masc_config", Types.CanReadState);
-      ("masc_team_memory_read", Types.CanReadState);
-      ("masc_team_memory_search", Types.CanReadState);
-      ("masc_team_memory_write", Types.CanBroadcast);
       ("masc_tool_list", Types.CanReadState);
       ("masc_tool_admin_snapshot", Types.CanAdmin);
       ("masc_runtime_verify", Types.CanReadState);
@@ -161,7 +156,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_keeper_reset", Types.CanBroadcast);
       ("masc_join", Types.CanJoin);
       ("masc_broadcast", Types.CanBroadcast);
-      ("masc_portal_send", Types.CanSendPortal);
       ("channel_gate", Types.CanBroadcast);
     ]
   in
@@ -248,8 +242,8 @@ let () =
             test_worker_allows_worker_only_tools;
           test_case "channel_gate requires worker" `Quick
             test_channel_gate_requires_worker;
-          test_case "portal tools require worker" `Quick
-            test_portal_tools_require_worker;
+          test_case "retired portal tools omitted" `Quick
+            test_retired_portal_tools_are_not_worker_tools;
           test_case "permissions promoted to metadata ssot" `Quick
             test_permissions_promoted_to_metadata_ssot;
         ] );

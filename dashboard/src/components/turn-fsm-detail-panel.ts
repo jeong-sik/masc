@@ -3,25 +3,28 @@ import { useMemo } from 'preact/hooks'
 
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
   turnFsmTlaSymbol,
 } from './keeper-fsm-specs'
 
-export function chipClass(tone: 'accent' | 'neutral' | 'warn' | 'err' | 'ok'): string {
+type TurnChipTone = 'accent' | 'neutral' | 'warn' | 'err' | 'ok'
+
+export function turnFsmChipTone(tone: TurnChipTone): StatusChipTone {
   switch (tone) {
     case 'accent':
-      return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
+      return 'info'
     case 'warn':
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
+      return 'warn'
     case 'err':
-      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
+      return 'bad'
     case 'ok':
-      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
+      return 'ok'
     case 'neutral':
     default:
-      return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'neutral'
   }
 }
 
@@ -76,21 +79,13 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-3xs">
-          <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass(projectedState ? 'accent' : 'warn')}`}>
-            ${projectedState ?? 'unmapped'}
-          </span>
-          <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass('neutral')}`}>
-            KTC ${snapshot.turn_phase}
-          </span>
+          <${StatusChip} tone=${turnFsmChipTone(projectedState ? 'accent' : 'warn')} uppercase=${false} class="font-mono">${projectedState ?? 'unmapped'}</${StatusChip}>
+          <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">KTC ${snapshot.turn_phase}</${StatusChip}>
           ${isCoarse ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 ${chipClass('warn')}`}>
-              coarse legacy map
-            </span>
+            <${StatusChip} tone="warn" uppercase=${false}>coarse legacy map</${StatusChip}>
           ` : null}
           ${tlaSymbol ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass('neutral')}`}>
-              TLA ${tlaSymbol}
-            </span>
+            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">TLA ${tlaSymbol}</${StatusChip}>
           ` : null}
         </div>
       </div>
@@ -99,23 +94,15 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
 
       ${execution ? html`
         <div class="flex flex-wrap items-center gap-1.5 text-3xs" aria-label="latest turn receipt summary">
-          <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 ${chipClass(terminalTone(execution.outcome))}`}>
-            receipt ${execution.outcome ?? 'unknown'}
-          </span>
+          <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false}>receipt ${execution.outcome ?? 'unknown'}</${StatusChip}>
           ${terminalReason ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass(terminalTone(execution.outcome))}`}>
-              reason ${terminalReason}
-            </span>
+            <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono">reason ${terminalReason}</${StatusChip}>
           ` : null}
           ${execution.tool_contract_result ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')}`}>
-              tool ${execution.tool_contract_result}
-            </span>
+            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono">tool ${execution.tool_contract_result}</${StatusChip}>
           ` : null}
           ${execution.model_used ? html`
-            <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 font-mono ${chipClass('neutral')}`}>
-              model ${execution.model_used}
-            </span>
+            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">model ${execution.model_used}</${StatusChip}>
           ` : null}
         </div>
       ` : null}

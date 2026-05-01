@@ -191,6 +191,7 @@
    optint
    re
    re.str
+   str
    re.pcre
    mirage-crypto
    mirage-crypto-ec

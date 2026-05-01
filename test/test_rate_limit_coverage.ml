@@ -401,7 +401,7 @@ let test_agent_key_of_token () =
   | Some key ->
       check bool "key starts with token:" true
         (String.length key > 6 && String.sub key 0 6 = "token:");
-      (* key should be 16 hex chars + "token:" prefix = 22 chars *)
+      (* "token:" prefix (6 chars) + 16 hex chars from SHA-256 = 22 chars total *)
       check bool "key length ok" true (String.length key = 22)
 
 let test_agent_key_of_agent_name () =
@@ -468,9 +468,9 @@ let test_agent_bucket_independent_per_agent () =
 let test_too_many_agent_requests_body () =
   let body = Rate_limit.too_many_agent_requests_body () in
   check bool "contains Per-agent" true
-    (try
-       let _ = Str.search_forward (Str.regexp "Per-agent") body 0 in true
-     with Not_found -> false)
+    (match Str.search_forward (Str.regexp "Per-agent") body 0 with
+     | _ -> true
+     | exception Not_found -> false)
 
 (* ============================================================
    Test Runners

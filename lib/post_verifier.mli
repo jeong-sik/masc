@@ -65,3 +65,11 @@ val result_to_json : verification_result -> Yojson.Safe.t
 (** Flatten a {!verification_result} into a list of three
     {!dimension_result} entries (Relevance, Quality, Safety). *)
 val to_dimension_results : verification_result -> dimension_result list
+
+val to_reward_advice :
+  agent_name:string ->
+  ?task_id:string ->
+  verification_result ->
+  Reward_advice_artifact.reward_advice_artifact
+(** Build a {!Reward_advice_artifact.reward_advice_artifact} from a verification result.
+    Convenience wrapper around {!Reward_advice_artifact.of_post_verifier_verdict}. *)

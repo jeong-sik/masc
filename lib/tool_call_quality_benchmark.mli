@@ -11,6 +11,12 @@ val load_runs_from_file : string -> (evidence_run list, string) Result.t
 val score_run :
   cases:benchmark_case list -> evidence_run -> case_score option
 
+val to_reward_advice :
+  agent_name:string ->
+  ?task_id:string ->
+  case_score ->
+  Reward_advice_artifact.reward_advice_artifact
+
 val summarize :
      cases:benchmark_case list
   -> runs:evidence_run list

@@ -552,7 +552,6 @@
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
-        test_a2a_e2e
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
@@ -745,7 +744,6 @@
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
-        test_a2a_e2e
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
@@ -954,10 +952,6 @@
  (modules tool_call_quality_benchmark_cli)
  (libraries masc_test_deps))
 
-(executable
- (name test_a2a_distributed)
- (modules test_a2a_distributed)
- (libraries masc_test_deps))
 
 (executable
  (name test_a12_e2e_demo)

@@ -14,7 +14,7 @@ let test_agent_status_roundtrip () =
 let test_agent_status_of_string_r () =
   match agent_status_of_string_r "unknown_status" with
   | Ok _ -> Alcotest.fail "expected error for unknown status"
-  | Error msg -> Alcotest.(check string) "error message" "Unknown agent status: unknown_status" msg
+  | Error msg -> Alcotest.(check string) "error message" "unknown agent_status: \"unknown_status\"" msg
 
 let test_task_status_todo () =
   let status = Todo in

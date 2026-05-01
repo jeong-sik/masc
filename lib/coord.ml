@@ -37,7 +37,6 @@ include Coord_task_schedule
 include Coord_query
 
 (* Portal / A2A Protocol *)
-include Coord_portal
 
 (* Git Worktree *)
 include Coord_worktree

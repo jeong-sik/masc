@@ -285,6 +285,11 @@ jobs:
         if: needs.changes.outputs.spec_refs == 'true'
         run: bash scripts/lint/spec-line-refs.sh
 
+      - name: Check sandbox dune version alignment
+        run: |
+          chmod +x scripts/check-sandbox-dune-version.sh
+          scripts/check-sandbox-dune-version.sh
+
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
         run: |
           chmod +x scripts/ci/*.sh

@@ -13,12 +13,17 @@ playground="$tmpdir/playground"
 mkdir -p "$playground"
 printf 'alpha\nbeta\ngamma\n' > "$playground/demo.txt"
 
+# Extract required dune version from dune-project: (lang dune X.Y)
+req_dune_ver="$(grep -E '^\(lang dune\b' "$repo_root/dune-project" \
+                | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+
 docker run --rm \
   --read-only \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
   --cap-drop=ALL \
   --security-opt no-new-privileges \
   --network none \
+  -e "MASC_REQ_DUNE_VER=$req_dune_ver" \
   -v "$playground:/workspace:rw" \
   --workdir /workspace \
   "$image_tag" \
@@ -27,6 +32,13 @@ docker run --rm \
     for cmd in sh bash git gh rg tree jq python3 node npm make opam dune; do
       command -v "$cmd" >/dev/null
     done
+    # Verify sandbox dune version meets dune-project requirement (Fix C: sandbox launch invariant)
+    actual_dune="$(dune --version)"
+    if ! printf "%s\n%s\n" "$MASC_REQ_DUNE_VER" "$actual_dune" | sort -V -C; then
+      printf "FAIL: sandbox dune %s < dune-project requires %s\n" "$actual_dune" "$MASC_REQ_DUNE_VER" >&2
+      exit 1
+    fi
+    printf "OK: sandbox dune %s >= required %s\n" "$actual_dune" "$MASC_REQ_DUNE_VER"
     test "$(cat demo.txt)" = $'"'"'alpha\nbeta\ngamma'"'"'
     rg beta demo.txt >/dev/null
     printf "delta\n" >> append.txt

@@ -395,7 +395,7 @@ module FileSystem = struct
         match t.clock with
         | Some clock -> (
             match
-              Fiber.first
+              Eio.Fiber.first
                 (fun () -> `Ok (Eio.Promise.await p))
                 (fun () ->
                   Eio.Time.sleep clock 30.0;

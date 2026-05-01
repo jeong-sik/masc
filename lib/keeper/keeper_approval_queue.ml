@@ -796,10 +796,12 @@ let sort_entries_by_requested_at entries =
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
 
-    [timeout_s] defaults to 600s. This is intentionally longer than the
-    30s wrapper used by A2 for generic [Eio.Promise.await] sites: a
-    HITL approval is bounded by an operator's response time, not by an
-    SLA on autonomous progress. Drop the default only after measuring
+    [timeout_s] defaults to 600s for non-[Critical] approvals. This is
+    intentionally longer than the 30s wrapper used by A2 for generic
+    [Eio.Promise.await] sites: a HITL approval is bounded by an
+    operator's response time, not by an SLA on autonomous progress.
+    [Critical] approvals are exempt, matching [expire_stale]'s
+    operator-must-decide policy. Drop the default only after measuring
     the operator-response distribution — premature shortening turns
     every distracted operator into an [Approval_expired] event. *)
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
@@ -818,11 +820,24 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
+  let timeout_decision reason =
+    let decision = Oas.Hooks.Reject reason in
+    match Eio.Promise.peek promise with
+    | Some observed -> observed
+    | None ->
+      (try Eio.Promise.resolve resolver decision
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ());
+      (match Eio.Promise.peek promise with
+       | Some observed -> observed
+       | None -> decision)
+  in
   let await_with_timeout () =
-    match clock with
-    | Some clock ->
+    match clock, risk_level with
+    | Some clock, (Low | Medium | High) ->
       (match
-         Fiber.first
+         Eio.Fiber.first
            (fun () -> `Decision (Eio.Promise.await promise))
            (fun () -> Eio.Time.sleep clock timeout_s; `Timeout)
        with
@@ -845,29 +860,11 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
            ?selected_model
            ~decision:(Approval_expired reason)
            ();
-         (* Mirror expire_stale's teardown so external observers and
-            queued waiters see the same lifecycle signal as a stale
-            expiry: resolve the promise with [Reject reason] and run
-            the on_resolution callback (None for submit_and_await
-            entries today, but kept symmetric with expire_stale in
-            case the contract grows). Eio.Promise.resolve raises if
-            the promise is already resolved by a concurrent path
-            (e.g. expire_stale racing with this timeout) — guard
-            with try/with and let cancellation propagate. *)
-         (try Eio.Promise.resolve resolver (Oas.Hooks.Reject reason)
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> ());
-         (* Return the same decision we resolved the promise with so
-            the awaited result, the audit ([Approval_expired]), and
-            the caller observation all agree.  Returning [Deny] here
-            previously would have made awaited callers see [Reject]
-            (via the resolved promise) while the caller of
-            [submit_and_await] saw [Deny] for the same timeout — a
-            split signal that telemetry and policy code cannot
-            reconcile. *)
-         Oas.Hooks.Reject reason)
-    | None -> Eio.Promise.await promise
+         (* Mirror expire_stale's teardown, but preserve any concurrent
+            operator decision that wins the promise resolution race. *)
+         timeout_decision reason)
+    | Some _, Critical
+    | None, _ -> Eio.Promise.await promise
   in
   Fun.protect
     await_with_timeout

@@ -19,7 +19,7 @@ let temp_counter = ref 0
    substring search.  Local arg order is (needle haystack) so the
    wrapper flips into the canonical (haystack needle) signature. *)
 let contains needle haystack =
-  Masc_mcp.String_util.contains_substring haystack needle
+  String_util.contains_substring haystack needle
 
 (** Create a temp directory with a unique name. *)
 let make_temp_dir () =

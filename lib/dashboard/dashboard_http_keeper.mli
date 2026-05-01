@@ -90,6 +90,22 @@ val keeper_decisions_json :
   Yojson.Safe.t
 (** Renders a recent unified keeper decision/event stream. *)
 
+val keeper_decisions_log_json :
+  config:Coord.config ->
+  keepers:Keeper_types.keeper_meta list ->
+  ?limit:int ->
+  unit ->
+  Yojson.Safe.t
+(** Renders the K2 cross-keeper decision log feed. *)
+
+val keeper_memory_log_json :
+  config:Coord.config ->
+  keepers:Keeper_types.keeper_meta list ->
+  ?limit:int ->
+  unit ->
+  Yojson.Safe.t
+(** Renders the K2 cross-keeper memory-bank feed. *)
+
 (** {1 Per-keeper config snapshot} *)
 
 val keeper_config_json :

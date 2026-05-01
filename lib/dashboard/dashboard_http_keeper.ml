@@ -1915,6 +1915,20 @@ let keeper_decisions_json
     ("generated_at", `Float (Unix.gettimeofday ()));
   ]
 
+let k2_iso8601_of_unix ts_unix =
+  if ts_unix <= 0.0 then ""
+  else
+    let t = Unix.gmtime ts_unix in
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
+      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+
+let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
+  let ms = Int64.of_float (ts_unix *. 1000.0) in
+  let hash = Digest.to_hex (Digest.string raw) in
+  Printf.sprintf "%s-%s-%016Lx-%s"
+    prefix keeper_name ms (String.sub hash 0 8)
+
 (** Map a keeper memory bank [kind] to the K2 log vocabulary:
     [episode] for progress notes, [plan] for goal/decision/next entries,
     [fact] for everything else (belief, open_question, constraints, etc.). *)
@@ -1965,6 +1979,15 @@ let keeper_decisions_log_json
               let raw = str "keeper_name" in
               if raw = "" then m.name else raw
             in
+            let id =
+              let raw = str "id" in
+              if raw <> "" then raw
+              else k2_stable_id ~prefix:"dec" ~keeper_name ~ts_unix ~raw:line
+            in
+            let ts =
+              let raw = str "ts" in
+              if raw <> "" then raw else k2_iso8601_of_unix ts_unix
+            in
             let decision_type =
               let sa = str "speech_act" in
               if sa <> "" then sa
@@ -1991,8 +2014,8 @@ let keeper_decisions_log_json
               else []
             in
             Some (ts_unix, `Assoc [
-              ("id", `String (str "id"));
-              ("ts", `String (str "ts"));
+              ("id", `String id);
+              ("ts", `String ts);
               ("ts_unix", `Float ts_unix);
               ("keeper", `String keeper_name);
               ("decision_type", `String decision_type);
@@ -2046,18 +2069,10 @@ let keeper_memory_log_json
           | None -> None
           | Some (row : Keeper_memory.keeper_memory_row_raw) ->
               let kind = memory_kind_for_log row.kind in
-              let ts =
-                if row.ts_unix > 0.0 then
-                  let t = Unix.gmtime row.ts_unix in
-                  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                    (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
-                    t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
-                else ""
-              in
+              let ts = k2_iso8601_of_unix row.ts_unix in
               let id =
-                Printf.sprintf "mem-%s-%d"
-                  m.name
-                  (int_of_float (row.ts_unix *. 1000.0))
+                k2_stable_id ~prefix:"mem" ~keeper_name:m.name
+                  ~ts_unix:row.ts_unix ~raw:line
               in
               Some (row.ts_unix, `Assoc [
                 ("id", `String id);

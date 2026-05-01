@@ -2653,6 +2653,35 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
       Alcotest.(check bool) "not framed as auth/config" false
         (contains_substring ~needle:"auth/config/model" reason)
   | _ -> Alcotest.fail "expected setproctitle UnicodeDecodeError to map to AcceptRejected"
+
+let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "kimi_cli rejected the request (exit 1): startup crash: \
+              UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef";
+         })
+  in
+  Alcotest.(check bool)
+    "Kimi startup UnicodeDecodeError is terminal provider runtime" true
+    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+
+let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "Error parsing SSE message: pydantic ValidationError for \
+              JSONRPCMessage: invalid JSON EOF";
+         })
+  in
+  Alcotest.(check bool)
+    "JSON-RPC SSE parse storm is terminal provider runtime" true
+    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -4030,6 +4059,10 @@ let () =
         test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject;
       Alcotest.test_case "kimi setproctitle unicode crash is startup crash" `Quick
         test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash;
+      Alcotest.test_case "terminal runtime detects Kimi unicode crash" `Quick
+        test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash;
+      Alcotest.test_case "terminal runtime detects JSON-RPC SSE parse storm" `Quick
+        test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

@@ -676,7 +676,12 @@ let run_turn
              , actionable_tool_contract_violation_reason
            with
            | Ok (), Some reason ->
-               let contract_status = tool_contract_status () in
+               let contract_status =
+                 if actual_keeper_tool_names = [] then
+                   "missing_required_tool_use"
+                 else
+                   tool_contract_status ()
+               in
                acc.receipt_tool_contract_result <- contract_status;
                (* #10091: emit the labelled counter so dashboards
                   can distinguish the [has_current_task=true]

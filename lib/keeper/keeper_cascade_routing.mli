@@ -16,13 +16,13 @@ type routing_decision = {
 
 (** Select the effective cascade profile for the current turn.
 
-    [~base_cascade] is the keeper's configured cascade name
-    (typically ["keeper_unified"]).
+    [~base_cascade] is the keeper's configured cascade name.
 
-    Routing rules (TLA+ mirrored):
+    Routing rules (TLA+ mirrored, with logical route names resolved through
+    [cascade.json] [routes]):
     - [Running], [Draining], [Paused] -> [base_cascade]
-    - [Failing] -> ["local_recovery"]
-    - [Compacting], [HandingOff] -> ["local_only"]
+    - [Failing] -> [routes.phase_recovery]
+    - [Compacting], [HandingOff] -> [routes.phase_buffer]
     - [Overflowed], terminal/non-executable phases -> [base_cascade]
 
     This helper is total: even phases that are blocked upstream still return

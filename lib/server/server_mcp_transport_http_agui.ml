@@ -70,7 +70,7 @@ let handle_ag_ui_events ~deps request reqd =
       let mutex = Eio.Mutex.create () in
       let info_ref : sse_conn_info option ref = ref None in
       let client_id, event_stream, evicted =
-        Sse.register session_id
+        Sse.register ~kind:Sse.Observer session_id
           ~last_event_id:(Option.value ~default:0 last_event_id)
       in
       (match evicted with
@@ -97,7 +97,7 @@ let handle_ag_ui_events ~deps request reqd =
         Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
       (match last_event_id with
       | Some last_id ->
-          let missed = Sse.get_events_after last_id in
+          let missed = Sse.get_events_after_for_kind Sse.Observer last_id in
           List.iter (fun ev ->
             if not (send_raw info ev) then
               Log.Server.debug "ag-ui replay send failed for session %s" info.session_id

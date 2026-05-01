@@ -15,6 +15,26 @@ include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
 
+let registry_failure_reason_of_terminal_reason
+    (terminal_reason : Keeper_turn_terminal.t)
+    ~(raw_error : string) : Keeper_registry.failure_reason option =
+  let detail = short_preview raw_error in
+  match terminal_reason.code with
+  | "required_tool_use_no_tool_call"
+  | "required_tool_use_unsatisfied" ->
+      Some
+        (Keeper_registry.Tool_required_unsatisfied
+           { code = terminal_reason.code; detail })
+  | "provider_error" ->
+      Some
+        (Keeper_registry.Provider_runtime_error
+           { code = terminal_reason.code; detail })
+  | code when String.starts_with ~prefix:"api_error_" code ->
+      Some
+        (Keeper_registry.Provider_runtime_error
+           { code = terminal_reason.code; detail })
+  | _ -> None
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
@@ -1456,6 +1476,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~post_commit_ambiguous:is_ambiguous_partial
               ~raw_error:e_str err
           in
+          if not is_ambiguous_partial then begin
+            match
+              registry_failure_reason_of_terminal_reason terminal_reason
+                ~raw_error:e_str
+            with
+            | Some failure_reason ->
+                Keeper_registry.set_failure_reason
+                  ~base_path:config.base_path meta.name
+                  (Some failure_reason)
+            | None -> ()
+          end;
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")

@@ -1818,6 +1818,8 @@ let keeper_cost_aggregates_json
     ("generated_at", `Float now_ts);
   ]
 
+let k2_feed_limit limit = max 1 (min 200 limit)
+
 (** Read per-keeper [.decisions.jsonl] files and return a unified,
     time-sorted stream of recent events (turn telemetry, tool_exec,
     memory_search, etc.).  Each event is normalized to a flat record so
@@ -1829,6 +1831,7 @@ let keeper_decisions_json
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
+  let limit = k2_feed_limit limit in
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map (fun (m : Keeper_types.keeper_meta) ->
@@ -1943,7 +1946,9 @@ let memory_kind_for_log (kind : string) : string =
       {id, ts, ts_unix, keeper, decision_type, summary, evidence_refs[]}
     [decision_type] comes from [speech_act] when present, otherwise [outcome].
     [summary] is a human-readable sentence assembled from the available
-    social-model fields. [evidence_refs] is the belief summary when non-empty.
+    social-model fields. [evidence_refs] is copied only from real evidence
+    reference lists present in the source record; prose summaries are kept out
+    of that field so downstream consumers can treat it as reference data.
     Events are sorted newest-first and capped at [limit]. *)
 let keeper_decisions_log_json
     ~(config : Coord.config)
@@ -1951,6 +1956,7 @@ let keeper_decisions_log_json
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
+  let limit = k2_feed_limit limit in
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map (fun (m : Keeper_types.keeper_meta) ->
@@ -2010,8 +2016,12 @@ let keeper_decisions_log_json
             in
             let summary = String.concat " \xc2\xb7 " summary_parts in
             let evidence_refs =
-              if belief_summary <> "" then [`String belief_summary]
-              else []
+              let refs = json_string_list_member "evidence_refs" json in
+              let refs =
+                if refs <> [] then refs
+                else json_string_list_member "raw_evidence_refs" json
+              in
+              List.map (fun value -> `String value) refs
             in
             Some (ts_unix, `Assoc [
               ("id", `String id);
@@ -2054,6 +2064,7 @@ let keeper_memory_log_json
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
+  let limit = k2_feed_limit limit in
   let per_keeper_limit = limit * 2 in
   let all_entries =
     List.concat_map (fun (m : Keeper_types.keeper_meta) ->

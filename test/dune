@@ -41,6 +41,7 @@
         test_sidecar_lifecycle_routes
         test_channel_gate_imessage_state
         test_dashboard
+        test_dashboard_k2_feeds
         test_dashboard_perf
         test_dashboard_tool_host_events
         test_tool_assignment_telemetry
@@ -236,6 +237,7 @@
         test_sidecar_lifecycle_routes
           test_channel_gate_imessage_state
           test_dashboard
+          test_dashboard_k2_feeds
           test_dashboard_perf
           test_dashboard_tool_host_events
           test_tool_assignment_telemetry

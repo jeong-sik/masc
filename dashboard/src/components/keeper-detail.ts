@@ -1155,6 +1155,7 @@ export function KeeperDetailPage() {
               long_goal=${keeper.long_goal}
               goal_horizons=${keeper.goal_horizons}
             />
+              <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`

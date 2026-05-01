@@ -1,5 +1,6 @@
 open Alcotest
 open Masc_mcp
+open Tool_coord
 open Yojson.Safe.Util
 
 let temp_dir () =
@@ -33,8 +34,8 @@ let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
 let parse_json_result = function
-  | true, body -> Yojson.Safe.from_string body
-  | false, body -> fail body
+  | { success = true; message = body } -> Yojson.Safe.from_string body
+  | { success = false; message = body } -> fail body
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]

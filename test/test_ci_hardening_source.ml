@@ -2,13 +2,15 @@
 
 open Alcotest
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_path file_rel = Filename.concat (source_root ()) file_rel
+
 let file_contains_pattern file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = source_path file_rel in
   if not (Sys.file_exists path) then false
   else
     let ic = open_in path in
@@ -25,13 +27,31 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let file_contains_line_with_patterns file_rel patterns =
+  let path = source_path file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let line_matches line =
+          List.for_all
+            (fun pattern ->
+               let re = Str.regexp_string pattern in
+               try ignore (Str.search_forward re line 0); true
+               with Not_found -> false)
+            patterns
+        in
+        let rec loop () =
+          match input_line ic with
+          | line -> line_matches line || loop ()
+          | exception End_of_file -> false
+        in
+        loop ())
+
 let file_pattern_position file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = source_path file_rel in
   if not (Sys.file_exists path) then None
   else
     let ic = open_in path in
@@ -41,11 +61,6 @@ let file_pattern_position file_rel pattern =
         let content = In_channel.input_all ic in
         let re = Str.regexp_string pattern in
         try Some (Str.search_forward re content 0) with Not_found -> None)
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
 
 let quote = Filename.quote
 
@@ -73,6 +88,11 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
   check bool "ci workflow passes pr number to sync check" true
     (file_contains_pattern ".github/workflows/ci.yml" "--pr-number \"$PR_NUMBER\"");
+  check bool "ci workflow ignores PR readiness state events" true
+    (file_not_contains_pattern ".github/workflows/ci.yml" "ready_for_review");
+  check bool "pr automation owns PR readiness state events" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "ready_for_review");
   check bool "ci gate enforces agent draft policy" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "Enforce agent draft policy on merge gate");
@@ -259,7 +279,7 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern ".github/workflows/ci.yml"
        "dune exec ./test/test_operator_control.exe");
   check bool "operator control test is env-gated in dune" true
-    (file_contains_pattern "test/dune"
+    (file_contains_pattern "test/stanzas/test_operator_control.inc"
        "(enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} \"true\"))")
 
 let test_release_truth_contracts () =
@@ -1083,6 +1103,45 @@ let test_masc_dirname_ssot_contracts () =
          (file_not_contains_pattern file "\".masc\""))
     migrated_files
 
+(* #9516: SSOT fingerprint CI gate — verify that the `make check-ssot`
+   target and `scripts/check-spec-truth.sh` are properly wired into the
+   build system and CI workflow.  These contracts ensure:
+   1. `mk/quality.mk` defines a `check-ssot` phony target.
+   2. The target delegates to all three SSOT sub-gates.
+   3. `scripts/check-spec-truth.sh` exists with the expected contract
+      structure (orphan spec validation via `Mirrors:` annotation scanning).
+   4. The CI meta-gates step invokes `check-spec-truth.sh`. *)
+let test_ssot_fingerprint_gate_contracts () =
+  check bool "quality.mk declares check-ssot rule header" true
+    (file_contains_pattern "mk/quality.mk" "check-ssot:");
+  check bool "quality.mk declares check-ssot as phony" true
+    (file_contains_line_with_patterns "mk/quality.mk" [ ".PHONY:"; "check-ssot" ]);
+  check bool "check-ssot target runs ratchet bypass script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/check-ssot.sh");
+  check bool "check-ssot target runs spawn drift script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/ci/check-ssot-spawn-drift.sh");
+  check bool "check-ssot target runs spec truth script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/check-spec-truth.sh");
+  check bool "check-spec-truth script exists" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "orphan spec");
+  check bool "check-spec-truth scans Mirrors annotations" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "Mirrors:");
+  check bool "check-spec-truth resolves file-path references" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "resolve_mirrors_ref");
+  check bool "check-spec-truth exits non-zero on orphan" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "orphan_count");
+  check bool "check-spec-truth guards resolver failures under set -e" true
+    (file_contains_pattern "scripts/check-spec-truth.sh"
+       "if resolve_mirrors_ref \"$token\"; then");
+  check bool "check-spec-truth surfaces parser failures" true
+    (file_not_contains_pattern "scripts/check-spec-truth.sh"
+       "2>/dev/null || true");
+  check bool "check-spec-truth references meta-issue #9516" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "#9516");
+  check bool "ci meta gates step runs check-spec-truth" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/check-spec-truth.sh")
+
 let test_human_approval_credential_boundary_contracts () =
   (* Issue #9733: the bypass-label actor check cannot distinguish a real
      human from an agent using the same owner credentials.  The
@@ -1176,6 +1235,8 @@ let () =
              test_runtime_precondition_contracts;
            test_case "masc_dirname SSOT contracts (#9571 batch 1)" `Quick
              test_masc_dirname_ssot_contracts;
+           test_case "SSOT fingerprint gate contracts (#9516)" `Quick
+             test_ssot_fingerprint_gate_contracts;
            test_case "human approval credential boundary contracts (#9733)" `Quick
              test_human_approval_credential_boundary_contracts;
          ]);

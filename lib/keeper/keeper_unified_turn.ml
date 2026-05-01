@@ -15,6 +15,26 @@ include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
 
+let registry_failure_reason_of_terminal_reason
+    (terminal_reason : Keeper_turn_terminal.t)
+    ~(raw_error : string) : Keeper_registry.failure_reason option =
+  let detail = short_preview raw_error in
+  match terminal_reason.code with
+  | "required_tool_use_no_tool_call"
+  | "required_tool_use_unsatisfied" ->
+      Some
+        (Keeper_registry.Tool_required_unsatisfied
+           { code = terminal_reason.code; detail })
+  | "provider_error" ->
+      Some
+        (Keeper_registry.Provider_runtime_error
+           { code = terminal_reason.code; detail })
+  | code when String.starts_with ~prefix:"api_error_" code ->
+      Some
+        (Keeper_registry.Provider_runtime_error
+           { code = terminal_reason.code; detail })
+  | _ -> None
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
@@ -726,9 +746,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
             last_execution := execution;
-            let execution_cascade_name =
-              KCP.runtime_name_to_string execution.cascade_name
-            in
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
               ~agent_name:run_meta.agent_name
@@ -751,7 +768,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 try
                   Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                     ~max_context:execution.max_context ~build_turn_prompt
-                    ~user_message ~cascade_name:execution_cascade_name
+                    ~user_message ~cascade_name:execution.cascade_name
                     ~world_observation:observation
                     ~turn_affordances
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -1456,6 +1473,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~post_commit_ambiguous:is_ambiguous_partial
               ~raw_error:e_str err
           in
+          if not is_ambiguous_partial then begin
+            match
+              registry_failure_reason_of_terminal_reason terminal_reason
+                ~raw_error:e_str
+            with
+            | Some failure_reason ->
+                Keeper_registry.set_failure_reason
+                  ~base_path:config.base_path meta.name
+                  (Some failure_reason)
+            | None -> ()
+          end;
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")

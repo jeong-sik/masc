@@ -794,10 +794,20 @@ let sort_entries_by_requested_at entries =
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
-    Called from the OAS approval_callback (inside agent fiber). *)
+    Called from the OAS approval_callback (inside agent fiber).
+
+    [timeout_s] defaults to 600s for non-[Critical] approvals. This is
+    intentionally longer than the 30s wrapper used by A2 for generic
+    [Eio.Promise.await] sites: a HITL approval is bounded by an
+    operator's response time, not by an SLA on autonomous progress.
+    [Critical] approvals are exempt, matching [expire_stale]'s
+    operator-must-decide policy. Drop the default only after measuring
+    the operator-response distribution — premature shortening turns
+    every distracted operator into an [Approval_expired] event. *)
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason
+    ?clock ?(timeout_s = 600.0)
     ()
   : Oas.Hooks.approval_decision =
   let id = generate_id () in
@@ -810,8 +820,54 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
+  let timeout_decision reason =
+    let decision = Oas.Hooks.Reject reason in
+    match Eio.Promise.peek promise with
+    | Some observed -> observed
+    | None ->
+      (try Eio.Promise.resolve resolver decision
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ());
+      (match Eio.Promise.peek promise with
+       | Some observed -> observed
+       | None -> decision)
+  in
+  let await_with_timeout () =
+    match clock, risk_level with
+    | Some clock, (Low | Medium | High) ->
+      (match
+         Eio.Fiber.first
+           (fun () -> `Decision (Eio.Promise.await promise))
+           (fun () -> Eio.Time.sleep clock timeout_s; `Timeout)
+       with
+       | `Decision d -> d
+       | `Timeout ->
+         let reason =
+           Printf.sprintf "approval timeout after %.0fs" timeout_s
+         in
+         audit_approval_event
+           ~event_type:"approval_timeout"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ?runtime_contract
+           ?selected_model
+           ~decision:(Approval_expired reason)
+           ();
+         (* Mirror expire_stale's teardown, but preserve any concurrent
+            operator decision that wins the promise resolution race. *)
+         timeout_decision reason)
+    | Some _, Critical
+    | None, _ -> Eio.Promise.await promise
+  in
   Fun.protect
-    (fun () -> Eio.Promise.await promise)
+    await_with_timeout
     ~finally:(fun () ->
       Safe_ops.protect ~default:() (fun () ->
         atomic_update pending (fun map -> SMap.remove id map)))

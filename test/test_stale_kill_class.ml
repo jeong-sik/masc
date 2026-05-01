@@ -54,6 +54,22 @@ let test_failure_reason_to_string_oas_timeout_budget_loop () =
     "oas_timeout_budget_loop(count=3)"
     (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
 
+let test_failure_reason_to_string_provider_runtime_error () =
+  r "Provider_runtime_error includes terminal code"
+    "provider_runtime_error(provider_error:kimi unicode crash)"
+    (failure_reason_to_string
+       (Provider_runtime_error
+          { code = "provider_error"; detail = "kimi unicode crash" }))
+
+let test_failure_reason_to_string_tool_required_unsatisfied () =
+  r "Tool_required_unsatisfied includes terminal code"
+    "tool_required_unsatisfied(required_tool_use_no_tool_call:no keeper tools)"
+    (failure_reason_to_string
+       (Tool_required_unsatisfied
+          { code = "required_tool_use_no_tool_call";
+            detail = "no keeper tools";
+          }))
+
 let test_cohort_key_collapses_subclasses () =
   (* The cohort key intentionally ignores the sub-class — every stale
      kill is one cohort for dashboard rate computation.  Operators
@@ -77,6 +93,39 @@ let test_oas_timeout_budget_loop_cohort_key () =
     (failure_reason_cohort_key
        (Some (Oas_timeout_budget_loop { count = 3 })))
 
+let test_terminal_failure_cohort_keys () =
+  r "Provider_runtime_error cohort_key" "provider_runtime_error"
+    (failure_reason_cohort_key
+       (Some
+          (Provider_runtime_error
+             { code = "provider_error"; detail = "x" })));
+  r "Tool_required_unsatisfied cohort_key" "tool_required_unsatisfied"
+    (failure_reason_cohort_key
+       (Some
+          (Tool_required_unsatisfied
+             { code = "required_tool_use_unsatisfied"; detail = "x" })))
+
+let test_stale_watchdog_preserves_terminal_failure_reason () =
+  let prior =
+    Provider_runtime_error { code = "provider_error"; detail = "kimi" }
+  in
+  let kill_class = Idle_turn { stall_seconds = 305.0 } in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some preserved ->
+      r "preserves provider runtime error"
+        (failure_reason_to_string prior)
+        (failure_reason_to_string preserved)
+  | None -> Alcotest.fail "expected preserved reason"
+
+let test_stale_watchdog_uses_stale_reason_without_terminal_prior () =
+  let kill_class = Idle_turn { stall_seconds = 305.0 } in
+  match stale_watchdog_failure_reason ~prior:None ~kill_class with
+  | Some reason ->
+      r "uses stale reason when no prior terminal reason"
+        "stale_turn_timeout(idle_turn(305s))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -98,6 +147,10 @@ let () =
             `Quick test_failure_reason_to_string_noop;
           Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
             test_failure_reason_to_string_oas_timeout_budget_loop;
+          Alcotest.test_case "Provider_runtime_error wraps" `Quick
+            test_failure_reason_to_string_provider_runtime_error;
+          Alcotest.test_case "Tool_required_unsatisfied wraps" `Quick
+            test_failure_reason_to_string_tool_required_unsatisfied;
         ] );
       ( "failure_reason_cohort_key",
         [
@@ -105,5 +158,14 @@ let () =
             `Quick test_cohort_key_collapses_subclasses;
           Alcotest.test_case "Oas_timeout_budget_loop cohort" `Quick
             test_oas_timeout_budget_loop_cohort_key;
+          Alcotest.test_case "terminal failure cohorts" `Quick
+            test_terminal_failure_cohort_keys;
+        ] );
+      ( "stale_watchdog_failure_reason",
+        [
+          Alcotest.test_case "preserves terminal failure" `Quick
+            test_stale_watchdog_preserves_terminal_failure_reason;
+          Alcotest.test_case "uses stale reason without terminal prior" `Quick
+            test_stale_watchdog_uses_stale_reason_without_terminal_prior;
         ] );
     ]

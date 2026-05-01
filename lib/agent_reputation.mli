@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
@@ -33,7 +52,7 @@ val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t
 (** PPX-generated serializer. *)
 
 val agent_reputation_of_yojson :
-  Yojson.Safe.t -> (agent_reputation, string) result
+  Yojson.Safe.t -> (agent_reputation, string) Result.t
 (** PPX-generated deserializer.  Returns [Error msg] on parse failure. *)
 
 val default_reputation : agent_name:string -> agent_reputation

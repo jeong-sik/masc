@@ -1658,6 +1658,22 @@ let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
   Alcotest.(check string) "general GLM label" "glm" glm;
   Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
 
+let test_provider_effective_max_turns_clamps_claude_code () =
+  Alcotest.(check int)
+    "claude_code max_turns hard cap"
+    Oas_worker_exec.claude_code_max_turns_hard_cap
+    (Oas_worker_exec.provider_effective_max_turns
+       Llm_provider.Provider_config.Claude_code
+       39)
+
+let test_provider_effective_max_turns_keeps_ollama_budget () =
+  Alcotest.(check int)
+    "ollama has no provider max_turns cap"
+    39
+    (Oas_worker_exec.provider_effective_max_turns
+       Llm_provider.Provider_config.Ollama
+       39)
+
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
       (make_openrouter_provider_cfg ()) in
@@ -2466,6 +2482,19 @@ let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   Alcotest.(check bool) "non-ASCII prompt does not use -p" false
     (List.mem "-p" argv)
 
+let test_kimi_cli_build_args_sanitizes_broken_utf8_prompt () =
+  let prompt = "prefix\x80suffix" in
+  let argv =
+    Oas_worker_exec.Kimi_cli_transport_local.build_args
+      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~mcp_config_json:[] ~prompt
+  in
+  Alcotest.(check bool) "broken UTF-8 prompt omitted" false
+    (List.mem prompt argv);
+  Alcotest.(check bool) "sanitized non-ASCII replacement stays off argv" false
+    (List.mem "-p" argv)
+
 let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
   let provider_cfg = make_kimi_cli_provider_cfg () in
   Alcotest.(check (option string)) "auto uses transport default"
@@ -2653,6 +2682,35 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
       Alcotest.(check bool) "not framed as auth/config" false
         (contains_substring ~needle:"auth/config/model" reason)
   | _ -> Alcotest.fail "expected setproctitle UnicodeDecodeError to map to AcceptRejected"
+
+let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "kimi_cli rejected the request (exit 1): startup crash: \
+              UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef";
+         })
+  in
+  Alcotest.(check bool)
+    "Kimi startup UnicodeDecodeError is terminal provider runtime" true
+    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+
+let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "Error parsing SSE message: pydantic ValidationError for \
+              JSONRPCMessage: invalid JSON EOF";
+         })
+  in
+  Alcotest.(check bool)
+    "JSON-RPC SSE parse storm is terminal provider runtime" true
+    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3854,6 +3912,10 @@ let () =
         test_cascade_audit_persists_observation;
       Alcotest.test_case "cascade provider labels keep glm and glm-coding distinct" `Quick
         test_cascade_provider_labels_keep_glm_and_glm_coding_distinct;
+      Alcotest.test_case "provider max_turns clamps claude_code" `Quick
+        test_provider_effective_max_turns_clamps_claude_code;
+      Alcotest.test_case "provider max_turns leaves ollama uncapped" `Quick
+        test_provider_effective_max_turns_keeps_ollama_budget;
       Alcotest.test_case "cascade provider labels preserve registered openai_compat family" `Quick
         test_cascade_provider_labels_preserve_registered_openai_compat_family;
       Alcotest.test_case "cascade provider labels detect kimi from endpoint metadata" `Quick
@@ -4012,6 +4074,8 @@ let () =
         test_kimi_cli_build_args_uses_stdin_for_large_prompt;
       Alcotest.test_case "kimi non-ASCII prompt uses stdin, not argv" `Quick
         test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt;
+      Alcotest.test_case "kimi broken UTF-8 prompt is sanitized off argv" `Quick
+        test_kimi_cli_build_args_sanitizes_broken_utf8_prompt;
       Alcotest.test_case "kimi auto model keeps transport default" `Quick
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick
@@ -4030,6 +4094,10 @@ let () =
         test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject;
       Alcotest.test_case "kimi setproctitle unicode crash is startup crash" `Quick
         test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash;
+      Alcotest.test_case "terminal runtime detects Kimi unicode crash" `Quick
+        test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash;
+      Alcotest.test_case "terminal runtime detects JSON-RPC SSE parse storm" `Quick
+        test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

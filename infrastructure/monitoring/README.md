@@ -25,7 +25,7 @@ Tracks cascade-routing decisions inside `Oas_worker_named.cycle_loop`. Counters:
 
 Tracks the typed turn-state ADT inside `run_keeper_cycle`. Counter: `masc_keeper_turn_fsm_transitions_total{from,to,keeper}`. State vocabulary: 10 typed states with `failure_reason` / `cancel_reason` carriers (TLA+ `KeeperTurnFSM`).
 
-`keeper-turn-fsm-alerts.yml` also carries the **fsm_guard violation** alerts (group `masc_keeper_fsm_guard`). Counter: `masc_fsm_guard_violation_total{action,stage}` — incremented when a `[@@fsm_guard "<expr>"]`-injected runtime assertion catches a TLA+ Next-set violation in counter mode (production default `MASC_FSM_GUARD_ASSERT=0`). The dashboard surfaces this counter in the bottom row of `grafana-keeper-turn-fsm-dashboard.json`.
+`keeper-turn-fsm-alerts.yml` also carries the **fsm_guard violation** alerts (group `masc_keeper_fsm_guard`). Counter: `masc_fsm_guard_violation_total{action,stage}` — incremented when a `[@@fsm_guard "<expr>"]`-injected runtime assertion catches a TLA+ Next-set violation in counter mode (`MASC_FSM_GUARD_ASSERT=0`). Production default is assert mode (unset or `1`), where violations re-raise immediately and this counter stays at zero. The dashboard surfaces this counter in the bottom row of `grafana-keeper-turn-fsm-dashboard.json`.
 
 The two domains overlap *only* at `cascade_routing` — when the keeper FSM enters cascade routing, the cascade subsystem takes over until a provider is selected (or exhausted). Both surfaces emit independently; an operator chasing a turn that died at cascade exhaustion sees:
 

@@ -1011,7 +1011,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 end else if
                   (* Fast-fail on second consecutive contract violation: if
                      we already rotated once because the LLM only used
-                     passive/read-only tools, rotating to a weaker cascade
+                     passive/read-only tools, rotating to the same cascade
                      is unlikely to change the LLM's choice on the same
                      prompt.  Each rotation eats ~600s of turn budget, and
                      in production we observe 4–5 rotations all hitting
@@ -1021,9 +1021,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      keeper_unified → kimi_cli_keeper → … →
                      oas_timeout_budget at 1064s/1200s).  Cap rotation
                      at 1 for this error class so the keeper releases
-                     its turn budget for actionable work. *)
+                     its turn budget for actionable work.
+
+                     Exception: if the current cascade declares a
+                     fallback_cascade that has not been attempted yet,
+                     allow one more rotation to try it — the fallback
+                     has a different model composition and may not
+                     exhibit the same passive-tool behavior. *)
+                  let fallback_not_yet_tried =
+                    match
+                      KCP.fallback_cascade_for execution_cascade_name
+                    with
+                    | Some fb ->
+                        not (List.exists (String.equal fb) attempted_cascades)
+                        && not (String.equal fb execution_cascade_name)
+                    | None -> false
+                  in
                   EC.is_required_tool_contract_violation err
                   && List.length attempted_cascades >= 1
+                  && not fallback_not_yet_tried
                 then begin
                   Log.Keeper.warn
                     "%s: required_tool_contract_violation on second cascade \

@@ -29,6 +29,13 @@ import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
+const DECK_PANEL = 'overflow-hidden rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
+const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
+const DECK_CARD = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
+const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
+const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
+const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const BRASS_CHIP = 'rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
 
 export function PlanningStat({
   label,
@@ -49,9 +56,9 @@ export function PlanningStat({
           : 'text-text-strong'
 
   return html`
-    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-      <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${label}</div>
-      <div class="mt-2 text-3xl font-bold leading-none tabular-nums ${toneClass}">${value}</div>
+    <div class="${DECK_CARD}">
+      <div class="${DECK_LABEL}">${label}</div>
+      <div class="mt-1 font-mono text-2xl font-semibold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
   `
 }
@@ -62,7 +69,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-[var(--white-3)] px-2.5 py-1.5 text-2xs font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+      class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
@@ -90,20 +97,20 @@ function GuideCard({
   children?: ComponentChildren
 }) {
   return html`
-    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label=${title}>
+    <section class="flex flex-col gap-2 ${DECK_CARD}" aria-label=${title}>
       <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${eyebrow}</div>
-          <h3 class="mt-1 text-md font-semibold text-text-strong">${title}</h3>
+          <div class="${DECK_LABEL}">${eyebrow}</div>
+          <h3 class="mt-1 text-sm font-semibold text-[var(--color-fg-primary)]">${title}</h3>
         </div>
-        <span class="rounded border border-card-border/70 bg-[var(--white-4)] px-2.5 py-1 text-2xs font-semibold text-text-body">
+        <span class="${DECK_CHIP} text-[var(--color-fg-secondary)]">
           ${count}
         </span>
       </div>
-      <p class="text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
+      <p class="text-xs leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap">${summary}</p>
       ${command ? html`
-        <div class="rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2 text-xs leading-relaxed text-text-body">
-          <code class="text-2xs text-text-strong">${command}</code>
+        <div class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-xs leading-relaxed text-[var(--color-fg-secondary)]">
+          <code class="font-mono text-3xs text-[var(--color-fg-primary)]">${command}</code>
         </div>
       ` : null}
       ${children}
@@ -147,32 +154,32 @@ function KeeperToolActivity() {
   }, [keeperList])
 
   return html`
-    <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[var(--backdrop-deep)]" open=${true}>
-      <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-base font-bold text-text-strong transition-colors hover:bg-[var(--white-3)]">
+    <details class="overview-section-collapsible group ${DECK_PANEL}" open=${true}>
+      <summary class="flex cursor-pointer items-center gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 text-sm font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-panel-alt)]">
         <div class="min-w-0">
           <div>도구 활동 요약</div>
-          <div class="mt-1 text-xs font-normal text-text-muted">
+          <div class="mt-1 text-2xs font-normal text-[var(--color-fg-muted)]">
             keeper가 최근 사용한 도구와 활동 현황. 상세는 keeper 클릭.
           </div>
         </div>
-        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-[var(--white-4)] px-2.5 py-1 text-3xs uppercase tracking-wider text-text-body font-semibold">
+        <span class="ml-auto inline-flex items-center ${DECK_CHIP} font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-secondary)]">
           ${totalToolTurns} calls
         </span>
       </summary>
-      <div class="p-5">
+      <div class="p-3">
         ${activeKeepers.length > 0 ? html`
-          <div class="mb-4">
-            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">활성 keeper</div>
-            <div class="flex flex-wrap gap-2">
+          <div class="mb-3">
+            <div class="${DECK_LABEL} mb-2">활성 keeper</div>
+            <div class="flex flex-wrap gap-1.5">
               ${activeKeepers.map(k => html`
                 <button
                   key=${k.name}
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-1.5 text-xs text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+                  class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
                   onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}
-                  <span class="text-3xs font-mono text-text-dim">${k.turn_count ?? 0}t</span>
+                  <span class="text-[var(--color-fg-disabled)]">${k.turn_count ?? 0}t</span>
                 </button>
               `)}
             </div>
@@ -181,12 +188,12 @@ function KeeperToolActivity() {
 
         ${topTools.length > 0 ? html`
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">최근 자주 사용된 도구</div>
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
+            <div class="${DECK_LABEL} mb-2">최근 자주 사용된 도구</div>
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-1">
               ${topTools.map(([name, count]) => html`
-                <div key=${name} class="flex items-center justify-between rounded bg-[var(--white-3)] px-3 py-1.5 text-xs">
-                  <span class="font-mono text-text-body truncate">${normalizeToolName(name)}</span>
-                  <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
+                <div key=${name} class="flex items-center justify-between rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-3xs">
+                  <span class="truncate font-mono text-[var(--color-fg-secondary)]">${normalizeToolName(name)}</span>
+                  <span class="ml-2 flex-shrink-0 font-mono text-[var(--color-fg-disabled)]">${count}</span>
                 </div>
               `)}
             </div>
@@ -220,13 +227,13 @@ export function Planning() {
       : '아직 등록된 항목이 없습니다.'
 
   return html`
-    <div class="flex flex-col gap-6">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="계획 상태 요약">
-        <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="flex flex-col gap-4">
+      <section class="${DECK_PANEL}" aria-label="계획 상태 요약">
+        <div class="${DECK_HEAD}">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">계획 상태</div>
-            <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">${planStatusHeadline}</h3>
-            <p class="mt-2 text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>
+            <div class="${DECK_LABEL}">계획 상태</div>
+            <h3 class="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${planStatusHeadline}</h3>
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap">${planStatusBody}</p>
           </div>
           <${ActionButton}
             variant="ghost"
@@ -238,36 +245,38 @@ export function Planning() {
           <//>
         </div>
 
-        <div class="mt-5 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-          <${PlanningStat} label="전체 태스크" value=${totalTasks} />
-          <${PlanningStat} label="할 일" value=${todo.length} />
-          <${PlanningStat} label="진행 중" value=${inProgress.length} tone="warn" />
-          <${PlanningStat} label="완료" value=${done.length} tone="ok" />
-          <${PlanningStat} label="높은 우선순위" value=${highPriority} tone=${highPriority > 0 ? 'bad' : 'default'} />
-        </div>
+        <div class="p-3">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] gap-2">
+            <${PlanningStat} label="전체 태스크" value=${totalTasks} />
+            <${PlanningStat} label="할 일" value=${todo.length} />
+            <${PlanningStat} label="진행 중" value=${inProgress.length} tone="warn" />
+            <${PlanningStat} label="완료" value=${done.length} tone="ok" />
+            <${PlanningStat} label="높은 우선순위" value=${highPriority} tone=${highPriority > 0 ? 'bad' : 'default'} />
+          </div>
 
-        <div class="mt-5 grid gap-4 xl:grid-cols-2">
-          <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="태스크 추가">
-            <div class="mb-3">
-              <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">백로그 항목</div>
-              <h3 class="mt-1 text-md font-semibold text-text-strong">태스크 추가</h3>
-            </div>
-            <${TaskCreateForm} />
-            <div class="mt-3 flex items-center gap-2">
-              <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="빠른 시작" />
-            </div>
-          </section>
+          <div class="mt-3 grid gap-3 xl:grid-cols-2">
+            <section class="${DECK_CARD}" aria-label="태스크 추가">
+              <div class="mb-2">
+                <div class="${DECK_LABEL}">백로그 항목</div>
+                <h3 class="mt-1 text-sm font-semibold text-[var(--color-fg-primary)]">태스크 추가</h3>
+              </div>
+              <${TaskCreateForm} />
+              <div class="mt-2 flex items-center gap-2">
+                <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="빠른 시작" />
+              </div>
+            </section>
 
-          <${GuideCard}
-            eyebrow="목표 파이프라인"
-            title="장기 목표 파이프라인"
-            count=${goals.value.length}
-            summary=${hasGoals
-              ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
-              : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
-            docHref=${QUICK_START_DOC_URL}
-            docLabel="빠른 시작"
-          />
+            <${GuideCard}
+              eyebrow="목표 파이프라인"
+              title="장기 목표 파이프라인"
+              count=${goals.value.length}
+              summary=${hasGoals
+                ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
+                : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
+              docHref=${QUICK_START_DOC_URL}
+              docLabel="빠른 시작"
+            />
+          </div>
         </div>
       </section>
 
@@ -279,38 +288,40 @@ export function Planning() {
 
       <${KeeperToolActivity} />
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="목표 파이프라인">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">목표 파이프라인</div>
-            <h3 class="mt-1 text-md font-semibold text-text-strong">
-              장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
-            </h3>
+      <section class="${DECK_PANEL}" aria-label="목표 파이프라인">
+        <div class="${DECK_HEAD}">
+          <div class="flex w-full items-center justify-between gap-3">
+            <div>
+              <div class="${DECK_LABEL}">목표 파이프라인</div>
+              <h3 class="mt-1 text-sm font-semibold text-[var(--color-fg-primary)]">
+                장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
+              </h3>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-accent-fg)] transition-colors hover:border-[var(--color-accent-fg)]"
+              onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
+            >
+              목표 트리에서 보기
+              <span aria-hidden="true">\u2192</span>
+            </button>
           </div>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
-            onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
-          >
-            목표 트리에서 보기
-            <span aria-hidden="true">\u2192</span>
-          </button>
         </div>
         ${hasGoals ? html`
-          <div class="mt-3 flex flex-col gap-2">
-            <div class="flex flex-wrap gap-2">
+          <div class="flex flex-col gap-2 p-3">
+            <div class="flex flex-wrap gap-1.5">
               ${(grouped.short ?? []).length > 0 ? html`
-                <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-2xs text-ok">
+                <span class="rounded-sm border border-ok/25 bg-ok/10 px-1.5 py-0.5 font-mono text-3xs text-ok">
                   단기 ${(grouped.short ?? []).length}${hp.short.total > 0 ? ` · ${hp.short.done}/${hp.short.total} (${formatProgressPct(hp.short)})` : ''}
                 </span>
               ` : null}
               ${(grouped.mid ?? []).length > 0 ? html`
-                <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-2xs text-warn">
+                <span class="rounded-sm border border-warn/25 bg-warn/10 px-1.5 py-0.5 font-mono text-3xs text-warn">
                   중기 ${(grouped.mid ?? []).length}${hp.mid.total > 0 ? ` · ${hp.mid.done}/${hp.mid.total} (${formatProgressPct(hp.mid)})` : ''}
                 </span>
               ` : null}
               ${(grouped.long ?? []).length > 0 ? html`
-                <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent">
+                <span class="${BRASS_CHIP}">
                   장기 ${(grouped.long ?? []).length}${hp.long.total > 0 ? ` · ${hp.long.done}/${hp.long.total} (${formatProgressPct(hp.long)})` : ''}
                 </span>
               ` : null}
@@ -318,10 +329,10 @@ export function Planning() {
             ${(hp.short.total + hp.mid.total + hp.long.total) > 0 ? html`
               <div class="flex flex-col gap-1">
                 ${hp.short.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-2xs">
-                    <span class="w-8 shrink-0 text-text-muted">단기</span>
+                  <div class="flex items-center gap-2 text-3xs">
+                    <span class="${DECK_META} w-8 shrink-0">단기</span>
                     <div
-                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.short.ratio * 100)}
                       aria-valuemin="0"
@@ -336,10 +347,10 @@ export function Planning() {
                   </div>
                 ` : null}
                 ${hp.mid.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-2xs">
-                    <span class="w-8 shrink-0 text-text-muted">중기</span>
+                  <div class="flex items-center gap-2 text-3xs">
+                    <span class="${DECK_META} w-8 shrink-0">중기</span>
                     <div
-                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.mid.ratio * 100)}
                       aria-valuemin="0"
@@ -354,10 +365,10 @@ export function Planning() {
                   </div>
                 ` : null}
                 ${hp.long.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-2xs">
-                    <span class="w-8 shrink-0 text-text-muted">장기</span>
+                  <div class="flex items-center gap-2 text-3xs">
+                    <span class="${DECK_META} w-8 shrink-0">장기</span>
                     <div
-                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.long.ratio * 100)}
                       aria-valuemin="0"
@@ -365,7 +376,7 @@ export function Planning() {
                       aria-label=${`장기 목표 진행 ${hp.long.done}/${hp.long.total}`}
                     >
                       <div
-                        class="absolute inset-y-0 left-0 bg-accent"
+                        class="absolute inset-y-0 left-0 bg-[var(--color-accent-fg)]"
                         style=${`width: ${(hp.long.ratio * 100).toFixed(1)}%`}
                       ></div>
                     </div>
@@ -373,24 +384,24 @@ export function Planning() {
                 ` : null}
               </div>
             ` : null}
-            <div class="mt-4 flex flex-col gap-3">
+            <div class="mt-3 flex flex-col gap-2">
               ${(['short', 'mid', 'long'] as const).map(h => {
                 const list = grouped[h] ?? []
                 if (list.length === 0) return null
                 return html`
                   <div key=${h}>
-                    <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">
+                    <div class="${DECK_LABEL} mb-1.5">
                       ${horizonLabel(h)} 목표
                     </div>
-                    <div class="flex flex-col gap-2">
+                    <div class="flex flex-col gap-1.5">
                       ${list.map(g => {
                         const p = goalProgressFor(g.id)
                         return html`
-                          <div key=${g.id} class="flex items-center gap-3 rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2">
+                          <div key=${g.id} class="flex items-center gap-2 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5">
                             <div class="min-w-0 flex-1">
                               <div class="flex items-center gap-2">
-                                <span class="text-xs font-medium text-text-strong truncate">${g.title}</span>
-                                <span class="shrink-0 rounded border border-card-border/70 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-muted">${goalPhaseLabel(g.phase)}</span>
+                                <span class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${g.title}</span>
+                                <span class="${DECK_CHIP} shrink-0 text-[var(--color-fg-muted)]">${goalPhaseLabel(g.phase)}</span>
                               </div>
                             </div>
                             <div class="w-28">
@@ -406,7 +417,7 @@ export function Planning() {
             </div>
           </div>
         ` : html`
-          <p class="mt-2 text-sm text-text-muted">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>
+          <p class="p-3 text-xs text-[var(--color-fg-muted)]">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>
         `}
       </section>
     </div>

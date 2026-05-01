@@ -48,7 +48,10 @@ import {
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
-const CARD_BOX = 'rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4'
+const CARD_BOX = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
+const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
+const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
+const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -375,26 +378,26 @@ function GoalVerificationEvidencePanel({
   const statusClass = verificationStatusClass(request, isOpen)
   const votes = request?.votes ?? []
   const panelClass = compact
-    ? 'ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
+    ? 'ml-6 rounded-sm border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
     : CARD_BOX
 
   return html`
     <div class=${panelClass}>
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">AI 확인</div>
-        <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${statusClass}">
+        <div class="${DECK_LABEL}">AI 확인</div>
+        <span class="rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold ${statusClass}">
           ${verificationStatusLabel(request, isOpen)}
         </span>
       </div>
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-body">
-        <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
+      <div class="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-secondary)]">
+        <span class="rounded-sm border border-amber-400/20 bg-amber-400/8 px-1.5 py-0.5 text-amber-100">
           quorum ${summary.approve_count}/${requiredVerdicts}
         </span>
         <span>reject ${summary.reject_count}</span>
         <span>remaining ${summary.remaining_possible}</span>
       </div>
       ${request ? html`
-        <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
+        <div class="mt-2 flex flex-wrap gap-2 font-mono text-3xs text-[var(--color-fg-muted)]">
           <span>request ${request.id}</span>
           <span>target ${request.target_phase}</span>
           <span>opened <${TimeAgo} timestamp=${request.created_at} /></span>
@@ -406,7 +409,7 @@ function GoalVerificationEvidencePanel({
       ${policy && policy.eligible_principals.length > 0 ? html`
         <div class="mt-3 flex flex-wrap gap-1.5">
           ${policy.eligible_principals.map(principal => html`
-            <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
+            <span key=${`${principal.kind}:${principal.id}`} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
               ${verificationPrincipalLabel(principal)}
             </span>
           `)}
@@ -417,19 +420,19 @@ function GoalVerificationEvidencePanel({
           ${votes.map(vote => {
             const evidenceRefs = vote.evidence_refs ?? []
             return html`
-              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded border border-card-border/50 bg-[var(--white-3)] p-2 text-xs text-text-body">
+              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-semibold text-text-strong">${verificationPrincipalLabel(vote.principal)}</span>
-                  <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs uppercase tracking-wider text-text-muted">${vote.decision}</span>
-                  <span class="text-3xs text-text-dim"><${TimeAgo} timestamp=${vote.submitted_at} /></span>
+                  <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
+                  <span class="${DECK_CHIP} uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">${vote.decision}</span>
+                  <span class="${DECK_META}"><${TimeAgo} timestamp=${vote.submitted_at} /></span>
                 </div>
                 ${vote.note ? html`
-                  <div class="mt-1 leading-relaxed text-text-muted">${vote.note}</div>
+                  <div class="mt-1 leading-relaxed text-[var(--color-fg-muted)]">${vote.note}</div>
                 ` : null}
                 ${evidenceRefs.length > 0 ? html`
                   <div class="mt-2 flex flex-wrap gap-1">
                     ${evidenceRefs.map(ref => html`
-                      <code key=${ref} class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-secondary">${ref}</code>
+                      <code key=${ref} class="${DECK_CHIP} text-[var(--color-fg-secondary)]">${ref}</code>
                     `)}
                   </div>
                 ` : null}
@@ -513,10 +516,10 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-sm bg-[var(--white-10)] overflow-hidden">
+      <div class="flex-1 ${h} rounded-sm bg-[var(--color-bg-elevated)] overflow-hidden">
         <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
       </div>
-      <span class="text-2xs font-semibold tabular-nums text-text-muted w-9 text-right">${clamped}%</span>
+      <span class="${DECK_META} w-9 text-right font-semibold tabular-nums">${clamped}%</span>
     </div>
   `
 }
@@ -531,41 +534,41 @@ function TreeSummary({
   goalVerificationCount: number
 }) {
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] gap-3">
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
-        <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">전체 목표</div>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-2">
+      <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.total_goals}</div>
+        <div class="mt-1 ${DECK_LABEL}">전체 목표</div>
       </div>
-      <div class="rounded border border-ok/25 bg-ok/10 p-3 text-center">
-        <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">정상</div>
+      <div class="rounded-sm border border-ok/25 bg-ok/10 p-3 text-center">
+        <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.active_goals}</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-ok/80">정상</div>
       </div>
-      <div class="rounded border border-warn/25 bg-warn/10 p-3 text-center">
-        <div class="text-2xl font-bold text-warn tabular-nums">${summary.at_risk_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">위험</div>
+      <div class="rounded-sm border border-warn/25 bg-warn/10 p-3 text-center">
+        <div class="font-mono text-xl font-semibold text-warn tabular-nums">${summary.at_risk_goals}</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-warn/80">위험</div>
       </div>
-      <div class="rounded border border-bad/25 bg-bad/10 p-3 text-center">
-        <div class="text-2xl font-bold text-bad tabular-nums">${summary.blocked_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">차단</div>
+      <div class="rounded-sm border border-bad/25 bg-bad/10 p-3 text-center">
+        <div class="font-mono text-xl font-semibold text-bad tabular-nums">${summary.blocked_goals}</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-bad/80">차단</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
-        <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.pending_approvals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
+      <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.pending_approvals}</div>
+        <div class="mt-1 ${DECK_LABEL}">승인 대기</div>
       </div>
       ${goalVerificationCount > 0 ? html`
-        <div class="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-center">
-          <div class="text-2xl font-bold text-amber-200 tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-amber-100/80">Goal 검증 대기</div>
+        <div class="rounded-sm border border-amber-400/30 bg-amber-400/10 p-3 text-center">
+          <div class="font-mono text-xl font-semibold text-amber-200 tabular-nums">${goalVerificationCount}</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-amber-100/80">Goal 검증 대기</div>
         </div>
       ` : null}
       ${awaitingVerificationCount > 0 ? html`
-        <div class="rounded border border-accent/30 bg-[var(--accent-10)] p-3 text-center">
-          <div class="text-2xl font-bold text-accent tabular-nums">${awaitingVerificationCount}</div>
-          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">Task 검증 대기</div>
+        <div class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] p-3 text-center">
+          <div class="font-mono text-xl font-semibold text-[var(--color-accent-fg)] tabular-nums">${awaitingVerificationCount}</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-accent-fg)]/80">Task 검증 대기</div>
         </div>
       ` : null}
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-        <div class="mb-2 text-3xs font-semibold uppercase tracking-widest text-text-muted">전체 수렴도</div>
+      <div class="${CARD_BOX}">
+        <div class="mb-2 ${DECK_LABEL}">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
       </div>
     </div>
@@ -574,7 +577,7 @@ function TreeSummary({
 
 function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
   return html`
-    <span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wider ${healthClass(health)}">
+    <span class="inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${healthClass(health)}">
       ${healthLabel(health)}
     </span>
   `
@@ -583,11 +586,11 @@ function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
 function GoalBadges({ badges }: { badges: string[] }) {
   if (badges.length === 0) return null
   return html`
-    <div class="flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap gap-1">
       ${badges.map(badge => html`
         <span
           key=${badge}
-          class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wider ${badgeClass(badge)}"
+          class="inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${badgeClass(badge)}"
         >
           ${badgeLabel(badge)}
         </span>

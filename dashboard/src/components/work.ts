@@ -29,8 +29,8 @@ export function Work() {
     : 'board'
 
   return html`
-    <div class="flex flex-col gap-5">
-      <div class="transition-opacity duration-300">
+    <div class="flex min-w-0 flex-col gap-3">
+      <div class="min-w-0 transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${Memory} />`
             : current === 'planning' ? html`<${PlanningPanel} />`

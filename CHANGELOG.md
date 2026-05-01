@@ -1528,7 +1528,6 @@ observation and fix — silent cost of the pre-fix contract shape.
   backpressure-policy API (`Block` / `Drop_oldest` / `Drop_newest`),
   per-subscription + per-bus stats, and `subscribe ?purpose` labels from
   OAS #998, and now tracks OAS PR #1004 where the deprecated
-  `agent_sdk_swarm` package was removed from the upstream tree.
 
 - **Keeper `[keeper.oas_env]` TOML table.** Per-keeper OAS transport env
   vars are now declarative. `config/keepers/<name>.toml` accepts a new
@@ -1683,7 +1682,6 @@ Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keep
 - **Keeper / server / lib.**
   - Keeper behavioral regime deriver MVP (7th FSM axis: Crashing/Thrashing/Healthy) (#7968).
   - HTTP transport session/conn registries: global mutexes eliminated via lock-free atomic maps (#7979).
-  - `a2a` global mutexes eliminated via lock-free atomic maps (#7857).
   - Dashboard cache global mutex eliminated via lock-free atomic map (#7953).
   - New `Lockfree_atomic` helper module extracted for reuse (#7952).
   - `bash exec` substrate semantics hardened (#7891).
@@ -2066,7 +2064,6 @@ had the full Phase 2 release to migrate.
 
 - `keeper_pr_submit` tool + hardened `gh`/dashboard flows (#7389).
 - 18 dead permission entries (#7434); dead tool references
-  (`masc_release`, `swarm_start` variants) (#7376).
 - Dead `Blocked` variant from `turn_outcome` (#7346).
 - Dead functions from `keeper_status_bridge` (#7403, #7406).
 

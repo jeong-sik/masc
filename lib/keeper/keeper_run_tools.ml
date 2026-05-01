@@ -420,9 +420,8 @@ let prepare_agent_setup
     then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
   in
-  let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
   let visible_always_include_tools =
-    Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
+    always_include_tools
   in
   (* Receipt refs: written sequentially after OAS execution, kept as refs
      because the facade (keeper_agent_run.ml) writes them post-run. *)
@@ -469,7 +468,7 @@ let prepare_agent_setup
       | None -> []
   in
   let validate_allow_list ~turn raw =
-    let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
+    let raw = raw in
     let validated, dropped_names =
       List.partition
         (fun n ->
@@ -642,7 +641,7 @@ let prepare_agent_setup
         ~deterministic_prefilter
         ~llm_selected
         ~discovered
-      |> Tool_portal.filter_visible_tool_names portal_ctx
+      
     in
     let required_tool_names =
       current_task_required_tools ()
@@ -650,7 +649,7 @@ let prepare_agent_setup
     in
     let visible_required_tool_names =
       required_tool_names
-      |> Tool_portal.filter_visible_tool_names portal_ctx
+      
       |> validate_allow_list ~turn
       |> Keeper_types.dedupe_keep_order
     in
@@ -1255,9 +1254,6 @@ let prepare_agent_setup
                  ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                  ~network_mode:
                    (Keeper_types.network_mode_to_string meta.network_mode)
-                 ~shared_memory_scope:
-                   (Keeper_types.shared_memory_scope_to_string
-                      meta.shared_memory_scope)
                  ?approval_mode:approval_mode_effective
                  ~tool_surface_class:computed_surface.tool_surface_class
                  ~visible_tool_count:(List.length all_allowed)

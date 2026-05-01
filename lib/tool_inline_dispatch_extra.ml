@@ -291,13 +291,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Types.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        A2a_tools.notify_event
-          ~event_type:A2a_tools.Broadcast
-          ~agent:author
-          ~data:(`Assoc [
-            ("event", `String "board_post");
-            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ]);
         emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted) ~actor:author
           ?subject:
             (Option.map (Activity_graph.entity ~kind:"post") post_id)
@@ -359,14 +352,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Types.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        A2a_tools.notify_event
-          ~event_type:A2a_tools.Broadcast
-          ~agent:author
-          ~data:(`Assoc [
-            ("event", `String "board_comment");
-            ("post_id", `String post_id);
-            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ]);
         emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented) ~actor:author
           ~subject:(Activity_graph.entity ~kind:"post" post_id)
           ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]

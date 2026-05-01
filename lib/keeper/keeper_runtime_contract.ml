@@ -108,8 +108,7 @@ let provider_of_model = function
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
-    ?shared_memory_scope ?approval_mode ?tool_surface_class
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
     ?visible_tool_count ?required_tools ?missing_required_tools ?provider ?model
     ?cascade_profile () : Yojson.Safe.t =
   let provider =
@@ -131,7 +130,6 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("sandbox_root", string_opt_json sandbox_root);
       ("allowed_paths", string_list_json (nonempty_list allowed_paths));
       ("network_mode", string_opt_json network_mode);
-      ("shared_memory_scope", string_opt_json shared_memory_scope);
       ("approval_mode", string_opt_json approval_mode);
       ("tool_surface_class", string_opt_json tool_surface_class);
       ("visible_tool_count", int_opt_json visible_tool_count);
@@ -224,8 +222,6 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
     [
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("network_mode", `String (network_mode_to_string meta.network_mode));
-      ( "shared_memory_scope",
-        `String (shared_memory_scope_to_string meta.shared_memory_scope) );
       ("backend", `String sandbox_target);
       ("sandbox_target", `String sandbox_target);
       ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));

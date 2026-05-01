@@ -68,15 +68,7 @@ let handle_broadcast (ctx : context) : tool_result option =
         (match mention with
          | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
          | None -> ());
-        A2a_tools.notify_event
-          ~event_type:A2a_tools.Broadcast
-          ~agent:agent_name
-          ~data:(`Assoc [
-            ("message", `String message);
-            ("mention", Json_util.string_opt_to_json mention);
-          ]);
-        let _ = Auto_responder.maybe_respond
-          ~sw
+        let _ = Auto_responder.maybe_respond          ~sw
           ~base_path:config.base_path
           ~from_agent:agent_name
           ~content:message

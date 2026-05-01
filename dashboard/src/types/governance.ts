@@ -212,7 +212,6 @@ export interface KeeperApprovalQueueItem {
   runtime_contract?: {
     sandbox_profile?: string | null
     network_mode?: string | null
-    shared_memory_scope?: string | null
     backend?: string | null
     task_id?: string | null
     goal_id?: string | null

@@ -4,7 +4,6 @@
     Only schemas dispatched by {!Tool_coord} live here. Other
     schemas have been moved to their owning modules
     ({!Tool_task}, {!Tool_control}, {!Tool_suspend}, {!Tool_plan},
-    {!Tool_portal}, {!Tool_inline_dispatch}).
 
     Issue #8636: [assertion_kind_enum_strings] hand-mirrors
     {!Tool_coord.valid_assertion_strings}; the sync regression test

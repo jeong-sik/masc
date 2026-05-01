@@ -16,6 +16,7 @@
   --h-ticker: 32px;
   --h-kpi:    60px;
   --h-life:   32px;
+  --h-drawer: 0px;     /* set dynamically by Drawer.jsx */
   --h-compose:48px;
   --h-status: 20px;
 
@@ -46,6 +47,7 @@ button { font: inherit; }
     var(--h-kpi)
     var(--h-life)
     1fr
+    var(--h-drawer)
     var(--h-compose)
     var(--h-status);
   grid-template-areas:
@@ -54,6 +56,7 @@ button { font: inherit; }
     "kpi    kpi    kpi"
     "life   life   life"
     "side   center rail"
+    "drawer drawer drawer"
     "compose compose compose"
     "status status status";
   gap: 0;
@@ -65,6 +68,7 @@ button { font: inherit; }
 .app > .side    { grid-area: side; overflow: hidden; }
 .app > .center  { grid-area: center; overflow: hidden; min-width: 0; }
 .app > .rail    { grid-area: rail; overflow: hidden; }
+.app > .drawer { grid-area: drawer; overflow: hidden; }
 .app > .compose { grid-area: compose; }
 .app > .status  { grid-area: status; }
 
@@ -275,6 +279,14 @@ button { font: inherit; }
   background: var(--color-bg-page);
   display: grid;
   grid-template-rows: 180px 1fr;
+}
+
+/* When .center holds a plane (Work / Comms / Observe / Cognition / IDE),
+   the dashboard's [180px swimlanes / 1fr deck] grid would squash the plane
+   into the 180px row. Switch to a single-cell flex layout in that case. */
+.center:has(> .plane) {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Swimlanes */

@@ -199,9 +199,7 @@ end
 
 module Masc = struct
   type t =
-    | A2a_delegate
     | Add_task
-    | Agent_card
     | Agent_fitness
     | Agent_update
     | Agents
@@ -290,7 +288,6 @@ module Masc = struct
     | Worktree_list
     | Worktree_remove
     | Approval_get
-    | Collaboration_graph
     | Config
     | Gc
     | Get_metrics
@@ -306,9 +303,7 @@ module Masc = struct
     | Webrtc_offer
 
   let to_string = function
-    | A2a_delegate -> "masc_a2a_delegate"
     | Add_task -> "masc_add_task"
-    | Agent_card -> "masc_agent_card"
     | Agent_fitness -> "masc_agent_fitness"
     | Agent_update -> "masc_agent_update"
     | Agents -> "masc_agents"
@@ -397,7 +392,6 @@ module Masc = struct
     | Worktree_list -> "masc_worktree_list"
     | Worktree_remove -> "masc_worktree_remove"
     | Approval_get -> "masc_approval_get"
-    | Collaboration_graph -> "masc_collaboration_graph"
     | Config -> "masc_config"
     | Gc -> "masc_gc"
     | Get_metrics -> "masc_get_metrics"
@@ -413,9 +407,7 @@ module Masc = struct
     | Webrtc_offer -> "masc_webrtc_offer"
 
   let of_string = function
-    | "masc_a2a_delegate" -> Some A2a_delegate
     | "masc_add_task" -> Some Add_task
-    | "masc_agent_card" -> Some Agent_card
     | "masc_agent_fitness" -> Some Agent_fitness
     | "masc_agent_update" -> Some Agent_update
     | "masc_agents" -> Some Agents
@@ -504,7 +496,6 @@ module Masc = struct
     | "masc_worktree_list" -> Some Worktree_list
     | "masc_worktree_remove" -> Some Worktree_remove
     | "masc_approval_get" -> Some Approval_get
-    | "masc_collaboration_graph" -> Some Collaboration_graph
     | "masc_config" -> Some Config
     | "masc_gc" -> Some Gc
     | "masc_get_metrics" -> Some Get_metrics

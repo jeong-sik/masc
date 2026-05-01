@@ -834,29 +834,3 @@ and with_token_permission_auth ~permission handler request reqd =
           | Ok () -> handler state agent_name request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
-
-let serve_agent_card ~host ~port request reqd =
-  with_read_auth
-    (fun _state req reqd ->
-      let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
-      let resolved_host, resolved_port =
-        match host_header with
-        | None -> (host, port)
-        | Some host_value -> (
-            match String.split_on_char ':' host_value with
-            | [ host_name ] -> (host_name, port)
-            | host_name :: port_str :: _ ->
-                let resolved_port =
-                  Option.value ~default:port (int_of_string_opt port_str)
-                in
-                (host_name, resolved_port)
-            | _ -> (host, port))
-      in
-      let (_card, json) =
-        Agent_card.get_cached ~host:resolved_host
-          ~port:resolved_port ~schemas:Config.raw_all_tool_schemas ()
-      in
-      let a2a_version = A2a_tools.default_a2a_version in
-      Http_server_eio.Response.json ~extra_headers:[ ("A2A-Version", a2a_version) ] json
-        reqd)
-    request reqd

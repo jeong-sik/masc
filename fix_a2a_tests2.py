@@ -1,0 +1,20 @@
+import re
+
+with open("test/test_error_logging_coverage.ml", "r") as f:
+    content = f.read()
+
+content = re.sub(r'\(\* ============================================================\n\s*a2a_tools: submit_heartbeat_result unknown status.*?\]\n', '', content, flags=re.DOTALL)
+
+with open("test/test_error_logging_coverage.ml", "w") as f:
+    f.write(content)
+
+with open("test/test_dashboard_mission.ml", "r") as f:
+    content = f.read()
+
+content = re.sub(r'\s*Lib\.A2a_tools\.emit_heartbeat_task.*?\(\);\n', '\n', content, flags=re.DOTALL)
+content = re.sub(r'\s*ignore\s*\(Lib\.A2a_tools\.submit_heartbeat_result.*?\(\)\);\n', '\n', content, flags=re.DOTALL)
+
+with open("test/test_dashboard_mission.ml", "w") as f:
+    f.write(content)
+
+print("done")

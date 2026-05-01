@@ -94,6 +94,18 @@ let test_pricing_catalog_miss_for_unknown_model () =
     ~cost_usd:0.0
     "pricing_catalog_miss"
 
+let test_pricing_catalog_miss_for_auto_alias () =
+  (* The OAS catalog may carry zero-price fallback entries for selector
+     aliases, but "auto" is not a billable model id. Treating it as
+     free would hide missing canonical telemetry. *)
+  check_source
+    ~msg:"auto alias on paid provider => pricing_catalog_miss"
+    ~usage_missing:false ~usage_trusted:true
+    ~provider:"openai"
+    ~model:"auto"
+    ~cost_usd:0.0
+    "pricing_catalog_miss"
+
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
 let counter_for source =
@@ -147,6 +159,8 @@ let () =
             test_computed_when_trusted_and_positive;
           test_case "pricing_catalog_miss for unknown model" `Quick
             test_pricing_catalog_miss_for_unknown_model;
+          test_case "pricing_catalog_miss for auto alias" `Quick
+            test_pricing_catalog_miss_for_auto_alias;
         ] );
       ( "counter",
         [

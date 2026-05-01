@@ -85,9 +85,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         else
           old.network_mode
   in
-  let shared_memory_scope =
-    Option.value ~default:old.shared_memory_scope p.shared_memory_scope_opt
-  in
   let autoboot_enabled =
     Option.value ~default:old.autoboot_enabled p.autoboot_enabled_opt
   in
@@ -229,7 +226,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     allowed_paths;
     sandbox_profile;
     network_mode;
-    shared_memory_scope;
     tool_access;
     tool_denylist;
     tool_preset_source = p.profile_defaults.tool_preset_source;

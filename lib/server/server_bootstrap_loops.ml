@@ -750,8 +750,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      pruning never ran (zero production callers of [consolidate]).
      last_consolidation=0.0 on live graphs confirmed the gap in
      production. *)
-  Hebbian_eio.start_consolidation_fiber ~sw ~clock state.room_config;
-  (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
+    (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
   Tool_usage_log.init
     ~base_path:state.room_config.base_path
     ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
@@ -824,22 +823,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           let ar_reaped = Agent_registry_eio.cleanup_stale_sessions () in
           if ar_reaped > 0 then
             Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
-          (* A2A: remove heartbeat snapshots for offline agents *)
-          let active_agents =
-            List.map (fun (id : Agent_identity.t) -> id.agent_name)
-              (Agent_registry_eio.list_active ~within_seconds:600.0 ())
-          in
-          let hb_reaped = A2a_tools.cleanup_stale_heartbeats ~active_agents () in
-          if hb_reaped > 0 then
-            Log.Server.info "Reaped %d stale heartbeat entries" hb_reaped;
-          (* A2A: remove event buffers for dead subscriptions *)
-          let buf_reaped = A2a_tools.cleanup_orphan_buffers () in
-          if buf_reaped > 0 then
-            Log.Server.info "Reaped %d orphan event buffers" buf_reaped;
-          (* A2A: expire subscriptions idle > 24h *)
-          let sub_expired = A2a_tools.cleanup_stale_subscriptions () in
-          if sub_expired > 0 then
-            Log.Server.info "Expired %d stale A2A subscriptions" sub_expired;
           (* Keeper sandbox: remove stale Docker containers when owner_pid is
              dead, container age exceeds MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC
              (default 6h), or container is stopped. Internally throttled by
@@ -939,5 +922,4 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         sync_loop ());
   let resolved_base = state.room_config.base_path in
   let masc_dir = Coord.masc_root_dir state.room_config in
-  A2a_tools.init ~masc_dir;
   (resolved_base, masc_dir)

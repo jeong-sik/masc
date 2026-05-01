@@ -11,14 +11,12 @@
 
 (** Allowed values for [masc_agent_card] [action]: ["get" | "refresh"].
     Mirror of [Tool_agent.valid_agent_card_action_strings]. *)
-val agent_card_action_enum_strings : string list
 
 (** Allowed values for [masc_collaboration_graph] [format]:
     ["text" | "json"]. Mirror of
     [Tool_agent.valid_collaboration_format_strings]. *)
-val collaboration_format_enum_strings : string list
 
-(** Tool schemas: [masc_agents], [masc_agent_update], [masc_agent_card],
+(** Tool schemas: [masc_agents], [masc_agent_update], 
     [masc_agent_fitness], [masc_register_capabilities],
-    [masc_collaboration_graph], [masc_get_metrics]. *)
+    [masc_get_metrics]. *)
 val schemas : Types.tool_schema list

@@ -55,7 +55,6 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     ? {
         sandbox_profile: asNullableString(raw.runtime_contract.sandbox_profile),
         network_mode: asNullableString(raw.runtime_contract.network_mode),
-        shared_memory_scope: asNullableString(raw.runtime_contract.shared_memory_scope),
         backend: asNullableString(raw.runtime_contract.backend),
         task_id: asNullableString(raw.runtime_contract.task_id),
         goal_id: asNullableString(raw.runtime_contract.goal_id),

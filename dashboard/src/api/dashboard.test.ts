@@ -651,7 +651,6 @@ describe('fetchKeeperConfig', () => {
       active_goal_ids: ['goal-runtime'],
       sandbox_profile: 'docker',
       network_mode: 'none',
-      shared_memory_scope: 'room',
       sandbox_last_error: 'sandbox docker exec failed',
       effective_sandbox_image: 'ubuntu:24.04@sha256:test',
       private_workspace_root: '.masc/playground/keeper-sangsu',
@@ -811,7 +810,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
-    expect(result.shared_memory_scope).toBe('room')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
     expect(result.effective_sandbox_image).toBe('ubuntu:24.04@sha256:test')
     expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')

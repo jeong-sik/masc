@@ -45,7 +45,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
     ; "sandbox_image", Json_util.string_opt_to_json m.sandbox_image
     ; "network_mode", `String (network_mode_to_string m.network_mode)
-    ; "shared_memory_scope", `String (shared_memory_scope_to_string m.shared_memory_scope)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_preset_source", Json_util.string_opt_to_json m.tool_preset_source

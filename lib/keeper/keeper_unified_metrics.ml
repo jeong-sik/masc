@@ -603,7 +603,6 @@ let append_decision_record
       , turn_goal_ids_opt
       , _sandbox_profile
       , _network_mode
-      , _shared_memory_scope
       , approval_mode ) =
     Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
   in

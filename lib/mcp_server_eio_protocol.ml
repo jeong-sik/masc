@@ -86,7 +86,6 @@ let send_resource_updated_notification ~session_id ~uri =
        ~params:(`Assoc [ ("uri", `String uri) ]))
 
 let broadcast_tools_list_changed () =
-  Agent_card.invalidate_cache ();
   Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
 
 let dedup_strings items =

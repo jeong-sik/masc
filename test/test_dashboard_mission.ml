@@ -102,40 +102,6 @@ let test_dashboard_mission_projection () =
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       seed_room config session_id;
-      Lib.A2a_tools.emit_heartbeat_task
-        ~agent:"llama-local-alpha"
-        ~goal:"Inspect board state with allowed MCP tools."
-        ~context:"fixture context"
-        ~allowed_tools:[ "masc_board_get"; "masc_board_vote"; "keeper_board_list" ]
-        ();
-      ignore
-        (Lib.A2a_tools.submit_heartbeat_result
-           ~worker_name:"worker-fixture"
-           ~agent:"llama-local-alpha"
-           ~status:"acted"
-           ~summary:"Upvoted the target board post after inspection."
-           ~tool_call_count:2
-           ~tool_names:[ "masc_board_get"; "masc_board_vote" ]
-           ~decision_reason:"fixture result"
-           ~decision_confidence:0.93
-           ());
-      ignore
-        (Lib.A2a_tools.submit_heartbeat_result
-           ~worker_name:"worker-fixture"
-           ~agent:"llama-local-beta"
-           ~status:"acted"
-           ~summary:"Older result for beta."
-           ~tool_call_count:1
-           ~tool_names:[ "masc_board_get" ]
-           ~decision_reason:"fixture older result"
-           ~decision_confidence:0.61
-           ());
-      Lib.A2a_tools.emit_heartbeat_task
-        ~agent:"llama-local-beta"
-        ~goal:"Fresh assignment for beta."
-        ~context:"fixture context"
-        ~allowed_tools:[ "masc_board_comment" ]
-        ();
       (* Simulate delta departing: remove agent file so Dashboard_mission
          sees delta as departed. *)
       let delta_path =
@@ -353,12 +319,6 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
     (fun () ->
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Coord_utils.default_config dir in
-      Lib.A2a_tools.emit_heartbeat_task
-        ~agent:keeper_name
-        ~goal:"Mission keeper audit fixture"
-        ~context:"dashboard mission assembly"
-        ~allowed_tools:[ "masc_board_get"; "masc_board_vote" ]
-        ();
       let briefs =
         Lib.Dashboard_mission_assembly.build_keeper_briefs config
           [

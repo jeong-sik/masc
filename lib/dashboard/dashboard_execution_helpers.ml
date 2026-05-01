@@ -175,54 +175,14 @@ let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
   ]
 
 let tool_audit_snapshot agent_name =
-  let task_snapshot = A2a_tools.latest_heartbeat_task agent_name in
-  let result_snapshot = A2a_tools.latest_heartbeat_result agent_name in
-  match task_snapshot, result_snapshot with
-  | Some task, Some result when task.seq > result.seq ->
-      {
-        allowed_tool_names = task.allowed_tools;
-        latest_tool_names = [];
-        latest_tool_call_count = None;
-        latest_action_source = None;
-        tool_audit_source = Some "heartbeat_task";
-        tool_audit_at = Some task.created_at;
-      }
-  | Some task, Some result ->
-      {
-        allowed_tool_names = task.allowed_tools;
-        latest_tool_names = result.tool_names;
-        latest_tool_call_count = Some result.tool_call_count;
-        latest_action_source = None;
-        tool_audit_source = Some "heartbeat_result";
-        tool_audit_at = Some result.updated_at;
-      }
-  | Some task, None ->
-      {
-        allowed_tool_names = task.allowed_tools;
-        latest_tool_names = [];
-        latest_tool_call_count = None;
-        latest_action_source = None;
-        tool_audit_source = Some "heartbeat_task";
-        tool_audit_at = Some task.created_at;
-      }
-  | None, Some result ->
-      {
-        allowed_tool_names = [];
-        latest_tool_names = result.tool_names;
-        latest_tool_call_count = Some result.tool_call_count;
-        latest_action_source = None;
-        tool_audit_source = Some "heartbeat_result";
-        tool_audit_at = Some result.updated_at;
-      }
-  | None, None ->
-      {
-        allowed_tool_names = [];
-        latest_tool_names = [];
-        latest_tool_call_count = None;
-        latest_action_source = None;
-        tool_audit_source = None;
-        tool_audit_at = None;
-      }
+  {
+    allowed_tool_names = [];
+    latest_tool_names = [];
+    latest_tool_call_count = None;
+    latest_action_source = None;
+    tool_audit_source = None;
+    tool_audit_at = None;
+  }
 
 let skill_route_summary_of_keeper keeper =
   let route = member_assoc "skill_route" keeper in

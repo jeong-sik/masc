@@ -1,17 +1,70 @@
-/* global React, MASC_DATA */
+/* global React, MASC_DATA, WxHead, useCollapsed */
 const { useState } = React;
+const _Wx = (props) => (window.WxHead ? React.createElement(window.WxHead, props) : null);
+const _useCol = (id) => (window.useCollapsed ? window.useCollapsed(id) : [false, () => {}]);
+const _isToggleKey = (e) => e.key === "Enter" || e.key === " " || e.key === "Spacebar";
+const _fromNestedControl = (e) =>
+  e.target !== e.currentTarget &&
+  e.target.closest &&
+  e.target.closest("a,button,input,textarea,select");
 
 const keeperTone = { "nick0cave":"brass", "masc-improver":"ok", "sangsu":"info", "qa-king":"err", "rama":"stalled", "scholar":"idle", "taskmaster":"idle", "velvet-hammer":"idle" };
 const statusColor = s => ({ running:"running", ok:"ok", pending:"info", fail:"err", stalled:"stalled", idle:"idle", queued:"queued", done:"done", active:"active" }[s] || "idle");
 
 // ============== Sidebar ==============
+// Section header — collapsible per-section, no outer wx-head wrapper
+function SideSectHead({ id, label, count, right, onCollapseAll, popoutId }) {
+  const [col, toggle] = _useCol(id);
+  const onKeyDown = (e) => {
+    if (_fromNestedControl(e)) return;
+    if (_isToggleKey(e)) {
+      e.preventDefault();
+      toggle();
+    }
+  };
+  return (
+    <div className="side-sect-h sx" onClick={toggle} onKeyDown={onKeyDown} role="button" tabIndex={0} aria-expanded={!col}>
+      <span className="sx-chev">{col ? "▸" : "▾"}</span>
+      <span className="sx-lbl">{label}</span>
+      {count != null && <span className="count">{count}</span>}
+      {right}
+      {popoutId && (
+        <a className="wx-popout"
+           href={"?widget=" + popoutId}
+           target="_blank" rel="noopener"
+           onClick={(e)=>e.stopPropagation()}
+           title="open in new tab">↗</a>
+      )}
+      {onCollapseAll && (
+        <span className="sx-rail" onClick={(e)=>{ e.stopPropagation(); onCollapseAll(); }} title="collapse rail">«</span>
+      )}
+    </div>
+  );
+}
+function SideSectBody({ id, children, style }) {
+  const [col] = _useCol(id);
+  if (col) return null;
+  return <div className="side-sect-body" style={style}>{children}</div>;
+}
+
 function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal, selectedKeepers, toggleKeeper }) {
   const sk = selectedKeepers || new Set();
+  const [colSide, toggleSide] = _useCol("sidebar");
+  if (colSide) {
+    return (
+      <aside className="side wx-collapsed" onClick={toggleSide} title="expand sidebar">
+        <div className="wx-rail-vlabel">FLEET · GOALS</div>
+      </aside>
+    );
+  }
   return (
     <aside className="side">
       <div className="side-sect">
-        <div className="side-sect-h"><span>Fleet</span><span className="count">{keepers.filter(k=>k.status!=="idle").length}/{keepers.length}</span></div>
-        <div className="side-sect-body">
+        <SideSectHead id="sidebar.fleet" label="Fleet"
+          count={`${keepers.filter(k=>k.status!=="idle").length}/${keepers.length}`}
+          popoutId="sidebar"
+          onCollapseAll={toggleSide} />
+        <SideSectBody id="sidebar.fleet">
           {keepers.map(k => (
             <div key={k.id}
                  className={"keeper-row " + (k.status==="idle"?"idle ":"") + (selKeeper===k.id?"selected":"")}
@@ -21,16 +74,11 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
               <span className="meta">{k.task}</span>
             </div>
           ))}
-        </div>
+        </SideSectBody>
       </div>
       <div className="side-sect">
-        <div className="side-sect-h side-keepers">
-          <div className="h" style={{display:"flex",alignItems:"center",gap:6,width:"100%"}}>
-            <span>Filter</span>
-            <span className="cnt">{sk.size}/{keepers.length}</span>
-          </div>
-        </div>
-        <div className="side-sect-body" style={{paddingTop:0}}>
+        <SideSectHead id="sidebar.filter" label="Filter" count={`${sk.size}/${keepers.length}`} />
+        <SideSectBody id="sidebar.filter" style={{paddingTop:0}}>
           <div className="side-keepers">
             <div className="chips">
               {keepers.map(k => {
@@ -46,11 +94,11 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
               })}
             </div>
           </div>
-        </div>
+        </SideSectBody>
       </div>
-      <div className="side-sect" style={{flex:1, minHeight:0}}>
-        <div className="side-sect-h"><span>Goals</span><span className="count">{goals.length}</span></div>
-        <div className="side-sect-body">
+      <div className="side-sect side-sect-goals">
+        <SideSectHead id="sidebar.goals" label="Goals" count={goals.length} />
+        <SideSectBody id="sidebar.goals">
           {goals.map(g => (
             <div key={g.id}
                  className={"goal-row " + (g.status==="done"?"done ":"") + (selGoal===g.id?"selected":"")}
@@ -66,7 +114,7 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
               </div>
             </div>
           ))}
-        </div>
+        </SideSectBody>
       </div>
     </aside>
   );
@@ -101,6 +149,7 @@ function Swimlanes({ keepers, laneEvents }) {
 // ============== Deck ==============
 function Deck({ tasks, goals, providers, cascade }) {
   const [tab, setTab] = useState("board");
+  const [colDeck] = _useCol("deck");
   const tabs = [
     { id:"board",     label:"Board",     ct: tasks.filter(t=>t.status!=="queued").length },
     { id:"tasks",     label:"Tasks",     ct: tasks.length },
@@ -118,7 +167,8 @@ function Deck({ tasks, goals, providers, cascade }) {
   ];
 
   return (
-    <div className="deck">
+    <div className={"deck" + (colDeck ? " wx-collapsed" : "")}>
+      {_Wx({ id:"deck", title:"Deck", meta: `${tab} · ${tasks.length} tasks`, popoutId: "deck" })}
       <div className="deck-tabs">
         {tabs.map(t => (
           <button key={t.id} className={"deck-tab " + (tab===t.id?"active":"")} onClick={()=>setTab(t.id)}>
@@ -275,13 +325,55 @@ function Deck({ tasks, goals, providers, cascade }) {
 }
 
 // ============== Rail ==============
+function RailSectHead({ id, label, count, right, onCollapseAll, popoutId }) {
+  const [col, toggle] = _useCol(id);
+  const onKeyDown = (e) => {
+    if (_fromNestedControl(e)) return;
+    if (_isToggleKey(e)) {
+      e.preventDefault();
+      toggle();
+    }
+  };
+  return (
+    <div className="rail-sect-h sx" onClick={toggle} onKeyDown={onKeyDown} role="button" tabIndex={0} aria-expanded={!col}>
+      <span className="sx-chev">{col ? "▸" : "▾"}</span>
+      <span className="sx-lbl">{label}</span>
+      {count != null && <span className="count">{count}</span>}
+      {right}
+      {popoutId && (
+        <a className="wx-popout"
+           href={"?widget=" + popoutId}
+           target="_blank" rel="noopener"
+           onClick={(e)=>e.stopPropagation()}
+           title="open in new tab">↗</a>
+      )}
+      {onCollapseAll && (
+        <span className="sx-rail" onClick={(e)=>{ e.stopPropagation(); onCollapseAll(); }} title="collapse rail">»</span>
+      )}
+    </div>
+  );
+}
+function RailSectBody({ id, children, style, className }) {
+  const [col] = _useCol(id);
+  if (col) return null;
+  return <div className={"rail-sect-body " + (className||"")} style={style}>{children}</div>;
+}
+
 function Rail({ events, cascade }) {
   const nudges = (window.MASC_P2 && window.MASC_P2.nudges) || [];
+  const [colRail, toggleRail] = _useCol("rail");
+  if (colRail) {
+    return (
+      <aside className="rail wx-collapsed" onClick={toggleRail} title="expand activity rail">
+        <div className="wx-rail-vlabel">ACTIVITY · NUDGES</div>
+      </aside>
+    );
+  }
   return (
     <aside className="rail">
       <div className="rail-sect flex">
-        <div className="rail-sect-h"><span>Activity Feed</span><span className="count">{events.length}</span></div>
-        <div className="rail-sect-body">
+        <RailSectHead id="rail.activity" label="Activity Feed" count={events.length} popoutId="rail" onCollapseAll={toggleRail} />
+        <RailSectBody id="rail.activity">
           {events.map((ev,i) => (
             <div key={i} className="activity">
               <span className="t">{ev.t.slice(0,8)}</span>
@@ -292,14 +384,11 @@ function Rail({ events, cascade }) {
               </span>
             </div>
           ))}
-        </div>
+        </RailSectBody>
       </div>
       <div className="rail-sect">
-        <div className="rail-sect-h">
-          <span>Operator Nudges</span>
-          <span className="count">{nudges.filter(n => !n.ack).length}/{nudges.length}</span>
-        </div>
-        <div className="rail-nudges">
+        <RailSectHead id="rail.nudges" label="Operator Nudges" count={`${nudges.filter(n => !n.ack).length}/${nudges.length}`} />
+        <RailSectBody id="rail.nudges" className="rail-nudges">
           {nudges.slice(0, 5).map(n => (
             <div key={n.id} className="rail-nudge">
               <span className={"ch "+n.channel}>{n.channel}</span>
@@ -311,11 +400,11 @@ function Rail({ events, cascade }) {
               <span className={"ack "+(n.ack ? "y" : "n")}>{n.ack ? "✓" : "…"}</span>
             </div>
           ))}
-        </div>
+        </RailSectBody>
       </div>
       <div className="rail-sect">
-        <div className="rail-sect-h"><span>Last Cascade</span><span className="count">{cascade.total_ms}ms</span></div>
-        <div className="rail-sect-body" style={{padding:"0 var(--sp-3) var(--sp-3)"}}>
+        <RailSectHead id="rail.cascade" label="Last Cascade" count={`${cascade.total_ms}ms`} />
+        <RailSectBody id="rail.cascade" style={{padding:"0 var(--sp-3) var(--sp-3)"}}>
           {cascade.steps.map((s,i)=>(
             <div key={i} style={{
               display:"grid", gridTemplateColumns:"80px auto 1fr auto",
@@ -331,7 +420,7 @@ function Rail({ events, cascade }) {
               <span style={{color:"var(--color-fg-secondary)",fontVariantNumeric:"tabular-nums"}}>{s.ms}ms</span>
             </div>
           ))}
-        </div>
+        </RailSectBody>
       </div>
     </aside>
   );
@@ -339,12 +428,39 @@ function Rail({ events, cascade }) {
 
 // ============== Composer ==============
 function Composer({ selKeeper }) {
+  const [val, setVal] = useState("");
+  const [hist, setHist] = useState([
+    { ts:"16:31", kp:"nick0cave", cmd:"keeper.claim(t-9f2a)",  ok:true  },
+    { ts:"16:24", kp:"sangsu",    cmd:"keeper.trace(cascade-3f19)", ok:true },
+    { ts:"16:18", kp:"qa-king",   cmd:"verify(suite-merge-blockers)", ok:false },
+  ]);
+  const ctxLabel = (window.MASC_P2 && window.MASC_P2.repos)
+    ? `${selKeeper} → ${(window.MASC_EXT?.initialState?.().repo) || "runtime"} / ${(window.MASC_EXT?.initialState?.().branch) || "main"}`
+    : selKeeper;
+  const submit = () => {
+    if (!val.trim()) return;
+    setHist(h => [{ ts:"now", kp:selKeeper, cmd: val.trim(), ok:true }, ...h.slice(0,4)]);
+    setVal("");
+  };
   return (
     <div className="compose">
-      <span className="compose-prompt">▸ {selKeeper}:</span>
-      <input className="compose-input" placeholder="keeper.claim(task) · keeper.trace(cascade_id) · /goal goal-keeper-clarity …" />
+      <span className="compose-prompt" title={ctxLabel}>▸ {selKeeper}:</span>
+      <input className="compose-input"
+             value={val}
+             onChange={(e)=>setVal(e.target.value)}
+             onKeyDown={(e)=>{ if (e.key === "Enter") submit(); }}
+             placeholder="keeper.claim(task) · keeper.trace(cascade_id) · /goal goal-keeper-clarity …" />
+      <div className="compose-hist" title="recent commands">
+        {hist.slice(0,3).map((h,i) => (
+          <span key={i} className={"hb " + (h.ok?"ok":"err")}>
+            <span className="ht">{h.ts}</span>
+            <span className="hk">{h.kp}</span>
+            <span className="hc">{h.cmd}</span>
+          </span>
+        ))}
+      </div>
       <span className="compose-hint">⏎ run · ⌘K palette · ? help</span>
-      <button className="compose-btn">Run</button>
+      <button className="compose-btn" onClick={submit}>Run</button>
     </div>
   );
 }

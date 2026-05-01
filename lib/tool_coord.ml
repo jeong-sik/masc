@@ -421,86 +421,97 @@ let status_summary_string (ctx : context) =
       |> take_items 2
   in
   let attention_items =
-    []
-    |> fun items ->
-    if not joined then
-      items @ [ "You are not joined in the project namespace. Call masc_join." ]
-    else
-      items
-    |> fun items ->
-    if credential_blocked then
-      items
-      @ [
-          Printf.sprintf
-            "Lifecycle actions are credential-blocked for %s. Mount a valid credential before claiming or transitioning tasks."
-            (String.concat "/" credential_state.credential_candidates);
-        ]
-    else
-      items
-    |> fun items ->
-    (match planning_state.planning_missing_task with
-    | Some task_id ->
+    let items = [] in
+    let items =
+      if not joined then
+        items @ [ "You are not joined in the project namespace. Call masc_join." ]
+      else
+        items
+    in
+    let items =
+      if credential_blocked then
         items
         @ [
             Printf.sprintf
-              "Owned task %s has no planning context. Do not retry generic masc_plan_init from a drifted surface; use handoff/worktree/test logs as the temporary SSOT until a credentialed owner repair receipt exists."
-              task_id;
+              "Lifecycle actions are credential-blocked for %s. Mount a valid credential before claiming or transitioning tasks."
+              (String.concat "/" credential_state.credential_candidates);
           ]
-    | None -> items)
-    |> fun items ->
-    (match planning_state.deliverable_conflict_task with
-    | Some task_id ->
+      else
+        items
+    in
+    let items =
+      match planning_state.planning_missing_task with
+      | Some task_id ->
+          items
+          @ [
+              Printf.sprintf
+                "Owned task %s has no planning context. Do not retry generic masc_plan_init from a drifted surface; use handoff/worktree/test logs as the temporary SSOT until a credentialed owner repair receipt exists."
+                task_id;
+            ]
+      | None -> items
+    in
+    let items =
+      match planning_state.deliverable_conflict_task with
+      | Some task_id ->
+          items
+          @ [
+              Printf.sprintf
+                "Owned task %s already has a completed-looking deliverable while the task is still active. Treat this as conflict triage until board, planning, and control-plane state converge."
+                task_id;
+            ]
+      | None -> items
+    in
+    let items =
+      if Option.is_some binding.primary_owned && not binding.current_task_set then
+        items
+        @ [
+            "You own a task but planning current_task is unset or drifted. \
+             Treat owned as canonical and call masc_plan_set_task.";
+          ]
+      else
+        items
+    in
+    let items =
+      match binding.drift_reason with
+      | Some "secondary_assignment" ->
+          items
+          @ [
+              "Multiple assigned tasks detected. Current focus is also assigned; choose or reconcile the active lane before claiming new work.";
+            ]
+      | Some "stale_focus" ->
+          items
+          @ [
+              "Owned/current drift detected. Planning current_task is not assigned to you; treat primary_owned as the safe task lane.";
+            ]
+      | Some "no_owned" ->
+          items
+          @ [
+              "Planning current_task is set but no active task is assigned to you; clear or rebind current_task before following it.";
+            ]
+      | Some _ | None -> items
+    in
+    let items =
+      if todo_conflict_count > 0 then
         items
         @ [
             Printf.sprintf
-              "Owned task %s already has a completed-looking deliverable while the task is still active. Treat this as conflict triage until board, planning, and control-plane state converge."
-              task_id;
+              "%d todo task(s) have completed-looking planning deliverables; treat them as control-plane conflicts, not fresh claimable work."
+              todo_conflict_count;
           ]
-    | None -> items)
-    |> fun items ->
-    if Option.is_some binding.primary_owned && not binding.current_task_set then
-      items
-      @ [ "You own a task but planning current_task is unset or drifted. \
-           Treat owned as canonical and call masc_plan_set_task." ]
-    else
-      items
-    |> fun items ->
-    (match binding.drift_reason with
-    | Some "secondary_assignment" ->
+      else
+        items
+    in
+    let items = items @ coordination_fsm_attention_items ctx in
+    let items =
+      if zombie_count > 0 then
         items
         @ [
-            "Multiple assigned tasks detected. Current focus is also assigned; choose or reconcile the active lane before claiming new work.";
+            Printf.sprintf
+              "%d stale agent(s) are still visible in the namespace." zombie_count;
           ]
-    | Some "stale_focus" ->
+      else
         items
-        @ [
-            "Owned/current drift detected. Planning current_task is not assigned to you; treat primary_owned as the safe task lane.";
-          ]
-    | Some "no_owned" ->
-        items
-        @ [
-            "Planning current_task is set but no active task is assigned to you; clear or rebind current_task before following it.";
-          ]
-    | Some _ | None -> items)
-    |> fun items ->
-    if todo_conflict_count > 0 then
-      items
-      @ [
-          Printf.sprintf
-            "%d todo task(s) have completed-looking planning deliverables; treat them as control-plane conflicts, not fresh claimable work."
-            todo_conflict_count;
-        ]
-    else
-      items
-    |> fun items -> items @ coordination_fsm_attention_items ctx
-    |> fun items ->
-    if zombie_count > 0 then
-      items
-      @ [ Printf.sprintf "%d stale agent(s) are still visible in the namespace."
-            zombie_count ]
-    else
-      items
-    |> fun items ->
+    in
     if fresh_todo_count > 0 && binding.assigned_task_ids = [] then
       items
       @ [ Printf.sprintf "%d unclaimed task(s) are available right now."

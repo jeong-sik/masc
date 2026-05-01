@@ -340,11 +340,14 @@ let resolved_keeper_args_from_persona args :
         let defaults = load_keeper_profile_defaults persona_name in
         (match persona_operator_todo_placeholder_fields persona defaults with
         | _ :: _ as fields ->
+            let defaults_source =
+              Option.value defaults.manifest_path ~default:persona.profile_path
+            in
             Error
               (Printf.sprintf
-                 "persona profile %s contains OPERATOR_TODO placeholder(s): %s; \
+                 "keeper defaults at %s contain OPERATOR_TODO placeholder(s): %s; \
                   replace placeholders before masc_keeper_create_from_persona"
-                 persona.profile_path
+                 defaults_source
                  (String.concat ", " fields))
         | [] ->
         let name =

@@ -140,9 +140,11 @@ val ensure_local_discovery_ready :
   string list ->
   (unit, string) result
 
-(** Deterministic decision for the local-only phase fallback boundary. This
+(** Deterministic decision for the phase-buffer fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
-    labels warrant an Ollama liveness check before preserving [local_only]. *)
+    labels warrant an Ollama liveness check before preserving the configured
+    [routes.phase_buffer] target. Legacy [local_only] aliases are normalized
+    through routes before this decision. *)
 type local_only_liveness_decision =
   | Keep_effective_cascade of string
   | Probe_local_only_urls of {
@@ -158,10 +160,10 @@ val decide_local_only_liveness :
   string list ->
   local_only_liveness_decision
 
-(** When phase routing temporarily forces [local_only], fail open to the
+(** When phase routing temporarily forces the phase-buffer route, fail open to the
     keeper's configured base cascade if the local Ollama endpoint is
-    unavailable. Explicit [local_only] keepers are preserved. Exposed for
-    targeted tests. *)
+    unavailable. Explicit legacy [local_only] aliases follow the configured
+    [routes.phase_buffer] target. Exposed for targeted tests. *)
 val fail_open_local_only_when_unavailable :
   ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
   ?probe_ollama_base_url:(string -> bool) ->

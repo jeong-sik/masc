@@ -67,6 +67,14 @@ type failure_reason =
           consecutive cycles. This is a provider/cascade/runtime throughput
           failure, so the supervisor pauses instead of restarting into the
           same slow model and burning another multi-minute budget. *)
+  | Provider_runtime_error of { code : string; detail : string }
+      (** Latched from the keeper turn terminal reason when the provider,
+          adapter, or cascade fails before useful keeper progress. A later
+          idle watchdog should preserve this root cause instead of recasting
+          the keeper as generically stale. *)
+  | Tool_required_unsatisfied of { code : string; detail : string }
+      (** Latched when an actionable required-tool turn returned no useful
+          keeper tool progress. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
@@ -82,6 +90,11 @@ val failure_reason_to_string : failure_reason -> string
     OCaml's exhaustive-match check — Option B mitigation for the
     recurring P0 pattern (#10490, #10574). *)
 val failure_reason_cohort_key : failure_reason option -> string
+
+val stale_watchdog_failure_reason :
+  prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
+(** Preserve authoritative terminal failure reasons when the stale watchdog
+    fires after a failed turn. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

@@ -1,3 +1,4 @@
+open Base
 (** Time compatibility layer — transparent re-export of
     {!Mcp_protocol_eio.Time_compat}.
 

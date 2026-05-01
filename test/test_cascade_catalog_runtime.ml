@@ -220,7 +220,11 @@ let runtime_mcp_policy_with_headers =
           {
             name = "masc";
             url = "http://127.0.0.1:8935/mcp";
-            headers = [ ("x-masc-agent-name", "keeper-sangsu-agent") ];
+            headers =
+              [
+                ("x-masc-agent-name", "keeper-sangsu-agent");
+                ("authorization", "Bearer test-token");
+              ];
           };
       ];
     allowed_server_names = [ "masc" ];
@@ -328,8 +332,8 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
   let shared_model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
-  let keeper_unified_model =
-    Printf.sprintf "custom:keeper-unified@%s/v1" dummy_base_url
+  let custom_exec_model =
+    Printf.sprintf "custom:custom-exec@%s/v1" dummy_base_url
   in
   let strict_model =
     Printf.sprintf "custom:tool-use-strict@%s/v1" dummy_base_url
@@ -339,11 +343,11 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
        (Printf.sprintf
           {|{
   "big_three_models": ["%s"],
-  "keeper_unified_models": ["%s"],
+  "custom_exec_models": ["%s"],
   "tool_rerank_models": ["%s"],
-  "tool_use_strict_models": ["%s"]
+  "strict_exec_models": ["%s"]
 }|}
-          shared_model keeper_unified_model shared_model strict_model));
+          shared_model custom_exec_model shared_model strict_model));
   let snapshot =
     match Cascade_catalog_runtime.inspect_active () with
     | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
@@ -366,28 +370,38 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   in
   check string "blank name defaults to big_three"
     Keeper_config.default_cascade_name blank_name;
-  let keeper_unified_name =
+  let custom_exec_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name
-         ~raw_name:"keeper_unified" ())
+         ~raw_name:"custom_exec" ())
   in
-  check string "keeper_unified resolves to catalog profile"
-    "keeper_unified" keeper_unified_name;
-  check (list string) "keeper_unified models use exact catalog profile"
-    [ keeper_unified_model ]
+  check string "custom_exec resolves to catalog profile"
+    "custom_exec" custom_exec_name;
+  check (list string) "custom_exec models use exact catalog profile"
+    [ custom_exec_model ]
     (require_ok
-       (Cascade_catalog_runtime.models_of_cascade_name "keeper_unified"));
+       (Cascade_catalog_runtime.models_of_cascade_name "custom_exec"));
   let strict_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name
-         ~raw_name:"tool_use_strict" ())
+         ~raw_name:"strict_exec" ())
   in
-  check string "tool_use_strict resolves to catalog profile"
-    "tool_use_strict" strict_name;
-  check (list string) "tool_use_strict models use exact catalog profile"
+  check string "strict_exec resolves to catalog profile"
+    "strict_exec" strict_name;
+  check (list string) "strict_exec models use exact catalog profile"
     [ strict_model ]
     (require_ok
-       (Cascade_catalog_runtime.models_of_cascade_name "tool_use_strict"));
+       (Cascade_catalog_runtime.models_of_cascade_name "strict_exec"));
+  check string "keeper_unified logical alias falls back to big_three"
+    Keeper_config.default_cascade_name
+    (require_ok
+       (Cascade_catalog_runtime.resolve_declared_name
+          ~raw_name:"keeper_unified" ()));
+  check string "tool_use_strict logical alias falls back to big_three"
+    Keeper_config.default_cascade_name
+    (require_ok
+       (Cascade_catalog_runtime.resolve_declared_name
+          ~raw_name:"tool_use_strict" ()));
   match
     Cascade_catalog_runtime.resolve_declared_name ~raw_name:"missing_profile" ()
   with
@@ -735,9 +749,11 @@ let test_resolve_named_providers_canonical_labels_are_not_leaks () =
        (Printf.sprintf
           {|{
   "big_three_models": ["%s", "codex_cli:auto", "gemini_cli:auto"],
-  "governance_judge_models": ["%s", "codex_cli:auto", "gemini_cli:auto"]
+  "routes": {
+    "governance_judge": "big_three"
+  }
 }|}
-          model model));
+          model));
   Log.set_level Log.Info;
   let stderr_output =
     capture_stderr (fun () ->
@@ -774,7 +790,10 @@ let test_resolve_named_providers_three_cli_auto_not_leaks_10087 () =
     (write_cascade_json config_dir
        {|{
   "big_three_models": ["claude_code:auto", "codex_cli:auto", "gemini_cli:auto"],
-  "governance_judge_models": ["kimi_cli:kimi-for-coding", "codex_cli:auto", "gemini_cli:auto"]
+  "governance_judge_models": ["kimi_cli:kimi-for-coding", "codex_cli:auto", "gemini_cli:auto"],
+  "routes": {
+    "governance_judge": "big_three"
+  }
 }|});
   Log.set_level Log.Info;
   let big_three_stderr =
@@ -796,12 +815,9 @@ let test_resolve_named_providers_three_cli_auto_not_leaks_10087 () =
     "#10087 big_three: NO 'NOT in' leak warning fires for 3 CLI :auto"
     false
     (contains_substring big_three_stderr "NOT in");
-  (* The governance_judge case from the issue uses kimi_cli +
-     codex_cli + gemini_cli.  Don't require kimi to resolve in
-     this test (it needs an API key the test env does not
-     provide); just assert that the expanded codex/gemini path
-     does NOT emit a leak warning regardless of kimi's
-     resolution outcome. *)
+  (* [governance_judge_models] is a deprecated logical-profile key and is
+     ignored.  Direct logical-name resolution must route through [routes] to
+     the active [big_three] profile without producing false leak warnings. *)
   let gov_stderr =
     capture_stderr (fun () ->
         match
@@ -810,6 +826,8 @@ let test_resolve_named_providers_three_cli_auto_not_leaks_10087 () =
         with
         | Ok providers ->
           let kinds = provider_kinds providers in
+          check bool "governance_judge routes to big_three claude" true
+            (List.mem "claude_code" kinds);
           check bool "governance_judge: codex_cli expanded" true
             (List.mem "codex_cli" kinds);
           check bool "governance_judge: gemini_cli expanded" true

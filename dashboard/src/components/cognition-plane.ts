@@ -3,6 +3,7 @@ import { navigate, route } from '../router'
 import { AgentsUnified } from './agents-unified'
 import { Autoresearch } from './autoresearch'
 import { FilterChips } from './common/filter-chips'
+import { KeeperDecisionsStream } from './keeper-decisions-stream'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { MemorySubsystems } from './memory-subsystems'
 
@@ -45,22 +46,6 @@ function updateViewParam(view: CognitionView): void {
   navigate('monitoring', next)
 }
 
-function BlockedCognitionSurface() {
-  return html`
-    <section class="rounded border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3" role="status">
-      <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--warn-bright)]">
-        K2 decisions stream · backend-blocked
-      </div>
-      <div class="mt-1 text-sm text-[var(--color-fg-primary)]">
-        No cross-keeper decisions stream endpoint is registered yet.
-      </div>
-      <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">
-        The route stays live and explicit; no synthetic decisions feed is rendered.
-      </div>
-    </section>
-  `
-}
-
 export function CognitionPlane() {
   const view = currentView()
 
@@ -79,7 +64,7 @@ export function CognitionPlane() {
       ` : view === 'token-stats' ? html`
         <${KeeperTokenStats} />
       ` : view === 'decisions' ? html`
-        <${BlockedCognitionSurface} />
+        <${KeeperDecisionsStream} />
       ` : view === 'memory' || view === 'episodes' ? html`
         <${MemorySubsystems} />
       ` : view === 'autoresearch' ? html`

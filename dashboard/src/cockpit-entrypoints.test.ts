@@ -39,7 +39,7 @@ describe('cockpit entrypoint registry', () => {
     }
   })
 
-  it('resolves blocked and partial prototype subtabs to explicit live route homes', () => {
+  it('resolves prototype subtabs to explicit live route homes', () => {
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-str' })).toEqual({
       tab: 'monitoring',
       params: { section: 'cognition', view: 'decisions' },

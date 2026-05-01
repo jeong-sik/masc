@@ -262,6 +262,17 @@ module Rate_bucket : sig
   (** Per-agent burst capacity ([MASC_AGENT_RATE_BURST], default [50]). *)
 end
 
+(** {1 Per-agent rate limit bucket}
+
+    Lower-rate token bucket applied per bearer token.  Configured via
+    [MASC_AGENT_RATE_LIMIT] (req/s, default 30) and [MASC_AGENT_RATE_BURST]
+    (burst, default 60). *)
+
+module Agent_rate_bucket : sig
+  val rate : float
+  val burst : int
+end
+
 (** {1 Worker / local runtime} *)
 
 module Worker : sig

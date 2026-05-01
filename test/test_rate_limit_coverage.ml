@@ -431,8 +431,14 @@ let test_agent_key_of_token () =
   | Some key ->
       check bool "key starts with token:" true
         (String.length key > 6 && String.sub key 0 6 = "token:");
-      (* "token:" prefix (6 chars) + 16 hex chars from SHA-256 = 22 chars total *)
-      check bool "key length ok" true (String.length key = 22)
+      (* "token:" prefix (6 chars) + 32 hex chars from SHA-256 = 38 chars total *)
+      check bool "key length ok" true (String.length key = 38);
+      let hex_part = String.sub key 6 32 in
+      let is_hex c =
+        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+      in
+      check bool "token digest prefix is hex" true
+        (String.for_all is_hex hex_part)
 
 let test_agent_key_of_agent_name () =
   match Rate_limit.agent_key_of_token_or_name ~agent_name:"my-agent" () with

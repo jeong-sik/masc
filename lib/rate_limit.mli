@@ -134,7 +134,8 @@ val remaining_global : key:string -> int
 (** {1 Per-Agent Global Instance} *)
 
 val agent_global : t Eio.Lazy.t
-(** Lazy per-agent token-bucket limiter (separate from the per-IP limiter). *)
+(** Lazy per-agent token-bucket limiter keyed by a provided Authorization bearer
+    token or internal token-derived key. Separate from the per-IP limiter. *)
 
 val check_agent_global : key:string -> bool
 (** [check_agent_global ~key] consumes one per-agent token.
@@ -150,7 +151,12 @@ val headers_agent_global : key:string -> (string * string) list
 (** {1 Automatic Cleanup Loop} *)
 
 val start_cleanup_loop :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> ?interval:float -> t -> unit
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  ?label:string ->
+  ?interval:float ->
+  t ->
+  unit
 
 (** {1 HTTP Helpers} *)
 
@@ -168,7 +174,7 @@ val key_of_sockaddr : Eio.Net.Sockaddr.stream -> string
 
 val agent_key_of_token_or_name :
   ?token:string -> ?agent_name:string -> unit -> string option
-(** Derive a per-agent rate-limit key from a bearer [token] (first 16 hex
+(** Derive a per-agent rate-limit key from a bearer [token] (first 32 hex
     chars of its SHA-256, prefixed ["token:"]) or from [agent_name]
     (prefixed ["agent:"]).  [token] is tried first.  Returns [None] when
     neither is provided. *)

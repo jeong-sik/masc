@@ -319,7 +319,8 @@ let remaining_agent_global ~key =
 
 (** Start a background fiber that periodically cleans up stale rate limit buckets.
     Call this once at server startup with the main switch. *)
-let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interval_seconds) limiter =
+let start_cleanup_loop ~sw ~clock ?(label = "rate-limit")
+    ?(interval=Env_config.RateLimit.cleanup_interval_seconds) limiter =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
@@ -329,12 +330,13 @@ let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interv
          in
          let removed = cleanup limiter ~older_than_seconds in
          if removed > 0 then
-           Log.Misc.info "Cleaned up %d stale buckets" removed
+           Log.Misc.info "Cleaned up %d stale %s buckets" removed label
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn
-           "rate_limit cleanup iteration failed: %s"
+           "rate_limit cleanup iteration failed for %s limiter: %s"
+           label
            (Printexc.to_string exn));
       loop ()
     in
@@ -377,22 +379,22 @@ let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
 (** {1 Agent Key Extraction} *)
 
 (** Derive a stable per-agent rate-limit key from either a bearer token
-    (preferred — uses the first 16 hex chars of its SHA-256 to avoid storing
+    (preferred — uses the first 32 hex chars of its SHA-256 to avoid storing
     the raw credential) or an agent-name string.  Returns [None] when neither
     is provided (anonymous / loopback request). *)
 let agent_key_of_token_or_name ?token ?agent_name () =
   match token with
   | Some t when t <> "" ->
-      (* Use the first 16 hex chars (8 bytes, 64 bits) of the token's SHA-256
+      (* Use the first 32 hex chars (16 bytes, 128 bits) of the token's SHA-256
          digest as the rate-limit key.  This is sufficient for identifying
          distinct clients in a rate-limit bucket table while avoiding storage of
          raw credentials.  The reduced entropy (vs. 256 bits) is intentional and
          acceptable for a best-effort rate-limit use case: in the negligible
          collision scenario two distinct tokens would share a bucket, which is
          safe (one may consume the other's quota) but not a security hazard.
-         SHA-256 hex is always 64 chars, so String.sub 0 16 is safe. *)
+         SHA-256 hex is always 64 chars, so String.sub 0 32 is safe. *)
       let digest = Digestif.SHA256.(to_hex (digest_string t)) in
-      Some ("token:" ^ String.sub digest 0 16)
+      Some ("token:" ^ String.sub digest 0 32)
   | _ ->
       (match agent_name with
        | Some name when name <> "" -> Some ("agent:" ^ name)
@@ -403,5 +405,5 @@ let agent_key_of_token_or_name ?token ?agent_name () =
 (** Start the global rate-limit cleanup loops.  Call once at server startup.
     Starts loops for both the per-IP global limiter and the per-agent limiter. *)
 let start_global_cleanup_loop ~sw ~clock =
-  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global);
-  start_cleanup_loop ~sw ~clock (Eio.Lazy.force agent_global)
+  start_cleanup_loop ~sw ~clock ~label:"ip" (Eio.Lazy.force global);
+  start_cleanup_loop ~sw ~clock ~label:"agent" (Eio.Lazy.force agent_global)

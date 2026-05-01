@@ -28,7 +28,13 @@ import type {
 import { openAgentDetail } from '../agent-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 
-const CARD = 'rounded border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
+const CARD =
+  'rounded-sm border border-card-border/60 border-l-accent/35 bg-[rgba(7,12,20,0.92)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+const SECTION_HEAD =
+  'font-mono text-3xs font-semibold uppercase tracking-[0.16em] text-text-muted'
+const HEADER_ROW = `${SECTION_HEAD} mb-2 flex items-center justify-between gap-2 border-b border-card-border/40 pb-1.5`
+const COCKPIT_CELL = 'rounded-sm border border-card-border/45 bg-[var(--white-3)] px-2 py-1.5'
+const BRASS_RULE = 'h-px w-7 bg-accent/55'
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -119,43 +125,46 @@ function AlertPanel({
 
   return html`
     <section
-      class="rounded border ${criticalCount > 0 ? 'border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/6' : 'border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/6'} p-4"
+      class="rounded-sm border border-l ${criticalCount > 0 ? 'border-[var(--color-status-err)]/45 border-l-[var(--color-status-err)] bg-[var(--color-status-err)]/6' : 'border-[var(--color-status-warn)]/45 border-l-[var(--color-status-warn)] bg-[var(--color-status-warn)]/6'} p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
       aria-label="Attention alerts"
       data-testid="overview-alerts"
     >
-      <header class="flex items-center gap-2 mb-3">
-        <span class="${criticalCount > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-status-warn)]'} text-sm font-semibold">
-          Attention ${total}
+      <header class="${HEADER_ROW}">
+        <span class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class=${BRASS_RULE}></span>
+          <span class="${criticalCount > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-status-warn)]'}">
+            Attention ${total}
+          </span>
         </span>
         ${criticalCount > 0
-          ? html`<span class="text-2xs text-[var(--color-status-err)] font-medium">${criticalCount} critical</span>`
+          ? html`<span class="text-3xs text-[var(--color-status-err)]">${criticalCount} critical</span>`
           : null}
       </header>
-      <ul class="flex flex-col gap-2">
+      <ul class="flex flex-col gap-1.5">
         ${agentAlerts.map(a => html`
           <li
             key=${'agent:' + a.name}
-            class="flex items-center gap-2 min-w-0 text-sm"
+            class="${COCKPIT_CELL} flex min-w-0 items-center gap-2 text-xs"
             data-testid="overview-alert-agent"
           >
-            <span class="shrink-0 inline-block size-2 rounded-full bg-[var(--color-status-err)]"></span>
+            <span class="shrink-0 inline-block size-1.5 rounded-full bg-[var(--color-status-err)]"></span>
             <button
               type="button"
-              class="text-[var(--color-fg-secondary)] hover:underline truncate cursor-pointer bg-transparent border-0 p-0 text-left text-sm"
+              class="text-[var(--color-fg-secondary)] hover:underline truncate cursor-pointer bg-transparent border-0 p-0 text-left text-xs"
               onClick=${() => openAgentDetail(a.name)}
             >${a.display}</button>
-            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-err)] font-medium">${a.reason}</span>
+            <span class="ml-auto shrink-0 font-mono text-3xs uppercase tracking-[0.12em] text-[var(--color-status-err)]">${a.reason}</span>
           </li>
         `)}
         ${taskAlerts.map(t => html`
           <li
             key=${'task:' + t.id}
-            class="flex items-center gap-2 min-w-0 text-sm"
+            class="${COCKPIT_CELL} flex min-w-0 items-center gap-2 text-xs"
             data-testid="overview-alert-task"
           >
-            <span class="shrink-0 inline-block size-2 rounded-sm bg-[var(--color-status-warn)]"></span>
+            <span class="shrink-0 inline-block size-1.5 rounded-sm bg-[var(--color-status-warn)]"></span>
             <span class="text-[var(--color-fg-secondary)] truncate">${t.title}</span>
-            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-warn)] font-medium">Awaiting verification</span>
+            <span class="ml-auto shrink-0 font-mono text-3xs uppercase tracking-[0.12em] text-[var(--color-status-warn)]">Awaiting verification</span>
           </li>
         `)}
       </ul>
@@ -230,21 +239,27 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const awaitingKind: KpiCellKind | undefined = counts.awaiting > 0 ? 'warn' : undefined
   return html`
     <section class=${CARD} aria-label="Today funnel" data-testid="overview-funnel">
-      <header class="flex items-center justify-between mb-3">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">Today</h2>
-        <span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>
+      <header class=${HEADER_ROW}>
+        <span class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class=${BRASS_RULE}></span>
+          <h2 class="truncate">Today Funnel</h2>
+        </span>
+        <span class="shrink-0 text-3xs text-text-dim">task basis</span>
       </header>
-      <${KpiStripIsland}
-        ariaLabel="Today funnel"
-        cols=${5}
-        cells=${[
-          { variant: 'stacked', label: 'New', value: String(counts.created), testId: 'funnel-created' },
-          { variant: 'stacked', label: 'Active', value: String(counts.inProgress), testId: 'funnel-in-progress' },
-          { variant: 'stacked', label: 'Verify', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
-          { variant: 'stacked', label: 'Done', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
-          { variant: 'stacked', label: 'Target', value: formatTargetRatio(counts), testId: 'funnel-target' },
-        ]}
-      />
+      <div class="overflow-hidden rounded-sm border border-card-border/60 bg-card-border/60 [&_[role=list]]:!border-b-0 [&_[role=listitem]]:!rounded-none [&_[role=listitem]]:!border-0 [&_[role=listitem]]:!bg-[rgba(6,10,18,0.92)] [&_[role=listitem]]:!px-2 [&_[role=listitem]]:!py-1.5">
+        <${KpiStripIsland}
+          ariaLabel="Today funnel"
+          variant="compact"
+          cols=${5}
+          cells=${[
+            { variant: 'compact', bare: false, label: 'New', value: String(counts.created), testId: 'funnel-created' },
+            { variant: 'compact', bare: false, label: 'Active', value: String(counts.inProgress), testId: 'funnel-in-progress' },
+            { variant: 'compact', bare: false, label: 'Verify', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
+            { variant: 'compact', bare: false, label: 'Done', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
+            { variant: 'compact', bare: false, label: 'Target', value: formatTargetRatio(counts), testId: 'funnel-target' },
+          ]}
+        />
+      </div>
     </section>
   `
 }
@@ -268,18 +283,30 @@ function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
   if (attention === null) {
     return html`
       <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight-empty">
-        <p class="text-sm text-[var(--color-fg-muted)]">No notable signal</p>
+        <header class=${HEADER_ROW}>
+          <span class="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" class=${BRASS_RULE}></span>
+            <span>Top Signal</span>
+          </span>
+        </header>
+        <p class="text-xs text-[var(--color-fg-muted)]">No notable signal</p>
       </section>
     `
   }
   const severity = attention.severity === '' ? 'info' : attention.severity
   return html`
     <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight">
-      <div class="flex items-center gap-2 min-w-0">
-        <span class=${`text-2xs font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(severity)}`}>
+      <header class=${HEADER_ROW}>
+        <span class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class=${BRASS_RULE}></span>
+          <span>Top Signal</span>
+        </span>
+        <span class=${`shrink-0 ${severityToneClass(severity)}`}>
           ${severity.toUpperCase()}
         </span>
-        <span class="truncate text-sm text-[var(--color-fg-secondary)]">${attention.summary}</span>
+      </header>
+      <div class="${COCKPIT_CELL} min-w-0">
+        <span class="block truncate text-xs text-[var(--color-fg-secondary)]">${attention.summary}</span>
       </div>
     </section>
   `
@@ -311,8 +338,13 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   if (active === null) {
     return html`
       <section class=${CARD} aria-label="Active mission" data-testid="overview-party-empty">
-        <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">Active Mission</header>
-        <p class="text-sm text-[var(--color-fg-muted)]">No active mission</p>
+        <header class=${HEADER_ROW}>
+          <span class="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" class=${BRASS_RULE}></span>
+            <span>Active Mission</span>
+          </span>
+        </header>
+        <p class="text-xs text-[var(--color-fg-muted)]">No active mission</p>
       </section>
     `
   }
@@ -323,41 +355,44 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const blocker = active.blocker_summary
   return html`
     <section class=${CARD} aria-label="Active mission" data-testid="overview-party">
-      <header class="flex items-center justify-between gap-3 mb-3">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">Active Mission</h2>
+      <header class=${HEADER_ROW}>
+        <span class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class=${BRASS_RULE}></span>
+          <h2 class="truncate">Active Mission</h2>
+        </span>
         ${startedAt !== null && startedAt !== undefined && startedAt !== ''
-          ? html`<${TimeAgo} timestamp=${startedAt} class="text-2xs text-[var(--color-fg-muted)]" />`
+          ? html`<${TimeAgo} timestamp=${startedAt} class="shrink-0 text-3xs text-text-dim" />`
           : null}
       </header>
-      <p class="text-sm text-[var(--color-fg-secondary)] mb-3 line-clamp-2" data-testid="overview-party-goal">
+      <p class="${COCKPIT_CELL} mb-2 line-clamp-2 text-xs text-[var(--color-fg-secondary)]" data-testid="overview-party-goal">
         ${active.goal !== '' ? active.goal : '(no goal)'}
       </p>
       ${members.length > 0
         ? html`
-            <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <div class="${COCKPIT_CELL} mb-2 flex flex-wrap items-center gap-1.5">
               ${members.map(
                 name => html`<${AgentAvatar} name=${name} status=${active.health ?? 'idle'} size="sm" />`,
               )}
               ${extra > 0
-                ? html`<span class="text-2xs text-[var(--color-fg-muted)]">+${extra}</span>`
+                ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">+${extra}</span>`
                 : null}
             </div>
           `
         : null}
       ${pct !== null
         ? html`
-            <div class="flex items-center gap-2" data-testid="overview-party-progress">
-              <div class="flex-1 h-2 rounded bg-card-border/40 overflow-hidden">
+            <div class="${COCKPIT_CELL} flex items-center gap-2" data-testid="overview-party-progress">
+              <div class="h-1.5 flex-1 overflow-hidden rounded-sm bg-card-border/50">
                 <div class="h-full bg-[var(--color-status-ok)]" style=${`width: ${pct}%`}></div>
               </div>
-              <span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${pct}%</span>
+              <span class="font-mono text-3xs tabular-nums text-[var(--color-fg-muted)]">${pct}%</span>
             </div>
           `
         : null}
       ${blocker !== null && blocker !== undefined && blocker !== ''
         ? html`
             <div
-              class="mt-3 rounded border border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/10 px-2 py-1 text-2xs text-[var(--color-status-warn)]"
+              class="mt-2 rounded-sm border border-[var(--color-status-warn)]/40 border-l-[var(--color-status-warn)] bg-[var(--color-status-warn)]/10 px-2 py-1 font-mono text-3xs uppercase tracking-[0.1em] text-[var(--color-status-warn)]"
               data-testid="overview-party-blocker"
             >
               blocker: ${blocker}
@@ -402,22 +437,33 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   if (top.length === 0) {
     return html`
       <section class=${CARD} aria-label="Active keepers" data-testid="overview-keepers-empty">
-        <p class="text-sm text-[var(--color-fg-muted)]">No active keepers</p>
+        <header class=${HEADER_ROW}>
+          <span class="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" class=${BRASS_RULE}></span>
+            <span>Active Keepers</span>
+          </span>
+        </header>
+        <p class="text-xs text-[var(--color-fg-muted)]">No active keepers</p>
       </section>
     `
   }
   return html`
     <section class=${CARD} aria-label="Active keepers" data-testid="overview-keepers">
-      <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">Active Keepers</header>
-      <ul class="flex flex-col gap-2">
+      <header class=${HEADER_ROW}>
+        <span class="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class=${BRASS_RULE}></span>
+          <span>Active Keepers</span>
+        </span>
+      </header>
+      <ul class="flex flex-col gap-1.5">
         ${top.map(
           k => html`
-            <li class="flex items-center gap-2 min-w-0">
+            <li class="${COCKPIT_CELL} flex min-w-0 items-center gap-2">
               <${StatusDot} size="sm" class=${keeperStatusToneClass(k.status)} />
               <${RouteLink}
                 tab="monitoring"
                 params=${{ section: 'keepers', keeper: k.name }}
-                class="text-sm text-[var(--color-fg-secondary)] truncate hover:underline"
+                class="truncate text-xs text-[var(--color-fg-secondary)] hover:underline"
               >
                 ${k.koreanName !== undefined && k.koreanName !== '' ? k.koreanName : k.name}
               <//>
@@ -425,7 +471,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
                 ? html`
                     <${TimeAgo}
                       timestamp=${k.last_heartbeat}
-                      class="text-2xs text-[var(--color-fg-muted)] ml-auto shrink-0"
+                      class="ml-auto shrink-0 text-3xs text-[var(--color-fg-muted)]"
                     />
                   `
                 : null}
@@ -452,7 +498,7 @@ export function Overview() {
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
   const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-2.5">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
       <${Highlight} attention=${attention} />
       <${FunnelCard} counts=${counts} />

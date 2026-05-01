@@ -40,7 +40,7 @@ extract_ocaml_all_list() {
   # or lower, separated by ;/whitespace).
   awk "/^let ${list_name}[[:space:]]*=/{found=1} found{print} found && /\]/{exit}" "$file" \
     | rg '\b([A-Z][a-zA-Z_0-9]*)\b' -o -r '$1' \
-    | sort -u
+    | sort -u || true
 }
 
 # Extract constructor names from an OCaml type definition.
@@ -50,7 +50,7 @@ extract_ocaml_type() {
   local type_name="$2"
   awk "/^type ${type_name}[[:space:]]*=/{found=1; next} found && /^\s*\|/{print} found && /^[a-z]/{exit}" "$file" \
     | rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' -o -r '$1' \
-    | sort -u
+    | sort -u || true
 }
 
 # Extract a TypeScript union type (string literals) from a .ts file.
@@ -61,7 +61,7 @@ extract_ts_union_type() {
   # Match lines that are part of the union, extracting quoted strings.
   awk "/^export type ${type_name}[[:space:]]*=/{found=1} found{print} found && /^[[:space:]]*$/{exit}" "$file" \
     | rg "'([A-Za-z][a-zA-Z_0-9]*)'" -o -r '$1' \
-    | sort -u
+    | sort -u || true
 }
 
 # Extract PascalCase string literals from TLA+ specs as domain candidates.
@@ -69,6 +69,22 @@ extract_ts_union_type() {
 extract_tla_domain() {
   local path="$1"
   rg '"([A-Z][a-zA-Z_0-9]*)"' "$path" -o -r '$1' 2>/dev/null | sort -u || true
+}
+
+# Extract string literals from a named TLA+ set definition.
+# Supports both single-line and multi-line set literals by scanning from
+# `<SetName> == {` until the first closing brace.
+# Usage: extract_tla_set_literals <file> <set_name>
+extract_tla_set_literals() {
+  local file="$1"
+  local set_name="$2"
+  awk -v set_name="$set_name" '
+    $0 ~ (set_name "[[:space:]]*==[[:space:]]*\\{") { in_set=1 }
+    in_set { print }
+    in_set && /\}/ { exit }
+  ' "$file" 2>/dev/null \
+    | rg '"([A-Za-z_][a-zA-Z_0-9]*)"' -o -r '$1' \
+    | sort -u || true
 }
 
 # ── Comparison helper ──────────────────────────────────────────────────────────
@@ -127,7 +143,7 @@ fi
 # ── Check 2: turn_phase (OCaml) vs TurnPhaseSet in TLA+ ─────────────────────
 
 echo ""
-echo "=== Check 2: turn_phase (OCaml) vs KeeperCompositeLifecycle.tla domain ==="
+echo "=== Check 2: turn_phase (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
 
 KR_ML="lib/keeper/keeper_registry.ml"
 KCL_TLA="specs/keeper-state-machine/KeeperCascadeLifecycle.tla"
@@ -141,8 +157,7 @@ if [ -f "$KR_ML" ]; then
     if [ -f "$KCL_TLA" ]; then
       # Extract from the TurnPhaseSet == {"..."} definition in the TLA+ spec.
       # Reads the canonical set literal — no hardcoded values needed here.
-      tla_turn=$(rg 'TurnPhaseSet\s*==\s*\{([^}]+)\}' "$KCL_TLA" -o -r '$1' 2>/dev/null \
-        | rg '"([a-z_]+)"' -o -r '$1' | sort -u || true)
+      tla_turn=$(extract_tla_set_literals "$KCL_TLA" "TurnPhaseSet")
       if [ -n "$tla_turn" ]; then
         check_pair "OCaml(turn_phase)" "$ocaml_turn" "TLA+(TurnPhaseSet)" "$tla_turn"
       else
@@ -172,8 +187,7 @@ if [ -f "$KR_ML" ]; then
     if [ -f "$KCL_TLA" ]; then
       # Extract from the CascadeSet == {"..."} definition in the TLA+ spec.
       # Reads the canonical set literal — no hardcoded values needed here.
-      tla_cascade=$(rg 'CascadeSet\s*==\s*\{([^}]+)\}' "$KCL_TLA" -o -r '$1' 2>/dev/null \
-        | rg '"([a-z_]+)"' -o -r '$1' | sort -u || true)
+      tla_cascade=$(extract_tla_set_literals "$KCL_TLA" "CascadeSet")
       if [ -n "$tla_cascade" ]; then
         check_pair "OCaml(cascade_state)" "$ocaml_cascade" "TLA+(CascadeSet)" "$tla_cascade"
       else

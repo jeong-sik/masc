@@ -31,6 +31,7 @@ const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
   crashed: 'Crashed',
   restarting: 'Restarting',
   dead: 'Dead',
+  zombie: 'Zombie',
   // Also accept PascalCase for forward-compat / test fixtures
   Offline: 'Offline',
   Running: 'Running',
@@ -44,6 +45,7 @@ const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
   Crashed: 'Crashed',
   Restarting: 'Restarting',
   Dead: 'Dead',
+  Zombie: 'Zombie',
 }
 
 export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {

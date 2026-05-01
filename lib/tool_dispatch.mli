@@ -48,7 +48,7 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 type post_hook = Tool_result.t -> Tool_result.t
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) Result.t. *)
+    Return the (possibly transformed) tool result. *)
 
 val pre_hooks : pre_hook list ref
 (** Mutable list of registered pre-hooks. *)

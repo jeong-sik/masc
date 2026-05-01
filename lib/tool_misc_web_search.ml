@@ -765,8 +765,10 @@ let enforce_rate_limit now =
   let window = Env_config.Tools.web_search_rate_limit_window_sec () in
   let max_calls = Env_config.Tools.web_search_rate_limit_max_calls () in
   Eio.Mutex.use_rw ~protect:true rate_limit_mutex (fun () ->
+      (* Keep NaN windows fail-closed: [>] is false for NaN, so old timestamps
+         are retained and the limiter stays conservative. *)
       while Queue.length request_times > 0
-            && Stdlib.Float.compare (now -. Queue.peek request_times) window > 0
+            && now -. Queue.peek request_times > window
       do
         let (_ : float) = Queue.pop request_times in ()
       done;

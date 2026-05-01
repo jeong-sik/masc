@@ -364,7 +364,7 @@ let tool_definitions = [
   ("masc_library_read", {|Read a specific library document by topic name.|}, [
     ("topic", "string", true, "Topic name or partial match (e.g., 'eio-mutex')");
   ]);
-  ("masc_library_add", {|Add a new document to the library. Documents with Stdlib.Float.compare confidence 0.5 < 0 go to candidates/.|}, [
+  ("masc_library_add", {|Add a new document to the library. Documents with confidence < 0.5 go to candidates/.|}, [
     ("title", "string", true, "Document title");
     ("source", "string", true,
      sprintf "Source type: %s" (String.concat ", " valid_source_strings));
@@ -420,7 +420,7 @@ After masc_library_list or masc_library_search to find the topic name.";
   (* masc_library_add *)
   {
     name = "masc_library_add";
-    description = "Add a new document to the agent knowledge library (Stdlib.Float.compare confidence 0.5 < 0 goes to candidates/ for review). \
+    description = "Add a new document to the agent knowledge library (confidence < 0.5 goes to candidates/ for review). \
 Use when recording a new finding, experiment result, or pattern that other agents should know about. \
 Follow up with masc_library_promote to move candidates to the main library after verification.";
     input_schema = `Assoc [

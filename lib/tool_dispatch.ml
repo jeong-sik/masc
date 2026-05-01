@@ -74,7 +74,7 @@ type pre_hook_action =
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) Result.t. *)
+    Return the (possibly transformed) tool result. *)
 type post_hook = Tool_result.t -> Tool_result.t
 
 let pre_hooks : pre_hook list ref = ref []

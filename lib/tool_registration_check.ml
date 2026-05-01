@@ -65,11 +65,15 @@ let validate () : validation_result =
     { orphan_toml; uncovered }
 
 let log_validation_result (r : validation_result) =
-  if Stdlib.List.length r.orphan_toml > 0 then
+  (match r.orphan_toml with
+  | [] -> ()
+  | _ ->
     Log.Server.warn "tool_policy unknown tool names (%d): %s"
       (List.length r.orphan_toml)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml));
-  if Stdlib.List.length r.uncovered > 0 then
+      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml)));
+  (match r.uncovered with
+  | [] -> ()
+  | _ ->
     Log.Server.info "tool_policy reverse coverage (%d): %s"
       (List.length r.uncovered)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered))
+      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered)))

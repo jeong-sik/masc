@@ -253,9 +253,13 @@ export function workflowActionLabel(actionType?: string | null): string {
     case 'keeper_message':
       return 'Keeper Message'
     case 'keeper_probe':
-      return 'keeper probe'
+      return 'Keeper Probe'
     case 'keeper_recover':
-      return 'keeper recover'
+      return 'Keeper Recover'
+    case 'keeper_github_identity_status':
+      return 'GitHub Identity Status'
+    case 'keeper_github_identity_login_prepare':
+      return 'GitHub Login Prep'
     default:
       return actionType?.trim() || 'Recommended Action'
   }

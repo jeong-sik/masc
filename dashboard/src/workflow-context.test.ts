@@ -291,12 +291,12 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('keeper_message')).toBe('Keeper Message')
   })
 
-  it('returns "keeper probe" for keeper_probe', () => {
-    expect(workflowActionLabel('keeper_probe')).toBe('keeper probe')
+  it('returns "Keeper Probe" for keeper_probe', () => {
+    expect(workflowActionLabel('keeper_probe')).toBe('Keeper Probe')
   })
 
-  it('returns "keeper recover" for keeper_recover', () => {
-    expect(workflowActionLabel('keeper_recover')).toBe('keeper recover')
+  it('returns "Keeper Recover" for keeper_recover', () => {
+    expect(workflowActionLabel('keeper_recover')).toBe('Keeper Recover')
   })
 
   it('returns raw actionType for unknown values', () => {

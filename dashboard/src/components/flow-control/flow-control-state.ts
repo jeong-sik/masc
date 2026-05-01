@@ -64,11 +64,11 @@ export async function fetchPauseStatus(): Promise<void> {
 export async function pauseRoom(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? 'Missing permission to pause the project.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to pause the namespace.', 'error', 6000)
     return
   }
   flowLoading.value = true
-  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('Project paused.', 'success') }
+  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('Namespace paused.', 'success') }
   catch (err) { showToast(`Pause failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
@@ -76,11 +76,11 @@ export async function pauseRoom(): Promise<void> {
 export async function resumeRoom(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? 'Missing permission to resume the project.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to resume the namespace.', 'error', 6000)
     return
   }
   flowLoading.value = true
-  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('Project resumed.', 'success') }
+  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('Namespace resumed.', 'success') }
   catch (err) { showToast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }

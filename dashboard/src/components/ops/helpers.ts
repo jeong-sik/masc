@@ -4,7 +4,7 @@ import { showToast } from '../common/toast'
 import { prettyJson, displayStatus } from '../../lib/status-label'
 import type { OperatorKeeperSnapshot } from '../../types'
 import { dispatchOperatorAction } from '../../operator-store'
-import type { DashboardWorkflowContext } from '../../workflow-context'
+import { workflowActionLabel, type DashboardWorkflowContext } from '../../workflow-context'
 import {
   actorName,
   broadcastMessage,
@@ -45,32 +45,8 @@ function canonicalizeActionType(value?: string | null): string | null {
 }
 
 export function actionTypeLabel(value?: string | null): string {
-  switch (canonicalizeActionType(value)) {
-    case 'broadcast':
-      return 'Broadcast'
-    case 'namespace_pause':
-    case 'room_pause':
-      return 'Pause Namespace'
-    case 'namespace_resume':
-    case 'room_resume':
-      return 'Resume Namespace'
-    case 'task_inject':
-      return 'Inject Task'
-    case 'social_sweep':
-      return 'Social Sweep'
-    case 'keeper_message':
-      return 'Keeper Message'
-    case 'keeper_probe':
-      return 'Keeper Probe'
-    case 'keeper_recover':
-      return 'Keeper Recover'
-    case 'keeper_github_identity_status':
-      return 'GitHub Identity Status'
-    case 'keeper_github_identity_login_prepare':
-      return 'GitHub Login Prep'
-    default:
-      return value?.trim() || 'Action'
-  }
+  const label = workflowActionLabel(value)
+  return label === 'Recommended Action' ? 'Action' : label
 }
 
 export function targetTypeLabel(value?: string | null): string {

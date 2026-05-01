@@ -13,8 +13,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: odoc-pages-${{ github.ref }}
@@ -38,9 +36,8 @@ jobs:
 
       - name: Install system and OCaml dependencies
         uses: ./.github/actions/install-ocaml-deps
-
-      - name: Install odoc
-        run: opam install -y odoc
+        with:
+          install-flags: --with-doc
 
       - name: Build library
         run: opam exec -- dune build
@@ -55,9 +52,13 @@ jobs:
 
   deploy:
     name: Deploy to Pages
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: build-doc
     timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

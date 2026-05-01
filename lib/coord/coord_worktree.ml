@@ -528,7 +528,7 @@ type repo_candidate = {
 let trim_repo_token token =
   let is_edge = function
     | '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
-    | ',' | ';' | ':' | '!' | '?' -> true
+    | ',' | ';' | ':' | '!' | '?' | '.' -> true
     | _ -> false
   in
   let len = String.length token in
@@ -628,16 +628,21 @@ let task_by_id config task_id =
   List.find_opt (fun (task : task) -> String.equal task.id task_id)
     backlog.tasks
 
+let max_path_hints = 20
+
 let score_repo_candidate ~(task : task) ~tokens ~path_hints candidate =
   let mention_score =
     if repo_name_mentioned ~tokens candidate.name then 100 else 0
   in
   let file_score =
-    path_hints
-    |> List.filter (fun rel_path ->
-           Sys.file_exists (Filename.concat candidate.path rel_path))
-    |> List.length
-    |> ( * ) 25
+    if mention_score >= 100 then 0
+    else
+      path_hints
+      |> List.filteri (fun i _ -> i < max_path_hints)
+      |> List.filter (fun rel_path ->
+             safe_file_exists (Filename.concat candidate.path rel_path))
+      |> List.length
+      |> ( * ) 25
   in
   let worktree_score =
     match task.worktree with

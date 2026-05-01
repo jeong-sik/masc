@@ -478,6 +478,79 @@ let test_create_fails_ambiguous_multi_repo_without_evidence () =
             check bool "reports ambiguous repo" true
               (contains "ambiguous_task_repo" e)))
 
+let test_create_infers_repo_from_task_repo_mentions () =
+  let base = make_temp_dir () in
+  let dir = base in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        let proc_mgr = Eio.Stdenv.process_mgr env in
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Stdenv.cwd env in
+        Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
+        Unix.putenv "MASC_BASE_PATH" dir;
+        let config = Coord.default_config dir in
+        let _msg = Coord.init config ~agent_name:None in
+        let _join =
+          Coord.join config ~agent_name:"mention-agent"
+            ~capabilities:[ "test" ] ()
+        in
+        let grpc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"grpc-direct"
+            ~file_path:"README.md"
+        in
+        let masc_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"masc-mcp"
+            ~file_path:"README.md"
+        in
+        ignore
+          (seed_playground_clone ~base_path:dir ~agent_name:"mention-agent"
+             ~source_repo:grpc_repo);
+        ignore
+          (seed_playground_clone ~base_path:dir ~agent_name:"mention-agent"
+             ~source_repo:masc_repo);
+        let mention_cases =
+          [
+            ( "trailing-period",
+              "Investigate masc-mcp.",
+              "Fix a bug in masc-mcp." );
+            ( "url-path",
+              "Check github.com/org/masc-mcp before making changes",
+              "" );
+          ]
+        in
+        List.iter
+          (fun (label, title, description) ->
+            write_tasks config
+              [
+                task
+                  ~id:(Printf.sprintf "task-mention-%s" label)
+                  ~title ~description ();
+              ];
+            match
+              Task_sandbox.create ~config
+                ~task_id:(Printf.sprintf "task-mention-%s" label)
+                ~agent_name:"mention-agent" ()
+            with
+            | Ok sb ->
+                check bool (label ^ ": picked masc-mcp repo") true
+                  (contains "/repos/masc-mcp/.worktrees/" sb.worktree_path);
+                ignore
+                  (Task_sandbox.cleanup ~config ~agent_name:"mention-agent" sb)
+            | Error e ->
+                fail (Printf.sprintf "%s: sandbox create failed: %s" label e))
+          mention_cases))
+
 let test_with_sandbox_lifecycle () =
   let base = make_temp_dir () in
   let dir = base in
@@ -629,6 +702,8 @@ let () =
         test_create_infers_repo_from_task_file_evidence;
       test_case "ambiguous_multi_repo_without_evidence" `Quick
         test_create_fails_ambiguous_multi_repo_without_evidence;
+      test_case "infer_repo_from_task_repo_mentions" `Quick
+        test_create_infers_repo_from_task_repo_mentions;
       test_case "with_sandbox_result" `Quick test_with_sandbox_lifecycle;
       test_case "exception_cleanup" `Quick test_with_sandbox_cleans_up_on_exception;
     ];

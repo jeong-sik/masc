@@ -1,6 +1,27 @@
 # Changelog
 
 
+## [0.19.2] - 2026-05-01
+
+Release-build recovery patch after the `v0.19.1` tag landed before the latest main build-break repair PRs. No breaking API changes.
+
+### Added
+
+- Provider cooldown observability now includes `masc_keeper_provider_block_duration_sec`, recording cooldown durations for rejected, rate-limited, hard-quota, and terminal-failure paths (#12429).
+
+### Changed
+
+- Dashboard navigation is consolidated around the operator loop, keeping daily surfaces focused while retaining diagnostic routes behind canonical drill-downs and redirects (#12442).
+- OAS agent SDK pin helper now targets `0.187.6` for the downstream pin lane after the upstream generated opam metadata repair (#12460, oas#1288).
+- Package and release metadata advanced from `0.19.1` to `0.19.2`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.19.2`.
+
+### Fixed
+
+- Monitoring keeper detail routes now render safely from direct URLs when live keeper data exists but `selectedKeeper` starts empty, covering the `insertBefore` dashboard crash class (#12431).
+- Main branch release builds now compile after the `Tool_coord.tool_result` record conversion and `Task_sandbox.create ?repo_name` signature drift (#12453).
+- Gemini CLI admin policy now explicitly denies `ask_user`, preventing headless keepers from hanging on an interactive-only tool surface (#12455).
+
 ## [0.19.1] - 2026-05-01
 
 Post-v0.19.0 release-truth follow-up for the keeper Event Layer consumer path, dashboard design-system baseline, and `lib/dune` module-discovery cleanup. No breaking API changes.

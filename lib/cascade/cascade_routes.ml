@@ -218,12 +218,25 @@ let fallback_name_for_catalog use ~catalog =
 let logged_invalid_route_targets : (string * string, unit) Hashtbl.t =
   Hashtbl.create 8
 
+let logged_unvalidated_route_targets : (string * string, unit) Hashtbl.t =
+  Hashtbl.create 8
+
 let warn_invalid_route_target_once ~route_key ~target ~fallback =
   let key = (route_key, target) in
   if not (Hashtbl.mem logged_invalid_route_targets key) then begin
     Hashtbl.add logged_invalid_route_targets key ();
     Log.Misc.warn
       "[CascadeRoutes] routes.%s targets missing profile %s; using %s"
+      route_key target fallback
+  end
+
+let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
+  let key = (route_key, target) in
+  if not (Hashtbl.mem logged_unvalidated_route_targets key) then begin
+    Hashtbl.add logged_unvalidated_route_targets key ();
+    Log.Misc.warn
+      "[CascadeRoutes] routes.%s targets %s but no live catalog profiles \
+       were validated; using %s"
       route_key target fallback
   end
 
@@ -240,7 +253,9 @@ let cascade_name_for_use ?config_path use =
   in
   let fallback = fallback_from_entries use entries in
   match route_target with
-  | Some target when catalog_names = [] -> target
+  | Some target when catalog_names = [] ->
+      warn_unvalidated_route_target_once ~route_key ~target ~fallback;
+      fallback
   | Some target when List.mem target catalog_names -> target
   | Some target ->
       warn_invalid_route_target_once ~route_key ~target ~fallback;

@@ -254,10 +254,11 @@ val worktree_create_r :
   agent_name:string ->
   task_id:string -> base_branch:string -> string Types.masc_result
 (** Create [<root>/.worktrees/<task_id>] tracking [base_branch] for
-    [agent_name].  [repo_name] is required to select the sandbox clone.
-    Auto-provisions the sandbox clone when missing and
-    [docker_sandbox = true].  Returns the absolute worktree path on
-    success. *)
+    [agent_name].  Auto-provisions the sandbox clone when missing and
+    [docker_sandbox = true]. If [repo_name] is omitted, selects the repo
+    from task repo/path evidence, falling back only when exactly one clone
+    exists. Ambiguous multi-repo sandboxes fail instead of picking an
+    arbitrary clone. Returns the absolute worktree path on success. *)
 
 val worktree_remove_r :
   Coord_utils.config ->

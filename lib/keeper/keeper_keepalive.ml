@@ -594,6 +594,17 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
              ~keeper_name:live_meta.name
              ~detail)
       in
+      let record_loop_exit () =
+        match Keeper_registry.get
+                ~base_path:ctx.config.base_path live_meta.name with
+        | Some { Keeper_registry.last_failure_reason =
+                   Some ((Keeper_registry.Stale_turn_timeout _
+                         | Keeper_registry.Stale_termination_storm _
+                         | Keeper_registry.Oas_timeout_budget_loop _) as reason);
+                 _ } ->
+          record_crash reason
+        | _ -> record_stopped "normal exit"
+      in
       (* Cancel-safe finally (#9747 iter 2): [cleanup_tracking] touches
          registry state that can raise transiently during shutdown.
          Stdlib [Fun.protect] would wrap that as [Fun.Finally_raised],
@@ -620,7 +631,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         (fun () ->
           try
             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
-            record_stopped "normal exit"
+            record_loop_exit ()
           with
           | Keeper_registry.Keeper_fiber_crash ->
             if Atomic.get stop then

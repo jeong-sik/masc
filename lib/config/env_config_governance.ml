@@ -144,17 +144,6 @@ module Dashboard_config = struct
       hot reload as an operator contract. *)
   let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
 
-  (** Whether the proactive command-plane snapshot cache should run.
-      Default: false because large roots can make the full snapshot too heavy
-      for always-on background refresh. *)
-  let command_plane_snapshot_refresh_enabled () =
-    Feature_flag_registry.get_bool "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
-
-  (** Max age for an on-demand command-plane snapshot cache hit. *)
-  let command_plane_snapshot_cache_ttl_s () =
-    Float.max 5.0
-      (get_float ~default:30.0 "MASC_COMMAND_PLANE_SNAPSHOT_CACHE_TTL_S")
-
   (** Dashboard fixture name override. *)
   let fixture_opt () =
     Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt

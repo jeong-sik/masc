@@ -29,49 +29,44 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
              (match meta.Keeper_meta_contract.sandbox_profile with
               | Keeper_types.Local -> "skip_local"
               | Keeper_types.Docker ->
-                let repos_dir =
-                  Coord_worktree.repos_dir_of_keeper config agent_name
-                in
-                let repo_names =
-                  try
-                    Sys.readdir repos_dir
-                    |> Array.to_list
-                    |> List.filter (fun name ->
-                         Coord_worktree.is_git_clone
-                           (Filename.concat repos_dir name))
-                  with Sys_error _ -> []
-                in
-                (match repo_names with
-                 | [] ->
-                     Log.Misc.info
-                       "[claim_auto_provision] keeper=%s task=%s no sandbox repos \
-                        found under %s, skipping"
-                       keeper_name task_id repos_dir;
-                     "skip_no_repo"
-                 | [repo_name] ->
-                     (match
-                        Task_sandbox.create ~config ~task_id ~agent_name
-                          ~repo_name ()
-                      with
-                      | Ok _sandbox ->
-                          Log.Misc.info
-                            "[claim_auto_provision] keeper=%s task=%s \
-                             worktree provisioned (repo=%s)"
-                            keeper_name task_id repo_name;
-                          "created"
-                      | Error msg ->
-                          Log.Misc.warn
-                            "[claim_auto_provision] keeper=%s task=%s \
-                             worktree provisioning failed: %s"
-                            keeper_name task_id msg;
-                          "error")
-                 | _ ->
-                     Log.Misc.info
-                       "[claim_auto_provision] keeper=%s task=%s ambiguous \
-                        repos [%s], skipping auto-provision"
-                       keeper_name task_id
-                       (String.concat ", " repo_names);
-                     "skip_ambiguous")))
+                  (match Task_sandbox.create ~config ~task_id ~agent_name () with
+                   | Ok _sandbox ->
+                       Log.Misc.info
+                         "[claim_auto_provision] keeper=%s task=%s \
+                          worktree provisioned"
+                         keeper_name task_id;
+                       "created"
+                   | Error msg ->
+                       (* The error string is double-wrapped by the time it
+                          reaches us ("worktree creation failed: ❌ IO
+                          error: <inner>"), so prefix-match by substring on
+                          the inner tag rather than expecting an exact
+                          match.  ambiguous_task_repo and
+                          missing_sandbox_clone are expected
+                          "needs-disambiguation" outcomes — log info and
+                          report skip_* so they do not inflate the error
+                          metric / alerting. *)
+                       if String_util.contains_substring msg
+                            "ambiguous_task_repo:" then begin
+                         Log.Misc.info
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning skipped: %s"
+                           keeper_name task_id msg;
+                         "skip_ambiguous"
+                       end else if String_util.contains_substring msg
+                                     "missing_sandbox_clone:" then begin
+                         Log.Misc.info
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning skipped: %s"
+                           keeper_name task_id msg;
+                         "skip_missing_sandbox_clone"
+                       end else begin
+                         Log.Misc.warn
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning failed: %s"
+                           keeper_name task_id msg;
+                         "error"
+                       end)))
       in
       Prometheus.inc_counter "masc_keeper_claim_auto_provision_total"
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]
@@ -908,6 +903,40 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
+      (* Periodic repository sync: fetch repositories with auto_sync enabled. *)
+      Eio.Fiber.fork ~sw (fun () ->
+        let repo_sync_interval_sec =
+          Env_config_runtime.InternalTimers.repo_sync_interval_sec
+        in
+        let sync_once () =
+          try
+            let now = Int64.of_float (Eio.Time.now clock) in
+            match Repo_sync.sync_all ~base_path:state.room_config.base_path ~now with
+            | Ok repos ->
+              if repos <> [] then
+                Log.Server.info "repo_sync: synced %d repositories"
+                  (List.length repos)
+            | Error msg ->
+              Log.Server.warn "repo_sync: sync_all failed: %s" msg
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.error "repo_sync: iteration failed: %s"
+              (Printexc.to_string exn)
+        in
+        let rec sync_loop () =
+          (try
+             Eio.Time.sleep clock repo_sync_interval_sec
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.error "repo_sync: sleep failed: %s"
+               (Printexc.to_string exn));
+          sync_once ();
+          sync_loop ()
+        in
+        sync_once ();
+        sync_loop ());
   let resolved_base = state.room_config.base_path in
   let masc_dir = Coord.masc_root_dir state.room_config in
   A2a_tools.init ~masc_dir;

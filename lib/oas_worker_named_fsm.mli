@@ -65,6 +65,12 @@ val sdk_error_to_resumable_cli_session :
 
 val sdk_error_is_resumable_cli_session : Oas.Error.sdk_error -> bool
 
+val sdk_error_is_terminal_provider_runtime_failure :
+  Oas.Error.sdk_error -> bool
+(** [true] for deterministic provider/adapter crashes that should enter the
+    immediate long cooldown lane instead of waiting for generic failure
+    thresholding. *)
+
 val sdk_error_is_hard_quota : Oas.Error.sdk_error -> bool
 (** [true] when the error represents a hard usage quota that will not
     recover within the cascade turn budget. *)

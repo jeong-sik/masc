@@ -379,7 +379,7 @@ LLAMA_SWARM_MODEL=<exact-model-id> \
 
 ## Eval Pipeline (Quality Scoring)
 
-Keeper의 tool call 품질을 정량 평가하는 파이프라인. 세 가지 평가 경로가 `Reward_advice_artifact.reward_advice_artifact`로 수렴한다.
+Keeper의 tool call 품질을 정량 평가하는 파이프라인. 현재는 두 가지 평가 경로가 `Reward_advice_artifact.reward_advice_artifact`로 수렴하며, `Task verifier` 경로는 future로 계획되어 있다.
 
 ### 구조
 

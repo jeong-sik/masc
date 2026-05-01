@@ -22,13 +22,13 @@ describe('SectionCap a11y', () => {
   })
 
   it('default (muted + normal) passes axe', async () => {
-    render(html`<${SectionCap}>Recent activity</${SectionCap}>`, container)
+    render(html`<${SectionCap}>Recent activity<//>`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 
   it('tone=dim variant passes axe', async () => {
     render(
-      html`<${SectionCap} tone="dim">Telemetry</${SectionCap}>`,
+      html`<${SectionCap} tone="dim">Telemetry<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
@@ -36,7 +36,7 @@ describe('SectionCap a11y', () => {
 
   it('weight=semibold variant passes axe', async () => {
     render(
-      html`<${SectionCap} weight="semibold">Allowlist</${SectionCap}>`,
+      html`<${SectionCap} weight="semibold">Allowlist<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
@@ -46,7 +46,7 @@ describe('SectionCap a11y', () => {
     render(
       html`<${SectionCap} class="mb-2 border-b border-[var(--white-5)]">
         Diagnostics
-      </${SectionCap}>`,
+      <//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()

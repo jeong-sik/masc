@@ -361,7 +361,7 @@ export function DoctorPanel() {
             </div>
           `}
         />
-      </${Card}>
+      <//>
     </div>
   `
 }

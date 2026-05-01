@@ -233,7 +233,7 @@ export function KeeperRepoMapping() {
   }
 
   if (kState.status === 'loading' || rState.status === 'loading' || mState.status === 'loading') {
-    return html`<${LoadingState}>키퍼와 저장소 정보 불러오는 중...</${LoadingState}>`
+    return html`<${LoadingState}>키퍼와 저장소 정보 불러오는 중...<//>`
   }
 
   if (kState.status === 'error') {

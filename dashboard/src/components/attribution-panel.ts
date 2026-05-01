@@ -150,7 +150,7 @@ function GateCard({
             <span class="text-[var(--bad-light)]">⊘ ${blocked}</span>
           </div>
         </div>
-      </${SurfaceCard}>
+      <//>
     </button>
   `
 }
@@ -196,7 +196,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
     return html`
       <${SurfaceCard} variant="light">
         <${EmptyState} message="이벤트를 선택하면 evidence가 여기 표시됩니다." />
-      </${SurfaceCard}>
+      <//>
     `
   }
   const a = event.attribution
@@ -219,7 +219,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
           : null}
         <pre class="text-2xs font-mono bg-[var(--white-5)]/30 rounded p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
       </div>
-    </${SurfaceCard}>
+    <//>
   `
 }
 
@@ -365,7 +365,7 @@ export function AttributionPanel() {
                   />
                 `)}
           </div>
-        </${SurfaceCard}>
+        <//>
 
         <${EvidenceDetail} event=${selected} />
       </div>

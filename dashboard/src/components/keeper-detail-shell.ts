@@ -299,12 +299,12 @@ export function KeeperDetailOverviewSidebar({
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <${KeeperDetailQuickFact} label="상태">${effectiveStatus}</${KeeperDetailQuickFact}>
-          <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}</${KeeperDetailQuickFact}>
-          <${KeeperDetailQuickFact} label=${effectiveModelLabel}>${effectiveModel}</${KeeperDetailQuickFact}>
+          <${KeeperDetailQuickFact} label="상태">${effectiveStatus}<//>
+          <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}<//>
+          <${KeeperDetailQuickFact} label=${effectiveModelLabel}>${effectiveModel}<//>
           <${KeeperDetailQuickFact} label="최근 활동">
             <${KeeperActivityValue} activity=${activity} />
-          </${KeeperDetailQuickFact}>
+          <//>
         </div>
 
         <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] p-3.5">

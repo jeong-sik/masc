@@ -800,7 +800,7 @@ export function KeeperDetailPage() {
   const keeper = resolveKeeperForDetail(
     keeperName,
     findKeeper(keeperName),
-    selectedKeeper.value,
+    selectedKeeper.peek(),
     keepers.value.length,
   )
   if (!keeper) {
@@ -1064,7 +1064,7 @@ export function KeeperDetailPage() {
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />
-          </${KeeperDetailSection}>
+          <//>
 
           <${KeeperDetailSection}
             id="keeper-comms"
@@ -1077,7 +1077,7 @@ export function KeeperDetailPage() {
               <div class="text-2xs text-[var(--color-fg-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
-          </${KeeperDetailSection}>
+          <//>
 
           <${KeeperDetailSection}
             id="keeper-runtime"
@@ -1118,7 +1118,7 @@ export function KeeperDetailPage() {
               <div class="mt-3 text-2xs text-[var(--color-fg-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
               <${RuntimeSignals} keeper=${keeper} />
             </details>
-          </${KeeperDetailSection}>
+          <//>
 
           <${KeeperDetailSection}
             id="keeper-identity"
@@ -1187,7 +1187,7 @@ export function KeeperDetailPage() {
               />
             </div>
           </details>
-          </${KeeperDetailSection}>
+          <//>
 
           <${KeeperDetailSection}
             id="keeper-config"
@@ -1215,7 +1215,7 @@ export function KeeperDetailPage() {
                 <${KeeperConfigPanel} keeperName=${keeper.name} />
               </div>
             </details>
-          </${KeeperDetailSection}>
+          <//>
 
           <${KeeperDetailSection}
             id="keeper-debug"
@@ -1239,7 +1239,7 @@ export function KeeperDetailPage() {
             </div>
           </div>
         </details>
-          </${KeeperDetailSection}>
+          <//>
 
         <${KeeperClearContextDialog}
           keeperName=${keeper.name}

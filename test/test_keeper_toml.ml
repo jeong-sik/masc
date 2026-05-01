@@ -763,6 +763,20 @@ let with_personas_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f personas_dir)
 
+let with_config_dir f =
+  with_temp_dir "keeper-config" @@ fun config_dir ->
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match original with
+      | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+      | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f config_dir)
+
 (* Legacy allowed_providers is accepted for compatibility but ignored.
    Provider ownership now lives with OAS cascade resolution. *)
 
@@ -937,6 +951,44 @@ let test_persona_resolver_rejects_operator_todo_profile () =
   | Error e ->
       check bool "reports persona unavailable" true
         (contains_substring e "persona not found")
+
+let test_persona_resolver_reports_placeholder_defaults_source () =
+  with_personas_dir @@ fun personas_dir ->
+  with_config_dir @@ fun config_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "role": "runtime profile",
+  "keeper": {
+    "goal": "normal persona goal"
+  }
+}
+|};
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let keeper_path = Filename.concat keepers_dir "probe.toml" in
+  write_file keeper_path
+    {|
+[keeper]
+persona_name = "probe"
+goal = "OPERATOR_TODO: replace before spawn"
+|};
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder keeper defaults should not resolve"
+  | Error e ->
+      check bool "reports keeper defaults" true
+        (contains_substring e "keeper defaults");
+      check bool "reports manifest path" true
+        (contains_substring e keeper_path);
+      check bool "reports field" true
+        (contains_substring e "keeper.goal")
 
 let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1663,6 +1715,8 @@ let () =
             test_persona_resolver_defaults_to_research_tool_access;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
+          test_case "persona resolver reports placeholder defaults source" `Quick
+            test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver ignores non-public social_model arg" `Quick
             test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick

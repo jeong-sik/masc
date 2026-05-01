@@ -768,7 +768,7 @@ let enforce_rate_limit now =
       (* Keep NaN windows fail-closed: [>] is false for NaN, so old timestamps
          are retained and the limiter stays conservative. *)
       while Queue.length request_times > 0
-            && now -. Queue.peek request_times > window
+            && Stdlib.( > ) (Stdlib.Float.sub now (Queue.peek request_times)) window
       do
         let (_ : float) = Queue.pop request_times in ()
       done;

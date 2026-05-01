@@ -247,6 +247,12 @@ let is_auto_model_label model =
     (String.lowercase_ascii (model_id_leaf model))
     "auto"
 
+let is_unresolved_pricing_label model =
+  let trimmed = String.trim model in
+  String.equal trimmed ""
+  || is_auto_model_label trimmed
+  || String.equal trimmed unknown_model_sentinel
+
 let canonical_model_id_opt
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
@@ -346,15 +352,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
    path is the only place the miss becomes observable. *)
 let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage)
     : float =
-  match Llm_provider.Pricing.pricing_for_model_opt model with
-  | Some pricing ->
-    Llm_provider.Pricing.estimate_cost ~pricing
-      ~input_tokens:usage.input_tokens
-      ~output_tokens:usage.output_tokens
-      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
-      ~cache_read_input_tokens:usage.cache_read_input_tokens
-      ()
-  | None ->
+  let pricing_catalog_miss () =
     Prometheus.inc_counter
       "masc_pricing_catalog_miss_total"
       ~labels:[("model", model)] ();
@@ -365,6 +363,17 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
        agent_sdk/llm_provider/pricing.ml, then bump the OAS pin."
       model usage.input_tokens usage.output_tokens;
     0.0
+  in
+  if is_unresolved_pricing_label model then pricing_catalog_miss ()
+  else match Llm_provider.Pricing.pricing_for_model_opt model with
+  | Some pricing ->
+    Llm_provider.Pricing.estimate_cost ~pricing
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens
+      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:usage.cache_read_input_tokens
+      ()
+  | None -> pricing_catalog_miss ()
 
 type cost_status =
   | Cost_reported_or_estimated
@@ -412,7 +421,8 @@ let model_resolution_source_for_ledger ~model ~pricing_model =
   else "raw"
 
 let pricing_catalog_status ~pricing_model =
-  match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
+  if is_unresolved_pricing_label pricing_model then "miss"
+  else match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
   | Some pricing
     when pricing.input_per_million = 0.0
          && pricing.output_per_million = 0.0 ->
@@ -434,6 +444,7 @@ let cost_status_for_event
   else if cost_usd > 0.0 then Cost_reported_or_estimated
   else if structurally_unmetered_provider provider then Cost_known_free
   else if String.equal provider "unknown" then Cost_provider_unknown
+  else if is_unresolved_pricing_label pricing_model then Cost_unpriced_model
   else
     match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
     | Some pricing
@@ -591,6 +602,7 @@ let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
   else if not usage_trusted then "untrusted_usage"
   else if structurally_unmetered_provider provider then "unmetered_provider"
   else if cost_usd > 0.0 then "computed"
+  else if is_unresolved_pricing_label model then "pricing_catalog_miss"
   else
     match Llm_provider.Pricing.pricing_for_model_opt model with
     | None -> "pricing_catalog_miss"

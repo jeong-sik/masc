@@ -19,7 +19,7 @@ let load_failure_artifact = function
   | Cdal_loader.Schema_unsupported _ -> "manifest.json"
   | Cdal_loader.Ref_resolution_error _ -> "contract.json"
 
-let synthesize_inconclusive ~(proof : Oas.Cdal_proof.t)
+let synthesize_inconclusive ~(proof : Agent_sdk.Cdal_proof.t)
     (err : Cdal_loader.load_error) : Cdal_types.contract_verdict =
   let gap : Cdal_types.completeness_gap = {
     artifact = load_failure_artifact err;
@@ -53,8 +53,8 @@ let synthesize_inconclusive ~(proof : Oas.Cdal_proof.t)
 (* Evaluation pipeline                                              *)
 (* ================================================================ *)
 
-let evaluate ~(store : Oas.Proof_store.config)
-    (proof : Oas.Cdal_proof.t) : eval_outcome =
+let evaluate ~(store : Agent_sdk.Proof_store.config)
+    (proof : Agent_sdk.Cdal_proof.t) : eval_outcome =
   match Cdal_loader.load ~store proof with
   | Ok bundle ->
     let verdict = Cdal_judge.judge bundle in

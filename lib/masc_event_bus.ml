@@ -8,7 +8,7 @@
     Treating OAS's Event_bus as a general-purpose telemetry channel
     creates cross-layer coupling."
 
-    Same type as [Oas.Event_bus.t] — we re-use the library rather
+    Same type as [Agent_sdk.Event_bus.t] — we re-use the library rather
     than re-inventing the transport. Different instance, different
     subscribers, different lifecycle.
 
@@ -18,7 +18,7 @@
 
     @since 2.353.0 *)
 
-let bus_ref : Oas.Event_bus.t option Atomic.t = Atomic.make None
+let bus_ref : Agent_sdk.Event_bus.t option Atomic.t = Atomic.make None
 
 let set bus = Atomic.set bus_ref (Some bus)
 let get () = Atomic.get bus_ref

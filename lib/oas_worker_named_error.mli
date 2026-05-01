@@ -60,13 +60,13 @@ type masc_internal_error =
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 
-val sdk_error_of_masc_internal_error : masc_internal_error -> Oas.Error.sdk_error
+val sdk_error_of_masc_internal_error : masc_internal_error -> Agent_sdk.Error.sdk_error
 (** Convert a [masc_internal_error] to an SDK error, bumping the
     [masc_oas_error_total] Prometheus counter with [kind] and
     [cascade_name] labels. *)
 
 val classify_masc_internal_error :
-  Oas.Error.sdk_error -> masc_internal_error option
+  Agent_sdk.Error.sdk_error -> masc_internal_error option
 (** Parse an SDK error back into a [masc_internal_error] when it was
     originally produced by [sdk_error_of_masc_internal_error].  Returns
     [None] for errors that do not carry the [masc_oas_error] prefix. *)
@@ -86,7 +86,7 @@ val admission_wait_timeout_error :
   cascade_name:cascade_name ->
   priority:Llm_provider.Request_priority.t ->
   int ->
-  (string, Oas.Error.sdk_error) result
+  (string, Agent_sdk.Error.sdk_error) result
 (** Build an [Admission_queue_timeout] error from a wait duration in ms. *)
 
 val cross_cascade_fallback_metric : string
@@ -97,7 +97,7 @@ val config_for_label :
   name:string ->
   model_label:string ->
   system_prompt:string ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   max_turns:int ->
   max_tokens:int ->
   ?max_input_tokens:int ->
@@ -105,18 +105,18 @@ val config_for_label :
   temperature:float ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?context_reducer:Oas.Context_reducer.t ->
-  ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?context_reducer:Agent_sdk.Context_reducer.t ->
+  ?memory:Agent_sdk.Memory.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Risk_contract.t ->
-  ?approval:Oas.Hooks.approval_callback ->
+  ?contract:Agent_sdk.Risk_contract.t ->
+  ?approval:Agent_sdk.Hooks.approval_callback ->
   description:string option ->
   unit ->
-  (Oas_worker_exec.config, Oas.Error.sdk_error) result
+  (Oas_worker_exec.config, Agent_sdk.Error.sdk_error) result
 (** Build an [Oas_worker_exec.config] from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
@@ -141,8 +141,8 @@ val with_codex_cli_preflight :
   scope:string ->
   config:Oas_worker_exec.config ->
   goal:string ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+  (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  ('a, Agent_sdk.Error.sdk_error) result
 (** Wrap an execution with a codex_cli preflight check.  If the prompt
     exceeds limits, returns [Error] immediately without calling [run].
     Otherwise delegates to [run]. *)

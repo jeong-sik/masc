@@ -11,8 +11,8 @@
 val run_safe :
   ?caller:string ->
   timeout_s:float ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+  (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  ('a, Agent_sdk.Error.sdk_error) result
 
 (** Single entry point that resolves the per-caller timeout from
     [Env_config_oas_bridge] and labels the resulting Prometheus
@@ -22,5 +22,5 @@ val run_safe :
     for the per-caller default table and env-var layout. *)
 val run_with_caller :
   caller:Env_config_oas_bridge.caller ->
-  (unit -> ('a, Oas.Error.sdk_error) result) ->
-  ('a, Oas.Error.sdk_error) result
+  (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  ('a, Agent_sdk.Error.sdk_error) result

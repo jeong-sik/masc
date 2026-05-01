@@ -48,7 +48,7 @@ let next_fail_open_cascade_for_turn
     ~(effective_cascade : string)
     ~(tool_requirement : string)
     ~(attempted_cascades : string list)
-    (err : Oas.Error.sdk_error) : EC.degraded_retry option =
+    (err : Agent_sdk.Error.sdk_error) : EC.degraded_retry option =
   let fallback_hint =
     Keeper_cascade_profile.fallback_cascade_for effective_cascade
   in
@@ -59,22 +59,22 @@ let next_fail_open_cascade_for_turn
     ~attempted_cascades err
 
 let sdk_error_kind = function
-  | Oas.Error.Api _ -> "api"
-  | Oas.Error.Agent _ -> "agent"
-  | Oas.Error.Mcp _ -> "mcp"
-  | Oas.Error.Config _ -> "config"
-  | Oas.Error.Serialization _ -> "serialization"
-  | Oas.Error.Io _ -> "io"
-  | Oas.Error.Orchestration _ -> "orchestration"
-  | Oas.Error.A2a _ -> "a2a"
-  | Oas.Error.Internal _ -> "internal"
+  | Agent_sdk.Error.Api _ -> "api"
+  | Agent_sdk.Error.Agent _ -> "agent"
+  | Agent_sdk.Error.Mcp _ -> "mcp"
+  | Agent_sdk.Error.Config _ -> "config"
+  | Agent_sdk.Error.Serialization _ -> "serialization"
+  | Agent_sdk.Error.Io _ -> "io"
+  | Agent_sdk.Error.Orchestration _ -> "orchestration"
+  | Agent_sdk.Error.A2a _ -> "a2a"
+  | Agent_sdk.Error.Internal _ -> "internal"
 
 let record_turn_failure_stress
     ~(meta : keeper_meta)
     ~(is_auto_recoverable : bool)
     ~(consecutive : int)
     ~(threshold : int)
-    ~(err : Oas.Error.sdk_error)
+    ~(err : Agent_sdk.Error.sdk_error)
   : unit =
   let room_id =
     match meta.joined_room_ids with
@@ -226,9 +226,9 @@ let oas_retry_budget_available_for_turn ~(estimated_input_tokens : int)
 
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)
-    (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
+    (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
   match err, timeout_budget with
-  | Oas.Error.Api (Timeout { message }), Some timeout_budget
+  | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
     when EC.is_structural_oas_timeout_message message ->
       Oas_worker_named.sdk_error_of_masc_internal_error
         (Oas_worker_named.Oas_timeout_budget
@@ -255,7 +255,7 @@ let next_fail_open_cascade_for_turn_with_budget
     ~(estimated_input_tokens : int)
     ~(max_turns : int)
     ~(remaining_turn_budget_s : float)
-    (err : Oas.Error.sdk_error) : degraded_retry_budget_decision =
+    (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
   match
     next_fail_open_cascade_for_turn
       ?rotation_cascades
@@ -324,11 +324,11 @@ let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(max_cascade_context : int)
-    ~(error : Oas.Error.sdk_error) : overflow_retry_plan option =
+    ~(error : Agent_sdk.Error.sdk_error) : overflow_retry_plan option =
   let actual_limit =
     match error with
-    | Oas.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
-    | Oas.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
+    | Agent_sdk.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
+    | Agent_sdk.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
     | _ ->
       (* Overflow detected but limit not available -- use 80% of cascade max
          as a conservative fallback. *)
@@ -359,20 +359,20 @@ let recover_context_overflow_retry
   | None ->
       Log.Keeper.warn
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
-        meta.name (short_preview (Oas.Error.to_string error));
+        meta.name (short_preview (Agent_sdk.Error.to_string error));
       None
 
 let summarize_turn_event_bus
-    (events : Oas.Event_bus.event list) : turn_event_bus_summary =
+    (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
   List.fold_left
-    (fun acc (evt : Oas.Event_bus.event) ->
+    (fun acc (evt : Agent_sdk.Event_bus.event) ->
       let correlation_id =
         match acc.correlation_id with
         | Some _ -> acc.correlation_id
         | None -> Some evt.meta.correlation_id
       in
       match evt.payload with
-      | Oas.Event_bus.ContextOverflowImminent
+      | Agent_sdk.Event_bus.ContextOverflowImminent
           { estimated_tokens; limit_tokens; _ } ->
           {
             correlation_id;
@@ -387,7 +387,7 @@ let context_overflow_event_of_error
     ~(fallback_tokens : int)
     ?(turn_event_bus : turn_event_bus_summary =
       { correlation_id = None; overflow_imminent = None })
-    (err : Oas.Error.sdk_error) : Keeper_state_machine.event =
+    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event =
   match turn_event_bus.overflow_imminent with
   | Some { estimated_tokens; limit_tokens } ->
       Keeper_state_machine.Context_overflow_detected
@@ -398,14 +398,14 @@ let context_overflow_event_of_error
         }
   | None ->
       match err with
-      | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
+      | Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
           Keeper_state_machine.Context_overflow_detected
             {
               source = `Oas_signal;
               token_count = used;
               limit_tokens = Some limit;
             }
-      | Oas.Error.Api (ContextOverflow { limit; _ }) ->
+      | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
           Keeper_state_machine.Context_overflow_detected
             {
               source = `Prompt_rejected;
@@ -559,8 +559,8 @@ let enqueue_partial_commit_continue_gate
     ~on_resolution:(fun decision ->
       let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
       match decision with
-      | Oas.Hooks.Approve
-      | Oas.Hooks.Edit _ ->
+      | Agent_sdk.Hooks.Approve
+      | Agent_sdk.Hooks.Edit _ ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
          | Ok resumed_meta ->
              Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
@@ -572,7 +572,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err)
-      | Oas.Hooks.Reject reason ->
+      | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
          | Ok paused_meta ->
              Keeper_registry.set_failure_reason

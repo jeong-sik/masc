@@ -156,7 +156,7 @@ let max_oas_history_retained = 12
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
 
-let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
+let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
   let generation =
     match ckpt.working_context with
     | Some (`Assoc fields) -> (
@@ -170,11 +170,11 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
   Printf.sprintf "%s%013d-g%d%s"
     oas_history_prefix created_ms generation oas_history_suffix
 
-let save_oas_history ~(session_dir : string) (ckpt : Oas.Checkpoint.t) : unit =
+let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
   match Keeper_fs.save_atomic
     (oas_history_path ~session_dir ~snapshot_id)
-    (Oas.Checkpoint.to_string ckpt) with
+    (Agent_sdk.Checkpoint.to_string ckpt) with
   | Ok () ->
     let files = list_oas_history_files ~session_dir in
     if List.length files > max_oas_history_retained then
@@ -211,12 +211,12 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
+let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
     match Keeper_fs.save_atomic
       (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-      (Oas.Checkpoint.to_string ckpt) with
+      (Agent_sdk.Checkpoint.to_string ckpt) with
     | Ok () ->
       (try save_oas_history ~session_dir ckpt with
        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -231,9 +231,9 @@ let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
     match Fs_compat.get_fs_opt () with
     | Some fs when Eio_guard.is_ready () ->
         let dir = Eio.Path.(fs / session_dir) in
-        (match Oas.Checkpoint_store.create dir with
+        (match Agent_sdk.Checkpoint_store.create dir with
          | Ok store -> (
-             match Oas.Checkpoint_store.save store ckpt with
+             match Agent_sdk.Checkpoint_store.save store ckpt with
              | Ok () ->
                  (try save_oas_history ~session_dir ckpt with
                   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -241,15 +241,15 @@ let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
                         ckpt.session_id (Printexc.to_string exn));
                  Ok ()
-             | Error err -> Error (Oas.Error.to_string err))
-         | Error err -> Error (Oas.Error.to_string err))
+             | Error err -> Error (Agent_sdk.Error.to_string err))
+         | Error err -> Error (Agent_sdk.Error.to_string err))
     | Some _ | None ->
         fallback ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
 
-(* Delta Checkpoint Shadow-Apply removed: Oas.Checkpoint.delta
+(* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
 type checkpoint_load_error =
@@ -307,7 +307,7 @@ let is_not_found_detail (detail : string) : bool =
   || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
   || has_substring d "no such file or directory"
 
-(* #8605 family: exhaustive on Oas.Error.sdk_error top-level
+(* #8605 family: exhaustive on Agent_sdk.Error.sdk_error top-level
    variants. The previous wildcard collapsed Api / Agent / Mcp / Config
    / Orchestration / A2a / Internal errors into Io_error, hiding
    non-IO failures from the dashboard. The wildcards on Io _ and
@@ -315,7 +315,7 @@ let is_not_found_detail (detail : string) : bool =
    variants land in the semantically correct category, but a future
    top-level sdk_error variant becomes a build error and forces a
    deliberate routing decision. *)
-let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
+let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
       if is_not_found_detail r.detail then Not_found
@@ -328,7 +328,7 @@ let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Agent _ | Mcp _ | Config _
   | Orchestration _ | A2a _ | Internal _ ->
-      Sdk_other_error (Oas.Error.to_string e)
+      Sdk_other_error (Agent_sdk.Error.to_string e)
 
 let result_all items =
   let rec loop acc = function
@@ -340,7 +340,7 @@ let result_all items =
 
 let content_block_of_json_strict json =
   try
-    match Oas.Api.content_block_of_json json with
+    match Agent_sdk.Api.content_block_of_json json with
     | Some block -> Ok block
     | None ->
         let open Yojson.Safe.Util in
@@ -348,7 +348,7 @@ let content_block_of_json_strict json =
           json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
         in
         Error
-          (Oas.Error.Serialization
+          (Agent_sdk.Error.Serialization
              (JsonParseError
                 {
                   detail =
@@ -357,29 +357,29 @@ let content_block_of_json_strict json =
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Failure msg ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid content block: %s" msg }))
 
 let role_of_string_compat raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "system" -> Ok Oas.Types.System
-  | "user" -> Ok Oas.Types.User
-  | "assistant" -> Ok Oas.Types.Assistant
-  | "tool" -> Ok Oas.Types.Tool
+  | "system" -> Ok Agent_sdk.Types.System
+  | "user" -> Ok Agent_sdk.Types.User
+  | "assistant" -> Ok Agent_sdk.Types.Assistant
+  | "tool" -> Ok Agent_sdk.Types.Tool
   | other ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (UnknownVariant { type_name = "role"; value = other }))
 
 let message_of_json_compat json =
@@ -395,7 +395,7 @@ let message_of_json_compat json =
     | Ok role, Ok content ->
         Ok
           {
-            Oas.Types.role;
+            Agent_sdk.Types.role;
             content;
             name = json |> member "name" |> to_string_option;
             tool_call_id = json |> member "tool_call_id" |> to_string_option;
@@ -406,12 +406,12 @@ let message_of_json_compat json =
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
 
@@ -451,23 +451,23 @@ let checkpoint_of_json_compat json =
     match messages with
     | Error e -> Error e
     | Ok messages -> (
-        match Oas.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
+        match Agent_sdk.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
         | Ok checkpoint -> Ok { checkpoint with messages }
         | Error e -> Error e)
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
   | Yojson.Json_error msg ->
       Error
-        (Oas.Error.Serialization
+        (Agent_sdk.Error.Serialization
            (JsonParseError
               { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
 
 let checkpoint_of_string_compat raw =
-  match Oas.Checkpoint.of_string raw with
+  match Agent_sdk.Checkpoint.of_string raw with
   | Ok checkpoint -> Ok checkpoint
   | Error _ ->
       let json =
@@ -478,7 +478,7 @@ let checkpoint_of_string_compat raw =
       checkpoint_of_json_compat json
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
-    (Oas.Checkpoint.t, checkpoint_load_error) result =
+    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
   let path = oas_history_path ~session_dir ~snapshot_id in
   if Fs_compat.file_exists path then
     try
@@ -491,7 +491,7 @@ let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
   else Error Not_found
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
-    (Oas.Checkpoint.t, checkpoint_load_error) result =
+    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
   let fallback () =
     let path = oas_checkpoint_path ~session_dir ~session_id in
     if Fs_compat.file_exists path then
@@ -507,11 +507,11 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
   match Fs_compat.get_fs_opt () with
   | Some fs when Eio_guard.is_ready () ->
       let dir = Eio.Path.(fs / session_dir) in
-      (match Oas.Checkpoint_store.create dir with
+      (match Agent_sdk.Checkpoint_store.create dir with
        | Ok store -> (
-           match Oas.Checkpoint_store.load store session_id with
+           match Agent_sdk.Checkpoint_store.load store session_id with
            | Ok ckpt -> Ok ckpt
            | Error e -> Error (classify_sdk_error e))
-       | Error e -> Error (Store_error (Oas.Error.to_string e)))
+       | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | Some _ | None ->
       fallback ()

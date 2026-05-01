@@ -12,7 +12,7 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
         | _ -> []
       in
       Oas_bus_instrument.publish mb
-        (Oas.Event_bus.mk_event
+        (Agent_sdk.Event_bus.mk_event
            (Custom
               ( Printf.sprintf "masc.oas_worker.%s" event,
                 `Assoc
@@ -25,7 +25,7 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
                    @ optional_string_field "session_id" session_id
                    @ optional_string_field "status" status) )))
 
-let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t)
+let persist_checkpoint ~dir ~session_id (ckpt : Agent_sdk.Checkpoint.t)
     : (unit, string) result =
   let path = Filename.concat dir (session_id ^ ".json") in
   try
@@ -33,58 +33,58 @@ let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t)
     Result.map_error
       (fun err ->
          Printf.sprintf "checkpoint persist failed for %s: %s" session_id err)
-      (Fs_compat.save_file_atomic path (Oas.Checkpoint.to_string ckpt))
+      (Fs_compat.save_file_atomic path (Agent_sdk.Checkpoint.to_string ckpt))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Error (Printf.sprintf "checkpoint persist failed for %s: %s"
              session_id (Printexc.to_string exn))
 
-let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Oas.Agent.t) =
+let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t) =
   match checkpoint_sidecar with
-  | None -> Oas.Agent.checkpoint ~session_id agent
+  | None -> Agent_sdk.Agent.checkpoint ~session_id agent
   | Some json ->
-      Oas.Agent_checkpoint.build_checkpoint
+      Agent_sdk.Agent_checkpoint.build_checkpoint
         ~session_id ~working_context:json
-        ~state:(Oas.Agent.state agent)
-        ~tools:(Oas.Agent.tools agent)
-        ~context:(Oas.Agent.context agent)
-        ~mcp_clients:(Oas.Agent.options agent).mcp_clients
+        ~state:(Agent_sdk.Agent.state agent)
+        ~tools:(Agent_sdk.Agent.tools agent)
+        ~context:(Agent_sdk.Agent.context agent)
+        ~mcp_clients:(Agent_sdk.Agent.options agent).mcp_clients
         ()
 
 let partial_response_of_stop
     ~(session_id : string)
     ~(model_id : string)
     ~(text : string)
-  : Oas.Types.api_response =
+  : Agent_sdk.Types.api_response =
   {
     id = session_id;
     model = model_id;
-    stop_reason = Oas.Types.EndTurn;
-    content = [ Oas.Types.Text text ];
+    stop_reason = Agent_sdk.Types.EndTurn;
+    content = [ Agent_sdk.Types.Text text ];
     usage = None;
     telemetry = None;
   }
 
-(** Enrich an [Oas.Error.to_string] detail with the name of the most
+(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
     recently called tool when the error is an "Idle detected" failure.
     For all other error strings the input is returned unchanged.
 
     Exposed at module level so it can be unit-tested independently of
     the network-bound [run] function. *)
-let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : string =
+let enrich_idle_detail (detail : string) (messages : Agent_sdk.Types.message list) : string =
   if String.starts_with ~prefix:"Idle detected" detail then
     let last_tool =
       let rec find = function
         | [] -> None
-        | (m : Oas.Types.message) :: rest ->
+        | (m : Agent_sdk.Types.message) :: rest ->
             let later = find rest in
             if Option.is_some later then
               later
-            else if m.role = Oas.Types.Assistant then
+            else if m.role = Agent_sdk.Types.Assistant then
               List.find_map
                 (function
-                  | Oas.Types.ToolUse { name; _ } -> Some name
+                  | Agent_sdk.Types.ToolUse { name; _ } -> Some name
                   | _ -> None)
                 m.content
             else

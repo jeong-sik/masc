@@ -60,11 +60,11 @@ let accumulator_size acc =
 let try_parse (s : string) : Yojson.Safe.t option =
   try Some (Yojson.Safe.from_string s) with _ -> None
 
-let make_post_tool_use_hook (acc : accumulator) : Oas.Hooks.hook =
+let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
   fun event ->
     (if masc_tool_emission_enabled () then
        match event with
-       | Oas.Hooks.PostToolUse { output; _ } -> (
+       | Agent_sdk.Hooks.PostToolUse { output; _ } -> (
            match output with
            | Ok { content } -> (
                match try_parse content with
@@ -72,12 +72,12 @@ let make_post_tool_use_hook (acc : accumulator) : Oas.Hooks.hook =
                | None -> ())
            | Error _ -> ())
        | _ -> ());
-    Oas.Hooks.Continue
+    Agent_sdk.Hooks.Continue
 
-let install_into_hooks (acc : accumulator) (hooks : Oas.Hooks.hooks)
-    : Oas.Hooks.hooks =
+let install_into_hooks (acc : accumulator) (hooks : Agent_sdk.Hooks.hooks)
+    : Agent_sdk.Hooks.hooks =
   let k4_hook = make_post_tool_use_hook acc in
-  let combined : Oas.Hooks.hook =
+  let combined : Agent_sdk.Hooks.hook =
     match hooks.post_tool_use with
     | None -> k4_hook
     | Some original ->
@@ -85,7 +85,7 @@ let install_into_hooks (acc : accumulator) (hooks : Oas.Hooks.hooks)
           (* K4 hook is observational and always returns Continue;
              we run it for its side effect, then defer the decision
              to the original hook. *)
-          let _ : Oas.Hooks.hook_decision = k4_hook event in
+          let _ : Agent_sdk.Hooks.hook_decision = k4_hook event in
           original event
   in
   { hooks with post_tool_use = Some combined }

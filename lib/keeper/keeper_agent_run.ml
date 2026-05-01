@@ -47,7 +47,7 @@ let run_turn
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
-         base_system_prompt:string -> messages:Oas.Types.message list -> turn_prompt)
+         base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ?world_observation
@@ -66,7 +66,7 @@ let run_turn
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(tool_overlay : Oas.Tool_op.t ref option)
+      ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?priority
       ?(degraded_retry_applied = false)
       ?degraded_retry_cascade
@@ -76,7 +76,7 @@ let run_turn
       ?shared_context
       ?event_bus
       ()
-  : (run_result, Oas.Error.sdk_error) result
+  : (run_result, Agent_sdk.Error.sdk_error) result
   =
   Masc_runtime_events.emit_turn_start ();
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
@@ -160,7 +160,7 @@ let run_turn
   let reducer = s.Keeper_run_tools.reducer in
   let memory = s.Keeper_run_tools.memory in
   let acc = s.Keeper_run_tools.acc in
-  let agent_ref : Oas.Agent.t option ref = ref None in
+  let agent_ref : Agent_sdk.Agent.t option ref = ref None in
   let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
   let initial_tool_surface_blocker_ref = s.Keeper_run_tools.initial_tool_surface_blocker in
   let all_tool_names = s.Keeper_run_tools.all_tool_names in
@@ -213,7 +213,7 @@ let run_turn
       ~config
       ~allowed_paths:effective_allowed_paths
   with
-  | Error e -> Error (Oas.Error.Internal e)
+  | Error e -> Error (Agent_sdk.Error.Internal e)
   | Ok oas_allowed_paths ->
     let require_tool_choice_support =
       String.equal initial_tool_surface.tool_requirement "required"
@@ -371,10 +371,10 @@ let run_turn
                retry_on_recoverable_tool_error remains false — tool-level
                errors are handled by MASC's consecutive failure guardrail. *)
            ~tool_retry_policy:{
-             Oas.Tool_retry_policy.max_retries = 2;
+             Agent_sdk.Tool_retry_policy.max_retries = 2;
              retry_on_validation_error = true;
              retry_on_recoverable_tool_error = false;
-             feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
+             feedback_style = Agent_sdk.Tool_retry_policy.Structured_tool_result;
            }
            ~required_tool_satisfaction:
              Keeper_tool_disclosure.required_tool_satisfaction
@@ -425,7 +425,7 @@ let run_turn
        (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
-       let text = Oas.Types.text_of_content result.response.content in
+       let text = Agent_sdk.Types.text_of_content result.response.content in
        let model = result.response.model in
        receipt_turn_count_ref := Some result.turns;
        receipt_model_used_ref := Some model;
@@ -443,7 +443,7 @@ let run_turn
           let now_iso = Types.now_iso () in
           List.iter
             (function
-              | Oas.Types.Thinking { content; _ } ->
+              | Agent_sdk.Types.Thinking { content; _ } ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
                   ; ts_iso = now_iso
@@ -466,7 +466,7 @@ let run_turn
                      "keeper:%s thinking persist failed: %s"
                      meta.name
                      (Printexc.to_string exn))
-              | Oas.Types.RedactedThinking _ ->
+              | Agent_sdk.Types.RedactedThinking _ ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
                   ; ts_iso = now_iso
@@ -495,7 +495,7 @@ let run_turn
        let reported_tool_names =
          List.filter_map
            (function
-             | Oas.Types.ToolUse { name; _ } -> Some name
+             | Agent_sdk.Types.ToolUse { name; _ } -> Some name
              | _ -> None)
            result.response.content
        in
@@ -553,7 +553,7 @@ let run_turn
          in
          acc.receipt_tool_contract_result <- "violated";
          Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
-         Error (Oas.Error.Internal reason)
+         Error (Agent_sdk.Error.Internal reason)
        else (
          let should_log_unexpected_tool_partial =
            unexpected_tool_names <> []
@@ -618,10 +618,10 @@ let run_turn
              ~tool_names:actual_keeper_tool_names
          in
          let contract_violation_error reason =
-           Oas.Error.Agent
-             (Oas.Error.CompletionContractViolation
+           Agent_sdk.Error.Agent
+             (Agent_sdk.Error.CompletionContractViolation
                 {
-                  contract = Oas.Completion_contract_id.Require_tool_use;
+                  contract = Agent_sdk.Completion_contract_id.Require_tool_use;
                   reason;
                 })
          in
@@ -805,15 +805,15 @@ let run_turn
            in
            receipt_response_text_present_ref := true;
            let assistant_msg =
-             Oas.Types.make_message
-               ~role:Oas.Types.Assistant
+             Agent_sdk.Types.make_message
+               ~role:Agent_sdk.Types.Assistant
                ~metadata:
                  [
                    ( Keeper_memory_policy.replay_metadata_key,
                      Keeper_memory_policy.replay_metadata_of_snapshot
                        state_snapshot );
                  ]
-               [ Oas.Types.Text response_text ]
+               [ Agent_sdk.Types.Text response_text ]
            in
            Keeper_exec_context.persist_message
              ~source:history_assistant_source
@@ -863,7 +863,7 @@ let run_turn
            (match result.proof with
             | Some p ->
               Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
-              let store = Oas.Proof_store.default_config in
+              let store = Agent_sdk.Proof_store.default_config in
               let outcome = Cdal_eval_v1.evaluate ~store p in
               let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
 	              let task_subject =
@@ -1038,7 +1038,7 @@ let run_turn
                    @ (match result.response.telemetry with
                       | Some t ->
                         [ ( "inference_telemetry"
-                          , Oas.Types.inference_telemetry_to_yojson t )
+                          , Agent_sdk.Types.inference_telemetry_to_yojson t )
                         ]
                       | None -> [])
                    @
@@ -1089,7 +1089,7 @@ let run_turn
                Keeper_tool_disclosure.normalize_response_text
                  ~text ~tool_names:actual_keeper_tool_names ()
              with
-             | Error e -> Error (Oas.Error.Internal e)
+             | Error e -> Error (Agent_sdk.Error.Internal e)
              | Ok response_text -> finalize_response_text response_text))
     in
     (match turn_result with
@@ -1108,7 +1108,7 @@ let run_turn
          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          ~error_kind:
            (Memory_oas_bridge.error_kind_of_string (sdk_error_kind err))
-         ~error_message:(Oas.Error.to_string err)
+         ~error_message:(Agent_sdk.Error.to_string err)
          ())
     ;
     let receipt_ended_at = Types.now_iso () in
@@ -1119,11 +1119,11 @@ let run_turn
         ( Some
             (Keeper_execution_receipt.error_kind_of_string
                (sdk_error_kind err)),
-          Some (Oas.Error.to_string err) )
+          Some (Agent_sdk.Error.to_string err) )
     in
     let tool_contract_result =
       match turn_result with
-      | Error (Oas.Error.Agent (Oas.Error.CompletionContractViolation _)) ->
+      | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _)) ->
         if String.equal acc.receipt_tool_contract_result "unknown" then
           "violated"
         else
@@ -1271,6 +1271,6 @@ let run_turn
          error so the caller's [match turn_result with Ok _ | Error _]
          no longer sees a fictitious success. *)
       Error
-        (Oas.Error.Internal
+        (Agent_sdk.Error.Internal
            (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))
 ;;

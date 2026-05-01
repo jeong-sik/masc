@@ -78,16 +78,16 @@ type run_result =
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
-  ; usage : Oas.Types.api_usage
+  ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
-  ; checkpoint : Oas.Checkpoint.t option
-  ; proof : Oas.Cdal_proof.t option
-  ; trace_ref : Oas.Raw_trace.run_ref option
-  ; run_validation : Oas.Raw_trace.run_validation option
+  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; proof : Agent_sdk.Cdal_proof.t option
+  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
+  ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
-  ; inference_telemetry : Oas.Types.inference_telemetry option
+  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
 
@@ -99,7 +99,7 @@ type run_result =
     checkpoint immediately before dispatch. *)
 type pre_dispatch_checkpoint_hygiene_result =
   { context : Keeper_types.working_context
-  ; resume_checkpoint : Oas.Checkpoint.t option
+  ; resume_checkpoint : Agent_sdk.Checkpoint.t option
   ; compacted : bool
   ; applied : bool
   ; meaningful_reduction : bool
@@ -115,7 +115,7 @@ val prepare_resume_checkpoint_for_dispatch :
   -> now_ts:float
   -> loaded_checkpoint_present:bool
   -> save_checkpoint:
-       (Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+       (Keeper_types.working_context -> (Agent_sdk.Checkpoint.t, string) result)
   -> Keeper_types.working_context
   -> pre_dispatch_checkpoint_hygiene_result
 
@@ -126,7 +126,7 @@ val preferred_tool_choice_for_required_turn :
      has_current_task:bool
   -> turn_affordances:string list
   -> allowed_tool_names:string list
-  -> Oas.Types.tool_choice
+  -> Agent_sdk.Types.tool_choice
 
 (** Filtered variant of [turn_affordances_require_tool_gate] (in
     {!Keeper_agent_tool_surface}): only counts an affordance when at
@@ -175,7 +175,7 @@ val build_ctx_composition_metrics :
   -> memory_context:string
   -> temporal_context:string
   -> user_message:string
-  -> history_messages:Oas.Types.message list
+  -> history_messages:Agent_sdk.Types.message list
   -> actual_input_tokens:int
   -> ctx_composition_metrics
 
@@ -190,7 +190,7 @@ val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t
 val adaptive_thinking_budget :
      enabled:bool
   -> is_retry:bool
-  -> last_tool_results:Oas.Types.tool_result list
+  -> last_tool_results:Agent_sdk.Types.tool_result list
   -> user_message:string
   -> dynamic_context:string
   -> current_budget:int option
@@ -236,7 +236,7 @@ val run_turn :
   -> max_context:int
   -> build_turn_prompt:
        (   base_system_prompt:string
-        -> messages:Oas.Types.message list
+        -> messages:Agent_sdk.Types.message list
         -> turn_prompt)
   -> user_message:string
   -> cascade_name:Keeper_cascade_profile.runtime_name
@@ -248,14 +248,14 @@ val run_turn :
   -> ?max_idle_turns:int
   -> ?history_user_source:string
   -> ?history_assistant_source:string
-  -> ?guardrails:Oas.Guardrails.t
+  -> ?guardrails:Agent_sdk.Guardrails.t
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?oas_timeout_s:float
   -> ?max_cost_usd:float
-  -> ?on_event:(Oas.Types.sse_event -> unit)
+  -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?tool_overlay:Oas.Tool_op.t ref
+  -> ?tool_overlay:Agent_sdk.Tool_op.t ref
   -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_cascade:string
@@ -263,7 +263,7 @@ val run_turn :
   -> ?cascade_rotation_attempts:
        Keeper_execution_receipt.cascade_rotation_attempt list
   -> ?is_retry:bool
-  -> ?shared_context:Oas.Context.t
-  -> ?event_bus:Oas.Event_bus.t
+  -> ?shared_context:Agent_sdk.Context.t
+  -> ?event_bus:Agent_sdk.Event_bus.t
   -> unit
-  -> (run_result, Oas.Error.sdk_error) result
+  -> (run_result, Agent_sdk.Error.sdk_error) result

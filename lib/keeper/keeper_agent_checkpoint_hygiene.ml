@@ -6,7 +6,7 @@
 
 type pre_dispatch_checkpoint_hygiene_result =
   { context : Keeper_types.working_context
-  ; resume_checkpoint : Oas.Checkpoint.t option
+  ; resume_checkpoint : Agent_sdk.Checkpoint.t option
   ; compacted : bool
   ; applied : bool
   ; meaningful_reduction : bool
@@ -22,7 +22,7 @@ let prepare_resume_checkpoint_for_dispatch
       ~(now_ts : float)
       ~(loaded_checkpoint_present : bool)
       ~(save_checkpoint :
-           Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+           Keeper_types.working_context -> (Agent_sdk.Checkpoint.t, string) result)
       (ctx_work : Keeper_types.working_context)
   : pre_dispatch_checkpoint_hygiene_result
   =

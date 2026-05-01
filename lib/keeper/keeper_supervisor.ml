@@ -473,13 +473,13 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
       ~risk_level:Keeper_approval_queue.Critical
       ~on_resolution:(fun decision ->
         match decision with
-        | Oas.Hooks.Approve
-        | Oas.Hooks.Edit _ ->
+        | Agent_sdk.Hooks.Approve
+        | Agent_sdk.Hooks.Edit _ ->
             resume_keeper_after_reconcile_gate ctx meta;
             Log.Keeper.info
               "%s: restored reconcile continue gate approved; keeper resumed"
               meta.name
-        | Oas.Hooks.Reject reason ->
+        | Agent_sdk.Hooks.Reject reason ->
             Log.Keeper.warn
               "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
               meta.name reason)

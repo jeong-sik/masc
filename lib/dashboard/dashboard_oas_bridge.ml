@@ -120,29 +120,29 @@ let record_with_time ~now (s : sample) =
 let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
 let duration_from_response ?total_duration_ms
-    (response : Oas.Types.api_response) =
+    (response : Agent_sdk.Types.api_response) =
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
   | _, Some telemetry when telemetry.request_latency_ms > 0 ->
       Float.of_int telemetry.request_latency_ms
   | _ -> 0.0
 
-let ttfb_from_response (response : Oas.Types.api_response) =
+let ttfb_from_response (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
   | Some { timings = Some { prompt_ms = Some ms; _ }; _ } when ms > 0.0 ->
       ms
   | _ -> 0.0
 
-let cache_hit_from_response ~(usage : Oas.Types.api_usage)
-    (response : Oas.Types.api_response) =
+let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage)
+    (response : Agent_sdk.Types.api_response) =
   usage.cache_read_input_tokens > 0
   ||
   match response.telemetry with
   | Some { timings = Some { cache_n = Some n; _ }; _ } -> n > 0
   | _ -> false
 
-let throughput_from_response ~(usage : Oas.Types.api_usage) ~ttfb_ms
-    ~total_duration_ms (response : Oas.Types.api_response) =
+let throughput_from_response ~(usage : Agent_sdk.Types.api_usage) ~ttfb_ms
+    ~total_duration_ms (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
   | Some { timings = Some { predicted_per_second = Some v; _ }; _ }
     when v > 0.0 -> v
@@ -154,7 +154,7 @@ let throughput_from_response ~(usage : Oas.Types.api_usage) ~ttfb_ms
 
 let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
-    (response : Oas.Types.api_response) =
+    (response : Agent_sdk.Types.api_response) =
   let usage = Oas_response.usage_or_zero response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response

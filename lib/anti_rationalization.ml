@@ -604,7 +604,7 @@ let review
           driven; see Env_config.AntiRationalization. Both paths emit the
           same Prometheus counter so monitoring sees the fallback rate
           regardless of the chosen policy. *)
-       let msg = Oas.Error.to_string err in
+       let msg = Agent_sdk.Error.to_string err in
        (* #10474: discriminate "permanent cascade configuration issue"
           from "transient verifier failure".  [No_tool_capable_provider]
           means every provider in the [evaluator_cascade] failed the

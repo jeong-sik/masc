@@ -40,7 +40,7 @@ let make_sample
 let setup () = DOB.clear ()
 
 let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input
-    ~output () : Oas.Types.api_usage =
+    ~output () : Agent_sdk.Types.api_usage =
   {
     input_tokens = input;
     output_tokens = output;
@@ -50,7 +50,7 @@ let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input
   }
 
 let make_telemetry ?timings ?(request_latency_ms = 0) ()
-    : Oas.Types.inference_telemetry =
+    : Agent_sdk.Types.inference_telemetry =
   {
     system_fingerprint = None;
     timings;
@@ -65,11 +65,11 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ()
   }
 
 let make_response ?usage ?telemetry ?(model = "claude-opus-4-7") ()
-    : Oas.Types.api_response =
+    : Agent_sdk.Types.api_response =
   {
     id = "resp-1";
     model;
-    stop_reason = Oas.Types.EndTurn;
+    stop_reason = Agent_sdk.Types.EndTurn;
     content = [];
     usage;
     telemetry;
@@ -230,7 +230,7 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
   let usage =
     make_usage ~input:11 ~output:5 ~cache_read:7 ~cost:0.12 ()
   in
-  let timings : Oas.Types.inference_timings =
+  let timings : Agent_sdk.Types.inference_timings =
     {
       prompt_n = Some 11;
       prompt_ms = Some 510.0;

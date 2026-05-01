@@ -54,7 +54,7 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
     Log.Misc.warn
       "masc_oas_bridge: OAS execution timed out after %.1fs (caller=%s)"
       timeout_s caller;
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
+    Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.
@@ -91,7 +91,7 @@ let run_safe ?(caller = "unknown") ~timeout_s fn =
     let bt = Printexc.get_backtrace () in
     Log.Misc.error "masc_oas_bridge: OAS execution error (caller=%s): %s\n%s"
       caller (Printexc.to_string exn) bt;
-    Error (Oas.Error.Internal (Printexc.to_string exn))
+    Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels

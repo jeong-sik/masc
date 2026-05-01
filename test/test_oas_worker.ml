@@ -69,32 +69,32 @@ let _parse_json s =
 
 let _field key json = Yojson.Safe.Util.member key json
 
-let make_local_provider ?(model_id = "mock-model") () : Oas.Provider.config =
+let make_local_provider ?(model_id = "mock-model") () : Agent_sdk.Provider.config =
   {
-    Oas.Provider.provider = Oas.Provider.Local { base_url = "http://127.0.0.1:1" };
+    Agent_sdk.Provider.provider = Agent_sdk.Provider.Local { base_url = "http://127.0.0.1:1" };
     model_id;
     api_key_env = "";
   }
 
 let make_local_provider_cfg ?(model_id = "mock-model") () :
     Llm_provider.Provider_config.t =
-  match Oas.Provider_bridge.to_provider_config (make_local_provider ~model_id ()) with
+  match Agent_sdk.Provider_bridge.to_provider_config (make_local_provider ~model_id ()) with
   | Ok cfg -> cfg
-  | Error err -> failwith (Oas.Error.to_string err)
+  | Error err -> failwith (Agent_sdk.Error.to_string err)
 
 let make_noop_tool () =
-  Oas.Tool.create
+  Agent_sdk.Tool.create
     ~name:"noop"
     ~description:"No-op test tool"
     ~parameters:[]
-    (fun _ -> Ok Oas.Types.{ content = "ok" })
+    (fun _ -> Ok Agent_sdk.Types.{ content = "ok" })
 
 let make_named_noop_tool name =
-  Oas.Tool.create
+  Agent_sdk.Tool.create
     ~name
     ~description:"No-op test tool"
     ~parameters:[]
-    (fun _ -> Ok Oas.Types.{ content = "ok" })
+    (fun _ -> Ok Agent_sdk.Types.{ content = "ok" })
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -181,9 +181,9 @@ let contains_substring ~needle haystack =
   in
   loop 0
 
-let response_text (resp : Oas.Types.api_response) =
-  resp.Oas.Types.content
-  |> List.filter_map (function Oas.Types.Text s -> Some s | _ -> None)
+let response_text (resp : Agent_sdk.Types.api_response) =
+  resp.Agent_sdk.Types.content
+  |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
   |> String.concat ""
 
 let start_multi_mock ~sw ~net ~port (responses : string list) =
@@ -238,13 +238,13 @@ let with_raw_trace prefix f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      match Oas.Raw_trace.create ~path () with
+      match Agent_sdk.Raw_trace.create ~path () with
       | Ok raw_trace -> f raw_trace
-      | Error err -> Alcotest.fail (Oas.Error.to_string err))
+      | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err))
 
 let check_policy_matches_default_internal label
-    (policy : Oas.Tool_retry_policy.t option) =
-  let expected = Oas.Tool_retry_policy.default_internal in
+    (policy : Agent_sdk.Tool_retry_policy.t option) =
+  let expected = Agent_sdk.Tool_retry_policy.default_internal in
   let actual =
     match policy with
     | Some policy -> policy
@@ -260,8 +260,8 @@ let check_policy_matches_default_internal label
   Alcotest.(check bool) (label ^ ": structured feedback")
     true
     (match actual.feedback_style with
-     | Oas.Tool_retry_policy.Structured_tool_result -> true
-     | Oas.Tool_retry_policy.Plain_error_text -> false)
+     | Agent_sdk.Tool_retry_policy.Structured_tool_result -> true
+     | Agent_sdk.Tool_retry_policy.Plain_error_text -> false)
 
 (* ================================================================ *)
 (* SSE Event Bridge Tests (OAS #215 streaming verification)         *)
@@ -691,7 +691,7 @@ let test_cascade_audit_persists_observation () =
 
 let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message =
@@ -706,7 +706,7 @@ let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
 
 let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message =
@@ -719,7 +719,7 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
 
 let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message =
@@ -739,7 +739,7 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
    re-burning the full OAS turn budget the next time the cap fires. *)
 let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message =
@@ -754,7 +754,7 @@ let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
 
 let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          {
            message =
@@ -768,7 +768,7 @@ let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_lim
 
 let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message =
@@ -783,7 +783,7 @@ let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
 
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          {
            message = "gemini exited with code 1: connection reset by peer";
@@ -795,7 +795,7 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
 
 let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.RateLimited
          { retry_after = None; message = "resource exhausted" })
   in
@@ -804,7 +804,7 @@ let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
 
 let test_sdk_error_is_hard_quota_keeps_not_found_false () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Not Found"}|} })
   in
@@ -813,7 +813,7 @@ let test_sdk_error_is_hard_quota_keeps_not_found_false () =
 
 let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Not Found"}|} })
   in
@@ -829,7 +829,7 @@ let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
 
 let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Bad Request"}|} })
   in
@@ -846,8 +846,8 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
   let err =
-    Oas.Error.Config
-      (Oas.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
+    Agent_sdk.Error.Config
+      (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
   in
   match Oas_worker_named.sdk_error_to_cascade_outcome err with
   | Some
@@ -868,7 +868,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
       raw_message
   in
   let sdk_error =
-    Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
+    Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
   in
   let structured =
     match
@@ -913,7 +913,7 @@ let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
     "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message = raw_message; kind = Llm_provider.Http_client.Unknown })
   in
@@ -950,7 +950,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
       ()
   in
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.AuthError
          { message = "Invalid Authentication" })
   in
@@ -959,7 +959,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
-    |> Oas.Error.to_string
+    |> Agent_sdk.Error.to_string
   in
   Alcotest.(check bool) "env hint included" true
     (contains_substring ~needle:"KIMI_API_KEY" rendered);
@@ -974,7 +974,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
       ()
   in
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Not Found"}|} })
   in
@@ -983,7 +983,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
-    |> Oas.Error.to_string
+    |> Agent_sdk.Error.to_string
   in
   Alcotest.(check bool) "base_url hint included" true
     (contains_substring ~needle:"base_url=http://127.0.0.1:18080/v1" rendered);
@@ -1007,12 +1007,12 @@ let test_default_config_preserves_custom_local_request_path () =
       ~tools:[]
   in
   match config.provider.provider with
-  | Oas.Provider.OpenAICompat { base_url; path; _ } ->
+  | Agent_sdk.Provider.OpenAICompat { base_url; path; _ } ->
     Alcotest.(check string) "base_url preserved"
       "http://127.0.0.1:18080/v1" base_url;
     Alcotest.(check string) "request_path preserved"
       "/chat/completions" path
-  | Oas.Provider.Local _ ->
+  | Agent_sdk.Provider.Local _ ->
     Alcotest.fail "custom local OpenAI-compatible provider regressed to Local"
   | _ ->
     Alcotest.fail
@@ -1091,7 +1091,7 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
           "last provider survived timeout"
           (response_text result.response);
         Eio.Switch.fail sw Exit
-    | Error err -> Alcotest.fail (Oas.Error.to_string err)
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
 
 let make_worker_meta ?(effective_model = "local-qwen") () :
@@ -1113,15 +1113,15 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     last_run_at = None;
   }
 
-let make_checkpoint ?(model = "") () : Oas.Checkpoint.t =
+let make_checkpoint ?(model = "") () : Agent_sdk.Checkpoint.t =
   {
-    Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
     session_id = "session-1";
     agent_name = "resume-worker";
     model;
     system_prompt = None;
     messages = [];
-    usage = Oas.Types.empty_usage;
+    usage = Agent_sdk.Types.empty_usage;
     turn_count = 0;
     created_at = 0.0;
     tools = [];
@@ -1132,12 +1132,12 @@ let make_checkpoint ?(model = "") () : Oas.Checkpoint.t =
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format = Oas.Types.Off;
+    response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     max_input_tokens = None;
     max_total_tokens = None;
-    context = Oas.Context.create ();
+    context = Agent_sdk.Context.create ();
     mcp_sessions = [];
     working_context = None;
   }
@@ -1165,11 +1165,11 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
-      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
       Alcotest.(check bool) "default leaves retry disabled" true
         (Option.is_none policy);
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_retry_policy () =
   let base_config =
@@ -1181,15 +1181,15 @@ let test_oas_worker_exec_build_applies_retry_policy () =
   in
   let config =
     { base_config with
-      tool_retry_policy = Some Oas.Tool_retry_policy.default_internal }
+      tool_retry_policy = Some Agent_sdk.Tool_retry_policy.default_internal }
   in
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
-      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
       check_policy_matches_default_internal "exec build opt-in" policy;
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   let base_config =
@@ -1203,12 +1203,12 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
-      let timeout_s = (Oas.Agent.options agent).stream_idle_timeout_s in
+      let timeout_s = (Agent_sdk.Agent.options agent).stream_idle_timeout_s in
       Alcotest.(check (option (float 0.0001)))
         "stream idle timeout is propagated through build" (Some 12.5)
         timeout_s;
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_default_priority_unset () =
   let config =
@@ -1221,11 +1221,11 @@ let test_oas_worker_exec_build_default_priority_unset () =
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
-      let priority = (Oas.Agent.state agent).config.priority in
+      let priority = (Agent_sdk.Agent.state agent).config.priority in
       Alcotest.(check bool) "default priority remains unset" true
         (Option.is_none priority);
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_priority () =
   let base_config =
@@ -1242,13 +1242,13 @@ let test_oas_worker_exec_build_applies_priority () =
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
-      let priority = (Oas.Agent.state agent).config.priority in
+      let priority = (Agent_sdk.Agent.state agent).config.priority in
       Alcotest.(check bool) "priority propagated to agent config" true
         (match priority with
          | Some Llm_provider.Request_priority.Proactive -> true
          | _ -> false);
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_supports_kimi_direct () =
   let provider_cfg =
@@ -1266,8 +1266,8 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
   in
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
-  | Ok agent -> Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Ok agent -> Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_oas_worker_exec_build_supports_kimi_cli () =
   let provider_cfg =
@@ -1286,8 +1286,8 @@ let test_oas_worker_exec_build_supports_kimi_cli () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
-  | Ok agent -> Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Ok agent -> Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 (* Resume parity: fields that [build] threads from [config] via the
    Builder must also propagate through [resume_from_checkpoint]. Each
@@ -1299,10 +1299,10 @@ let test_oas_worker_exec_build_supports_kimi_cli () =
 
 let test_resume_propagates_approval () =
   let approval_called = ref false in
-  let approval : Oas.Hooks.approval_callback =
+  let approval : Agent_sdk.Hooks.approval_callback =
     fun ~tool_name:_ ~input:_ ->
       approval_called := true;
-      Oas.Hooks.Approve
+      Agent_sdk.Hooks.Approve
   in
   let base_config =
     Oas_worker_exec.default_config
@@ -1319,7 +1319,7 @@ let test_resume_propagates_approval () =
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
-      let approval_opt = (Oas.Agent.options agent).approval in
+      let approval_opt = (Agent_sdk.Agent.options agent).approval in
       Alcotest.(check bool) "approval is propagated through resume" true
         (Option.is_some approval_opt);
       (match approval_opt with
@@ -1328,8 +1328,8 @@ let test_resume_propagates_approval () =
            Alcotest.(check bool) "callback identity preserved" true
              !approval_called
        | None -> ());
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resume_propagates_slot_id () =
   let base_config =
@@ -1347,14 +1347,14 @@ let test_resume_propagates_slot_id () =
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
-      let slot = (Oas.Agent.options agent).slot_id in
+      let slot = (Agent_sdk.Agent.options agent).slot_id in
       Alcotest.(check (option int)) "slot_id is propagated" (Some 7) slot;
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resume_propagates_summarizer () =
   let summarizer_called = ref false in
-  let summarizer (_msgs : Oas.Types.message list) =
+  let summarizer (_msgs : Agent_sdk.Types.message list) =
     summarizer_called := true;
     "summary"
   in
@@ -1373,7 +1373,7 @@ let test_resume_propagates_summarizer () =
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
-      let s = (Oas.Agent.options agent).summarizer in
+      let s = (Agent_sdk.Agent.options agent).summarizer in
       Alcotest.(check bool) "summarizer is propagated" true (Option.is_some s);
       (match s with
        | Some f ->
@@ -1381,8 +1381,8 @@ let test_resume_propagates_summarizer () =
            Alcotest.(check bool) "summarizer identity preserved" true
              !summarizer_called
       | None -> ());
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resume_propagates_stream_idle_timeout () =
   let base_config =
@@ -1400,12 +1400,12 @@ let test_resume_propagates_stream_idle_timeout () =
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
-      let timeout_s = (Oas.Agent.options agent).stream_idle_timeout_s in
+      let timeout_s = (Agent_sdk.Agent.options agent).stream_idle_timeout_s in
       Alcotest.(check (option (float 0.0001)))
         "stream idle timeout is propagated through resume" (Some 12.5)
         timeout_s;
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resume_propagates_priority () =
   let base_config =
@@ -1425,13 +1425,13 @@ let test_resume_propagates_priority () =
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
-      let priority = (Oas.Agent.state agent).config.priority in
+      let priority = (Agent_sdk.Agent.state agent).config.priority in
       Alcotest.(check bool) "priority propagated through resume" true
         (match priority with
          | Some Llm_provider.Request_priority.Proactive -> true
          | _ -> false);
-      Oas.Agent.close agent
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+      Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
   match Oas_worker_exec.resolve_provider_config_of_label "not-a-model-label" with
@@ -1456,12 +1456,12 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
   with
   | Ok _ ->
       Alcotest.fail "expected invalid explicit model label to fail before execution"
-  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; detail })) ->
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
       Alcotest.(check string) "invalid field" "model_label" field;
       Alcotest.(check bool) "detail mentions rejected label" true
         (contains_substring ~needle:"not-a-model-label" detail)
   | Error err ->
-      Alcotest.failf "unexpected error shape: %s" (Oas.Error.to_string err)
+      Alcotest.failf "unexpected error shape: %s" (Agent_sdk.Error.to_string err)
 
 let mock_completion_request () : Llm_provider.Llm_transport.completion_request =
   {
@@ -1476,12 +1476,12 @@ let mock_completion_request () : Llm_provider.Llm_transport.completion_request =
     runtime_mcp_policy = None;
   }
 
-let mock_api_response () : Oas.Types.api_response =
+let mock_api_response () : Agent_sdk.Types.api_response =
   {
     id = "mock-session";
     model = "mock-cli";
-    stop_reason = Oas.Types.EndTurn;
-    content = [ Oas.Types.Text "ok" ];
+    stop_reason = Agent_sdk.Types.EndTurn;
+    content = [ Agent_sdk.Types.Text "ok" ];
     usage = None;
     telemetry = None;
   }
@@ -1787,7 +1787,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
         (Option.bind masc_headers (List.assoc_opt "Authorization"))
   | Ok (_, None) ->
       Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_identity_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1825,7 +1825,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
   | Ok (_, None) ->
       Alcotest.fail
         "expected codex_cli public MCP tools with agent_name to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1863,7 +1863,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
   | Ok (_, None) ->
       Alcotest.fail
         "expected codex_cli keeper-bound public MCP tools to keep safe runtime lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1889,7 +1889,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () 
       Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools
   | Ok (_, None) ->
       Alcotest.fail "expected kimi_cli public MCP tools to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runtime_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1919,7 +1919,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runti
   | Ok (_, None) ->
       Alcotest.fail
         "expected kimi_cli public MCP tools with agent_name to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1953,7 +1953,7 @@ let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mc
   | Ok (_, None) ->
       Alcotest.fail
         "expected claude_code keeper-internal tools to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1973,7 +1973,7 @@ let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_p
   | Ok (_, None) ->
       Alcotest.fail
         "expected kimi_cli keeper-internal tools to use runtime MCP lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -1997,7 +1997,7 @@ let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset 
   | Ok (_, None) ->
       Alcotest.fail
         "expected kimi_cli mixed surface to keep the public MCP runtime subset"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2014,7 +2014,7 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
         (List.length tools) (List.length effective_tools)
   | Ok (_, Some _) ->
       Alcotest.fail "expected openai_compat public tools to stay on inline lane"
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2026,9 +2026,9 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   | Ok _ ->
       Alcotest.fail
         "expected codex_cli to reject keeper-internal tools without inline tool support"
-  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
       Alcotest.(check string) "field" "tool_support" field
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2042,9 +2042,9 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_reject
   | Ok _ ->
       Alcotest.fail
         "expected codex_cli to reject keeper-internal tools requiring request-scoped headers"
-  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
       Alcotest.(check string) "field" "tool_support" field
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2056,9 +2056,9 @@ let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
   | Ok _ ->
       Alcotest.fail
         "expected kimi_cli to reject keeper-internal tools without inline tool support"
-  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
       Alcotest.(check string) "field" "tool_support" field
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2073,7 +2073,7 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools () 
         (List.length effective_tools);
       Alcotest.(check bool) "dropped optional tools stay text-only" true
         (Option.is_none runtime_mcp_policy)
-  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2677,7 +2677,7 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
       raw_message
   in
   let sdk_error =
-    Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
+    Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
   in
   match
     Oas_worker_named.sdk_error_to_resumable_cli_session
@@ -2745,7 +2745,7 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
 
 let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          {
            message =
@@ -2759,7 +2759,7 @@ let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
 
 let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () =
   let err =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          {
            message =
@@ -2825,15 +2825,15 @@ let test_worker_build_agent_uses_default_internal_retry_policy () =
       ~provider
       ~system_prompt:"worker system"
       ~tools:[ make_noop_tool () ]
-      ~hooks:Oas.Hooks.empty
+      ~hooks:Agent_sdk.Hooks.empty
       ~raw_trace
       ~heartbeat_callbacks:[]
       ()
   with
   | Ok agent ->
-      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
       check_policy_matches_default_internal "worker build_agent" policy;
-      Oas.Agent.close agent
+      Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail err
 
 let test_build_resume_config_propagates_retry_policy () =
@@ -2848,9 +2848,9 @@ let test_build_resume_config_propagates_retry_policy () =
       ~tools:[ make_noop_tool () ]
       ~max_turns:7
       ~thinking_enabled:true
-      ~hooks:Oas.Hooks.empty
+      ~hooks:Agent_sdk.Hooks.empty
       ~raw_trace
-      ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
+      ~tool_retry_policy:Agent_sdk.Tool_retry_policy.default_internal
       ()
   in
   Alcotest.(check (option (float 0.000001))) "resume config omits min_p" None config.min_p;
@@ -2875,27 +2875,27 @@ let test_worker_build_agent_validation_retry_success () =
       | Unix.Unix_error (Unix.EACCES, "bind", _) ->
           Alcotest.skip ()
     in
-    let provider : Oas.Provider.config =
+    let provider : Agent_sdk.Provider.config =
       {
-        provider = Oas.Provider.Local { base_url = url };
+        provider = Agent_sdk.Provider.Local { base_url = url };
         model_id = "mock-model";
         api_key_env = "";
       }
     in
     let time_tool =
-      Oas.Tool.create
+      Agent_sdk.Tool.create
         ~name:"get_time"
         ~description:"Get current time"
         ~parameters:
           [
             {
               name = "timezone";
-              param_type = Oas.Types.String;
+              param_type = Agent_sdk.Types.String;
               description = "tz";
               required = true;
             };
           ]
-        (fun _input -> Ok Oas.Types.{ content = "12:00 UTC" })
+        (fun _input -> Ok Agent_sdk.Types.{ content = "12:00 UTC" })
     in
     with_raw_trace "worker_build_agent_validation_retry" @@ fun raw_trace ->
     let meta = make_worker_meta () in
@@ -2906,26 +2906,26 @@ let test_worker_build_agent_validation_retry_success () =
         ~provider
         ~system_prompt:"worker system"
         ~tools:[ time_tool ]
-        ~hooks:Oas.Hooks.empty
+        ~hooks:Agent_sdk.Hooks.empty
         ~raw_trace
         ~heartbeat_callbacks:[]
         ()
     with
     | Ok agent ->
         Fun.protect
-          ~finally:(fun () -> Oas.Agent.close agent)
+          ~finally:(fun () -> Agent_sdk.Agent.close agent)
           (fun () ->
-            match Oas.Agent.run ~sw agent "what time is it?" with
+            match Agent_sdk.Agent.run ~sw agent "what time is it?" with
             | Ok resp ->
                 let text =
-                  resp.Oas.Types.content
-                  |> List.filter_map (function Oas.Types.Text s -> Some s | _ -> None)
+                  resp.Agent_sdk.Types.content
+                  |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
                   |> String.concat ""
                 in
                 Alcotest.(check string) "final text after retry"
                   "The time is 12:00 UTC" text;
                 Eio.Switch.fail sw Exit
-            | Error err -> Alcotest.fail (Oas.Error.to_string err))
+            | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err))
     | Error err -> Alcotest.fail err
   with Exit -> ()
 
@@ -2950,27 +2950,27 @@ let test_worker_build_agent_validation_retry_exhausted () =
       | Unix.Unix_error (Unix.EACCES, "bind", _) ->
           Alcotest.skip ()
     in
-    let provider : Oas.Provider.config =
+    let provider : Agent_sdk.Provider.config =
       {
-        provider = Oas.Provider.Local { base_url = url };
+        provider = Agent_sdk.Provider.Local { base_url = url };
         model_id = "mock-model";
         api_key_env = "";
       }
     in
     let time_tool =
-      Oas.Tool.create
+      Agent_sdk.Tool.create
         ~name:"get_time"
         ~description:"Get current time"
         ~parameters:
           [
             {
               name = "timezone";
-              param_type = Oas.Types.String;
+              param_type = Agent_sdk.Types.String;
               description = "tz";
               required = true;
             };
           ]
-        (fun _input -> Ok Oas.Types.{ content = "12:00 UTC" })
+        (fun _input -> Ok Agent_sdk.Types.{ content = "12:00 UTC" })
     in
     with_raw_trace "worker_build_agent_validation_retry_exhausted" @@ fun raw_trace ->
     let meta = make_worker_meta () in
@@ -2981,26 +2981,26 @@ let test_worker_build_agent_validation_retry_exhausted () =
         ~provider
         ~system_prompt:"worker system"
         ~tools:[ time_tool ]
-        ~hooks:Oas.Hooks.empty
+        ~hooks:Agent_sdk.Hooks.empty
         ~raw_trace
         ~heartbeat_callbacks:[]
         ()
     with
     | Ok agent ->
         Fun.protect
-          ~finally:(fun () -> Oas.Agent.close agent)
+          ~finally:(fun () -> Agent_sdk.Agent.close agent)
           (fun () ->
-            match Oas.Agent.run ~sw agent "what time is it?" with
+            match Agent_sdk.Agent.run ~sw agent "what time is it?" with
             | Ok _ -> Alcotest.fail "expected retry exhaustion error"
             | Error
-                (Oas.Error.Agent
-                  (Oas.Error.ToolRetryExhausted { attempts; limit; detail })) ->
+                (Agent_sdk.Error.Agent
+                  (Agent_sdk.Error.ToolRetryExhausted { attempts; limit; detail })) ->
                 Alcotest.(check int) "default_internal attempts" 2 attempts;
                 Alcotest.(check int) "default_internal limit" 2 limit;
                 Alcotest.(check bool) "detail mentions tool" true
                   (contains_substring ~needle:"get_time" detail);
                 Eio.Switch.fail sw Exit
-            | Error err -> Alcotest.fail (Oas.Error.to_string err))
+            | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err))
     | Error err -> Alcotest.fail err
   with Exit -> ()
 
@@ -3072,7 +3072,7 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
              ~needle:"mutation boundary reached after committed tool: keeper_shell"
              (response_text result.response));
         Eio.Switch.fail sw Exit
-    | Error err -> Alcotest.fail (Oas.Error.to_string err)
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
 
 (* ================================================================ *)

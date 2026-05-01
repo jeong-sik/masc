@@ -65,7 +65,7 @@ type compaction_event = {
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Oas.Checkpoint.t option;
+  checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -78,7 +78,7 @@ type post_turn_lifecycle = {
 }
 
 type overflow_retry_recovery = {
-  checkpoint : Oas.Checkpoint.t;
+  checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
   turn_generation : int;
 } [@@warning "-69"]
@@ -118,7 +118,7 @@ let apply_autonomous_wirein
     | Some cp -> (
         try
           let prev_meta_opt =
-            match cp.Oas.Checkpoint.working_context with
+            match cp.Agent_sdk.Checkpoint.working_context with
             | Some (`Assoc kv) -> List.assoc_opt "autonomous_meta" kv
             | _ -> None
           in
@@ -140,10 +140,10 @@ let apply_autonomous_wirein
           let suspended = Autonomous.Autonomous_bridge.suspend bridge' in
           let new_wc =
             Autonomous.Wirein_helpers.upsert_autonomous_meta
-              cp.Oas.Checkpoint.working_context suspended
+              cp.Agent_sdk.Checkpoint.working_context suspended
           in
           let new_cp =
-            { cp with Oas.Checkpoint.working_context = new_wc }
+            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with exn ->
@@ -190,12 +190,12 @@ let apply_resilience_wirein
           let outcome =
             Resilience.Keeper_bridge.apply_post_turn_resilience
               witness ~now
-              ~working_context:cp.Oas.Checkpoint.working_context
+              ~working_context:cp.Agent_sdk.Checkpoint.working_context
               ~maybe_error ()
           in
           let new_cp =
             { cp with
-              Oas.Checkpoint.working_context = outcome.working_context
+              Agent_sdk.Checkpoint.working_context = outcome.working_context
             }
           in
           { lifecycle with checkpoint = Some new_cp }
@@ -256,10 +256,10 @@ let apply_tool_emission_wirein
           let new_wc =
             Keeper_tool_emission_hook.drain_into_working_context
               acc
-              ~working_context:cp.Oas.Checkpoint.working_context
+              ~working_context:cp.Agent_sdk.Checkpoint.working_context
           in
           let new_cp =
-            { cp with Oas.Checkpoint.working_context = new_wc }
+            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with exn ->
@@ -281,7 +281,7 @@ let apply_multimodal_wirein
         try
           let raws, wc_rest =
             Multimodal.Wirein_helpers.extract_raw_artifacts
-              cp.Oas.Checkpoint.working_context
+              cp.Agent_sdk.Checkpoint.working_context
           in
           let added_count = ref 0 in
           let last_id = ref None in
@@ -323,7 +323,7 @@ let apply_multimodal_wirein
               meta
           in
           let new_cp =
-            { cp with Oas.Checkpoint.working_context = new_wc }
+            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with exn ->
@@ -340,13 +340,13 @@ let apply_post_turn_lifecycle
     ~(model : string)
     ~(primary_model_max_tokens : int)
     ~(current_turn_overflow_blocker : string option)
-    ~(checkpoint : Oas.Checkpoint.t option) : post_turn_lifecycle =
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let apply_continuity_summary
       ~(meta : keeper_meta)
       ~(ctx : working_context)
-      ~(oas_checkpoint : Oas.Checkpoint.t option) : keeper_meta =
+      ~(oas_checkpoint : Agent_sdk.Checkpoint.t option) : keeper_meta =
     let progress_path =
       Filename.concat
         (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)
@@ -355,7 +355,7 @@ let apply_post_turn_lifecycle
     let structured_snapshot =
       match oas_checkpoint with
       | Some cp -> (
-          match cp.Oas.Checkpoint.working_context with
+          match cp.Agent_sdk.Checkpoint.working_context with
           | Some json ->
               Keeper_memory_policy.snapshot_of_structured_working_context json
           | None -> None)

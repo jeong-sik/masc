@@ -1,6 +1,6 @@
 (** Keeper_extend_turns — Self-extending turn budget tool for keeper Agent.run.
 
-    Delegates to {!Oas.Agent.make_extend_turns_tool} which uses the
+    Delegates to {!Agent_sdk.Agent.make_extend_turns_tool} which uses the
     public [Agent.t] type and OAS-internal {!Agent_turn_budget} for
     budget tracking, idle checks, and cost guards.
 
@@ -13,12 +13,12 @@
     observed session length, providing headroom while preventing runaway loops. *)
 let default_ceiling = 200
 
-let make ~agent_ref ~max_turns ?ceiling () : Oas.Tool.t =
+let make ~agent_ref ~max_turns ?ceiling () : Agent_sdk.Tool.t =
   let ceiling = match ceiling with Some c -> c | None -> max max_turns default_ceiling in
   let budget =
-    Oas.Agent_turn_budget.create
+    Agent_sdk.Agent_turn_budget.create
       ~initial:max_turns
       ~ceiling
       ()
   in
-  Oas.Agent.make_extend_turns_tool ~agent_ref ~budget ()
+  Agent_sdk.Agent.make_extend_turns_tool ~agent_ref ~budget ()

@@ -41,7 +41,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
-    () : (keeper_meta, Oas.Error.sdk_error) result =
+    () : (keeper_meta, Agent_sdk.Error.sdk_error) result =
   (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 28 anchor for
      B2 (Task Acquisition).  Authoritative spec mirror is
      specs/keeper-state-machine/KeeperTaskAcquisition.tla (Cycle 8 /
@@ -283,17 +283,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
       let build_cascade_execution ~(cascade_name : KCP.runtime_name) :
-          (cascade_execution, Oas.Error.sdk_error) result =
+          (cascade_execution, Agent_sdk.Error.sdk_error) result =
         let cascade_name_string = KCP.runtime_name_to_string cascade_name in
         let meta_for_cascade = { meta with cascade_name = cascade_name_string } in
         let model_labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
         in
         match ensure_api_keys_for_labels model_labels with
-        | Error e -> Error (Oas.Error.Internal e)
+        | Error e -> Error (Agent_sdk.Error.Internal e)
         | Ok () -> (
             match ensure_local_discovery_ready model_labels with
-            | Error e -> Error (Oas.Error.Internal e)
+            | Error e -> Error (Agent_sdk.Error.Internal e)
             | Ok () ->
                 let max_context_resolution =
                   Keeper_exec_context.resolve_max_context_resolution
@@ -337,7 +337,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Printf.sprintf "pre_dispatch_%s"
               (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
           in
-          let error_message = Oas.Error.to_string err in
+          let error_message = Agent_sdk.Error.to_string err in
           record_pre_dispatch_terminal_observation
             ~config
             ~meta
@@ -486,7 +486,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | Some bus ->
           Some (Oas_bus_instrument.subscribe
                   ~purpose:"keeper_turn"
-                  ~filter:(Oas.Event_bus.filter_agent meta.name) bus)
+                  ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
@@ -515,13 +515,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | _ -> None
       in
       let process_tool_events_for_side_effects
-          (events : Oas.Event_bus.event list) : unit =
+          (events : Agent_sdk.Event_bus.event list) : unit =
         List.iter
-          (fun (evt : Oas.Event_bus.event) ->
+          (fun (evt : Agent_sdk.Event_bus.event) ->
             match evt.payload with
-            | Oas.Event_bus.ToolCalled { tool_name; input; _ } ->
+            | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
                 push_pending_input tool_name input
-            | Oas.Event_bus.ToolCompleted
+            | Agent_sdk.Event_bus.ToolCompleted
                 { tool_name; output = Ok _; _ } ->
                 let input_opt = pop_pending_input tool_name in
                 let input =
@@ -549,7 +549,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 then
                   mutating_tools_committed :=
                     tool_name :: !mutating_tools_committed
-            | Oas.Event_bus.ToolCompleted
+            | Agent_sdk.Event_bus.ToolCompleted
                 { tool_name; output = Error _; _ } ->
                 (* Failed tool: drop the matching pending input. *)
                 let _ = pop_pending_input tool_name in
@@ -667,7 +667,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           ~(from_cascade : Keeper_execution_receipt.cascade_name)
           ~(retry : EC.degraded_retry)
           ~(outcome : string)
-          (err : Oas.Error.sdk_error) =
+          (err : Agent_sdk.Error.sdk_error) =
         let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
           {
             from_cascade;
@@ -679,7 +679,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Some
                 (Keeper_execution_receipt.error_kind_of_string
                    (sdk_error_kind err));
-            error_message = Some (Oas.Error.to_string err);
+            error_message = Some (Agent_sdk.Error.to_string err);
             recorded_at = now_iso ();
           }
         in
@@ -711,7 +711,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         match
         Keeper_exec_context.timed (fun () ->
           match Eio_context.get_clock () with
-          | Error msg -> Error (Oas.Error.Internal msg)
+          | Error msg -> Error (Agent_sdk.Error.Internal msg)
           | Ok clock ->
           let timeout_sec =
             Keeper_runtime_resolved.turn_timeout_sec ()
@@ -861,7 +861,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Log.Keeper.warn
                   "%s: all cascades exhausted (terminal) — last_err=%s \
                    attempt=%d attempted_cascades=[%s]"
-                  meta.name (Oas.Error.to_string err) attempt
+                  meta.name (Agent_sdk.Error.to_string err) attempt
                   (String.concat ", " attempted_cascades)
               end
               else begin
@@ -875,7 +875,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Log.Keeper.warn
                   "%s: turn terminal (non-exhaustion error) — err=%s \
                    attempt=%d"
-                  meta.name (Oas.Error.to_string err) attempt
+                  meta.name (Agent_sdk.Error.to_string err) attempt
               end
             in
             let attempt_timeout_budget = ref None in
@@ -908,7 +908,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               with
               | None ->
                   Error
-                    (Oas.Error.Api
+                    (Agent_sdk.Error.Api
                        (Timeout
                           {
                             message =
@@ -958,7 +958,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      errors mean the LLM never saw the request, so no risk
                      of duplicate processing.  The keeper's next cycle will
                      build a fresh prompt that may avoid the parse issue. *)
-                  let err_preview = short_preview (Oas.Error.to_string err) in
+                  let err_preview = short_preview (Agent_sdk.Error.to_string err) in
                   let reason =
                     if EC.is_server_rejected_parse_error err then "server parse rejection"
                     else if EC.is_required_tool_contract_violation err then
@@ -993,7 +993,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           } )
                   in
                   post_commit_failure_reason := Some failure_reason;
-                  let err_preview = short_preview (Oas.Error.to_string err) in
+                  let err_preview = short_preview (Agent_sdk.Error.to_string err) in
                   if EC.is_transient_network_error err then
                     Log.Keeper.error
                       "%s: transient provider error after committed mutating tool call(s) [%s] — treating as integrity failure, skipping retry to prevent duplicate (error: %s)"
@@ -1048,7 +1048,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      model's passive-tool choice. Error: %s"
                     meta.name execution_cascade_name
                     (List.length attempted_cascades)
-                    (short_preview (Oas.Error.to_string err));
+                    (short_preview (Agent_sdk.Error.to_string err));
                   Prometheus.inc_counter
                     "masc_keeper_contract_violation_rotation_capped_total"
                     ~labels:[ ("keeper", meta.name) ]
@@ -1086,7 +1086,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             meta.name execution_cascade_name
                             degraded_retry.next_cascade
                             degraded_retry.fallback_reason
-                            (short_preview (Oas.Error.to_string fail_open_err));
+                            (short_preview (Agent_sdk.Error.to_string fail_open_err));
                           mark_terminal_error fail_open_err;
                           Error fail_open_err
                       | Ok next_execution ->
@@ -1113,7 +1113,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                              with
                              | Some requested -> string_of_int requested
                              | None -> "none")
-                            (short_preview (Oas.Error.to_string err));
+                            (short_preview (Agent_sdk.Error.to_string err));
                           Eio.Fiber.yield ();
                           retry_loop ~run_meta ~execution:next_execution
                             ~run_generation
@@ -1129,7 +1129,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         degraded_retry.next_cascade
                         degraded_retry.fallback_reason
                         (remaining_turn_budget_s ())
-                        (short_preview (Oas.Error.to_string err));
+                        (short_preview (Agent_sdk.Error.to_string err));
                       mark_terminal_error err;
                       Error err
                   | No_degraded_retry when EC.is_transient_network_error err
@@ -1145,7 +1145,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          | Some requested -> string_of_int requested
                          | None -> "none")
                         attempt (EC.max_transient_retries ()) delay
-                        (short_preview (Oas.Error.to_string err));
+                        (short_preview (Agent_sdk.Error.to_string err));
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation
                         ~attempt:(attempt + 1)
@@ -1174,7 +1174,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~base_path:config.base_path meta.name
                           Keeper_registry.Turn_compacting;
                         current_turn_overflow_blocker :=
-                          Some (Oas.Error.to_string err);
+                          Some (Agent_sdk.Error.to_string err);
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -1278,10 +1278,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
-              Error (Oas.Error.Api (Timeout { message = msg }))
+              Error (Agent_sdk.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
-                Oas.Error.Api (Timeout { message = msg })
+                Agent_sdk.Error.Api (Timeout { message = msg })
               in
               let reclassified, failure_reason =
                 match
@@ -1349,8 +1349,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       | Error err ->
           let final_execution = !last_execution in
           finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
-            (Trajectory.Failed (Oas.Error.to_string err));
-          let e_str = Oas.Error.to_string err in
+            (Trajectory.Failed (Agent_sdk.Error.to_string err));
+          let e_str = Agent_sdk.Error.to_string err in
           let is_transient = EC.is_transient_network_error err in
           (match Oas_worker_named.classify_masc_internal_error err with
            | Some (Oas_worker_named.Oas_timeout_budget _) ->
@@ -1363,7 +1363,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  ~labels:[("classification", "turn_wall_clock")] ()
            | _ -> (
                match err with
-               | Oas.Error.Api (Timeout { message }) ->
+               | Agent_sdk.Error.Api (Timeout { message }) ->
                let classification =
                  if is_transient then "transient_network"
                  else if EC.is_structural_oas_timeout_message message then
@@ -1472,18 +1472,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   (err, paused_meta)
               | Error sync_err ->
                   let combined_err =
-                    Oas.Error.Internal
+                    Agent_sdk.Error.Internal
                       (Printf.sprintf
                          "%s: ambiguous partial commit pause sync failed: %s \
                           (original_error=%s)"
                          meta.name sync_err (short_preview e_str))
                   in
-                  Log.Keeper.error "%s" (Oas.Error.to_string combined_err);
+                  Log.Keeper.error "%s" (Agent_sdk.Error.to_string combined_err);
                   (combined_err, updated_meta)
             end else
               (err, updated_meta)
           in
-          let e_str = Oas.Error.to_string err in
+          let e_str = Agent_sdk.Error.to_string err in
           let terminal_reason =
             Keeper_turn_terminal.of_failure
               ~post_commit_ambiguous:is_ambiguous_partial

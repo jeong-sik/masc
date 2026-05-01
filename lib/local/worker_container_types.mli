@@ -55,9 +55,9 @@ type run_result = {
   tool_call_count : int;
   tool_names : string list;
   session_id : string;
-  raw_trace_run : Oas.Raw_trace.run_ref option;
-  api_response : Oas.Types.api_response option;
-  proof : Oas.Cdal_proof.t option;
+  raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
+  api_response : Agent_sdk.Types.api_response option;
+  proof : Agent_sdk.Cdal_proof.t option;
 }
 (** Summary of a finished worker run: aggregated text
     [output], the model id that handled the run,
@@ -131,7 +131,7 @@ val unique_preserve_order : 'a list -> 'a list
 (** {1 Usage / cost helpers} *)
 
 val merge_usage :
-  Oas.Types.api_usage -> Oas.Types.api_usage -> Oas.Types.api_usage
+  Agent_sdk.Types.api_usage -> Agent_sdk.Types.api_usage -> Agent_sdk.Types.api_usage
 (** Sum two usage records field-wise: [input_tokens],
     [output_tokens], [cache_creation_input_tokens],
     [cache_read_input_tokens], and [cost_usd] (sum if both
@@ -237,10 +237,10 @@ val safe_text_for_followup : string -> string
     when the input is longer.  Never raises. *)
 
 val parse_text_tool_calls :
-  string -> Oas.Types.content_block list
+  string -> Agent_sdk.Types.content_block list
 (** [parse_text_tool_calls content] extracts inline
     [mcp__masc__*(...)] tool-call invocations from a free-form
-    text fragment and returns them as [Oas.Types.ToolUse]
+    text fragment and returns them as [Agent_sdk.Types.ToolUse]
     content blocks.  Returns [\[\]] when no invocations are
     found.  Pinned for behaviour-tests under
     {!test/test_worker_container_coverage} — used by the local

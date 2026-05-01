@@ -13,7 +13,7 @@ let re_weather_en = Re.str "weather" |> Re.compile
 let re_first_ko = Re.str "첫" |> Re.compile
 let re_first_en = Re.str "first" |> Re.compile
 
-let cost_usd_of_usage (usage : Oas.Types.api_usage) ~(model_id : string) : float =
+let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) ~(model_id : string) : float =
   let pricing = Llm_provider.Pricing.pricing_for_model model_id in Llm_provider.Pricing.estimate_cost ~pricing
         ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ()
 
@@ -178,23 +178,23 @@ let char_ngrams = Text_similarity.char_ngrams
 let jaccard_similarity = Text_similarity.jaccard_similarity
 
 let latest_message_content_by_role
-    ~(role : Oas.Types.role)
-    (messages : Oas.Types.message list) : string option =
+    ~(role : Agent_sdk.Types.role)
+    (messages : Agent_sdk.Types.message list) : string option =
   match
     messages
     |> List.rev
-    |> List.find_opt (fun (m : Oas.Types.message) -> m.role = role)
+    |> List.find_opt (fun (m : Agent_sdk.Types.message) -> m.role = role)
   with
   | None -> None
-  | Some m -> trim_nonempty (String.trim (Oas.Types.text_of_message m))
+  | Some m -> trim_nonempty (String.trim (Agent_sdk.Types.text_of_message m))
 
 let previous_assistant_message_content
-    (messages : Oas.Types.message list) : string option =
+    (messages : Agent_sdk.Types.message list) : string option =
   let assistants =
     messages
     |> List.rev
-    |> List.filter_map (fun (m : Oas.Types.message) ->
-         if m.role = Oas.Types.Assistant then trim_nonempty (Oas.Types.text_of_message m) else None)
+    |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+         if m.role = Agent_sdk.Types.Assistant then trim_nonempty (Agent_sdk.Types.text_of_message m) else None)
   in
   match assistants with
   | _latest :: previous :: _ -> Some previous
@@ -256,17 +256,17 @@ let goal_alignment_score
     | Some u, Some r -> (u +. r) /. 2.0
 
 let repetition_risk_score
-    ~(messages : Oas.Types.message list)
+    ~(messages : Agent_sdk.Types.message list)
     ~(candidate_reply : string option) : float =
   match candidate_reply with
   | Some reply -> (
-      match latest_message_content_by_role ~role:Oas.Types.Assistant messages with
+      match latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages with
       | Some prev -> jaccard_similarity reply prev
       | None -> 0.0)
   | None -> (
       match
         previous_assistant_message_content messages,
-        latest_message_content_by_role ~role:Oas.Types.Assistant messages
+        latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages
       with
       | Some prev, Some latest -> jaccard_similarity latest prev
       | _ -> 0.0)
@@ -600,12 +600,12 @@ let learned_policy_auto_rules
       ];
   }
 
-let recent_user_messages (msgs : Oas.Types.message list) ~(max_n : int) : string list =
+let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
-  |> List.filter_map (fun (m : Oas.Types.message) ->
-       if m.role = Oas.Types.User then
-         let c = String.trim (Oas.Types.text_of_message m) in
+  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+       if m.role = Agent_sdk.Types.User then
+         let c = String.trim (Agent_sdk.Types.text_of_message m) in
          if c = "" then None else Some c
        else None)
   |> take max_n
@@ -643,7 +643,7 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
     provides cross-generation recall for older conversations. Deduplication
     uses exact string match on the first 100 characters. *)
 let recall_candidates_with_history
-    ~(checkpoint_messages : Oas.Types.message list)
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(history_path : string)
     ~(max_checkpoint : int)
     ~(max_history : int) : string list =

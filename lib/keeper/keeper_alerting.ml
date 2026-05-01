@@ -11,9 +11,9 @@ open Keeper_memory
 let keeper_model_tools = Tool_shard.keeper_model_tools
 
 let merge_usage
-    (a : Oas.Types.api_usage)
-    (b : Oas.Types.api_usage) : Oas.Types.api_usage =
-  { Oas.Types.input_tokens = a.input_tokens + b.input_tokens;
+    (a : Agent_sdk.Types.api_usage)
+    (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;

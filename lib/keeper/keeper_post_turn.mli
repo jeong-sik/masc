@@ -31,7 +31,7 @@ type compaction_event =
     summary update + per-turn context metrics. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_types.keeper_meta
-  ; checkpoint : Oas.Checkpoint.t option
+  ; checkpoint : Agent_sdk.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
@@ -50,7 +50,7 @@ type post_turn_lifecycle =
     is read at the call site, but the record is exported so callers
     can match exhaustively. *)
 type overflow_retry_recovery =
-  { checkpoint : Oas.Checkpoint.t
+  { checkpoint : Agent_sdk.Checkpoint.t
   ; compaction : compaction_event
   ; turn_generation : int
   } [@@warning "-69"]
@@ -74,7 +74,7 @@ val apply_post_turn_lifecycle :
   model:string ->
   primary_model_max_tokens:int ->
   current_turn_overflow_blocker:string option ->
-  checkpoint:Oas.Checkpoint.t option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
 (** Build the relaxed-policy meta used during forced overflow

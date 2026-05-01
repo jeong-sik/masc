@@ -40,8 +40,8 @@ let worker_raw_trace_path ~base_path ~worker_name =
     (worker_container_dir ~base_path ~worker_name)
     "raw-trace.jsonl"
 
-let oas_tool_error ?(recoverable = false) message : Oas.Types.tool_result =
-  Error { Oas.Types.message; recoverable; error_class = None }
+let oas_tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
+  Error { Agent_sdk.Types.message; recoverable; error_class = None }
 
 let oas_trace_session_root ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "oas-runtime"
@@ -223,7 +223,7 @@ let load_worker_checkpoint ~base_path ~worker_name =
   if Sys.file_exists path then
     try
       let raw = In_channel.with_open_text path In_channel.input_all in
-      Oas.Checkpoint.of_string raw |> Result.to_option
+      Agent_sdk.Checkpoint.of_string raw |> Result.to_option
     with Sys_error _ -> None
   else
     None
@@ -233,7 +233,7 @@ let save_worker_checkpoint ~base_path ~worker_name checkpoint =
     ensure_worker_container_dirs ~base_path ~worker_name;
     Fs_compat.save_file
       (worker_checkpoint_path ~base_path ~worker_name)
-      (Oas.Checkpoint.to_string checkpoint);
+      (Agent_sdk.Checkpoint.to_string checkpoint);
     Ok ()
   with Sys_error msg ->
     Error
@@ -310,13 +310,13 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                | Ok result when result.is_error ->
                  oas_tool_error result.text
                | Ok result ->
-                 Ok { Oas.Types.content = result.text }
+                 Ok { Agent_sdk.Types.content = result.text }
                | Error e ->
                  oas_tool_error e
              in
-             Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
+             Agent_sdk.Mcp.mcp_tool_to_sdk_tool ~call_fn
                {
-                 Oas.Mcp.name = schema.name;
+                 Agent_sdk.Mcp.name = schema.name;
                  description = schema.description;
                  input_schema = schema.input_schema;
                }))
@@ -345,9 +345,9 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
 (** Convert a model label to an OAS Provider.config.
     Returns Error when the label cannot be parsed. *)
 let oas_provider_of_label (label : string) :
-    (Oas.Provider.config, string) result =
+    (Agent_sdk.Provider.config, string) result =
   match Cascade_config.parse_model_string label with
-  | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
+  | Some pc -> Ok (Agent_sdk.Provider.config_of_provider_config pc)
   | None ->
     let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
     Log.Misc.error "%s" msg;
@@ -356,16 +356,16 @@ let oas_provider_of_label (label : string) :
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
-    (Oas.Provider.config * string, string) result =
+    (Agent_sdk.Provider.config * string, string) result =
   match Cascade_config.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
   | Some pc ->
     Ok
-      ( Oas.Provider.config_of_provider_config pc,
+      ( Agent_sdk.Provider.config_of_provider_config pc,
         pc.Llm_provider.Provider_config.model_id )
 
-let oas_tool_names (tools : Oas.Tool.t list) =
-  List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+let oas_tool_names (tools : Agent_sdk.Tool.t list) =
+  List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
 
 let make_worker_meta ~base_path ~workspace_path ~worker_name
     ~mcp_session_id ~role ~selection_note ~runtime_backend
@@ -402,7 +402,7 @@ let append_worker_completion_log ~base_path ~worker_name
         ("output_preview", `String (safe_text_for_followup output));
         ( "raw_trace_run",
           match raw_trace_run with
-          | Some run_ref -> Oas.Raw_trace.run_ref_to_yojson run_ref
+          | Some run_ref -> Agent_sdk.Raw_trace.run_ref_to_yojson run_ref
           | None -> `Null );
         ( "evidence_session_id",
           Option.fold ~none:`Null ~some:(fun value -> `String value)
@@ -422,12 +422,12 @@ let append_worker_completion_log ~base_path ~worker_name
     Accepts [~provider] + [~model_id] as resolved values. *)
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
-    ?(guardrails : Oas.Guardrails.t option)
-    ?(tool_retry_policy : Oas.Tool_retry_policy.t option)
+    ?(guardrails : Agent_sdk.Guardrails.t option)
+    ?(tool_retry_policy : Agent_sdk.Tool_retry_policy.t option)
     () =
   let config =
     {
-      Oas.Types.default_config with
+      Agent_sdk.Types.default_config with
       name = worker_name;
       model = model_id;
       system_prompt = Some system_prompt;
@@ -440,21 +440,21 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
          reject the field itself even when the value is a no-op. *)
       min_p = None;
       enable_thinking = Some thinking_enabled;
-      tool_choice = Some Oas.Types.Auto;
+      tool_choice = Some Agent_sdk.Types.Auto;
     }
   in
   let effective_guardrails =
     match guardrails with
     | Some g -> g
     | None ->
-        { Oas.Guardrails.tool_filter =
-            Oas.Guardrails.AllowList (oas_tool_names tools);
+        { Agent_sdk.Guardrails.tool_filter =
+            Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
           max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
         }
   in
   let options =
     {
-      Oas.Agent.default_options with
+      Agent_sdk.Agent.default_options with
       provider = Some provider;
       hooks;
       guardrails = effective_guardrails;
@@ -484,7 +484,7 @@ let materialize_direct_evidence ~base_path ~worker_name
       in
       let options =
         {
-          Oas.Direct_evidence.session_root =
+          Agent_sdk.Direct_evidence.session_root =
             Some (oas_trace_session_root ~base_path);
           session_id;
           goal = prompt;
@@ -501,9 +501,9 @@ let materialize_direct_evidence ~base_path ~worker_name
           workdir = Some workspace_path;
         }
       in
-      match Oas.Direct_evidence.persist ~agent ~raw_trace ~options () with
+      match Agent_sdk.Direct_evidence.persist ~agent ~raw_trace ~options () with
       | Ok _ -> ()
       | Error err ->
           Log.LocalWorker.error
             "direct evidence persist failed for %s/%s: %s"
-            worker_name session_id (Oas.Error.to_string err)
+            worker_name session_id (Agent_sdk.Error.to_string err)

@@ -1,7 +1,7 @@
 (** Context_compact_oas — context-window compaction strategies
     for OAS message lists.
 
-    Wraps {!Oas.Context_reducer} with MASC-specific strategies
+    Wraps {!Agent_sdk.Context_reducer} with MASC-specific strategies
     (tool-output pruning, contiguous-message merging,
     low-importance dropping, summarization) plus a {!Dynamic}
     runtime selector for adaptive policies based on
@@ -66,11 +66,11 @@ type strategy =
 (** {1 Public API} *)
 
 val compact :
-  messages:Oas.Types.message list ->
+  messages:Agent_sdk.Types.message list ->
   strategies:strategy list ->
   ?observation:observation_context ->
   unit ->
-  Oas.Types.message list
+  Agent_sdk.Types.message list
 (** [compact ~messages ~strategies ?observation ()] applies the
     compaction pipeline.  When any [strategy] is {!Dynamic} and
     [?observation] is supplied, runtime resolution flattens it.
@@ -105,7 +105,7 @@ val observation_summary : observation_context option -> string
       record field. *)
 
 val score_messages :
-  Oas.Types.message list -> (int * float) list
+  Agent_sdk.Types.message list -> (int * float) list
 (** [score_messages msgs] is the SSOT importance scorer used by
     {!DropLowImportance} and {!SummarizeOld}. Returns a list of
     [(index, score)] pairs in the same order as [msgs] with
@@ -143,7 +143,7 @@ val default_dynamic_selector :
 (** {1 Test-visible scoring helper} *)
 
 val score_messages :
-  Oas.Types.message list -> (int * float) list
+  Agent_sdk.Types.message list -> (int * float) list
 (** [score_messages msgs] returns
     [(message_index, importance_score)] pairs for the input
     message list.  Importance combines recency (quadratic ramp

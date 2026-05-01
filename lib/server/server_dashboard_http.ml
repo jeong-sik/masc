@@ -254,13 +254,13 @@ let dashboard_governance_approval_resolve_http_json ~base_path
       in
       let decision =
         match decision_name with
-        | "approve" -> Ok Oas.Hooks.Approve
+        | "approve" -> Ok Agent_sdk.Hooks.Approve
         | "reject" ->
             let reason =
               Safe_ops.json_string_opt "reason" args
               |> Option.value ~default:"dashboard rejected approval"
             in
-            Ok (Oas.Hooks.Reject reason)
+            Ok (Agent_sdk.Hooks.Reject reason)
         | _ ->
             Error (Bad_request "decision must be 'approve' or 'reject'")
       in

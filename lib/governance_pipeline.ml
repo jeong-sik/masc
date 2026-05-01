@@ -271,7 +271,7 @@ let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
 
 let to_oas_approval_callback
-    ?config ~governance_level ~keeper_name ?meta ?clock () : Oas.Hooks.approval_callback =
+    ?config ~governance_level ~keeper_name ?meta ?clock () : Agent_sdk.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -385,7 +385,7 @@ let to_oas_approval_callback
           ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
           ?selected_model ~disposition:"Pass"
           ~disposition_reason:"always_approve_enabled" ~auto_approved:true ();
-        Oas.Hooks.Approve
+        Agent_sdk.Hooks.Approve
       ) else
         match routine_label with
         | Some label ->
@@ -400,7 +400,7 @@ let to_oas_approval_callback
             Log.Governance.debug
               "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
               keeper_name tool_name (risk_level_to_string risk) label;
-            Oas.Hooks.Approve
+            Agent_sdk.Hooks.Approve
         | None -> (
             match rule_match with
             | Some matched ->
@@ -414,7 +414,7 @@ let to_oas_approval_callback
                   ?runtime_contract ?selected_model ~disposition:"Pass"
                   ~disposition_reason:"healthy" ~rule_match:matched
                   ~auto_approved:true ();
-                Oas.Hooks.Approve
+                Agent_sdk.Hooks.Approve
             | None ->
                 Keeper_approval_queue.submit_and_await
                   ~keeper_name
@@ -432,4 +432,4 @@ let to_oas_approval_callback
                   ?clock
                   ())
     else
-      Oas.Hooks.Approve
+      Agent_sdk.Hooks.Approve

@@ -26,15 +26,15 @@ let with_tmp_dir f =
   Fs_compat.mkdir_p dir;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let dummy_checkpoint : Oas.Checkpoint.t =
+let dummy_checkpoint : Agent_sdk.Checkpoint.t =
   {
-    Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
     session_id = "ir3-test";
     agent_name = "test-worker";
     model = "";
     system_prompt = None;
     messages = [];
-    usage = Oas.Types.empty_usage;
+    usage = Agent_sdk.Types.empty_usage;
     turn_count = 0;
     created_at = 0.0;
     tools = [];
@@ -45,12 +45,12 @@ let dummy_checkpoint : Oas.Checkpoint.t =
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format = Oas.Types.Off;
+    response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     max_input_tokens = None;
     max_total_tokens = None;
-    context = Oas.Context.create ();
+    context = Agent_sdk.Context.create ();
     mcp_sessions = [];
     working_context = None;
   }

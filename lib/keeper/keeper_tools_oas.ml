@@ -1,7 +1,7 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
     Bridges [Keeper_exec_tools.execute_keeper_tool_call] dispatch
-    to [Oas.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
+    to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
     enabling Agent.run() to manage messages while keeper tools
@@ -22,7 +22,7 @@ type tool_call_entry = Keeper_types.tool_call_entry = {
 
 type tool_bundle =
   {
-    tools : Oas.Tool.t list;
+    tools : Agent_sdk.Tool.t list;
     cleanup : unit -> unit;
   }
 
@@ -556,5 +556,5 @@ let make_tools
     ?search_fn
     ?on_tool_called
     ()
-  : Oas.Tool.t list =
+  : Agent_sdk.Tool.t list =
   (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ()).tools

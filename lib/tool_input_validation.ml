@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
-    Delegates to [Oas.Tool_middleware.make_validation_hook] for type
+    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for type
     coercion and structured error feedback.
 
     @since 2.220.0 — OAS delegation
@@ -189,10 +189,10 @@ let augment_missing_param_hint ~(args : Yojson.Safe.t) (oas_message : string) =
 let register_pre_hook () =
   let lookup name =
     Option.map
-      (Oas.Tool_middleware.tool_schema_of_json ~name)
+      (Agent_sdk.Tool_middleware.tool_schema_of_json ~name)
       (Tool_dispatch.lookup_schema name)
   in
-  let hook = Oas.Tool_middleware.make_validation_hook ~lookup in
+  let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
     let compat_args =
       let args = strip_internal_marker_args args in
@@ -202,15 +202,15 @@ let register_pre_hook () =
         args
     in
     match hook ~name ~args:compat_args with
-    | Oas.Tool_middleware.Pass
+    | Agent_sdk.Tool_middleware.Pass
       when not (Yojson.Safe.equal compat_args args) ->
       Log.debug "tool_input_validation coerced args for %s" name;
       Proceed compat_args
-    | Oas.Tool_middleware.Pass -> Pass
-    | Oas.Tool_middleware.Proceed coerced ->
+    | Agent_sdk.Tool_middleware.Pass -> Pass
+    | Agent_sdk.Tool_middleware.Proceed coerced ->
       Log.debug "tool_input_validation coerced args for %s" name;
       Proceed coerced
-    | Oas.Tool_middleware.Reject { message; _ } ->
+    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       let augmented = augment_missing_param_hint ~args:compat_args message in
       Log.info "tool_input_validation rejected %s: %s" name augmented;
       Reject {

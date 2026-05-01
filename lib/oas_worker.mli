@@ -64,13 +64,13 @@ type cli_transport_overrides = Oas_worker_exec.cli_transport_overrides = {
 }
 
 type run_result = {
-  response : Oas.Types.api_response;
-  checkpoint : Oas.Checkpoint.t option;
+  response : Agent_sdk.Types.api_response;
+  checkpoint : Agent_sdk.Checkpoint.t option;
   session_id : string;
   turns : int;
-  trace_ref : Oas.Raw_trace.run_ref option;
-  run_validation : Oas.Raw_trace.run_validation option;
-  proof : Oas.Cdal_proof.t option;
+  trace_ref : Agent_sdk.Raw_trace.run_ref option;
+  run_validation : Agent_sdk.Raw_trace.run_validation option;
+  proof : Agent_sdk.Cdal_proof.t option;
   cascade_observation : cascade_observation option;
   stop_reason : stop_reason;
 }
@@ -97,8 +97,8 @@ val run_named :
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
-  ?tools:Oas.Tool.t list ->
-  ?initial_messages:Oas.Types.message list ->
+  ?tools:Agent_sdk.Tool.t list ->
+  ?initial_messages:Agent_sdk.Types.message list ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
@@ -108,20 +108,20 @@ val run_named :
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?context_reducer:Oas.Context_reducer.t ->
-  ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?context_reducer:Agent_sdk.Context_reducer.t ->
+  ?memory:Agent_sdk.Memory.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?required_tool_satisfaction:
-    Oas.Completion_contract.required_tool_satisfaction ->
-  ?raw_trace:Oas.Raw_trace.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+    Agent_sdk.Completion_contract.required_tool_satisfaction ->
+  ?raw_trace:Agent_sdk.Raw_trace.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?agent_ref:Oas.Agent.t option ref ->
-  ?proof_ref:Oas.Cdal_proof.t option ref ->
-  ?contract:Oas.Risk_contract.t ->
+  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?proof_ref:Agent_sdk.Cdal_proof.t option ref ->
+  ?contract:Agent_sdk.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?cli_transport_overrides:cli_transport_overrides ->
   ?allowed_paths:string list ->
@@ -130,21 +130,21 @@ val run_named :
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?checkpoint_dir:string ->
-  ?context_injector:Oas.Hooks.context_injector ->
-  ?context:Oas.Context.t ->
+  ?context_injector:Agent_sdk.Hooks.context_injector ->
+  ?context:Agent_sdk.Context.t ->
   ?slot_id:int ->
   ?enable_thinking:bool ->
-  ?approval:Oas.Hooks.approval_callback ->
+  ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
   ?exit_condition_result:(int -> stop_reason * string option) ->
-  ?summarizer:(Oas.Types.message list -> string) ->
-  ?oas_checkpoint:Oas.Checkpoint.t ->
-  ?event_bus:Oas.Event_bus.t ->
+  ?summarizer:(Agent_sdk.Types.message list -> string) ->
+  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?event_bus:Agent_sdk.Event_bus.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?per_provider_timeout_s:float ->
   unit ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -152,7 +152,7 @@ val run_model_by_label :
   model_label:string ->
   goal:string ->
   ?system_prompt:string ->
-  ?tools:Oas.Tool.t list ->
+  ?tools:Agent_sdk.Tool.t list ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
@@ -162,20 +162,20 @@ val run_model_by_label :
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?context_reducer:Oas.Context_reducer.t ->
-  ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?context_reducer:Agent_sdk.Context_reducer.t ->
+  ?memory:Agent_sdk.Memory.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Risk_contract.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?contract:Agent_sdk.Risk_contract.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result
 
 val run_named_with_masc_tools :
   cascade_name:string ->
@@ -191,26 +191,26 @@ val run_named_with_masc_tools :
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?memory:Agent_sdk.Memory.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?required_tool_satisfaction:
-    Oas.Completion_contract.required_tool_satisfaction ->
-  ?raw_trace:Oas.Raw_trace.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+    Agent_sdk.Completion_contract.required_tool_satisfaction ->
+  ?raw_trace:Agent_sdk.Raw_trace.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?proof_ref:Oas.Cdal_proof.t option ref ->
-  ?contract:Oas.Risk_contract.t ->
+  ?proof_ref:Agent_sdk.Cdal_proof.t option ref ->
+  ?contract:Agent_sdk.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
-  ?approval:Oas.Hooks.approval_callback ->
+  ?approval:Agent_sdk.Hooks.approval_callback ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result
 
 val run_model_with_masc_tools :
   model_label:string ->
@@ -225,17 +225,17 @@ val run_model_with_masc_tools :
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?memory:Agent_sdk.Memory.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Risk_contract.t ->
-  ?raw_trace:Oas.Raw_trace.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?contract:Agent_sdk.Risk_contract.t ->
+  ?raw_trace:Agent_sdk.Raw_trace.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result

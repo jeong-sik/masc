@@ -114,8 +114,8 @@ let label_resolution_error_to_string = function
       Printf.sprintf "invalid model label %S" label
 
 let label_resolution_error_to_sdk_error err =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig
        {
          field = "model_label";
          detail = label_resolution_error_to_string err;
@@ -132,8 +132,8 @@ let resolve_provider_config_of_label (label : string) :
       Error (Invalid_model_label label)
 
 let invalid_runtime_config field detail =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig { field; detail })
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig { field; detail })
 
 let cli_model_override model_id =
   match String.lowercase_ascii (String.trim model_id) with
@@ -348,12 +348,12 @@ let kimi_cli_runtime_mcp_jsons
   in
   dedupe_preserve_order (base @ request_json)
 
-let public_mcp_tool_names_of_oas_tools (tools : Oas.Tool.t list) =
-  List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+let public_mcp_tool_names_of_oas_tools (tools : Agent_sdk.Tool.t list) =
+  List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
 
-let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
+let public_mcp_tools_of_oas_tools (tools : Agent_sdk.Tool.t list) =
   List.filter
-    (fun (tool : Oas.Tool.t) -> Tool_catalog.is_public_mcp tool.schema.name)
+    (fun (tool : Agent_sdk.Tool.t) -> Tool_catalog.is_public_mcp tool.schema.name)
     tools
 
 let tool_names_are_public_mcp (tool_names : string list) =
@@ -557,11 +557,11 @@ let resolve_tool_lane_for_oas_tools
     ?agent_name
     ?(tool_requirement = `Required)
     ~(provider_cfg : Llm_provider.Provider_config.t)
-    ~(tools : Oas.Tool.t list)
+    ~(tools : Agent_sdk.Tool.t list)
     ()
-  : (Oas.Tool.t list
+  : (Agent_sdk.Tool.t list
      * Llm_provider.Llm_transport.runtime_mcp_policy option,
-     Oas.Error.sdk_error)
+     Agent_sdk.Error.sdk_error)
     result =
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
@@ -572,10 +572,10 @@ let resolve_tool_lane_for_oas_tools
     match requested_agent_name with
     | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->
         tools
-        |> List.filter (fun (tool : Oas.Tool.t) ->
+        |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
                Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                  tool.schema.name)
-        |> List.map (fun (tool : Oas.Tool.t) -> tool.schema.name)
+        |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
         |> dedupe_preserve_order
     | _ -> []
   in
@@ -752,11 +752,11 @@ module Kimi_cli_transport_local = struct
   let blocks_of_message_content json =
     match json with
     | `String text when String.trim text = "" -> []
-    | `String text -> [ Oas.Types.Text text ]
+    | `String text -> [ Agent_sdk.Types.Text text ]
     | `List items ->
         List.filter_map Llm_provider.Api_common.content_block_of_json items
     | `Null -> []
-    | other -> [ Oas.Types.Text (Yojson.Safe.to_string other) ]
+    | other -> [ Agent_sdk.Types.Text (Yojson.Safe.to_string other) ]
 
   let tool_use_of_json json =
     let open Yojson.Safe.Util in
@@ -767,7 +767,7 @@ module Kimi_cli_transport_local = struct
       let args =
         fn |> member "arguments" |> to_string_option |> json_of_argument_string
       in
-      Some (Oas.Types.ToolUse { id; name; input = args })
+      Some (Agent_sdk.Types.ToolUse { id; name; input = args })
     with Type_error _ -> None
 
   let tool_result_of_json json =
@@ -777,12 +777,12 @@ module Kimi_cli_transport_local = struct
         let content_json = json |> member "content" in
         let content, parsed_json =
           match content_json with
-          | `String text -> text, Oas.Types.try_parse_json text
+          | `String text -> text, Agent_sdk.Types.try_parse_json text
           | `Null -> "", None
           | other -> Yojson.Safe.to_string other, Some other
         in
         Some
-          (Oas.Types.ToolResult
+          (Agent_sdk.Types.ToolResult
              { tool_use_id; content; is_error = false; json = parsed_json })
     | None -> None
 
@@ -845,68 +845,68 @@ module Kimi_cli_transport_local = struct
     else
       Ok
         {
-          Oas.Types.id = response_id_of_lines lines;
+          Agent_sdk.Types.id = response_id_of_lines lines;
           model = response_model_of_lines ~model_id lines;
-          stop_reason = Oas.Types.EndTurn;
+          stop_reason = Agent_sdk.Types.EndTurn;
           content;
           usage = None;
           telemetry = None;
         }
 
   let events_of_block ~index = function
-    | Oas.Types.Text text ->
+    | Agent_sdk.Types.Text text ->
         [
-          Oas.Types.ContentBlockStart
+          Agent_sdk.Types.ContentBlockStart
             { index; content_type = "text"; tool_id = None; tool_name = None };
-          Oas.Types.ContentBlockDelta { index; delta = Oas.Types.TextDelta text };
-          Oas.Types.ContentBlockStop { index };
+          Agent_sdk.Types.ContentBlockDelta { index; delta = Agent_sdk.Types.TextDelta text };
+          Agent_sdk.Types.ContentBlockStop { index };
         ]
-    | Oas.Types.Thinking { content; _ } ->
+    | Agent_sdk.Types.Thinking { content; _ } ->
         [
-          Oas.Types.ContentBlockStart
+          Agent_sdk.Types.ContentBlockStart
             {
               index;
               content_type = "thinking";
               tool_id = None;
               tool_name = None;
             };
-          Oas.Types.ContentBlockDelta
-            { index; delta = Oas.Types.ThinkingDelta content };
-          Oas.Types.ContentBlockStop { index };
+          Agent_sdk.Types.ContentBlockDelta
+            { index; delta = Agent_sdk.Types.ThinkingDelta content };
+          Agent_sdk.Types.ContentBlockStop { index };
         ]
-    | Oas.Types.ToolUse { id; name; input } ->
+    | Agent_sdk.Types.ToolUse { id; name; input } ->
         [
-          Oas.Types.ContentBlockStart
+          Agent_sdk.Types.ContentBlockStart
             {
               index;
               content_type = "tool_use";
               tool_id = Some id;
               tool_name = Some name;
             };
-          Oas.Types.ContentBlockDelta
+          Agent_sdk.Types.ContentBlockDelta
             {
               index;
-              delta = Oas.Types.InputJsonDelta (Yojson.Safe.to_string input);
+              delta = Agent_sdk.Types.InputJsonDelta (Yojson.Safe.to_string input);
             };
-          Oas.Types.ContentBlockStop { index };
+          Agent_sdk.Types.ContentBlockStop { index };
         ]
-    | Oas.Types.ToolResult { tool_use_id; content; _ } ->
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
         [
-          Oas.Types.ContentBlockStart
+          Agent_sdk.Types.ContentBlockStart
             {
               index;
               content_type = "tool_result";
               tool_id = Some tool_use_id;
               tool_name = None;
             };
-          Oas.Types.ContentBlockDelta
-            { index; delta = Oas.Types.TextDelta content };
-          Oas.Types.ContentBlockStop { index };
+          Agent_sdk.Types.ContentBlockDelta
+            { index; delta = Agent_sdk.Types.TextDelta content };
+          Agent_sdk.Types.ContentBlockStop { index };
         ]
-    | Oas.Types.RedactedThinking _
-    | Oas.Types.Image _
-    | Oas.Types.Document _
-    | Oas.Types.Audio _ -> []
+    | Agent_sdk.Types.RedactedThinking _
+    | Agent_sdk.Types.Image _
+    | Agent_sdk.Types.Document _
+    | Agent_sdk.Types.Audio _ -> []
 
   let emit_blocks ~on_event ~start_index blocks =
     List.fold_left
@@ -1169,7 +1169,7 @@ module Kimi_cli_transport_local = struct
             if not !started then (
               started := true;
               on_event
-                (Oas.Types.MessageStart
+                (Agent_sdk.Types.MessageStart
                    { id = "kimi-print"; model = model_id; usage = None }))
           in
           let on_line line =
@@ -1196,9 +1196,9 @@ module Kimi_cli_transport_local = struct
               | Ok resp as ok ->
                   if !started then (
                     on_event
-                      (Oas.Types.MessageDelta
+                      (Agent_sdk.Types.MessageDelta
                          { stop_reason = Some resp.stop_reason; usage = resp.usage });
-                    on_event Oas.Types.MessageStop)
+                    on_event Agent_sdk.Types.MessageStop)
                   else
                     Llm_provider.Cli_common_synthetic_events.replay ~on_event
                       resp;
@@ -1237,7 +1237,7 @@ let non_http_transport_of_provider
     ?runtime_mcp_policy
     ?cli_transport_overrides
     ()
-  : (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result =
+  : (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result =
   let _ = sw in
   let proc_mgr_result () =
     match Process_eio.get_proc_mgr () with

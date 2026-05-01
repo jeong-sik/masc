@@ -29,17 +29,17 @@ val next_fail_open_cascade_for_turn :
   effective_cascade:string ->
   tool_requirement:string ->
   attempted_cascades:string list ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   EC.degraded_retry option
 
-val sdk_error_kind : Oas.Error.sdk_error -> string
+val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 val record_turn_failure_stress :
   meta:keeper_meta ->
   is_auto_recoverable:bool ->
   consecutive:int ->
   threshold:int ->
-  err:Oas.Error.sdk_error ->
+  err:Agent_sdk.Error.sdk_error ->
   unit
 
 val oas_timeout_guard_sec : float
@@ -48,7 +48,7 @@ val oas_timeout_guard_sec : float
 val min_oas_timeout_budget_sec : float
 (** Minimum OAS timeout budget (seconds). *)
 
-val sdk_error_kind : Oas.Error.sdk_error -> string
+val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;
@@ -89,8 +89,8 @@ val oas_retry_budget_available_for_turn :
 
 val reclassify_oas_timeout_for_attempt :
   timeout_budget:oas_timeout_budget_resolution option ->
-  Oas.Error.sdk_error ->
-  Oas.Error.sdk_error
+  Agent_sdk.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error
 
 type degraded_retry_budget_decision =
   | No_degraded_retry
@@ -106,7 +106,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision
 
 type overflow_retry_plan = {
@@ -134,16 +134,16 @@ val recover_context_overflow_retry :
   meta:keeper_meta ->
   base_dir:string ->
   max_cascade_context:int ->
-  error:Oas.Error.sdk_error ->
+  error:Agent_sdk.Error.sdk_error ->
   overflow_retry_plan option
 
 val summarize_turn_event_bus :
-  Oas.Event_bus.event list -> turn_event_bus_summary
+  Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
 val context_overflow_event_of_error :
   fallback_tokens:int ->
   ?turn_event_bus:turn_event_bus_summary ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event
 
 val pause_keeper_for_overflow :

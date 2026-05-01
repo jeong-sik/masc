@@ -125,11 +125,11 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
       if String.equal id "" then Some (false, "id is required")
       else
         let decision = match String.lowercase_ascii decision_str with
-          | "approve" -> Oas.Hooks.Approve
+          | "approve" -> Agent_sdk.Hooks.Approve
           | "reject" ->
             let reason = arg_get_string "reason" "operator rejected" in
-            Oas.Hooks.Reject reason
-          | _ -> Oas.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
+            Agent_sdk.Hooks.Reject reason
+          | _ -> Agent_sdk.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
         in
         (match Keeper_approval_queue.resolve ~id ~decision with
          | Ok () ->

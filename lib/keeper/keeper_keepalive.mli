@@ -1,10 +1,10 @@
 open Keeper_types
 
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
-val set_bus : Oas.Event_bus.t -> unit
+val set_bus : Agent_sdk.Event_bus.t -> unit
 
 (** Retrieve the shared Event_bus, if set. *)
-val get_bus : unit -> Oas.Event_bus.t option
+val get_bus : unit -> Agent_sdk.Event_bus.t option
 
 (** Inject a gRPC client for bidirectional heartbeat streaming.
     When set and [MASC_AGENT_TRANSPORT=grpc], keepalive opens a

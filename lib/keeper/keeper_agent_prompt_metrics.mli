@@ -5,7 +5,7 @@
 val adaptive_thinking_budget :
   enabled:bool ->
   is_retry:bool ->
-  last_tool_results:Oas.Types.tool_result list ->
+  last_tool_results:Agent_sdk.Types.tool_result list ->
   user_message:string ->
   dynamic_context:string ->
   current_budget:int option ->
@@ -79,13 +79,13 @@ val add_segment_metric :
 
 (** Project a single [content_block] of [role] to its segment metric. *)
 val metric_of_block :
-  role:Oas.Types.role ->
-  Oas.Types.content_block ->
+  role:Agent_sdk.Types.role ->
+  Agent_sdk.Types.content_block ->
   prompt_segment_metrics
 
 (** Pick the segment bucket name for a history block. *)
 val history_bucket_of_block :
-  role:Oas.Types.role -> Oas.Types.content_block -> string
+  role:Agent_sdk.Types.role -> Agent_sdk.Types.content_block -> string
 
 val build_ctx_composition_metrics :
   system_prompt:string ->
@@ -93,7 +93,7 @@ val build_ctx_composition_metrics :
   memory_context:string ->
   temporal_context:string ->
   user_message:string ->
-  history_messages:Oas.Types.message list ->
+  history_messages:Agent_sdk.Types.message list ->
   actual_input_tokens:int ->
   ctx_composition_metrics
 

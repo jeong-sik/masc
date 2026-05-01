@@ -32,7 +32,7 @@ let make_gate
     denied_tools = denied;
   }
 
-let make_schema name : Oas.Types.tool_schema =
+let make_schema name : Agent_sdk.Types.tool_schema =
   { name; description = ""; parameters = [] }
 
 (* ================================================================ *)
@@ -50,7 +50,7 @@ let test_allowlist_maps_to_allowlist () =
   Alcotest.(check bool) "allowlist takes priority"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowList names ->
+     | Agent_sdk.Guardrails.AllowList names ->
          List.sort String.compare names
          = List.sort String.compare ["keeper_read"; "keeper_bash"]
      | _ -> false);
@@ -67,7 +67,7 @@ let test_denylist_maps_to_denylist () =
   Alcotest.(check bool) "denied only -> DenyList"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.DenyList names ->
+     | Agent_sdk.Guardrails.DenyList names ->
          List.sort String.compare names
          = List.sort String.compare ["keeper_bash"; "keeper_fs_edit"]
      | _ -> false)
@@ -80,7 +80,7 @@ let test_neither_maps_to_allowall () =
   Alcotest.(check bool) "neither -> AllowAll"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowAll -> true
+     | Agent_sdk.Guardrails.AllowAll -> true
      | _ -> false)
 
 let test_empty_allowlist_maps_to_empty_allowlist () =
@@ -91,7 +91,7 @@ let test_empty_allowlist_maps_to_empty_allowlist () =
   Alcotest.(check bool) "empty allowlist -> AllowList []"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowList [] -> true
+     | Agent_sdk.Guardrails.AllowList [] -> true
      | _ -> false)
 
 let test_max_tool_calls_preserved () =
@@ -111,7 +111,7 @@ let test_allowlist_ignores_denied_when_both () =
   Alcotest.(check bool) "allowlist wins over denylist"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.AllowList ["keeper_read"] -> true
+     | Agent_sdk.Guardrails.AllowList ["keeper_read"] -> true
      | _ -> false)
 
 (* ================================================================ *)
@@ -122,19 +122,19 @@ let test_pass_to_continue () =
   let decision = Verifier_oas.verdict_to_hook_decision Pass in
   Alcotest.(check bool) "Pass -> Continue"
     true
-    (decision = Oas.Hooks.Continue)
+    (decision = Agent_sdk.Hooks.Continue)
 
 let test_warn_to_continue () =
   let decision = Verifier_oas.verdict_to_hook_decision (Warn "minor issue") in
   Alcotest.(check bool) "Warn -> Continue"
     true
-    (decision = Oas.Hooks.Continue)
+    (decision = Agent_sdk.Hooks.Continue)
 
 let test_fail_to_skip () =
   let decision = Verifier_oas.verdict_to_hook_decision (Fail "critical error") in
   Alcotest.(check bool) "Fail -> Skip"
     true
-    (decision = Oas.Hooks.Skip)
+    (decision = Agent_sdk.Hooks.Skip)
 
 (* ================================================================ *)
 (* read_only_predicate                                               *)
@@ -255,7 +255,7 @@ let test_hook_continues_on_verify_error () =
   in
   let decision =
     hook
-      (Oas.Hooks.PreToolUse {
+      (Agent_sdk.Hooks.PreToolUse {
          tool_use_id = "test-id-1";
          tool_name = "keeper_bash";
          input = `Assoc [ ("cmd", `String "echo hi") ];
@@ -268,7 +268,7 @@ let test_hook_continues_on_verify_error () =
   Alcotest.(check bool) "verify called" true !verify_called;
   Alcotest.(check bool) "verifier errors degrade open"
     true
-    (decision = Oas.Hooks.Continue)
+    (decision = Agent_sdk.Hooks.Continue)
 
 let test_hook_readonly_skips_verifier () =
   let verify_called = ref false in
@@ -282,7 +282,7 @@ let test_hook_readonly_skips_verifier () =
   in
   let decision =
     hook
-      (Oas.Hooks.PreToolUse {
+      (Agent_sdk.Hooks.PreToolUse {
          tool_use_id = "test-id-2";
          tool_name = "read file";
          input = `Assoc [ ("path", `String "README.md") ];
@@ -295,7 +295,7 @@ let test_hook_readonly_skips_verifier () =
   Alcotest.(check bool) "verify skipped" false !verify_called;
   Alcotest.(check bool) "readonly still continues"
     true
-    (decision = Oas.Hooks.Continue)
+    (decision = Agent_sdk.Hooks.Continue)
 
 (* ================================================================ *)
 (* Roundtrip: keeper_default_gate_config -> guardrails               *)
@@ -318,7 +318,7 @@ let test_default_gate_roundtrip () =
   Alcotest.(check bool) "default -> DenyList (safety)"
     true
     (match g.tool_filter with
-     | Oas.Guardrails.DenyList names -> List.length names > 0
+     | Agent_sdk.Guardrails.DenyList names -> List.length names > 0
      | _ -> false);
   Alcotest.(check (option int)) "default max_tool_calls = 5"
     (Some 5) g.max_tool_calls_per_turn

@@ -363,19 +363,19 @@ let validate_input_json schema json =
 (* Strict classifier: returns [None] for unknown JSON Schema types so
    callers can distinguish "rule fired" from "fall-through default".
    See #8832. *)
-let param_type_of_schema_opt schema : Oas.Types.param_type option =
+let param_type_of_schema_opt schema : Agent_sdk.Types.param_type option =
   match schema_type schema with
-  | "string" -> Some Oas.Types.String
-  | "integer" -> Some Oas.Types.Integer
-  | "number" -> Some Oas.Types.Number
-  | "boolean" -> Some Oas.Types.Boolean
-  | "array" -> Some Oas.Types.Array
-  | "object" -> Some Oas.Types.Object
+  | "string" -> Some Agent_sdk.Types.String
+  | "integer" -> Some Agent_sdk.Types.Integer
+  | "number" -> Some Agent_sdk.Types.Number
+  | "boolean" -> Some Agent_sdk.Types.Boolean
+  | "array" -> Some Agent_sdk.Types.Array
+  | "object" -> Some Agent_sdk.Types.Object
   | _ -> None
 
 (* Back-compat wrapper: warns once per unknown JSON Schema type and falls
    back to [String] (the legacy permissive default mirrored by the
-   upstream Oas.Mcp.json_schema_type_to_param_type). The warn
+   upstream Agent_sdk.Mcp.json_schema_type_to_param_type). The warn
    converts the silent #8605-family fallback into an observable signal
    without changing the tool-registration result. *)
 let param_type_of_schema schema =
@@ -385,7 +385,7 @@ let param_type_of_schema schema =
       Log.Misc.warn
         "param_type_of_schema: unknown JSON Schema type %S -> String (drift; see #8832)"
         (schema_type schema);
-      Oas.Types.String
+      Agent_sdk.Types.String
 
 let tool_params_of_input_schema schema =
   let required = required_names schema in
@@ -395,7 +395,7 @@ let tool_params_of_input_schema schema =
            string_member "description" property_schema
            |> Option.value ~default:(Printf.sprintf "%s parameter" name)
          in
-         let param : Oas.Types.tool_param =
+         let param : Agent_sdk.Types.tool_param =
            {
              name;
              description;

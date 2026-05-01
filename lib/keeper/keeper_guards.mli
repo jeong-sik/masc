@@ -2,7 +2,7 @@
 
     Decomposes the previously monolithic [pre_tool_use] guard chain
     (streak / deny / cost / destructive / governance) into standalone
-    OAS [Hooks.hooks] records that stack via [Oas.Hooks.compose].
+    OAS [Hooks.hooks] records that stack via [Agent_sdk.Hooks.compose].
     Each guard fills only the [pre_tool_use] slot; composition
     short-circuits on the first non-[Continue] decision.
 
@@ -103,11 +103,11 @@ val report_gate_decision :
   unit
 
 (** Build a [Hooks.hooks] record with only [pre_tool_use] filled. *)
-val hooks_of_pre_tool_use : Oas.Hooks.hook -> Oas.Hooks.hooks
+val hooks_of_pre_tool_use : Agent_sdk.Hooks.hook -> Agent_sdk.Hooks.hooks
 
 (** Compose hooks list left-to-right via [Hooks.compose]; each
     slot short-circuits on the first non-[Continue] decision. *)
-val compose_all : Oas.Hooks.hooks list -> Oas.Hooks.hooks
+val compose_all : Agent_sdk.Hooks.hooks list -> Agent_sdk.Hooks.hooks
 
 (** Mutable streak state captured by [streak_guard]: pair of
     [(tool_name, count)]. *)
@@ -118,7 +118,7 @@ val make_streak_state : unit -> streak_state
 (** Record [tool_start_time] so the post_tool_use phase can compute
     latency. Always returns [Continue]. Compose FIRST so the
     timestamp is set even when a later guard returns [Override]. *)
-val timing_guard : tool_start_time:float ref -> Oas.Hooks.hooks
+val timing_guard : tool_start_time:float ref -> Agent_sdk.Hooks.hooks
 
 (** User-supplied guard. Short-circuits via [Override] when the
     callback returns [Some reason_text]. *)
@@ -126,7 +126,7 @@ val custom_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   guard:(tool_name:string -> input:Yojson.Safe.t -> string option) ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Same-name streak gate: block when [tool_name] is called
     [threshold+] times consecutively. Catches the
@@ -137,14 +137,14 @@ val streak_guard :
   on_gate_decision:(gate_decision_event -> unit) ->
   state:streak_state ->
   threshold:int ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Reject every tool name in [denied]. *)
 val deny_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   denied:string list ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Reject when the running cost meets or exceeds [max_cost_usd].
     No-op when [None]. *)
@@ -152,7 +152,7 @@ val cost_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   max_cost_usd:float option ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Destructive-pattern detection for tools flagged by
     [Tool_dispatch.is_destructive]; runs only when [enabled]. *)
@@ -160,14 +160,14 @@ val destructive_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
   enabled:bool ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Governance gate. Escalates via [ApprovalRequired] when the
     assessed risk meets or exceeds the keeper-confirm threshold. *)
 val governance_approval_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks
 
 (** Build the full keeper pre_tool_use chain in canonical order:
     timing -> custom -> streak -> deny -> cost -> destructive ->
@@ -183,4 +183,4 @@ val build_chain :
   on_gate_decision:(gate_decision_event -> unit) ->
   pre_tool_use_guard:
     (tool_name:string -> input:Yojson.Safe.t -> string option) ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks

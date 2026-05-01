@@ -23,7 +23,7 @@ val blocker_class_of_string :
   string -> blocker_class option
 
 val blocker_class_of_sdk_error :
-  Oas.Error.sdk_error -> blocker_class option
+  Agent_sdk.Error.sdk_error -> blocker_class option
 
 val runtime_blocker_surface_of_typed_class :
   ?summary:string -> blocker_class -> runtime_blocker_surface

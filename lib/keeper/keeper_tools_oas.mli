@@ -1,7 +1,7 @@
-(** Keeper_tools_oas — Wrap keeper tools as [Oas.Tool.t] for [Agent.run].
+(** Keeper_tools_oas — Wrap keeper tools as [Agent_sdk.Tool.t] for [Agent.run].
 
     Bridges [Keeper_exec_tools.execute_keeper_tool_call] dispatch
-    to [Oas.Tool.t list] via [Tool_bridge.oas_tool_of_masc]. Tool
+    to [Agent_sdk.Tool.t list] via [Tool_bridge.oas_tool_of_masc]. Tool
     execution reads the current context from [ctx_snapshot]
     (immutable), enabling [Agent.run] to manage messages while
     keeper tools access the working context for status/metrics.
@@ -17,11 +17,11 @@ type tool_call_entry = Keeper_types.tool_call_entry =
   ; last_used_at : float
   }
 
-(** Bundle returned by [make_tool_bundle]: the [Oas.Tool.t list]
+(** Bundle returned by [make_tool_bundle]: the [Agent_sdk.Tool.t list]
     plus a [cleanup] thunk that releases the per-turn sandbox
     runtimes. *)
 type tool_bundle =
-  { tools : Oas.Tool.t list
+  { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   }
 
@@ -92,4 +92,4 @@ val make_tools :
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   ?on_tool_called:(string -> unit) ->
   unit ->
-  Oas.Tool.t list
+  Agent_sdk.Tool.t list

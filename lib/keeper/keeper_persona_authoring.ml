@@ -970,7 +970,7 @@ let handle_persona_generate ctx args =
                  ~code:Internal_error
                  (Printf.sprintf
                     "persona generation failed: %s"
-                    (Oas.Error.to_string err)) )
+                    (Agent_sdk.Error.to_string err)) )
            | Ok result ->
              let raw_text = Oas_response.text_of_response result.Oas_worker.response in
              (try

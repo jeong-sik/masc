@@ -151,7 +151,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
               ("files_reviewed", `Int (List.length target_files));
             ]))
         | Error err ->
-            let msg = Oas.Error.to_string err in
+            let msg = Agent_sdk.Error.to_string err in
             Log.Misc.warn "adversarial review failed: %s" msg;
             (true, Yojson.Safe.to_string (`Assoc [
               ("verdict", `String "unavailable");

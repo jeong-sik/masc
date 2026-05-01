@@ -1,6 +1,6 @@
 (** Keeper_extend_turns — Self-extending turn budget tool for keeper Agent.run.
 
-    Creates an [extend_turns] {!Oas.Tool.t} that lets the keeper request
+    Creates an [extend_turns] {!Agent_sdk.Tool.t} that lets the keeper request
     more turns at runtime.  The tool enforces a per-session extension limit
     (10 extensions) and an absolute ceiling on total turns. *)
 
@@ -11,8 +11,8 @@
     @param max_turns  Initial turn budget.
     @param ceiling    Absolute upper bound on turns (default: [max max_turns 200]). *)
 val make :
-  agent_ref:Oas.Agent.t option ref ->
+  agent_ref:Agent_sdk.Agent.t option ref ->
   max_turns:int ->
   ?ceiling:int ->
   unit ->
-  Oas.Tool.t
+  Agent_sdk.Tool.t

@@ -107,15 +107,15 @@ val make_worker_meta :
 val load_worker_checkpoint :
   base_path:string ->
   worker_name:string ->
-  Oas.Checkpoint.t option
-(** Reads [checkpoint.json] via {!Oas.Checkpoint.of_string}.
+  Agent_sdk.Checkpoint.t option
+(** Reads [checkpoint.json] via {!Agent_sdk.Checkpoint.of_string}.
     Returns [None] on missing file, parse failure, or
     [Sys_error]. *)
 
 val save_worker_checkpoint :
   base_path:string ->
   worker_name:string ->
-  Oas.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t ->
   (unit, string) result
 
 (** {1 Session id resolution} *)
@@ -146,19 +146,19 @@ val build_oas_mcp_tools :
   auth_token:string option ->
   session_id:string ->
   worker_name:string ->
-  (Oas.Tool.t list, string) result
+  (Agent_sdk.Tool.t list, string) result
 (** Builds the OAS-formatted MASC tool list for a local
     worker.  Filters {!list_masc_tools} by
     {!session_min_tool_names}, then wraps each schema with
     a [call_fn] that injects [agent_name] when required,
     dispatches via {!call_masc_tool}, and converts MASC
-    errors into [Oas.Types.tool_result]. *)
+    errors into [Agent_sdk.Types.tool_result]. *)
 
 val build_local_shell_tools :
   room_config:Coord.config option ->
   worker_name:string ->
   workdir:string ->
-  (Oas.Tool.t list, string) result
+  (Agent_sdk.Tool.t list, string) result
 (** Builds the local-shell tool subset (process exec /
     file IO).  Errors when {!Process_eio.get_proc_mgr} or
     {!Process_eio.get_clock} are unavailable.  Hooks
@@ -168,13 +168,13 @@ val build_local_shell_tools :
 (** {1 Provider resolution} *)
 
 val oas_provider_of_label :
-  string -> (Oas.Provider.config, string) result
+  string -> (Agent_sdk.Provider.config, string) result
 (** Parses a model label (e.g. ["openai:gpt-4.1"]) into an
-    {!Oas.Provider.config}.  Errors when
+    {!Agent_sdk.Provider.config}.  Errors when
     {!Cascade_config.parse_model_string} returns [None]. *)
 
 val resolve_oas_provider_of_label :
-  string -> (Oas.Provider.config * string, string) result
+  string -> (Agent_sdk.Provider.config * string, string) result
 (** Like {!oas_provider_of_label} but additionally returns
     the parsed [model_id] so callers do not have to
     re-parse the label to feed both fields into
@@ -190,7 +190,7 @@ val append_worker_completion_log :
   status:string ->
   output:string ->
   ?error:string ->
-  ?raw_trace_run:Oas.Raw_trace.run_ref ->
+  ?raw_trace_run:Agent_sdk.Raw_trace.run_ref ->
   ?evidence_session_id:string ->
   ?proof_run_id:string ->
   ?proof_result_status:string ->
@@ -204,22 +204,22 @@ val append_worker_completion_log :
 
 val build_resume_config :
   worker_name:string ->
-  provider:Oas.Provider.config ->
+  provider:Agent_sdk.Provider.config ->
   model_id:string ->
   system_prompt:string ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   max_turns:int ->
   thinking_enabled:bool ->
-  hooks:Oas.Hooks.hooks ->
-  raw_trace:Oas.Raw_trace.t ->
-  ?periodic_callbacks:Oas.Agent.periodic_callback list ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  hooks:Agent_sdk.Hooks.hooks ->
+  raw_trace:Agent_sdk.Raw_trace.t ->
+  ?periodic_callbacks:Agent_sdk.Agent.periodic_callback list ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   unit ->
-  Oas.Types.agent_config * Oas.Agent.options
+  Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
 (** Assembles the [(config, options)] pair consumed by
-    [Oas.Agent.resume].  [config] inherits
-    {!Oas.Types.default_config} and overrides
+    [Agent_sdk.Agent.resume].  [config] inherits
+    {!Agent_sdk.Types.default_config} and overrides
     [name] / [model] / [system_prompt] / [max_tokens]
     ({!local_worker_max_tokens}) / [max_turns] /
     [temperature] / [top_p] / [top_k] / [enable_thinking]
@@ -237,8 +237,8 @@ val materialize_direct_evidence :
   meta:worker_container_meta ->
   prompt:string ->
   workspace_path:string ->
-  agent:Oas.Agent.t ->
-  raw_trace:Oas.Raw_trace.t ->
+  agent:Agent_sdk.Agent.t ->
+  raw_trace:Agent_sdk.Raw_trace.t ->
   unit
 (** Writes a direct-evidence bundle under
     [<base_path>/.masc/oas-runtime/...] when

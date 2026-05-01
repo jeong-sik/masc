@@ -454,7 +454,7 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
                 ~session_dir:session.session_dir ~session_id:trace_id
             with
             | Ok cp ->
-                (match cp.Oas.Checkpoint.working_context with
+                (match cp.Agent_sdk.Checkpoint.working_context with
                  | Some json ->
                      Keeper_memory_policy
                      .snapshot_of_structured_working_context json

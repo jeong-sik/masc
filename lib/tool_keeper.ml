@@ -1417,7 +1417,7 @@ let handle_keeper_clear ctx args : tool_result =
             if preserve_system then
               (* Keep only system-role messages *)
               List.filter
-                (fun (m : Oas.Types.message) ->
+                (fun (m : Agent_sdk.Types.message) ->
                    Poly.equal m.role Llm_provider.Types.System)
                 existing_messages
             else

@@ -418,4 +418,5 @@ Task verifier     →  (future)                   →  reward_advice_artifact
 ```bash
 dune runtest test/test_reward_advice_artifact.ml
 dune runtest test/test_post_verifier.ml
+dune runtest test/test_tool_call_quality_benchmark.ml
 ```

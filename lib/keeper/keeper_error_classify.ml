@@ -11,33 +11,6 @@
 open Keeper_types
 open Keeper_exec_context
 
-(* Duplicated from keeper_unified_turn.ml to avoid circular dependency.
-   keeper_unified_turn.ml also keeps its own copy for the error-classification
-   helpers that remain there (is_server_rejected_parse_error pattern matching). *)
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  if start_idx < 0 || start_idx + needle_len > String.length haystack
-  then false
-  else
-    let rec check i =
-      if i >= needle_len then true
-      else if String.unsafe_get needle i <> String.unsafe_get haystack (start_idx + i)
-      then false
-      else check (i + 1)
-    in
-    check 0
-
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  if needle = "" then true
-  else
-    let max_start = String.length haystack - String.length needle in
-    let rec try_from i =
-      if i > max_start then false
-      else if substring_matches_at ~needle haystack i then true
-      else try_from (i + 1)
-    in
-    try_from 0
-
 (** {1 Retry & Side-Effect Safety}
 
     @boundary-contract
@@ -49,19 +22,20 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
     - Neither may: retry silently after a mutating tool succeeded (integrity
       over availability); duplicate OAS per-provider retry counts. *)
 
-(** Detect transient network errors that warrant retry with short backoff.
-    Uses structured [Oas.Error.sdk_error] pattern matching instead of
-    substring matching on stringified error messages. *)
+(** Detect timeout-related message text for OAS budget exhaustion and
+    turn wall-clock deadline expiry.
+    These helpers classify timeout messages via substring matching on the
+    reported message text. *)
 let is_oas_timeout_budget_message message =
   let lower = String.lowercase_ascii message in
-  string_contains_substring ~needle:"(budget=" lower
-  || string_contains_substring ~needle:"oas_timeout_budget" lower
-  || string_contains_substring ~needle:"oas budget timeout" lower
+  String_util.contains_substring lower "(budget="
+  || String_util.contains_substring lower "oas_timeout_budget"
+  || String_util.contains_substring lower "oas budget timeout"
 
 let is_turn_wall_clock_timeout_message message =
   let lower = String.lowercase_ascii message in
-  string_contains_substring ~needle:"turn wall-clock timeout" lower
-  || string_contains_substring ~needle:"turn wall-clock budget exhausted" lower
+  String_util.contains_substring lower "turn wall-clock timeout"
+  || String_util.contains_substring lower "turn wall-clock budget exhausted"
 
 let is_structural_oas_timeout_message message =
   is_oas_timeout_budget_message message
@@ -112,11 +86,11 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
       (* Compound patterns to avoid false positives on generic messages
          like "Service closing" or "Can't find the specified tool".
          Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
+      (String_util.contains_substring lower "can't find closing"
+       || String_util.contains_substring lower "find end of")
+      || String_util.contains_substring lower "unexpected character in json"
+      || String_util.contains_substring lower "unterminated"
+      || String_util.contains_substring lower "parse error"
   | _ -> false
 
 let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
@@ -406,8 +380,8 @@ let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
   | None -> (
       match err with
       | Oas.Error.Internal msg ->
-          string_contains_substring
-            ~needle:ambiguous_side_effect_error_prefix msg
+          String_util.contains_substring msg
+            ambiguous_side_effect_error_prefix
       | _ -> false)
   | _ -> false
 

@@ -125,7 +125,12 @@ function OutputPanel() {
 
 function CascadePanel() {
   const D = window.MASC_DATA || {};
-  const cascades = (D.cascade && Array.isArray(D.cascade) ? D.cascade : []).slice(0, 6);
+  const cascadeSource = Array.isArray(D.cascade) ? D.cascade : (D.cascade ? [D.cascade] : []);
+  const cascades = cascadeSource.map((c) => {
+    const hops = Array.isArray(c.hops) ? c.hops : (Array.isArray(c.steps) ? c.steps : []);
+    const outcome = c.outcome || (hops.some(h => h.status === "hit" || h.status === "ok") ? "ok" : "fail");
+    return { ...c, hops, outcome };
+  }).slice(0, 6);
   return (
     <div className="dr-cascade">
       <div className="dr-cascade-bar">

@@ -101,8 +101,12 @@ type agent_ledger_metrics = {
   goal_completions : int;
   goal_adherent_completions : int;
   safety_violations : int;
-  execution_reliability : float;  (** [tool_successes / tool_calls], 0.0 if no calls. *)
-  goal_adherence : float;  (** [goal_adherent_completions / goal_completions], 0.0 if none. *)
+  execution_reliability : float;
+      (** [tool_successes / tool_calls], 1.0 if no calls
+          (neutral when no history). *)
+  goal_adherence : float;
+      (** [goal_adherent_completions / goal_completions], 1.0 if none
+          (neutral when no history). *)
   safety_compliance : float;  (** [1.0 - penalty] where penalty grows with violations. *)
 }
 

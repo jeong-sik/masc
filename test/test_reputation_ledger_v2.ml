@@ -4,12 +4,20 @@ open Alcotest
 open Masc_mcp
 
 let temp_dir () =
-  let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_reputation_ledger_v2_%d" (Random.int 1_000_000))
+  let path =
+    Filename.temp_file ~temp_dir:(Filename.get_temp_dir_name ())
+      "test_reputation_ledger_v2_" ""
   in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None ->
+      (* Repo convention: use an empty env value as the portable unset
+         approximation; see the same pattern in env-config tests. *)
+      Unix.putenv name ""
 
 let cleanup_dir dir =
   let rec rm path =
@@ -32,12 +40,8 @@ let with_room f =
   Unix.putenv "SB_PG_URL" "";
   Fun.protect
     ~finally:(fun () ->
-      (match saved_pg with
-       | Some v -> Unix.putenv "MASC_POSTGRES_URL" v
-       | None -> Unix.putenv "MASC_POSTGRES_URL" "");
-      (match saved_sb with
-       | Some v -> Unix.putenv "SB_PG_URL" v
-       | None -> Unix.putenv "SB_PG_URL" "");
+      restore_env "MASC_POSTGRES_URL" saved_pg;
+      restore_env "SB_PG_URL" saved_sb;
       cleanup_dir dir)
     (fun () ->
       let config = Coord.default_config dir in

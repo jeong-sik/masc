@@ -765,6 +765,24 @@ let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
   read_payload_string payload ~len ~on_complete:(fun text ->
       handle_inbound_text session ~on_message ~is_fin text)
 
+(** Read the RFC 6455 close-frame payload, log the close code at DEBUG,
+    then clean up the session.  Used by both the standalone and the
+    HTTP-upgrade [Connection_close] handlers. *)
+let read_close_reason_and_cleanup session_id ~len payload =
+  read_payload_string payload ~len ~on_complete:(fun text ->
+    let reason_str =
+      if String.length text >= 2 then begin
+        let code = (Char.code text.[0] lsl 8) lor (Char.code text.[1]) in
+        if String.length text > 2 then
+          Printf.sprintf "close_code=%d reason=%S"
+            code (String.sub text 2 (String.length text - 2))
+        else
+          Printf.sprintf "close_code=%d" code
+      end else "no_code"
+    in
+    Log.Server.debug "WebSocket session %s close_reason=%s" session_id reason_str;
+    cleanup_session session_id)
+
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =
   let removed =
@@ -840,8 +858,7 @@ let upgrade_connection
                 Httpun_ws.Wsd.send_pong wsd;
                 Httpun_ws.Payload.close payload
               | `Connection_close ->
-                cleanup_session session_id;
-                Httpun_ws.Payload.close payload
+                read_close_reason_and_cleanup session_id ~len payload
               | `Pong | `Other _ ->
                 Httpun_ws.Payload.close payload
             );

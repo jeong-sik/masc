@@ -67,8 +67,7 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
         Ws.Wsd.send_pong wsd;
         Ws.Payload.close payload
       | `Connection_close ->
-        Server_mcp_transport_ws.cleanup_session session_id;
-        Ws.Payload.close payload
+        Server_mcp_transport_ws.read_close_reason_and_cleanup session_id ~len payload
       | `Pong | `Other _ ->
         Ws.Payload.close payload
     );

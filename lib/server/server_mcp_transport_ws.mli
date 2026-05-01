@@ -160,6 +160,18 @@ val read_inbound_message_frame :
     false] frames, and invokes [on_message ~session_id
     ~body] when a final fragment arrives. *)
 
+val read_close_reason_and_cleanup : string -> len:int -> Httpun_ws.Payload.t -> unit
+(** Reads the RFC 6455 close-frame payload from [payload]
+    (up to [len] bytes), logs the 2-byte close code at
+    {!Log.Server.debug} for diagnostics (codes: 1000 =
+    normal, 1001 = going_away, 1006 = abnormal, 1011 =
+    server_error), then calls {!cleanup_session}.  Used by
+    both the standalone and the HTTP-upgrade
+    [Connection_close] frame handlers.  Replaces the
+    previous pattern of calling [cleanup_session] +
+    [Payload.close] separately, which discarded the close
+    code. *)
+
 (** {1 Outbound delivery} *)
 
 val send_to_session_result : string -> string -> send_outcome

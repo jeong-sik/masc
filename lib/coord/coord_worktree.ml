@@ -657,6 +657,66 @@ let score_repo_candidate ~(task : task) ~tokens ~path_hints candidate =
   in
   mention_score + file_score + worktree_score
 
+(* Hoisted above [infer_task_repo_name] so the candidates=[] path can
+   validate task-evidence mentions against the workspace before
+   returning. The companion error helpers
+   ([workspace_repo_not_found_error] / [workspace_repo_ambiguous_error]
+   / [partial_clone_error]) stay near [auto_provision_sandbox_clone]
+   since [infer_task_repo_name] does not produce them. *)
+let workspace_repo_matches ~search_root ~repo_name =
+  let max_dirs = 4000 in
+  let max_matches = 8 in
+  let preferred_dir_name = function
+    | "workspace" | "workspaces" | "repos" | "projects" | "src" -> true
+    | _ -> false
+  in
+  let entry_priority entry =
+    if entry = repo_name then 0
+    else if preferred_dir_name entry then 1
+    else if String.length entry > 0 && entry.[0] = '.' then 3
+    else 2
+  in
+  let skip_dir_name name =
+    name = ".git" || name = ".hg" || name = ".svn"
+    || name = Common.masc_dirname || name = ".worktrees"
+    || name = "_build" || name = "node_modules"
+  in
+  let matches =
+    if Filename.basename search_root = repo_name && is_git_clone search_root
+    then ref [ search_root ]
+    else ref []
+  in
+  let queue = Queue.create () in
+  Queue.add search_root queue;
+  let dirs_seen = ref 0 in
+  while
+    !dirs_seen < max_dirs
+    && Queue.length queue > 0
+    && List.length !matches < max_matches
+  do
+    let dir = Queue.take queue in
+    incr dirs_seen;
+    let entries =
+      try Sys.readdir dir with Sys_error _ -> [||]
+    in
+    Array.sort
+      (fun a b ->
+         match compare (entry_priority a) (entry_priority b) with
+         | 0 -> compare a b
+         | n -> n)
+      entries;
+    Array.iter
+      (fun entry ->
+         if List.length !matches < max_matches then
+           let path = Filename.concat dir entry in
+           if entry = repo_name && is_git_clone path then
+             matches := path :: !matches;
+           if safe_is_dir path && not (skip_dir_name entry) then
+             Queue.add path queue)
+      entries
+  done;
+  List.sort_uniq String.compare !matches
+
 let infer_task_repo_name config ~agent_name ~task_id =
   let repos_dir = repos_dir_of_keeper config agent_name in
   let candidates = repo_candidates_in_dir repos_dir in
@@ -675,9 +735,52 @@ let infer_task_repo_name config ~agent_name ~task_id =
   | Some task -> (
       match candidates with
       | [] -> (
+          (* Sandbox is empty.  Prefer a previously-linked
+             [task.worktree.repo_name]; otherwise scan task evidence
+             for a unique safe_repo_name mention that resolves to
+             exactly one workspace repo via [workspace_repo_matches]
+             — [worktree_create_r] will then [auto_provision_sandbox_clone]
+             on demand.  Returning [Ok None] here would be a silent
+             stranding of the task (caller falls to
+             [missing_sandbox_clone] with no actionable repo hint),
+             which contradicts the PR's "infer from task evidence"
+             contract.  Multiple workspace matches escalate to
+             [ambiguous_task_repo] for the same reason as the
+             multi-candidate path. *)
           match task.worktree with
           | Some wt when safe_repo_name wt.repo_name -> Ok (Some wt.repo_name)
-          | _ -> Ok None)
+          | _ ->
+              let tokens = tokenize_repo_evidence (task_repo_text task) in
+              let mention_candidates =
+                tokens
+                (* Allow URL-path mentions like "github.com/org/masc-mcp"
+                   to surface "masc-mcp" via Filename.basename. *)
+                |> List.concat_map (fun t -> [ t; Filename.basename t ])
+                |> List.filter safe_repo_name
+                |> List.sort_uniq String.compare
+              in
+              let search_root = project_root config in
+              let workspace_unique =
+                mention_candidates
+                |> List.filter_map (fun name ->
+                       match
+                         workspace_repo_matches ~search_root ~repo_name:name
+                       with
+                       | [ _ ] -> Some name
+                       | _ -> None)
+                |> List.sort_uniq String.compare
+              in
+              (match workspace_unique with
+               | [] -> Ok None
+               | [ name ] -> Ok (Some name)
+               | many ->
+                   Error
+                     (IoError
+                        (Printf.sprintf
+                           "ambiguous_task_repo: task %s has no sandbox \
+                            clone, and task evidence mentions multiple \
+                            workspace repos [%s]"
+                           task_id (String.concat ", " many)))))
       | [ candidate ] -> Ok (Some candidate.name)
       | _ ->
           let tokens = tokenize_repo_evidence (task_repo_text task) in
@@ -768,60 +871,6 @@ let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
 let partial_clone_error ~clone_path ~msg =
   rm_rf clone_path;
   IoError msg
-
-let workspace_repo_matches ~search_root ~repo_name =
-  let max_dirs = 4000 in
-  let max_matches = 8 in
-  let preferred_dir_name = function
-    | "workspace" | "workspaces" | "repos" | "projects" | "src" -> true
-    | _ -> false
-  in
-  let entry_priority entry =
-    if entry = repo_name then 0
-    else if preferred_dir_name entry then 1
-    else if String.length entry > 0 && entry.[0] = '.' then 3
-    else 2
-  in
-  let skip_dir_name name =
-    name = ".git" || name = ".hg" || name = ".svn"
-    || name = Common.masc_dirname || name = ".worktrees"
-    || name = "_build" || name = "node_modules"
-  in
-  let matches =
-    if Filename.basename search_root = repo_name && is_git_clone search_root
-    then ref [ search_root ]
-    else ref []
-  in
-  let queue = Queue.create () in
-  Queue.add search_root queue;
-  let dirs_seen = ref 0 in
-  while
-    !dirs_seen < max_dirs
-    && Queue.length queue > 0
-    && List.length !matches < max_matches
-  do
-    let dir = Queue.take queue in
-    incr dirs_seen;
-    let entries =
-      try Sys.readdir dir with Sys_error _ -> [||]
-    in
-    Array.sort
-      (fun a b ->
-         match compare (entry_priority a) (entry_priority b) with
-         | 0 -> compare a b
-         | n -> n)
-      entries;
-    Array.iter
-      (fun entry ->
-         if List.length !matches < max_matches then
-           let path = Filename.concat dir entry in
-           if entry = repo_name && is_git_clone path then
-             matches := path :: !matches;
-           if safe_is_dir path && not (skip_dir_name entry) then
-             Queue.add path queue)
-      entries
-  done;
-  List.sort_uniq String.compare !matches
 
 let git_origin_url root =
   match run_argv_with_status [ "git"; "-C"; root; "remote"; "get-url"; "origin" ] with

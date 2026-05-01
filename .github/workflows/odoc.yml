@@ -1,0 +1,69 @@
+name: odoc Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'bin/**'
+      - 'dune-project'
+      - 'dune-workspace'
+      - '*.opam'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoc-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-doc:
+    name: Build odoc
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-doc
+
+      - name: Build library
+        run: opam exec -- dune build
+
+      - name: Build documentation
+        run: opam exec -- dune build @doc
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _build/default/_doc/_html
+
+  deploy:
+    name: Deploy to Pages
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: build-doc
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

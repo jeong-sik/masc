@@ -138,8 +138,8 @@ val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)
 
-(** Daily budget from cached [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
-    config (default: 0.10). *)
+(** Current daily budget from keeper runtime config
+    ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
 val daily_budget_usd : unit -> float
 
 (** Check whether the keeper has remaining budget for deliberation.

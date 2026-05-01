@@ -325,7 +325,7 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
 
 (* ---------- Budget check ---------- *)
 
-(** Daily budget from cached config (set via env at startup). *)
+(** Current daily budget from keeper runtime config. *)
 let daily_budget_usd () : float =
   Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
 

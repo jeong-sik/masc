@@ -52,5 +52,9 @@ describe('cockpit entrypoint registry', () => {
       tab: 'workspace',
       params: { section: 'repositories', view: 'graph' },
     })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'heuristic-log' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'heuristics', focus: 'log' },
+    })
   })
 })

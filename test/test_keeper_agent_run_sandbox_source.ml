@@ -8,6 +8,7 @@
 open Alcotest
 
 let target_file = "lib/keeper/keeper_agent_run.ml"
+let run_tools_file = "lib/keeper/keeper_run_tools.ml"
 
 let load_source rel =
   let source_root =
@@ -97,6 +98,36 @@ let test_runtime_contract_sandbox_root_is_keeper_visible () =
        src)
 ;;
 
+let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
+  let agent_src = load_source target_file in
+  let run_tools_src = load_source run_tools_file in
+  check
+    bool
+    "run setup retains the full keeper tool bundle"
+    true
+    (contains ~needle:"Keeper_tools_oas.make_tool_bundle" run_tools_src);
+  check
+    bool
+    "run setup exposes the bundle cleanup callback"
+    true
+    (contains ~needle:"cleanup = keeper_tool_bundle.cleanup" run_tools_src);
+  check
+    bool
+    "agent run reads setup cleanup callback"
+    true
+    (contains ~needle:"s.Keeper_run_tools.cleanup ()" agent_src);
+  check
+    int
+    "agent run defines cleanup once and references it from both result and exception branches"
+    3
+    (count_occurrences ~needle:"cleanup_agent_setup" agent_src);
+  check
+    bool
+    "agent run preserves exception propagation after cleanup"
+    true
+    (contains ~needle:"raise e" agent_src)
+;;
+
 let () =
   run
     "keeper_agent_run_sandbox_source"
@@ -113,6 +144,10 @@ let () =
             "runtime_contract sandbox_root is keeper-visible"
             `Quick
             test_runtime_contract_sandbox_root_is_keeper_visible
+        ; test_case
+            "keeper tool bundle cleanup is retained and invoked"
+            `Quick
+            test_keeper_tool_bundle_cleanup_is_retained_and_invoked
         ] )
     ]
 ;;

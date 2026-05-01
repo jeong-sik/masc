@@ -62,6 +62,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
     at the OAS call site. *)
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
+  ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
   ; memory : Agent_sdk.Memory.t
@@ -187,8 +188,8 @@ let prepare_agent_setup
               (fun (e : Keeper_tool_affinity.affinity_entry) ->
                  Printf.sprintf "%s(%.1f)" e.tool_name e.score)
               entries)));
-  let keeper_tools =
-    Keeper_tools_oas.make_tools
+  let keeper_tool_bundle =
+    Keeper_tools_oas.make_tool_bundle
       ~config
       ~meta
       ~ctx_snapshot
@@ -197,6 +198,7 @@ let prepare_agent_setup
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
       ()
   in
+  let keeper_tools = keeper_tool_bundle.tools in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -1373,6 +1375,7 @@ let prepare_agent_setup
     ])
   in
   Ok { tools
+     ; cleanup = keeper_tool_bundle.cleanup
      ; hooks
      ; reducer
      ; memory

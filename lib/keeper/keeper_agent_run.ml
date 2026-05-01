@@ -155,6 +155,28 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
+  let cleanup_agent_setup () =
+    try s.Keeper_run_tools.cleanup () with
+    | Eio.Cancel.Cancelled _ -> ()
+    | e ->
+      let backtrace = Printexc.get_backtrace () in
+      Log.Keeper.warn
+        "%s: keeper tool bundle cleanup raised: %s%s"
+        meta.name
+        (Printexc.to_string e)
+        (if String.equal backtrace "" then "" else "\n" ^ backtrace)
+  in
+  let run_with_setup_cleanup f =
+    match f () with
+    | result ->
+      cleanup_agent_setup ();
+      result
+    | exception e ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      cleanup_agent_setup ();
+      Printexc.raise_with_backtrace e backtrace
+  in
+  run_with_setup_cleanup @@ fun () ->
   let tools = s.Keeper_run_tools.tools in
   let hooks = s.Keeper_run_tools.hooks in
   let reducer = s.Keeper_run_tools.reducer in

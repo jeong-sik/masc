@@ -160,6 +160,10 @@ val read_inbound_message_frame :
     false] frames, and invokes [on_message ~session_id
     ~body] when a final fragment arrives. *)
 
+val close_reason_debug_string : string -> string
+(** Decodes an RFC 6455 close-frame payload into the compact
+    DEBUG-log detail used by WebSocket cleanup paths. *)
+
 val read_close_reason_and_cleanup : string -> len:int -> Httpun_ws.Payload.t -> unit
 (** Reads the RFC 6455 close-frame payload from [payload]
     (up to [len] bytes), logs the 2-byte close code at
@@ -171,6 +175,13 @@ val read_close_reason_and_cleanup : string -> len:int -> Httpun_ws.Payload.t -> 
     previous pattern of calling [cleanup_session] +
     [Payload.close] separately, which discarded the close
     code. *)
+
+val read_eof_and_cleanup :
+  string -> ?error:Httpun_ws.Websocket_connection.error -> unit -> unit
+(** Logs an EOF-side close reason at DEBUG, then calls
+    {!cleanup_session}.  This distinguishes socket EOFs
+    from clean close frames without increasing lifecycle
+    logging above DEBUG. *)
 
 (** {1 Outbound delivery} *)
 

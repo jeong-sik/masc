@@ -156,6 +156,25 @@ let test_ws_parse_handles_real_broadcast_wire_format () =
               "execution_snapshot maps to execution slice"
               (Some "execution") parsed.slice)
 
+let close_payload code reason =
+  String.init 2 (function
+      | 0 -> Char.chr ((code lsr 8) land 0xff)
+      | _ -> Char.chr (code land 0xff))
+  ^ reason
+
+let test_ws_close_reason_debug_string () =
+  let module Ws = Masc_mcp.Server_mcp_transport_ws in
+  Alcotest.(check string) "empty payload"
+    "no_code" (Ws.close_reason_debug_string "");
+  Alcotest.(check string) "malformed one-byte payload"
+    "malformed_close_payload_len=1"
+    (Ws.close_reason_debug_string "\000");
+  Alcotest.(check string) "normal close code"
+    "close_code=1000" (Ws.close_reason_debug_string (close_payload 1000 ""));
+  Alcotest.(check string) "server error reason"
+    "close_code=1011 reason=\"server restart\""
+    (Ws.close_reason_debug_string (close_payload 1011 "server restart"))
+
 (* ============================================================
    3. WebRTC Signaling Full Flow
    ============================================================ *)
@@ -295,6 +314,8 @@ let () =
         test_ws_external_subscriber_receives_broadcast;
       Alcotest.test_case "parse handles real broadcast wire format" `Quick
         test_ws_parse_handles_real_broadcast_wire_format;
+      Alcotest.test_case "close reason debug string decodes RFC6455 payload" `Quick
+        test_ws_close_reason_debug_string;
     ]);
     ("webrtc_signaling",
       if Sys.getenv_opt "MASC_TEST_WEBRTC" = Some "1" then [

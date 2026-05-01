@@ -845,6 +845,19 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
            ?selected_model
            ~decision:(Approval_expired reason)
            ();
+         (* Mirror expire_stale's teardown so external observers and
+            queued waiters see the same lifecycle signal as a stale
+            expiry: resolve the promise with [Reject reason] and run
+            the on_resolution callback (None for submit_and_await
+            entries today, but kept symmetric with expire_stale in
+            case the contract grows). Eio.Promise.resolve raises if
+            the promise is already resolved by a concurrent path
+            (e.g. expire_stale racing with this timeout) — guard
+            with try/with and let cancellation propagate. *)
+         (try Eio.Promise.resolve resolver (Oas.Hooks.Reject reason)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> ());
          Oas.Hooks.Deny reason)
     | None -> Eio.Promise.await promise
   in

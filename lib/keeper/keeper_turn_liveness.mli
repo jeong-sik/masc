@@ -30,9 +30,10 @@ val fail_open_local_only_when_unavailable :
   effective_cascade:string ->
   string list ->
   string
-(** When phase routing temporarily forces [local_only], fail open to the
+(** When phase routing temporarily forces the phase-buffer route, fail open to the
     keeper's configured base cascade if the local Ollama endpoint is
-    unavailable. Explicit [local_only] keepers are preserved. *)
+    unavailable. Legacy [local_only] aliases normalize through
+    [routes.phase_buffer]. *)
 
 val resolve_ollama_only_base_url :
   ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->

@@ -520,57 +520,149 @@ let repos_dir_of_keeper config agent_name =
   in
   Filename.concat config.base_path repos_rel
 
-let rec rm_rf path =
-  if safe_file_exists path then
-    if safe_is_dir path then begin
-      (try Sys.readdir path with Sys_error _ -> [||])
-      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
-      (try Unix.rmdir path with Unix.Unix_error _ -> ())
-    end else
-      try Unix.unlink path with Unix.Unix_error _ -> ()
+type repo_candidate = {
+  name : string;
+  path : string;
+}
 
-let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
-  let rel_target, clone_hint =
-    match repo_name with
-    | Some name when String.trim name <> "" ->
-      let rel = Printf.sprintf "repos/%s" name in
-      ( rel,
-        Printf.sprintf
-          "keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" path=\"%s\""
-          name rel )
-    | _ ->
-      ( "repos/<repo>",
-        "keeper_shell op=git_clone url=\"https://github.com/<org>/<repo>.git\" \
-         path=\"repos/<repo>\"" )
+let trim_repo_token token =
+  let is_edge = function
+    | '`' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+    | ',' | ';' | ':' | '!' | '?' | '.' -> true
+    | _ -> false
   in
-  IoError
-    (Printf.sprintf
-       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
-        (expected %s). Recovery: %s"
-       agent_name repos_dir rel_target clone_hint)
+  let len = String.length token in
+  let rec left i =
+    if i >= len then len
+    else if is_edge token.[i] then left (i + 1)
+    else i
+  in
+  let rec right i =
+    if i < 0 then -1
+    else if is_edge token.[i] then right (i - 1)
+    else i
+  in
+  let l = left 0 in
+  let r = right (len - 1) in
+  if r < l then "" else String.sub token l (r - l + 1)
 
-let workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
-    ~search_root =
-  IoError
-    (Printf.sprintf
-       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
-        and no workspace git repo named %s was found under %s. Recovery: \
-        keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" \
-        path=\"repos/%s\""
-       agent_name repos_dir repo_name search_root repo_name repo_name)
+let tokenize_repo_evidence text =
+  let mapped =
+    String.map
+      (function
+        | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.'
+          | '/') as c -> c
+        | _ -> ' ')
+      text
+  in
+  mapped
+  |> String.split_on_char ' '
+  |> List.map trim_repo_token
+  |> List.filter (fun token -> token <> "")
 
-let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
-  IoError
-    (Printf.sprintf
-       "ambiguous_workspace_repo: found multiple git repos named %s under %s: \
-        [%s]. Auto-provision is blocked until the repo is disambiguated; use \
-        keeper_shell op=git_clone explicitly."
-       repo_name search_root (String.concat ", " matches))
+(* Route to the SSOT helper rather than allocating String.sub on every
+   step.  Keeps semantics aligned across modules (empty needle returns
+   true). *)
+let contains_substring = String_util.contains_substring
 
-let partial_clone_error ~clone_path ~msg =
-  rm_rf clone_path;
-  IoError msg
+let task_repo_text (task : task) =
+  let handoff_texts =
+    match task.handoff_context with
+    | None -> []
+    | Some handoff ->
+        [ Some handoff.summary
+        ; handoff.reason
+        ; handoff.next_step
+        ; handoff.failure_mode
+        ]
+        |> List.filter_map Fun.id
+  in
+  String.concat "\n" (task.title :: task.description :: handoff_texts)
 
+(* Reject any path-hint candidate whose components include a literal
+   ".." segment.  Substring matching falsely flagged legitimate names
+   like "..config.ts.bak" (filename containing ".."), and missed
+   embedded segments such as "src/foo/../bar" only by accident.
+   Splitting on '/' and checking segments is both more precise and
+   the same definition the OS uses for parent-traversal. *)
+let has_parent_segment token =
+  String.split_on_char '/' token
+  |> List.exists (fun seg -> String.equal seg "..")
+
+let task_path_hints (task : task) =
+  let text_paths =
+    task_repo_text task
+    |> tokenize_repo_evidence
+    |> List.filter (fun token ->
+           contains_substring token "/"
+           && Filename.is_relative token
+           && not (has_parent_segment token))
+  in
+  (task.files @ text_paths)
+  |> List.map trim_repo_token
+  |> List.filter (fun token ->
+         token <> ""
+         && Filename.is_relative token
+         && not (has_parent_segment token))
+  |> List.sort_uniq String.compare
+
+let repo_candidates_in_dir repos_dir =
+  if not (safe_is_dir repos_dir) then []
+  else
+    let entries =
+      try Sys.readdir repos_dir |> Array.to_list with Sys_error _ -> []
+    in
+    entries
+    |> List.filter safe_repo_name
+    |> List.filter_map (fun name ->
+           let path = Filename.concat repos_dir name in
+           if is_git_clone path then Some { name; path } else None)
+    |> List.sort (fun a b -> String.compare a.name b.name)
+
+let repo_name_mentioned ~tokens repo_name =
+  List.exists
+    (fun token ->
+       String.equal token repo_name
+       || String.equal (Filename.basename token) repo_name)
+    tokens
+
+let task_by_id config task_id =
+  let backlog = Coord_backlog.read_backlog config in
+  List.find_opt (fun (task : task) -> String.equal task.id task_id)
+    backlog.tasks
+
+let max_path_hints = 20
+let mention_score_value = 100
+let file_score_weight = 25
+
+let score_repo_candidate ~(task : task) ~tokens ~path_hints candidate =
+  let mention_score =
+    if repo_name_mentioned ~tokens candidate.name then mention_score_value
+    else 0
+  in
+  let file_score =
+    if mention_score >= mention_score_value then 0
+    else
+      path_hints
+      |> List.filteri (fun i _ -> i < max_path_hints)
+      |> List.filter (fun rel_path ->
+             safe_file_exists (Filename.concat candidate.path rel_path))
+      |> List.length
+      |> ( * ) file_score_weight
+  in
+  let worktree_score =
+    match task.worktree with
+    | Some wt when String.equal wt.repo_name candidate.name -> 5
+    | _ -> 0
+  in
+  mention_score + file_score + worktree_score
+
+(* Hoisted above [infer_task_repo_name] so the candidates=[] path can
+   validate task-evidence mentions against the workspace before
+   returning. The companion error helpers
+   ([workspace_repo_not_found_error] / [workspace_repo_ambiguous_error]
+   / [partial_clone_error]) stay near [auto_provision_sandbox_clone]
+   since [infer_task_repo_name] does not produce them. *)
 let workspace_repo_matches ~search_root ~repo_name =
   let max_dirs = 4000 in
   let max_matches = 8 in
@@ -624,6 +716,161 @@ let workspace_repo_matches ~search_root ~repo_name =
       entries
   done;
   List.sort_uniq String.compare !matches
+
+let infer_task_repo_name config ~agent_name ~task_id =
+  let repos_dir = repos_dir_of_keeper config agent_name in
+  let candidates = repo_candidates_in_dir repos_dir in
+  match task_by_id config task_id with
+  | None -> (
+      match candidates with
+      | [] -> Ok None
+      | [ candidate ] -> Ok (Some candidate.name)
+      | _ ->
+          Error
+            (IoError
+               (Printf.sprintf
+                  "ambiguous_task_repo: task %s is not in backlog and sandbox has multiple repos [%s]"
+                  task_id
+                  (String.concat ", " (List.map (fun c -> c.name) candidates)))))
+  | Some task -> (
+      match candidates with
+      | [] -> (
+          (* Sandbox is empty.  Prefer a previously-linked
+             [task.worktree.repo_name]; otherwise scan task evidence
+             for a unique safe_repo_name mention that resolves to
+             exactly one workspace repo via [workspace_repo_matches]
+             — [worktree_create_r] will then [auto_provision_sandbox_clone]
+             on demand.  Returning [Ok None] here would be a silent
+             stranding of the task (caller falls to
+             [missing_sandbox_clone] with no actionable repo hint),
+             which contradicts the PR's "infer from task evidence"
+             contract.  Multiple workspace matches escalate to
+             [ambiguous_task_repo] for the same reason as the
+             multi-candidate path. *)
+          match task.worktree with
+          | Some wt when safe_repo_name wt.repo_name -> Ok (Some wt.repo_name)
+          | _ ->
+              let tokens = tokenize_repo_evidence (task_repo_text task) in
+              let mention_candidates =
+                tokens
+                (* Allow URL-path mentions like "github.com/org/masc-mcp"
+                   to surface "masc-mcp" via Filename.basename. *)
+                |> List.concat_map (fun t -> [ t; Filename.basename t ])
+                |> List.filter safe_repo_name
+                |> List.sort_uniq String.compare
+              in
+              let search_root = project_root config in
+              let workspace_unique =
+                mention_candidates
+                |> List.filter_map (fun name ->
+                       match
+                         workspace_repo_matches ~search_root ~repo_name:name
+                       with
+                       | [ _ ] -> Some name
+                       | _ -> None)
+                |> List.sort_uniq String.compare
+              in
+              (match workspace_unique with
+               | [] -> Ok None
+               | [ name ] -> Ok (Some name)
+               | many ->
+                   Error
+                     (IoError
+                        (Printf.sprintf
+                           "ambiguous_task_repo: task %s has no sandbox \
+                            clone, and task evidence mentions multiple \
+                            workspace repos [%s]"
+                           task_id (String.concat ", " many)))))
+      | [ candidate ] -> Ok (Some candidate.name)
+      | _ ->
+          let tokens = tokenize_repo_evidence (task_repo_text task) in
+          let path_hints = task_path_hints task in
+          let ranked =
+            candidates
+            |> List.map (fun candidate ->
+                   ( score_repo_candidate ~task ~tokens ~path_hints candidate
+                   , candidate ))
+            |> List.sort (fun (sa, a) (sb, b) ->
+                   match compare sb sa with
+                   | 0 -> String.compare a.name b.name
+                   | n -> n)
+          in
+          match ranked with
+          | (top_score, top_candidate) :: (second_score, _) :: _
+            when top_score > 0 && top_score > second_score ->
+              Ok (Some top_candidate.name)
+          | (top_score, top_candidate) :: [] when top_score > 0 ->
+              Ok (Some top_candidate.name)
+          | (top_score, _) :: _ when top_score > 0 ->
+              let tied =
+                ranked
+                |> List.filter (fun (score, _) -> score = top_score)
+                |> List.map (fun (_, candidate) -> candidate.name)
+              in
+              Error
+                (IoError
+                   (Printf.sprintf
+                      "ambiguous_task_repo: task %s matches multiple repos with equal score [%s]"
+                      task_id (String.concat ", " tied)))
+          | _ ->
+              Error
+                (IoError
+                   (Printf.sprintf
+                      "ambiguous_task_repo: task %s has no repo evidence; sandbox repos=[%s]"
+                      task_id
+                      (String.concat ", "
+                         (List.map (fun c -> c.name) candidates)))))
+
+let rec rm_rf path =
+  if safe_file_exists path then
+    if safe_is_dir path then begin
+      (try Sys.readdir path with Sys_error _ -> [||])
+      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+    end else
+      try Unix.unlink path with Unix.Unix_error _ -> ()
+
+let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
+  let rel_target, clone_hint =
+    match repo_name with
+    | Some name when String.trim name <> "" ->
+      let rel = Printf.sprintf "repos/%s" name in
+      ( rel,
+        Printf.sprintf
+          "keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" path=\"%s\""
+          name rel )
+    | _ ->
+      ( "repos/<repo>",
+        "keeper_shell op=git_clone url=\"https://github.com/<org>/<repo>.git\" \
+         path=\"repos/<repo>\"" )
+  in
+  IoError
+    (Printf.sprintf
+       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
+        (expected %s). Recovery: %s"
+       agent_name repos_dir rel_target clone_hint)
+
+let workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
+    ~search_root =
+  IoError
+    (Printf.sprintf
+       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
+        and no workspace git repo named %s was found under %s. Recovery: \
+        keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" \
+        path=\"repos/%s\""
+       agent_name repos_dir repo_name search_root repo_name repo_name)
+
+let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
+  IoError
+    (Printf.sprintf
+       "ambiguous_workspace_repo: found multiple git repos named %s under %s: \
+        [%s]. Auto-provision is blocked until the repo is disambiguated; use \
+        keeper_shell op=git_clone explicitly."
+       repo_name search_root (String.concat ", " matches))
+
+let partial_clone_error ~clone_path ~msg =
+  rm_rf clone_path;
+  IoError msg
 
 let git_origin_url root =
   match run_argv_with_status [ "git"; "-C"; root; "remote"; "get-url"; "origin" ] with
@@ -737,9 +984,11 @@ let link_worktree_to_task config ~task_id ~worktree_info =
 
 (** Create worktree for agent - Result version
     @param link_task If true, links worktree info to the task in backlog (default: true)
-    @param repo_name Required. Targets the keeper's sandbox repo clone at
-           [.masc/playground/<agent>/repos/<repo_name>/]. A sandbox repo
-           clone is required; omitting [repo_name] is an error. *)
+    @param repo_name If set, target the keeper's sandbox repo clone at
+           [.masc/playground/<agent>/repos/<repo_name>/] directly. If
+           unset, infer the repo from the task's repo/path evidence; only
+           fall back to the sole clone when exactly one clone exists. A
+           sandbox repo clone is required. *)
 let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
     Error NotInitialized
@@ -750,41 +999,53 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
   | _, Error e -> Error e
   | Ok _, Ok _ ->
     with_worktree_mutation_lock @@ fun () ->
-    (* Prefer a keeper's sandbox repo clone under
-       the keeper's backend-specific sandbox repo lane. [repo_name]
-       is required to disambiguate which clone to use. Keepers
-       may work on any repo their [tool_policy.toml] allows, but the
-       worktree root must come from a sandbox repo clone. *)
-    let resolve_keeper_repo_root () =
-      let repos_dir = repos_dir_of_keeper config agent_name in
-      let explicit_repo =
-        match repo_name with
-        | None | Some "" -> None
-        | Some name when not (safe_repo_name name) -> None
-        | Some name ->
-          let candidate = Filename.concat repos_dir name in
-          if is_git_clone candidate
-          then Some (ensure_sandbox_clone_ready candidate |> Result.map (fun note -> (candidate, note)))
-          else None
-      in
+    let repo_name =
       match repo_name with
-      | Some name when String.trim name <> "" && safe_repo_name name -> (
-          match explicit_repo with
-          | Some result -> result
-          | None ->
-              auto_provision_sandbox_clone ~config ~agent_name ~repos_dir
-                ~repo_name:name)
-      | _ ->
+      | Some name when String.trim name <> "" && not (safe_repo_name name) ->
           Error
             (IoError
                (Printf.sprintf
-                  "repo_name is required to select a sandbox clone for agent %s \
-                   under %s. Pass repo_name explicitly (e.g. 'masc-mcp')."
-                  agent_name repos_dir))
+                  "invalid_repo_name: %S must be a single repo directory name under repos/"
+                  name))
+      | Some name when String.trim name <> "" -> Ok (Some name)
+      | _ -> infer_task_repo_name config ~agent_name ~task_id
     in
-    match resolve_keeper_repo_root () with
+    match repo_name with
     | Error e -> Error e
-    | Ok (root, provision_note) -> begin
+    | Ok repo_name ->
+        (* Prefer a keeper's sandbox repo clone under the keeper's
+           backend-specific sandbox repo lane. If [repo_name] is supplied,
+           target that clone directly; otherwise use the repo inferred above.
+           Keepers may work on any repo their [tool_policy.toml] allows, but
+           the worktree root must come from a sandbox repo clone. *)
+        let resolve_keeper_repo_root () =
+          let repos_dir = repos_dir_of_keeper config agent_name in
+          let explicit_repo =
+            match repo_name with
+            | None | Some "" -> None
+            | Some name when not (safe_repo_name name) -> None
+            | Some name ->
+                let candidate = Filename.concat repos_dir name in
+                if is_git_clone candidate
+                then
+                  Some
+                    (ensure_sandbox_clone_ready candidate
+                     |> Result.map (fun note -> (candidate, note)))
+                else None
+          in
+          match repo_name with
+          | Some name when String.trim name <> "" && safe_repo_name name -> (
+              match explicit_repo with
+              | Some result -> result
+              | None ->
+                  auto_provision_sandbox_clone ~config ~agent_name ~repos_dir
+                    ~repo_name:name)
+          | _ ->
+              Error (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name)
+        in
+        match resolve_keeper_repo_root () with
+        | Error e -> Error e
+        | Ok (root, provision_note) -> begin
         let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         match ensure_worktree_path root worktree_name with
         | Error e -> Error e

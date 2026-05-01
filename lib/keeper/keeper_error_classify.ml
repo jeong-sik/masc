@@ -277,9 +277,19 @@ let normalized_cascade_name name =
 
 let required_tool_rotation_candidate name =
   let normalized = normalized_cascade_name name in
+  let default_cascade = Keeper_config.default_cascade_name in
+  let routed_local_only_is_distinct =
+    not (String.equal Keeper_config.local_only_cascade_name default_cascade)
+  in
+  let routed_local_recovery_is_distinct =
+    not
+      (String.equal Keeper_config.local_recovery_cascade_name default_cascade)
+  in
   not
-    (String.equal normalized Keeper_config.local_only_cascade_name
-     || String.equal normalized Keeper_config.local_recovery_cascade_name)
+    ((routed_local_only_is_distinct
+      && String.equal normalized Keeper_config.local_only_cascade_name)
+     || (routed_local_recovery_is_distinct
+         && String.equal normalized Keeper_config.local_recovery_cascade_name))
 
 let legacy_degraded_rotation_candidates
     ~(base_cascade : string)

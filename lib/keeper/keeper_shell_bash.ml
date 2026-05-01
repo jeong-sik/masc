@@ -198,6 +198,23 @@ let handle_keeper_bash
         ~config ~meta ~cwd ~timeout_sec ~cmd
         ~network_mode:sandbox_network_mode)
     else
+      let local_reason =
+        if Env_config_keeper.KeeperSandbox.hard_mode () then "hard_mode_local"
+        else if not (Env_config_keeper.DockerPlayground.enabled) then
+          "playground_disabled"
+        else "outside_playground"
+      in
+      Log.Keeper.info
+        "LOCAL_EXEC: keeper=%s cwd=%s reason=%s sandbox_profile=%s \
+         playground=%b hard_mode=%b"
+        meta.name cwd local_reason
+        (sandbox_profile_to_string meta.sandbox_profile)
+        in_playground
+        (Env_config_keeper.KeeperSandbox.hard_mode ());
+      Prometheus.inc_counter
+        "masc_keeper_bash_local_execution_total"
+        ~labels:[ ("keeper", meta.name); ("reason", local_reason) ]
+        ();
       (* Local execution path: full validation applies *)
       let validate =
         if write_enabled then Worker_dev_tools.validate_command_coding

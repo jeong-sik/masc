@@ -307,6 +307,32 @@ let record_semaphore_wait_observation ~base_path ~keeper_name ~channel ~kind =
     keeper_name
     ~reasons:(semaphore_wait_observation_reasons ~kind ~channel)
 
+let oas_timeout_budget_observation_reasons =
+  [
+    "provider_runtime_error";
+    "oas_timeout_budget";
+    "keeper_turn_retry_backoff";
+  ]
+
+let record_oas_timeout_budget_observation ~base_path ~keeper_name =
+  Keeper_registry.record_skip_reasons
+    ~base_path
+    keeper_name
+    ~reasons:oas_timeout_budget_observation_reasons;
+  Keeper_registry.touch_last_turn_ts ~base_path keeper_name
+
+let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some { Keeper_registry.last_failure_reason =
+             Some (Keeper_registry.Oas_timeout_budget_loop _); _ } ->
+      Keeper_registry.set_failure_reason ~base_path keeper_name None
+  | _ -> ()
+
+let is_oas_timeout_budget_error (err : Oas.Error.sdk_error) =
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
+  | _ -> false
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -540,10 +566,17 @@ let run_keepalive_unified_turn
                  same-fiber retry has the same context budget, so a
                  budget exhaustion is unrecoverable in place and only
                  [sweep_and_recover] can clear it. *)
-              if String_util.contains_substring e_str "oas_timeout_budget"
+              if is_oas_timeout_budget_error err
               then begin
                 let keeper_name = meta_after_observe.name in
                 let strikes = Keeper_turn_slot.bump_budget_exhaustion ~keeper_name in
+                Keeper_registry.set_failure_reason
+                  ~base_path:ctx.config.base_path keeper_name
+                  (Some (Keeper_registry.Oas_timeout_budget_loop
+                           { count = strikes }));
+                record_oas_timeout_budget_observation
+                  ~base_path:ctx.config.base_path
+                  ~keeper_name;
                 if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit then begin
                   Log.Keeper.error
                     "%s: %d consecutive oas_timeout_budget strikes \
@@ -557,10 +590,6 @@ let run_keepalive_unified_turn
                       ("outcome", "promote");
                     ] ();
                   Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
-                  Keeper_registry.set_failure_reason
-                    ~base_path:ctx.config.base_path keeper_name
-                    (Some (Keeper_registry.Oas_timeout_budget_loop
-                             { count = strikes }));
                   raise Keeper_registry.Keeper_fiber_crash
                 end else begin
                   Log.Keeper.warn
@@ -590,6 +619,9 @@ let run_keepalive_unified_turn
                  transient budget exhaustion does not trickle into the
                  next 4h-window's strike limit. *)
               Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_observe.name;
+              clear_oas_timeout_budget_failure_reason
+                ~base_path:ctx.config.base_path
+                ~keeper_name:meta_after_observe.name;
               updated)
         with
         | Ok meta -> meta

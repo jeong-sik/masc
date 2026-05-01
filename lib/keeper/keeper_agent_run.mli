@@ -208,7 +208,7 @@ val adaptive_thinking_budget :
     @param build_turn_prompt Callback: receives the base keeper system prompt
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param cascade_name Cascade profile name for model selection
+    @param cascade_name Runtime cascade profile name for model selection
     @param world_observation Structured keeper world snapshot used by
            required-tool contract checks. When omitted, the contract gate
            does not infer world state from prompt text.
@@ -239,7 +239,7 @@ val run_turn :
         -> messages:Oas.Types.message list
         -> turn_prompt)
   -> user_message:string
-  -> cascade_name:string
+  -> cascade_name:Keeper_cascade_profile.runtime_name
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
   -> ?provider_filter:string list

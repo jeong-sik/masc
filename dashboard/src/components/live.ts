@@ -1,11 +1,12 @@
 // 라이브 모니터 — 3패널 실시간 관찰 화면
-// 상단 pulse strip + 좌측 activity stream + 우측 focus sidebar
+// 상단 pulse strip + 토폴로지 맵 + 좌측 activity stream + 우측 focus sidebar
 
 import { html } from 'htm/preact'
 import { PulseStrip } from './live/pulse-strip'
 import { KeeperHealthStrip } from './live/keeper-health-strip'
 import { ActivityStream } from './live/activity-stream'
 import { FocusSidebar } from './live/focus-sidebar'
+import { LiveTopologyMap } from './live/topology-map'
 import { CollapsibleSection } from './common/collapsible'
 
 interface LiveProps {
@@ -34,6 +35,16 @@ export function Live({ variant = 'full' }: LiveProps) {
       ` : null}
 
       ${!observatoryMode ? html`<${KeeperHealthStrip} />` : null}
+
+      ${!observatoryMode ? html`
+        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-2)] p-4" aria-label="에이전트 토폴로지 맵">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--color-fg-secondary)]">에이전트 토폴로지</h3>
+            <span class="text-2xs text-[var(--color-fg-muted)]">실시간 · 노드 클릭 시 상세 보기</span>
+          </div>
+          <${LiveTopologyMap} />
+        </section>
+      ` : null}
 
       ${observatoryMode ? html`
         <section class="contain-content live-panel-main monitor-surface-card monitor-surface-card-medium p-4" aria-label="활동 스트림">

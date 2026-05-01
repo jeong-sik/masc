@@ -308,6 +308,14 @@ let test_rl_score_two_429_decays_to_quarter () =
   let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
   check (float 0.001) "2 × 429 → 0.25" 0.25 s
 
+let test_rl_score_three_429_skips_provider () =
+  let h = H.create () in
+  H.record_soft_rate_limited h ~provider_key:"p" ();
+  H.record_soft_rate_limited h ~provider_key:"p" ();
+  H.record_soft_rate_limited h ~provider_key:"p" ();
+  let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
+  check (float 0.001) "3 × 429 → hard skip" 0.0 s
+
 (* ── weighted_shuffle composition with recency factor ──────────── *)
 
 let test_weighted_shuffle_429_provider_loses_to_clean_peer () =
@@ -339,29 +347,19 @@ let test_weighted_shuffle_429_provider_loses_to_clean_peer () =
        !clean_wins trials win_rate)
     true (win_rate > 0.65)
 
-let test_weighted_shuffle_429_provider_still_eligible () =
-  (* Even after 3 recent 429s, the rate-limited provider must remain
-     eligible (max-1 floor in weighted_shuffle).  This confirms the
-     factor de-prioritises rather than eliminates — the elimination
-     story is the cooldown mechanic, not the recency factor. *)
+let test_weighted_shuffle_429_provider_does_not_crash () =
+  (* Sustained 429s now zero the recency score.  The strategy should
+     return an empty ordering when that removes the only candidate,
+     rather than reviving it via the max-1 floor. *)
   let h = H.create () in
   for _ = 1 to 5 do
     H.record_soft_rate_limited h ~provider_key:"limited" ()
   done;
-  (* Wait would normally clear cooldown; here we work around it by
-     using a single-provider candidate list and forcing the picker to
-     visit it.  As long as effective_weight stays positive (cooldown
-     not active), weighted_shuffle's max-1 floor keeps it. *)
   let cands = [mk_cand ~w:100 "limited"] in
   let strat = mk_t S.Weighted_random in
   let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  (* When the provider is cooled down (5 × soft_rl far exceeds the
-     immediate cooldown trigger), the post-cooldown filter drops it —
-     check_at_least we get a deterministic empty-or-singleton outcome
-     rather than a crash from a divide-by-zero in the weighted picker. *)
-  check bool "rate-limited provider does not crash strategy"
-    true (List.length ordered <= 1)
+  check (list string) "rate-limited provider skipped" [] (names ordered)
 
 (* ── S4 Circuit_breaker_cycling ──────────────────────────────── *)
 
@@ -1143,10 +1141,12 @@ let () =
         test_rl_score_one_429_decays_to_half;
       test_case "2 × 429 → 0.25" `Quick
         test_rl_score_two_429_decays_to_quarter;
+      test_case "3 × 429 → hard skip" `Quick
+        test_rl_score_three_429_skips_provider;
       test_case "weighted_shuffle prefers clean peer over 429-hit (200 trials)" `Quick
         test_weighted_shuffle_429_provider_loses_to_clean_peer;
       test_case "weighted_shuffle does not crash on rate-limited provider" `Quick
-        test_weighted_shuffle_429_provider_still_eligible;
+        test_weighted_shuffle_429_provider_does_not_crash;
     ];
     "circuit_breaker_cycling", [
       test_case "excludes cooldown and busy" `Quick

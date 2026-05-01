@@ -27,6 +27,12 @@ async function loadRuntimePanel() {
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
+  vi.doMock('./cost-dashboard', () => ({
+    CostDashboard: () => html`<div data-testid="cost-dashboard">CostDashboard</div>`,
+  }))
+  vi.doMock('./cascade-inspector', () => ({
+    CascadeInspector: () => html`<div data-testid="cascade-inspector">CascadeInspector</div>`,
+  }))
   vi.doMock('./common/filter-chips', () => ({
     FilterChips: ({ chips, value }: { chips: { key: string; label: string }[]; value: string }) => html`
       <div data-testid="filter-chips" data-value=${value}>
@@ -60,6 +66,8 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./prometheus-metrics')
     vi.doUnmock('./cascade-config-panel')
     vi.doUnmock('./verification-specs-panel')
+    vi.doUnmock('./cost-dashboard')
+    vi.doUnmock('./cascade-inspector')
     vi.doUnmock('./common/filter-chips')
   })
 
@@ -133,7 +141,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('PrometheusMetrics')
   })
 
-  it('renders FilterChips with 7 options', async () => {
+  it('renders FilterChips with runtime view options', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)

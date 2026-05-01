@@ -190,6 +190,42 @@ type catalog_builder = {
   fallback_cascade : string option;
 }
 
+let deprecated_logical_profile_names =
+  [
+    "";
+    "default";
+    "default_models";
+    "oas-keeper_unified";
+    "coding_first";
+    "oas-coding_first";
+    "keeper_reply";
+    "keeper_unified";
+    "phase_recovery";
+    "phase_buffer";
+    "local_recovery";
+    "local_only";
+    "tool_required";
+    "tool_use_strict";
+    "resilient_breaker";
+    "governance_judge";
+    "operator_judge";
+    "cross_verifier";
+    "verifier";
+    "autoresearch";
+    "adversarial_reviewer";
+    "auto_responder";
+    "routing";
+    "routing_judge";
+    "openai_compat";
+    "persona_generation";
+    "provider_benchmark";
+    "llm_rerank";
+  ]
+
+let is_deprecated_logical_profile_name raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  List.mem normalized deprecated_logical_profile_names
+
 let empty_catalog_builder = {
   has_schema_field = false;
   keeper_assignable = None;
@@ -239,7 +275,9 @@ let load_catalog ~config_path =
         builders
         |> StringMap.bindings
         |> List.filter_map (fun (name, builder) ->
-               if not builder.has_schema_field then None
+               if (not builder.has_schema_field)
+                  || is_deprecated_logical_profile_name name
+               then None
                else
                  Some
                    {

@@ -285,6 +285,7 @@ jobs:
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
           bash scripts/ci/check-ssot-spawn-drift.sh
+          bash scripts/check-spec-truth.sh
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh

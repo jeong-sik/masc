@@ -1083,6 +1083,39 @@ let test_masc_dirname_ssot_contracts () =
          (file_not_contains_pattern file "\".masc\""))
     migrated_files
 
+(* #9516: SSOT fingerprint CI gate — verify that the `make check-ssot`
+   target and `scripts/check-spec-truth.sh` are properly wired into the
+   build system and CI workflow.  These contracts ensure:
+   1. `mk/quality.mk` defines a `check-ssot` phony target.
+   2. The target delegates to all three SSOT sub-gates.
+   3. `scripts/check-spec-truth.sh` exists with the expected contract
+      structure (orphan spec validation via `Mirrors:` annotation scanning).
+   4. The CI meta-gates step invokes `check-spec-truth.sh`. *)
+let test_ssot_fingerprint_gate_contracts () =
+  check bool "quality.mk declares check-ssot rule header" true
+    (file_contains_pattern "mk/quality.mk" "check-ssot:");
+  check bool "quality.mk declares check-ssot as phony" true
+    (file_contains_pattern "mk/quality.mk" ".PHONY: check-ssot");
+  check bool "check-ssot target runs ratchet bypass script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/check-ssot.sh");
+  check bool "check-ssot target runs spawn drift script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/ci/check-ssot-spawn-drift.sh");
+  check bool "check-ssot target runs spec truth script" true
+    (file_contains_pattern "mk/quality.mk" "bash scripts/check-spec-truth.sh");
+  check bool "check-spec-truth script exists" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "orphan spec");
+  check bool "check-spec-truth scans Mirrors annotations" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "Mirrors:");
+  check bool "check-spec-truth resolves file-path references" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "resolve_mirrors_ref");
+  check bool "check-spec-truth exits non-zero on orphan" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "orphan_count");
+  check bool "check-spec-truth references meta-issue #9516" true
+    (file_contains_pattern "scripts/check-spec-truth.sh" "#9516");
+  check bool "ci meta gates step runs check-spec-truth" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/check-spec-truth.sh")
+
 let test_human_approval_credential_boundary_contracts () =
   (* Issue #9733: the bypass-label actor check cannot distinguish a real
      human from an agent using the same owner credentials.  The
@@ -1176,6 +1209,8 @@ let () =
              test_runtime_precondition_contracts;
            test_case "masc_dirname SSOT contracts (#9571 batch 1)" `Quick
              test_masc_dirname_ssot_contracts;
+           test_case "SSOT fingerprint gate contracts (#9516)" `Quick
+             test_ssot_fingerprint_gate_contracts;
            test_case "human approval credential boundary contracts (#9733)" `Quick
              test_human_approval_credential_boundary_contracts;
          ]);

@@ -7,7 +7,6 @@ describe("isWorkSection", () => {
     ["board", true],
     ["planning", true],
     ["repositories", true],
-    ["collab-mvp", true],
     ["verification", true],
   ])("returns true for %s", (v, expected) => {
     expect(isWorkSection(v)).toBe(expected)

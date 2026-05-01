@@ -597,9 +597,9 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
-    const networkMode = container.querySelector('select[aria-label="network_mode"]') as HTMLSelectElement | null    expect(sandboxProfile).not.toBeNull()
+    const networkMode = container.querySelector('select[aria-label="network_mode"]') as HTMLSelectElement | null
+    expect(sandboxProfile).not.toBeNull()
     expect(networkMode).not.toBeNull()
-    expect(sharedMemory).not.toBeNull()
 
     sandboxProfile!.value = 'docker'
     sandboxProfile!.dispatchEvent(new Event('change', { bubbles: true }))
@@ -609,8 +609,6 @@ describe('KeeperConfigPanel', () => {
     expect(hardenedNetworkMode).not.toBeNull()
     hardenedNetworkMode!.value = 'none'
     hardenedNetworkMode!.dispatchEvent(new Event('change', { bubbles: true }))
-    sharedMemory!.value = 'room'
-    sharedMemory!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>

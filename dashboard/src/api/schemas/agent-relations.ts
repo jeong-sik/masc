@@ -17,7 +17,34 @@ import {
   type InferOutput,
 } from 'valibot'
 
+const AgentCollaboratorSchema = object({
+  name: string(),
+  collaborations: number(),
+  last_collab: nullable(string()),
+})
 
+const AgentRelationParticipantSchema = object({
+  kind: string(),
+  display_name: nullable(string()),
+  role: nullable(string()),
+})
+
+const AgentRelationSchema = object({
+  type: string(),
+  category: nullable(string()),
+  confidence: nullable(number()),
+  note: nullable(string()),
+  participants: array(AgentRelationParticipantSchema),
+})
+
+const AgentRelationsResponseSchema = object({
+  agent_name: string(),
+  collaborators: array(AgentCollaboratorSchema),
+  interests: array(string()),
+  relations: array(AgentRelationSchema),
+})
+
+export type AgentCollaborator = InferOutput<typeof AgentCollaboratorSchema>
 export type AgentRelation = InferOutput<typeof AgentRelationSchema>
 export type AgentRelationsResponse = InferOutput<typeof AgentRelationsResponseSchema>
 

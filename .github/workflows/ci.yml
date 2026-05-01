@@ -15,10 +15,12 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name || github.run_id }}
-  # Code-changing PR events supersede older CI for the same PR. State-only
-  # readiness events must not cancel an already-running code CI; they may queue
-  # behind it to run the ready/full-matrix path.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action) }}
+  # Code-changing PR events supersede older CI for the same PR. Pushes to the
+  # same branch also supersede older post-merge CI; only the latest branch head
+  # needs the full verification matrix. State-only readiness events must not
+  # cancel an already-running code CI; they may queue behind it to run the
+  # ready/full-matrix path.
+  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:

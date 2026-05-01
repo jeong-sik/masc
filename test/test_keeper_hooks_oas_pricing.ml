@@ -149,7 +149,8 @@ let test_known_model_with_trusted_usage_gives_priced () =
 let test_known_model_zero_cost_with_tokens_gives_known_free () =
   (* Known model, trusted usage, but cost_usd=0 (e.g. catalog hit but
      input/output are both zero-cost tiers). Still classified as
-     "priced" because the catalog was found. *)
+     "known_free" because the catalog was found and its computed price is
+     zero. *)
   let status =
     Hooks.cost_status_for_event
       ~provider:"ollama"

@@ -325,9 +325,11 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
    | Error msg ->
        Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
-  (* #9919: Heuristic_metrics recording replaced by Thompson sampling.
-     init + diagnostics removed — no callers of [record] remain.
-     The module is kept for now in case legacy JSONL needs migration. *)
+  (* #9919: active Heuristic_metrics recording moved to Prometheus/Thompson
+     paths, but the dashboard still reads the legacy JSONL via
+     /api/v1/dashboard/heuristics. Keep storage initialized so existing
+     rows remain visible while no new degenerate rows are emitted. *)
+  Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
   (* Load tool policy presets from config/tool_policy.toml *)
   (match Keeper_exec_tools.init_policy_config ~base_path with

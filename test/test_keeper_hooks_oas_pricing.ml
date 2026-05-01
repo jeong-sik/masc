@@ -26,20 +26,20 @@ let mk_usage
     cost_usd;
   }
 
-let check_json_string name expected json =
+let check_json_string name expected field json =
   Alcotest.(check string)
     name expected
-    (json |> Json.member name |> Json.to_string)
+    (json |> Json.member field |> Json.to_string)
 
-let check_json_float name expected json =
+let check_json_float name expected field json =
   Alcotest.(check (float 0.000_001))
     name expected
-    (json |> Json.member name |> Json.to_float)
+    (json |> Json.member field |> Json.to_float)
 
-let check_json_int name expected json =
+let check_json_int name expected field json =
   Alcotest.(check int)
     name expected
-    (json |> Json.member name |> Json.to_int)
+    (json |> Json.member field |> Json.to_int)
 
 let catalog_miss_for model =
   Prom.metric_value_or_zero
@@ -226,10 +226,12 @@ let test_cost_event_payload_masks_unpriced_model () =
       ~usage_trust:Trust.Usage_trusted
       ()
   in
-  check_json_string "unpriced status" "unpriced_model" payload;
-  check_json_string "unpriced reason" "pricing_catalog_miss" payload;
-  check_json_string "unpriced source" "pricing_catalog_miss" payload;
-  check_json_float "unpriced cost masked" 0.0 payload
+  check_json_string "unpriced status" "unpriced_model" "cost_status" payload;
+  check_json_string
+    "unpriced reason" "pricing_catalog_miss" "cost_status_reason" payload;
+  check_json_string
+    "unpriced source" "pricing_catalog_miss" "cost_usd_source" payload;
+  check_json_float "unpriced cost masked" 0.0 "cost_usd" payload
 
 let test_cost_event_payload_preserves_positive_zero_token_cost () =
   let payload =
@@ -243,11 +245,16 @@ let test_cost_event_payload_preserves_positive_zero_token_cost () =
       ~usage_trust:Trust.Usage_trusted
       ()
   in
-  check_json_string "positive zero-token status" "priced" payload;
-  check_json_string "positive zero-token source" "computed" payload;
-  check_json_float "positive zero-token cost preserved" 0.031 payload;
-  check_json_int "positive zero-token input tokens" 0 payload;
-  check_json_int "positive zero-token output tokens" 0 payload
+  check_json_string
+    "positive zero-token status" "priced" "cost_status" payload;
+  check_json_string
+    "positive zero-token source" "computed" "cost_usd_source" payload;
+  check_json_float
+    "positive zero-token cost preserved" 0.031 "cost_usd" payload;
+  check_json_int
+    "positive zero-token input tokens" 0 "input_tokens" payload;
+  check_json_int
+    "positive zero-token output tokens" 0 "output_tokens" payload
 
 let () =
   Alcotest.run "keeper_hooks_oas_pricing"

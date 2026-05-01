@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 include Board_core
 
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
@@ -91,14 +109,14 @@ type vote_outcome = {
   earn_upvote_for : string option;
 }
 
-let vote store ~voter ~post_id ~direction : (int, board_error) result =
+let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
   | Ok _ ->
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-      let board_result : (vote_outcome, board_error) result =
+      let board_result : (vote_outcome, board_error) Result.t =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
@@ -106,7 +124,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
               let now = Time_compat.now () in
               match Hashtbl.find_opt store.vote_log vote_key with
-              | Some (prev, _prev_ts) when prev = direction ->
+              | Some (prev, _prev_ts) when Poly.equal prev direction ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
               | Some (_opposite, _prev_ts) ->
@@ -145,7 +163,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                   let vote_dir = match direction with Up -> `Up | Down -> `Down in
                   Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                   let earn =
-                    if direction = Up then Some author_name else None
+                    if Poly.equal direction Up then Some author_name else None
                   in
                   Ok { delta = updated.votes_up - updated.votes_down;
                        earn_upvote_for = earn })
@@ -168,7 +186,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
        | Error _ as e -> e)
 
 (** Vote on a comment *)
-let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result =
+let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
   | Ok _ ->
@@ -182,7 +200,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
             let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
             let now = Time_compat.now () in
             match Hashtbl.find_opt store.vote_log vote_key with
-            | Some (prev, _prev_ts) when prev = direction ->
+            | Some (prev, _prev_ts) when Poly.equal prev direction ->
                 Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                   voter (vote_direction_to_string direction) comment_id))
             | Some (_opposite, _prev_ts) ->
@@ -227,7 +245,7 @@ let stats store =
     let comment_count = Hashtbl.length store.comments in
     let now = Time_compat.now () in
     let expired_posts = Hashtbl.fold (fun _ (p : post) acc ->
-      if p.expires_at > 0.0 && p.expires_at < now then acc + 1 else acc
+      if Stdlib.Float.compare p.expires_at 0.0 > 0 && Stdlib.Float.compare p.expires_at now < 0 then acc + 1 else acc
     ) store.posts 0 in
     `Assoc [
       ("post_count", `Int post_count);
@@ -347,9 +365,9 @@ let load_persisted_posts store =
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
         match post_of_yojson json with
-        | Some p when p.expires_at = 0.0 || p.expires_at > now ->
+        | Some p when Stdlib.Float.compare p.expires_at 0.0 = 0 || Stdlib.Float.compare p.expires_at now > 0 ->
             Hashtbl.replace store.posts (Post_id.to_string p.id) p;
-            incr loaded
+            Stdlib.incr loaded
         | _ -> ()
       ) lines;
       store.post_count := Hashtbl.length store.posts;
@@ -360,7 +378,7 @@ let load_persisted_posts store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load posts failed: %s" (Printexc.to_string e)
+      Log.BoardLog.error "load posts failed: %s" (Exn.to_string e)
   end
 
 let load_persisted_comments store =
@@ -372,7 +390,7 @@ let load_persisted_comments store =
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
         match comment_of_yojson json with
-        | Some c when c.expires_at = 0.0 || c.expires_at > now ->
+        | Some c when Stdlib.Float.compare c.expires_at 0.0 = 0 || Stdlib.Float.compare c.expires_at now > 0 ->
             let cid = Comment_id.to_string c.id in
             Hashtbl.replace store.comments cid c;
             (* Build comments_by_post index *)
@@ -383,7 +401,7 @@ let load_persisted_comments store =
               else cid :: existing
             in
             Hashtbl.replace store.comments_by_post post_key indexed;
-            incr loaded
+            Stdlib.incr loaded
         | _ -> ()
       ) lines;
       if !loaded > 0 then
@@ -393,7 +411,7 @@ let load_persisted_comments store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load comments failed: %s" (Printexc.to_string e)
+      Log.BoardLog.error "load comments failed: %s" (Exn.to_string e)
   end
 
 (** Recalculate reply_count for all posts based on actual comments.
@@ -456,7 +474,7 @@ let quarantine_enabled () =
   match Sys.getenv_opt "MASC_BOARD_VOTE_QUARANTINE" with
   | Some v ->
       let norm = String.lowercase_ascii (String.trim v) in
-      not (norm = "0" || norm = "false" || norm = "off" || norm = "")
+      not (String.equal norm "0" || String.equal norm "false" || String.equal norm "off" || String.equal norm "")
   | None -> true
 
 let load_persisted_votes store =
@@ -472,7 +490,7 @@ let load_persisted_votes store =
         match Safe_ops.json_string_opt "target" json,
               Safe_ops.json_string_opt "direction" json with
         | Some target, Some dir_str ->
-          let direction = if dir_str = "down" then Down else Up in
+          let direction = if String.equal dir_str "down" then Down else Up in
           (* #10086: legacy rows persisted before this fix may have
              [ts] overwritten by a prior flush cycle.  Use the
              recorded value when present; fall back to 0.0 rather
@@ -486,15 +504,15 @@ let load_persisted_votes store =
             | None -> 0.0
           in
           if is_fixture_voter_target target then begin
-            incr fixture_detected;
-            if quarantine then incr quarantined
+            Stdlib.incr fixture_detected;
+            if quarantine then Stdlib.incr quarantined
             else begin
               Hashtbl.replace store.vote_log target (direction, ts);
-              incr loaded
+              Stdlib.incr loaded
             end
           end else begin
             Hashtbl.replace store.vote_log target (direction, ts);
-            incr loaded
+            Stdlib.incr loaded
           end
         | _ -> ()
       ) lines;
@@ -517,7 +535,7 @@ let load_persisted_votes store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
+      Log.BoardLog.error "load votes failed: %s" (Exn.to_string e)
   end
 
 (** {1 Hearth (topic) operations} *)
@@ -538,7 +556,7 @@ let list_hearths store : (string * int) list =
   )
 
 (** Update a post's thread_id (for linking Board post → Conversation thread) *)
-let set_thread_id store ~post_id ~thread_id : (unit, board_error) result =
+let set_thread_id store ~post_id ~thread_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
@@ -551,7 +569,7 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) result =
             Ok ()
       )
 
-let delete_post store ~post_id : (unit, board_error) result =
+let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
@@ -563,7 +581,7 @@ let delete_post store ~post_id : (unit, board_error) result =
             let comment_ids =
               Hashtbl.fold
                 (fun key (c : comment) acc ->
-                  if Post_id.to_string c.post_id = post_key then key :: acc else acc)
+                  if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
                 store.comments []
             in
             Hashtbl.remove store.posts post_key;
@@ -667,13 +685,13 @@ let get_agent_karma store ~agent_name =
   let all_posts = list_posts store () in
   let post_karma =
     List.fold_left (fun acc (p : post) ->
-      if Agent_id.to_string p.author = agent_name then acc + p.votes_up
+      if String.equal (Agent_id.to_string p.author) agent_name then acc + p.votes_up
       else acc
     ) 0 all_posts
   in
   let comment_karma =
     Hashtbl.fold (fun _ (c : comment) acc ->
-      if Agent_id.to_string c.author = agent_name then acc + c.votes_up
+      if String.equal (Agent_id.to_string c.author) agent_name then acc + c.votes_up
       else acc
     ) store.comments 0
   in
@@ -718,7 +736,7 @@ let extract_flair content =
   match Re.exec_opt flair_tag_re content with
   | Some g ->
     let flair_name = Re.Group.get g 1 in
-    (match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with
+    (match List.find_opt (fun (name, _, _) -> String.equal name flair_name) available_flairs with
     | Some f -> Some f
     | None -> None)
   | None -> None

@@ -81,9 +81,9 @@ describe('FlowControlPanel', () => {
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('흐름 제어')
-    expect(container.textContent).toContain('일시정지')
-    expect(container.textContent).toContain('재개')
-    expect(container.textContent).not.toContain('새로고침')
+    expect(container.textContent).toContain('Flow Control')
+    expect(container.textContent).toContain('Pause')
+    expect(container.textContent).toContain('Resume')
+    expect(container.textContent).not.toContain('Refresh')
   })
 })

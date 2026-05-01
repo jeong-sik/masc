@@ -36,15 +36,15 @@ function actionDescription(action: OperatorActionDescriptor): string {
   if (description) return description
   switch (action.action_type) {
     case 'keeper_probe':
-      return '선택한 keeper의 상태와 진단 정보를 확인합니다.'
+      return 'Inspect status and diagnostics for the selected keeper.'
     case 'keeper_recover':
-      return '선택한 keeper를 복구 플로우로 넘깁니다.'
+      return 'Hand the selected keeper to the recovery flow.'
     case 'keeper_github_identity_status':
-      return '선택한 keeper의 GitHub identity 상태를 확인합니다.'
+      return 'Inspect GitHub identity status for the selected keeper.'
     case 'keeper_github_identity_login_prepare':
-      return '선택한 keeper의 GitHub login 준비 정보를 생성합니다.'
+      return 'Generate GitHub login preparation details for the selected keeper.'
     default:
-      return '서버 catalog에는 있지만 아직 전용 UI adapter가 없습니다.'
+      return 'Available in the server catalog; dedicated UI adapter is still pending.'
   }
 }
 
@@ -68,26 +68,26 @@ export function KeeperUtilitiesPanel() {
       target_type: 'keeper',
       target_id: selectedName,
       payload: {},
-      successMessage: `${selectedName} ${actionTypeLabel(action.action_type)} 실행을 요청했습니다`,
+      successMessage: `Requested ${actionTypeLabel(action.action_type)} for ${selectedName}`,
     })
   }
 
   return html`
-    <section class="${CARD_STANDARD} flex flex-col gap-3" data-testid="keeper-utilities-panel" aria-label="키퍼 유틸리티">
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">키퍼 유틸리티</h3>
+    <section class="${CARD_STANDARD} flex flex-col gap-3" data-testid="keeper-utilities-panel" aria-label="Keeper utilities">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-40 flex-1">
+          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Keeper Utilities</h3>
           <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">
-            서버 available_actions catalog 기준으로 노출합니다.
+            Server-backed actions from the available_actions catalog.
           </p>
         </div>
         <${Select}
-          class="shrink-0 px-3 py-2 text-xs min-w-36"
-          ariaLabel="키퍼 유틸리티 대상"
+          class="shrink-0 px-3 py-2 text-xs min-w-36 max-w-full"
+          ariaLabel="Keeper utility target"
           value=${selectedName}
           disabled=${busy || onlineKeepers.length === 0}
           options=${onlineKeepers.length === 0
-            ? [{ value: '', label: '온라인 keeper 없음' }]
+            ? [{ value: '', label: 'No online keepers' }]
             : onlineKeepers.map(keeper => ({ value: keeper.name, label: keeper.name }))}
           onInput=${(v: string) => { selectedKeeper.value = v }}
         />
@@ -117,7 +117,7 @@ export function KeeperUtilitiesPanel() {
                   disabled=${disabled}
                   onClick=${() => { void runAction(action) }}
                 >
-                  ${adapted ? (action.confirm_required ? '요청' : '실행') : '대기'}
+                  ${adapted ? (action.confirm_required ? 'Request' : 'Run') : 'Pending'}
                 <//>
               </div>
             </article>

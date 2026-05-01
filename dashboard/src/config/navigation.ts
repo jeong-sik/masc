@@ -1,6 +1,16 @@
 import type { RouteState, TabId } from '../types'
 
 type SurfaceId = TabId
+export type DashboardSurfaceIcon =
+  | 'overview'
+  | 'monitoring'
+  | 'command'
+  | 'connectors'
+  | 'workspace'
+  | 'lab'
+  | 'code'
+  | 'logs'
+
 type SurfaceSectionId =
   // monitoring
   | 'observatory'
@@ -34,7 +44,7 @@ type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 interface DashboardNavGroup {
   id: SurfaceId
   label: string
-  icon: string
+  icon: DashboardSurfaceIcon
   description: string
   defaultTab: TabId
   defaultParams?: Record<string, string>
@@ -45,7 +55,7 @@ interface DashboardNavGroup {
 interface DashboardNavItem {
   id: TabId
   label: string
-  icon: string
+  icon: DashboardSurfaceIcon
   description: string
   defaultParams?: Record<string, string>
 }
@@ -61,62 +71,62 @@ interface DashboardSectionNavItem {
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'overview',
-    label: '오버뷰',
-    icon: '🏠',
-    description: '빠른 신호 및 브리핑 통합 화면',
+    label: 'Overview',
+    icon: 'overview',
+    description: 'Fast signals and briefing rollup',
     defaultTab: 'overview',
     tabs: ['overview'],
   },
   {
     id: 'monitoring',
-    label: '모니터링',
-    icon: '📡',
-    description: '운영 스토리라인, 에이전트, 런타임, 플릿 신호 관찰',
+    label: 'Monitor',
+    icon: 'monitoring',
+    description: 'Fleet storylines, agents, runtime, and telemetry',
     defaultTab: 'monitoring',
     defaultParams: { section: 'journey' },
     tabs: ['monitoring'],
   },
   {
     id: 'command',
-    label: '운영',
-    icon: '🎛️',
-    description: '실시간 개입과 거버넌스 판단/승인 운영 화면',
+    label: 'Command',
+    icon: 'command',
+    description: 'Intervention, governance decisions, and approvals',
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
     tabs: ['command'],
   },
   {
     id: 'connectors',
-    label: '커넥터',
-    icon: '🔌',
-    description: 'Discord, iMessage, Slack, Telegram 등 채널 sidecar 상태와 keeper 바인딩',
+    label: 'Connectors',
+    icon: 'connectors',
+    description: 'Channel sidecars and keeper bindings',
     defaultTab: 'connectors',
     defaultParams: { section: 'connector-status' },
     tabs: ['connectors'],
   },
   {
     id: 'workspace',
-    label: '작업',
-    icon: '📋',
-    description: '작업 게시판, 증명/판정, 계획 이력 탐색',
+    label: 'Workspace',
+    icon: 'workspace',
+    description: 'Board, planning, repositories, and verification',
     defaultTab: 'workspace',
     defaultParams: { section: 'board' },
     tabs: ['workspace'],
   },
   {
     id: 'lab',
-    label: '실험실',
-    icon: '🧪',
-    description: '도구 진단과 실험 제어',
+    label: 'Lab',
+    icon: 'lab',
+    description: 'Tool diagnostics and experiment control',
     defaultTab: 'lab',
     defaultParams: { section: 'tools' },
     tabs: ['lab'],
   },
   {
     id: 'code',
-    label: '코드',
-    icon: '💻',
-    description: 'Keeper 협업 코드 review IDE — 파일 트리, blame-by-keeper, 라인 anchored 대화, activity 스트림',
+    label: 'Code',
+    icon: 'code',
+    description: 'Keeper collaboration IDE shell',
     defaultTab: 'code',
     defaultParams: { section: 'ide-shell' },
     tabs: ['code'],
@@ -124,9 +134,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'logs',
-    label: '로그',
-    icon: '📜',
-    description: '시스템 실행 로그',
+    label: 'Logs',
+    icon: 'logs',
+    description: 'System execution logs',
     defaultTab: 'logs',
     tabs: ['logs'],
   },
@@ -144,39 +154,39 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   monitoring: [
     {
       id: 'journey',
-      label: '여정 맵',
-      description: 'Task, run, contract, keeper, thinking, memory, turn, life, cascade를 한 카드에 묶어 봅니다.',
+      label: 'Journey Map',
+      description: 'Task, run, contract, keeper, thinking, memory, turn, life, and cascade in one flow.',
       params: { section: 'journey' },
     },
     {
       id: 'observatory',
-      label: '관찰소',
-      description: '라이브 협업과 조사형 타임라인은 Fleet/Journey에서 drill-down으로 접근합니다.',
+      label: 'Observatory',
+      description: 'Live collaboration and investigative timelines remain drill-down surfaces.',
       params: { section: 'observatory' },
       hidden: true,
     },
     {
       id: 'agents',
-      label: '에이전트 디렉터리',
-      description: '누가 살아 있고 어떤 프로세스 위에 떠 있는지 live runtime 기준으로 빠르게 훑어봅니다. cached 조율 정보와 이벤트, 도구, 거버넌스는 다른 화면에서 봅니다.',
+      label: 'Agent Directory',
+      description: 'Live runtime-backed roster and process state.',
       params: { section: 'agents' },
     },
     {
       id: 'runtime',
-      label: '캐스케이드',
-      description: 'Provider 건강도, 슬롯 용량, 모델 선택, 비용/지연, cascade inspector를 한 화면에서 봅니다.',
+      label: 'Cascade',
+      description: 'Provider health, capacity, routing, cost, latency, and inspector views.',
       params: { section: 'runtime' },
     },
     {
       id: 'fleet-health',
-      label: '플릿 텔레메트리',
-      description: '이벤트 로그, Keeper 비교, 도구 품질, 거버넌스, attribution 신호를 한 화면에서 봅니다.',
+      label: 'Fleet Telemetry',
+      description: 'Event log, keeper comparison, tool quality, governance, and attribution signals.',
       params: { section: 'fleet-health' },
     },
     {
       id: 'memory-subsystems',
-      label: '기억 서브시스템',
-      description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태. 메인 루프가 아니라 warning/detail 링크로 접근합니다.',
+      label: 'Memory Subsystems',
+      description: 'Hebbian graph, episodes, and compaction state.',
       params: { section: 'memory-subsystems' },
       hidden: true,
     },
@@ -184,77 +194,77 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   command: [
     {
       id: 'operations',
-      label: '운영 행동',
-      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, safety, 인스펙터를 한 화면에서. 커넥터는 상위 메뉴 「커넥터」에서.',
+      label: 'Actions',
+      description: 'Broadcasts, keeper messages, autonomy approvals, safety, and inspector controls.',
       params: { section: 'operations' },
     },
   ],
   connectors: [
     {
       id: 'connector-status',
-      label: '전체',
-      description: '4개 sidecar(Discord/iMessage/Slack/Telegram)를 한 화면에서. 페이지 내부에서 connector를 선택해 자세히 봅니다.',
+      label: 'All',
+      description: 'Discord, iMessage, Slack, and Telegram sidecars in one surface.',
       params: { section: 'connector-status' },
     },
   ],
   workspace: [
     {
       id: 'board',
-      label: '작업 게시판',
-      description: '에이전트가 남긴 직접 작성 글, 자동화 글, 시스템 글을 한 곳에서 봅니다.',
+      label: 'Board',
+      description: 'Human, agent, automation, and system posts.',
       params: { section: 'board' },
     },
     {
       id: 'planning',
-      label: '계획 & 목표',
-      description: '실행 단위 칸반과 상위 의도 구조(목표 트리)를 함께 봅니다.',
+      label: 'Plans & Goals',
+      description: 'Task kanban with the higher-level goal tree.',
       params: { section: 'planning' },
     },
     {
       id: 'repositories',
-      label: '저장소',
-      description: '등록 저장소, Git graph, 브랜치, credential, keeper 접근 범위를 저장소별로 봅니다.',
+      label: 'Repositories',
+      description: 'Registered repos, Git graph, branches, credentials, and keeper access scope.',
       params: { section: 'repositories' },
     },
     {
       id: 'collab-mvp',
-      label: '협업 MVP',
-      description: 'Yjs/CodeMirror substrate, Git graph, TODO claim, turn queue, telemetry contract 실험 화면입니다.',
+      label: 'Collab MVP',
+      description: 'Yjs, CodeMirror, Git graph, claim queue, turn queue, and telemetry contract experiments.',
       params: { section: 'collab-mvp' },
       hidden: true,
     },
     {
       id: 'verification',
-      label: '검증',
-      description: 'Cross-agent 검증 요청 테이블 (completion contract + 증거 목록).',
+      label: 'Verification',
+      description: 'Cross-agent verification requests, completion contracts, and evidence.',
       params: { section: 'verification' },
     },
   ],
   lab: [
     {
       id: 'tools',
-      label: '도구',
-      description: '등록된 MCP 도구 전체 목록 (모든 서버 합산). 자주 사용하는 도구가 상단.',
+      label: 'Tools',
+      description: 'Registered MCP tools across servers.',
       params: { section: 'tools' },
     },
     {
       id: 'autoresearch',
-      label: '오토리서치',
-      description: '자율 실험 루프 상태와 이력.',
+      label: 'Autoresearch',
+      description: 'Autonomous experiment loop state and history.',
       params: { section: 'autoresearch' },
     },
     {
       id: 'harness',
-      label: '세이프티 하네스',
-      description: '평가 모델, 압축 전 상태, 세대 교체 모니터링 상태.',
+      label: 'Safety Harness',
+      description: 'Evaluation model, pre-compaction state, and generation handoff monitoring.',
       params: { section: 'harness' },
     },
   ],
   code: [
     {
       id: 'ide-shell',
-      label: '코드 IDE',
-      description: 'Keeper 협업 코드 review IDE shell. 4-pane (EXPLORER · 에디터 · CONVERSATION · ACTIVITY) 는 후속 PR에서 채워집니다.',
+      label: 'Code IDE',
+      description: 'Keeper collaboration code-review IDE shell.',
       params: { section: 'ide-shell' },
       hidden: true,
     },

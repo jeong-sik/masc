@@ -1,4 +1,4 @@
-.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot ci
+.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
 
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:
@@ -86,6 +86,12 @@ check-ssot:
 	@echo ""
 	@echo "=== SSOT gate: spec truth (orphan spec validator) ==="
 	bash scripts/check-spec-truth.sh
+
+# Cross-language variant sync: OCaml all_phases / all_X lists vs TypeScript
+# union types vs TLA+ domain literals. Fails on drift. Run before any PR that
+# adds/removes a variant/enum constructor.
+check-variants:
+	bash scripts/check-variants.sh
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract test-transport

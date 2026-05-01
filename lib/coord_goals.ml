@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Coord_goals - Handlers for goal management tools. *)
 
 open Coord_types
@@ -139,7 +157,7 @@ let parse_optional_priority args field =
             constraint_violated = Min_int 1;
             message = "priority must be between 1 and 5";
             expected = Some "1..5";
-            received = Some (string_of_int n);
+            received = Some (Int.to_string n);
           }
       else Ok (Some n)
   | json ->
@@ -241,7 +259,7 @@ let actor_must_be_operator action =
 
 let validate_goal_completion_ready config ~goal_id ~override_note =
   match override_note with
-  | Some note when String.trim note <> "" -> Ok ()
+  | Some note when not (String.equal (String.trim note) "") -> Ok ()
   | _ ->
       let linked_tasks =
         Coord_query.get_tasks_safe config
@@ -259,7 +277,7 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
                Types.task_status_is_done task.task_status)
         |> List.length
       in
-      if linked_tasks = [] then
+      if (match linked_tasks with [] -> true | _ -> false) then
         Error
           "goal completion requires at least one linked task; provide override_note to force"
       else if open_count > 0 then
@@ -346,7 +364,7 @@ let verification_summary_json ?latest_request (goal : Goal_store.goal)
       ("approve_count", `Int approve_count);
       ("reject_count", `Int reject_count);
       ("remaining_possible", `Int remaining_possible);
-      ("pending_verification_count", `Int (if open_request = None then 0 else 1));
+      ("pending_verification_count", `Int (if Option.is_none open_request then 0 else 1));
     ]
 
 let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note
@@ -468,7 +486,7 @@ let handle_goal_transition (ctx : context) args =
       let note = get_string_opt args "note" in
       let override_note = get_string_opt args "override_note" in
       if actor_must_be_operator action
-         && actor.Goal_verification.kind <> Goal_verification.Operator
+         && not (Poly.equal actor.Goal_verification.kind Goal_verification.Operator)
       then
         error_result_typed ~code:Validation_error
           "actor.kind must be operator for this transition"
@@ -478,7 +496,7 @@ let handle_goal_transition (ctx : context) args =
         | Some goal ->
             begin
               match
-                if action = Goal_phase.Request_complete then
+                if Poly.equal action Goal_phase.Request_complete then
                   validate_goal_completion_ready ctx.config ~goal_id
                     ~override_note
                 else
@@ -618,7 +636,7 @@ let handle_goal_transition (ctx : context) args =
                       (match goal.active_verification_request_id, next_phase with
                        | Some request_id, Goal_phase.Dropped
                        | Some request_id, Goal_phase.Executing
-                         when goal.phase = Goal_phase.Awaiting_verification ->
+                         when Poly.equal goal.phase Goal_phase.Awaiting_verification ->
                            (match Goal_verification.cancel_request ctx.config ~request_id with
                             | Ok _ ->
                                 emit_goal_event ctx ~goal_id
@@ -638,7 +656,7 @@ let handle_goal_transition (ctx : context) args =
                       match
                         update_goal_phase ctx goal ~phase:next_phase ?note
                           ~clear_active_verification_request:
-                            (next_phase <> Goal_phase.Awaiting_verification)
+                            (not (Poly.equal next_phase Goal_phase.Awaiting_verification))
                           ()
                       with
                       | Error msg -> error_result_typed ~code:Internal_error msg
@@ -650,8 +668,8 @@ let handle_goal_transition (ctx : context) args =
                                   ("phase", Goal_phase.to_yojson updated_goal.phase);
                                   ("actor", Goal_verification.goal_principal_to_yojson actor);
                                 ]);
-                          if action = Goal_phase.Approve_completion
-                             || action = Goal_phase.Reject_completion then
+                          if Poly.equal action Goal_phase.Approve_completion
+                             || Poly.equal action Goal_phase.Reject_completion then
                             emit_goal_event ctx ~goal_id
                               ~event_type:"goal_approval_resolved"
                               ~payload:
@@ -659,7 +677,7 @@ let handle_goal_transition (ctx : context) args =
                                   [
                                     ( "decision",
                                       `String
-                                        (if action = Goal_phase.Approve_completion then
+                                        (if Poly.equal action Goal_phase.Approve_completion then
                                            "approve"
                                          else
                                            "reject") );
@@ -779,7 +797,7 @@ let handle_goal_verify (ctx : context) args =
                               verification_summary_json ~latest_request:request
                                 updated_goal
                                 effective_policy
-                                (if updated_goal.phase = Goal_phase.Awaiting_verification then
+                                (if Poly.equal updated_goal.phase Goal_phase.Awaiting_verification then
                                    Some request
                                  else
                                    None) );

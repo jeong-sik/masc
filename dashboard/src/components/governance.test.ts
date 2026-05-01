@@ -127,11 +127,11 @@ describe('Governance surface', () => {
     render(html`<${Governance} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('judge-only / 최근 판단 0건')
-    expect(container.textContent).toContain('Judge 상태')
-    expect(container.textContent).toContain('Judge 모델')
-    expect(container.textContent).toContain('실시간 판정')
-    expect(container.textContent).toContain('새로고침')
+    expect(container.textContent).toContain('judge-only / 0 recent judgments')
+    expect(container.textContent).toContain('Judge Status')
+    expect(container.textContent).toContain('Judge Model')
+    expect(container.textContent).toContain('Live Judgment')
+    expect(container.textContent).toContain('Refresh')
     expect(container.querySelector('[data-testid="governance-retired-banner"]')).toBeNull()
     expect(container.textContent).not.toContain('retired')
     expect(container.textContent).not.toContain('(retired)')
@@ -178,7 +178,7 @@ describe('Governance surface', () => {
       await flushUiWithFakeTimers()
 
       expect(fetchDashboardGovernance).toHaveBeenCalledTimes(1)
-      expect(container.textContent).toContain('30초 자동 갱신')
+      expect(container.textContent).toContain('Auto-refresh 30s')
 
       await vi.advanceTimersByTimeAsync(30_000)
       await flushUiWithFakeTimers()
@@ -233,12 +233,12 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('85%')
     expect(container.textContent).toContain('recover')
     expect(container.textContent).toContain('masc_operator_confirm')
-    expect(container.textContent).toContain('승인 필요')
+    expect(container.textContent).toContain('Approval required')
     expect(container.textContent).toContain('zombie agent detected')
 
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()
-    expect(judgeStatus?.textContent).toContain('온라인')
+    expect(judgeStatus?.textContent).toContain('Online')
     expect(judgeStatus?.textContent).toContain('llama:qwen3.5')
   }, 20000)
 
@@ -267,7 +267,7 @@ describe('Governance surface', () => {
 
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()
-    expect(judgeStatus?.textContent).toContain('오류')
+    expect(judgeStatus?.textContent).toContain('Error')
     expect(judgeStatus?.textContent).toContain('cascade failed')
   }, 20000)
 
@@ -307,10 +307,10 @@ describe('Governance surface', () => {
 
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()
-    expect(judgeStatus?.textContent).toContain('캐시 유지')
+    expect(judgeStatus?.textContent).toContain('Using cache')
     expect(judgeStatus?.textContent).toContain('Execution timed out')
-    expect(container.textContent).toContain('fresh judgment 캐시')
-    expect(container.textContent).not.toContain('AI Judge 오프라인')
+    expect(container.textContent).toContain('fresh-judgment cache')
+    expect(container.textContent).not.toContain('AI Judge is offline')
   }, 20000)
 
   it('renders keeper approval queue and resolves approval from the dashboard', async () => {
@@ -359,33 +359,33 @@ describe('Governance surface', () => {
     render(html`<${Governance} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('Keeper HITL 승인 대기')
+    expect(container.textContent).toContain('Keeper HITL Approval Queue')
     expect(container.textContent).toContain('governance-judge')
     expect(container.textContent).toContain('masc_code_delete')
     expect(container.textContent).toContain('critical')
-    expect(container.textContent).toContain('승인 입력')
-    expect(container.textContent).toContain('관리자 승인 대기')
+    expect(container.textContent).toContain('Approval Input')
+    expect(container.textContent).toContain('Admin Queue')
     expect(container.textContent).toContain('1')
-    expect(container.textContent).toContain('새로고침')
+    expect(container.textContent).toContain('Refresh')
     expect(container.textContent).not.toContain('Case Load Visualized')
     expect(container.textContent).not.toContain('청원 콘솔')
 
     // Prominent top banner must render when approval queue is non-empty.
     const banner = container.querySelector('[data-testid="keeper-hitl-alert-banner"]')
     expect(banner).not.toBeNull()
-    expect(banner?.textContent).toContain('1건')
-    expect(banner?.textContent).toContain('지금 검토')
+    expect(banner?.textContent).toContain('1')
+    expect(banner?.textContent).toContain('Review now')
     expect(banner?.textContent?.toLowerCase()).toContain('critical')
 
     // Banner precedes the summary strip so it can't be missed.
     const governanceRoot = container.firstElementChild as HTMLElement | null
     expect(governanceRoot?.firstElementChild).toBe(banner)
 
-    // Anchor target on the HITL queue card exists so '지금 검토' can scroll to it.
+    // Anchor target on the HITL queue card exists so "Review now" can scroll to it.
     expect(container.querySelector('[data-testid="keeper-hitl-approval"]')).not.toBeNull()
 
     const approveButton = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.trim() === '승인')
+      .find(button => button.textContent?.trim() === 'Approve')
     approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
@@ -418,7 +418,7 @@ describe('Governance surface', () => {
 
     const empty = container.querySelector('[data-testid="live-judge-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('AI Judge 오프라인')
+    expect(empty?.textContent).toContain('AI Judge is offline')
     expect(empty?.textContent).toContain('governance-judge')
     expect(empty?.textContent).toContain('qwen3.5:35b')
   }, 20000)
@@ -452,9 +452,9 @@ describe('Governance surface', () => {
 
     const empty = container.querySelector('[data-testid="live-judge-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('새 입력 대기')
-    expect(empty?.textContent).toContain('마지막 판단')
-    expect(empty?.textContent).not.toContain('오프라인')
+    expect(empty?.textContent).toContain('Waiting for new input')
+    expect(empty?.textContent).toContain('Last judgment')
+    expect(empty?.textContent).not.toContain('Offline')
   }, 20000)
 
   it('renders keeper HITL empty state with judge-offline context when queue is empty and judge is offline', async () => {
@@ -483,8 +483,8 @@ describe('Governance surface', () => {
 
     const empty = container.querySelector('[data-testid="keeper-hitl-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('AI Judge 오프라인')
-    expect(empty?.textContent).toContain('keeper 기동 여부')
+    expect(empty?.textContent).toContain('AI Judge is offline')
+    expect(empty?.textContent).toContain('keeper is running')
     expect(empty?.textContent).toContain('governance-judge')
     expect(empty?.textContent).toContain('qwen3.5:35b')
   }, 20000)
@@ -519,10 +519,10 @@ describe('Governance surface', () => {
 
     const empty = container.querySelector('[data-testid="keeper-hitl-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('위험도 threshold를 넘는 tool call이 없습니다')
-    expect(empty?.textContent).toContain('시스템이 정상 작동 중')
-    expect(empty?.textContent).toContain('마지막 judge 활동')
-    expect(empty?.textContent).not.toContain('오프라인')
+    expect(empty?.textContent).toContain('No tool calls exceed the risk threshold')
+    expect(empty?.textContent).toContain('system is operating normally')
+    expect(empty?.textContent).toContain('Last judge activity')
+    expect(empty?.textContent).not.toContain('Offline')
   }, 20000)
 })
 

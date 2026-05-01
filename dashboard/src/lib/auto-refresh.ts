@@ -3,9 +3,9 @@ const AUTO_REFRESH_EVENT_DEDUPE_MS = 500
 export function formatAutoRefreshLabel(intervalMs: number): string {
   const seconds = Math.max(1, Math.round(intervalMs / 1000))
   if (seconds % 60 === 0) {
-    return `${seconds / 60}분 자동 갱신`
+    return `Auto-refresh ${seconds / 60}m`
   }
-  return `${seconds}초 자동 갱신`
+  return `Auto-refresh ${seconds}s`
 }
 
 export function setupVisibleAutoRefresh(

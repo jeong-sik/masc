@@ -1,3 +1,5 @@
+open Base
+
 (** Coord_assertions — state inspection and assertion-based
     verification.
 

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
+import type { RouteState } from '../types'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -26,6 +27,7 @@ import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
+import { SurfaceIcon } from './surface-icon'
 
 const buildIdentityOpen = signal(false)
 
@@ -48,7 +50,7 @@ const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogV
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 
 function lazyTabFallback(label: string) {
-  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+  return html`<${LoadingState}>Loading ${label}...<//>`
 }
 
 /** Pure: describe a "reconnecting" state as a user-facing label plus
@@ -68,7 +70,7 @@ export function describeReconnecting(args: {
 }): { label: string; title: string } {
   const { disconnectedAt, now, reconnects } = args
   if (disconnectedAt === 0) {
-    return { label: '재연결 중...', title: '' }
+    return { label: 'Reconnecting...', title: '' }
   }
   const sec = Math.max(0, Math.round((now - disconnectedAt) / 1000))
   const elapsed = sec < 5
@@ -76,16 +78,16 @@ export function describeReconnecting(args: {
     : sec < 60
       ? ` · ${sec}s`
       : ` · ${Math.round(sec / 60)}m`
-  const label = `재연결 중${elapsed}`
+  const label = `Reconnecting${elapsed}`
   const titleParts: string[] = []
   if (sec >= 5) {
     const d = new Date(disconnectedAt)
     const pad = (n: number) => String(n).padStart(2, '0')
     const when = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    titleParts.push(`연결 끊김 ${when}`)
+    titleParts.push(`Disconnected at ${when}`)
   }
   if (reconnects > 0) {
-    titleParts.push(`누적 재연결 ${reconnects}회`)
+    titleParts.push(`Reconnect attempts ${reconnects}`)
   }
   return { label, title: titleParts.join(' · ') }
 }
@@ -97,14 +99,14 @@ export function ConnectionStatus() {
   const reconn = reconnectCount.value
 
   const statusLabel = isConnected
-    ? reconn > 0 ? '재연결됨' : '연결됨'
+    ? reconn > 0 ? 'Reconnected' : 'Connected'
     : describeReconnecting({
         disconnectedAt: lastDisconnectedAt.value,
         now: Date.now(),
         reconnects: reconn,
       }).label
   const titleAttr = isConnected
-    ? reconn > 0 ? `누적 재연결 ${reconn}회` : ''
+    ? reconn > 0 ? `Reconnect attempts ${reconn}` : ''
     : describeReconnecting({
         disconnectedAt: lastDisconnectedAt.value,
         now: Date.now(),
@@ -122,7 +124,7 @@ export function ConnectionStatus() {
         <${RouteLink}
           tab="overview"
           class="inline-flex items-center justify-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
-        >주의 ${attentionCount}건<//>
+        >Attention ${attentionCount}<//>
       ` : null}
     </div>
   `
@@ -139,7 +141,7 @@ export function ErrorCounterBadge() {
       <button
         type="button"
         class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
-        title=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
+        title=${count > 0 ? `${count} unacknowledged errors` : 'No errors'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
         aria-expanded=${open}
         aria-haspopup="true"
@@ -186,12 +188,12 @@ export function githubCommitUrl(commit: string | null | undefined): string | nul
 /** Pure: render uptime seconds as a human-readable duration for the
     build-identity dropdown. Delegates to formatElapsedCompact ("3s",
     "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
-    \"알 수 없음\" so the dropdown never prints \"NaNs\" or \"-5s\". */
+    "Unknown" so the dropdown never prints "NaNs" or "-5s". */
 export function formatUptimeSecondsHuman(
   seconds: number | null | undefined,
 ): string {
   if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) {
-    return '알 수 없음'
+    return 'Unknown'
   }
   return formatElapsedCompact(seconds)
 }
@@ -207,8 +209,8 @@ export function composeBuildBadgeTitle(
   build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
   fallbackVersion: string | null | undefined,
 ): string {
-  if (!build && !fallbackVersion) return '버전 정보 없음'
-  const lines: string[] = ['서버 빌드']
+  if (!build && !fallbackVersion) return 'Build unavailable'
+  const lines: string[] = ['Server build']
   const version = build?.release_version ?? fallbackVersion
   if (version != null && version !== '') {
     const commit = build?.commit != null && build.commit !== ''
@@ -217,10 +219,10 @@ export function composeBuildBadgeTitle(
     lines.push(`  · v${version}${commit}`)
   }
   const uptime = formatUptimeSecondsHuman(build?.uptime_seconds)
-  if (uptime !== '알 수 없음') {
-    lines.push(`  · 업타임 ${uptime}`)
+  if (uptime !== 'Unknown') {
+    lines.push(`  · Uptime ${uptime}`)
   }
-  lines.push('  · 클릭하여 상세 보기')
+  lines.push('  · Click for details')
   return lines.join('\n')
 }
 
@@ -231,7 +233,7 @@ export function BuildIdentityBadge() {
     ? `v${build.release_version} · ${shortCommit(build.commit)}`
     : status?.version
       ? `v${status.version} · dev`
-      : '버전 정보 없음'
+      : 'Build unavailable'
   const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
   return html`
@@ -239,7 +241,7 @@ export function BuildIdentityBadge() {
       <button type="button"
         class=${`cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
-        aria-label=${`서버 빌드 정보 ${label}`}
+        aria-label=${`Server build ${label}`}
         title=${hoverTitle}
         onClick=${() => {
           buildIdentityOpen.value = !buildIdentityOpen.value
@@ -250,13 +252,13 @@ export function BuildIdentityBadge() {
       ${buildIdentityOpen.value
         ? html`
             <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
-              <${BuildInfoRow} label="릴리즈">
+              <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
-              <${BuildInfoRow} label="커밋">
+              <${BuildInfoRow} label="Commit">
                 ${(() => {
                   const url = githubCommitUrl(build?.commit)
-                  const text = build?.commit ?? 'git 미감지 (dev)'
+                  const text = build?.commit ?? 'git not detected (dev)'
                   return url !== null
                     ? html`<a
                         href=${url}
@@ -264,22 +266,22 @@ export function BuildIdentityBadge() {
                         rel="noopener noreferrer"
                         class="text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
                         data-build-commit-link
-                        title="GitHub에서 이 커밋 보기"
+                        title="View this commit on GitHub"
                       >${text} ↗</a>`
                     : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
                 })()}
               <//>
-              <${BuildInfoRow} label="서버 시작">
-                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
+              <${BuildInfoRow} label="Server started">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>
               <//>
-              <${BuildInfoRow} label="업타임">
+              <${BuildInfoRow} label="Uptime">
                 <strong
                   class="text-[color:var(--color-fg-secondary)] text-right tabular-nums"
                   title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
                 >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
               <//>
-              <${BuildInfoRow} label="쉘 스냅샷">
-                <strong class="text-[color:var(--color-fg-secondary)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
+              <${BuildInfoRow} label="Shell snapshot">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : 'Unknown'}</strong>
               <//>
             </div>
           `
@@ -314,7 +316,7 @@ export function summarizeAttentionPreview(
     valid.push(raw.length > 60 ? `${raw.slice(0, 57)}...` : raw)
   }
   if (valid.length <= max) return valid
-  return [...valid.slice(0, max), `… 외 ${valid.length - max}건`]
+  return [...valid.slice(0, max), `... +${valid.length - max} more`]
 }
 
 /** Pure: compose the full title-attribute string for the health
@@ -328,6 +330,27 @@ export function composeHealthIndicatorTitle(
   if (attentionLines.length === 0) return label
   const indented = attentionLines.map(line => `  · ${line}`)
   return [label, ...indented].join('\n')
+}
+
+export function dashboardRouteBoundaryKey(routeState: RouteState): string {
+  const params = routeState.params
+  const parts = [
+    routeState.tab,
+    params.section,
+    params.view ? `view=${params.view}` : '',
+    params.session_id ? `session=${params.session_id}` : '',
+    params.operation_id ? `operation=${params.operation_id}` : '',
+    params.worker_run_id ? `worker=${params.worker_run_id}` : '',
+  ]
+
+  if (routeState.tab === 'monitoring' && params.section === 'agents') {
+    parts.push(
+      params.agent ? `agent=${params.agent}` : '',
+      params.keeper ? `keeper=${params.keeper}` : '',
+    )
+  }
+
+  return parts.filter(Boolean).join(':')
 }
 
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
@@ -346,17 +369,17 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
 
   if (!live) {
     dotClass = 'bg-[var(--color-status-err)]'
-    label = '신호 없음'
+    label = 'Offline'
   } else if (!snap) {
     dotClass = 'bg-[var(--color-fg-muted)]'
-    label = missionLoading.value ? '로딩 중' : '대기 중'
+    label = missionLoading.value ? 'Loading' : 'Idle'
   } else if (blockers > 0 || attentionCount > 0) {
     dotClass = 'bg-[var(--color-status-warn)]'
     const total = blockers + attentionCount
-    label = `주의 ${total}건`
+    label = `Attention ${total}`
   } else {
     dotClass = 'bg-[var(--color-status-ok)]'
-    label = '정상'
+    label = 'Healthy'
   }
 
   const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
@@ -382,19 +405,19 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
   const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
 
   return html`
-    <nav class="flex flex-col h-full" aria-label="대시보드 내비게이션">
+    <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-3xs font-bold uppercase tracking-[0.2em] text-[var(--color-fg-muted)]">내비게이션</div>
-            <div class="mt-0.5 text-sm font-semibold tracking-[-0.02em] text-[var(--color-fg-secondary)]">MASC Core</div>
+            <div class="font-mono text-3xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Navigation</div>
+            <div class="mt-0.5 text-sm font-semibold tracking-normal text-[var(--color-fg-secondary)]">MASC Core</div>
           </div>
         ` : null}
         <button type="button"
-          class=${`flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)] cursor-pointer transition-colors duration-[var(--t-med)] hover:bg-[var(--white-10)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
-          aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
+          class=${`flex size-7 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] cursor-pointer transition-colors duration-[var(--t-med)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+          aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick=${onToggle}
-          title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
+          title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           ${collapsed ? html`<${ChevronRight} size=${16} />` : html`<${ChevronLeft} size=${16} />`}
         </button>
@@ -411,12 +434,12 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center justify-center w-full rounded-[var(--r-1)] border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)] border-[var(--select-20)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="text-xl drop-shadow-sm" aria-hidden="true">${surface.icon}</span>
+                  <span aria-hidden="true"><${SurfaceIcon} icon=${surface.icon} size=${17} /></span>
                 <//>
               `
             }
@@ -426,14 +449,14 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center gap-2 w-full rounded border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center gap-2 w-full rounded-[var(--r-1)] border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive && sections.length === 0 ? 'bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)] border-[var(--select-20)]' : 'bg-transparent border-transparent !text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-3)] text-base" aria-hidden="true">
-                    ${surface.icon}
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] ${isSurfaceActive ? 'text-[var(--select)]' : 'text-[var(--color-fg-muted)]'}" aria-hidden="true">
+                    <${SurfaceIcon} icon=${surface.icon} size=${15} />
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--color-accent-fg)]' : ''}">${surface.label}</div>
+                    <div class="text-[13px] font-medium truncate leading-tight tracking-normal ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
                   </div>
                 <//>
 
@@ -446,7 +469,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--color-accent-soft)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]'}"
+                          class="w-full rounded-[var(--r-1)] border px-2 py-1 text-left cursor-pointer text-xs transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'bg-[var(--select-10)] !text-[var(--select)] font-medium shadow-[inset_2px_0_0_var(--select)] border-[var(--select-20)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:!text-[var(--color-fg-primary)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>
@@ -474,55 +497,55 @@ function TabContent() {
   switch (tab) {
     case 'overview':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('개요 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Overview')}>
           <${LazyOverview} />
         <//>
       `
     case 'monitoring':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('모니터링 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Monitor')}>
           <${LazyStatus} />
         <//>
       `
     case 'workspace':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('작업 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Workspace')}>
           <${LazyWork} />
         <//>
       `
     case 'command':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('운영 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Command')}>
           <${LazyOperations} />
         <//>
       `
     case 'connectors':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('커넥터 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Connectors')}>
           <${LazyConnectors} />
         <//>
       `
     case 'lab':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Lab')}>
           <${LazyLabSurface} />
         <//>
       `
     case 'code':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('코드 IDE')}>
+        <${Suspense} fallback=${lazyTabFallback('Code IDE')}>
           <${LazyIdeShell} />
         <//>
       `
     case 'logs':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('시스템 로그')}>
+        <${Suspense} fallback=${lazyTabFallback('System Logs')}>
           <${LazyLogViewer} />
         <//>
       `
     default:
       return html`
-        <${Suspense} fallback=${lazyTabFallback('개요 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('Overview')}>
           <${LazyOverview} />
         <//>
       `
@@ -606,7 +629,7 @@ function SurfaceLead() {
   const currentSection = currentSectionForRoute(route.value)
 
   const description = currentSection?.description ?? currentView?.description ?? null
-  const title = currentSection?.label ?? currentView?.label ?? '홈'
+  const title = currentSection?.label ?? currentView?.label ?? 'Home'
   const shareUrl = currentSectionShareUrl()
   // Only surface a trail when the operator has drilled into a section —
   // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
@@ -626,8 +649,8 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-col gap-1.5">
       ${trail.length > 0
         ? html`<nav
-            class="flex items-center gap-1 text-2xs text-[var(--color-fg-disabled)]"
-            aria-label="페이지 경로"
+            class="flex items-center gap-1 font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]"
+            aria-label="Page path"
             data-surface-breadcrumb
           >
             ${trail.map((crumb, i) => {
@@ -649,41 +672,33 @@ function SurfaceLead() {
           </nav>`
         : null}
       <div class="flex items-center gap-2">
-        <h2 class="text-[22px] font-bold tracking-tight text-[var(--color-fg-secondary)]">
+        <h2 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">
           ${title}
         </h2>
         ${shareUrl !== ''
           ? html`<${CopyIdButton}
               value=${shareUrl}
-              label=${`섹션 링크 (${title})`}
-              ariaLabel="현재 섹션 URL 복사"
+              label=${`Section link (${title})`}
+              ariaLabel="Copy current section URL"
               size=${14}
             />`
           : null}
       </div>
-      ${description ? html`<p class="m-0 text-sm leading-normal text-[var(--color-fg-disabled)]">${description}</p>` : null}
+      ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
     </div>
   `
 }
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
-    return html`<${LoadingState}>대시보드 불러오는 중...<//>`
+    return html`<${LoadingState}>Loading dashboard...<//>`
   }
 
-  const routeLabel = [
-    route.value.tab,
-    route.value.params.section,
-    route.value.params.session_id,
-    route.value.params.operation_id,
-    route.value.params.worker_run_id,
-  ]
-    .filter(Boolean)
-    .join(':')
+  const routeLabel = dashboardRouteBoundaryKey(route.value)
 
   return html`
     ${namespaceTruthInitializing.value ? html`
-      <div class="mb-3 shrink-0 rounded border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]">Server data warming; this view will refresh automatically.</div>
     ` : null}
     <${SurfaceLead} />
     <${ObservatoryFilterBar} />

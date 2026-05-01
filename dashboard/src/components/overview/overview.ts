@@ -2,11 +2,11 @@
 //
 // "What's the party doing today?" in one glance, no scroll.
 // 5 sections, top-to-bottom (V2):
-//   0. Alert Panel     — failing agents + stalled tasks (actionable alerts first)
-//   1. Highlight       — mission.summary.top_attention 1줄
-//   2. Funnel          — 5칸 task 카운트 (신규/진행/검증 대기/완료/목표)
-//   3. Mission party   — active session 1건 (goal, members, progress bar, blocker)
-//   4. Keeper strip    — 상위 3명 (hb 최신순)
+//   0. Alert Panel     — failing agents and stalled tasks, actionable alerts first
+//   1. Highlight       — mission.summary.top_attention, one-line focus
+//   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
+//   3. Mission party   — one active session (goal, members, progress bar, blocker)
+//   4. Keeper strip    — top three keepers by recent heartbeat
 
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
@@ -61,7 +61,7 @@ export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
       alerts.push({
         name: a.name,
         display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
-        reason: status === 'offline' ? '오프라인' : '비활성',
+        reason: status === 'offline' ? 'Offline' : 'Inactive',
         severity: 'critical',
       })
     }
@@ -120,15 +120,15 @@ function AlertPanel({
   return html`
     <section
       class="rounded border ${criticalCount > 0 ? 'border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/6' : 'border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/6'} p-4"
-      aria-label="주의 알림"
+      aria-label="Attention alerts"
       data-testid="overview-alerts"
     >
       <header class="flex items-center gap-2 mb-3">
         <span class="${criticalCount > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-status-warn)]'} text-sm font-semibold">
-          ⚠ ${total}건 주의
+          Attention ${total}
         </span>
         ${criticalCount > 0
-          ? html`<span class="text-2xs text-[var(--color-status-err)] font-medium">${criticalCount}건 위험</span>`
+          ? html`<span class="text-2xs text-[var(--color-status-err)] font-medium">${criticalCount} critical</span>`
           : null}
       </header>
       <ul class="flex flex-col gap-2">
@@ -155,7 +155,7 @@ function AlertPanel({
           >
             <span class="shrink-0 inline-block size-2 rounded-sm bg-[var(--color-status-warn)]"></span>
             <span class="text-[var(--color-fg-secondary)] truncate">${t.title}</span>
-            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-warn)] font-medium">검증 대기</span>
+            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-warn)] font-medium">Awaiting verification</span>
           </li>
         `)}
       </ul>
@@ -229,20 +229,20 @@ export function formatTargetRatio(counts: FunnelCounts): string {
 function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const awaitingKind: KpiCellKind | undefined = counts.awaiting > 0 ? 'warn' : undefined
   return html`
-    <section class=${CARD} aria-label="오늘 상황" data-testid="overview-funnel">
+    <section class=${CARD} aria-label="Today funnel" data-testid="overview-funnel">
       <header class="flex items-center justify-between mb-3">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">오늘 상황</h2>
-        <span class="text-2xs text-[var(--color-fg-muted)]">task 기준</span>
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">Today</h2>
+        <span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>
       </header>
       <${KpiStripIsland}
-        ariaLabel="오늘 funnel"
+        ariaLabel="Today funnel"
         cols=${5}
         cells=${[
-          { variant: 'stacked', label: '신규', value: String(counts.created), testId: 'funnel-created' },
-          { variant: 'stacked', label: '진행', value: String(counts.inProgress), testId: 'funnel-in-progress' },
-          { variant: 'stacked', label: '검증 대기', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
-          { variant: 'stacked', label: '완료', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
-          { variant: 'stacked', label: '목표', value: formatTargetRatio(counts), testId: 'funnel-target' },
+          { variant: 'stacked', label: 'New', value: String(counts.created), testId: 'funnel-created' },
+          { variant: 'stacked', label: 'Active', value: String(counts.inProgress), testId: 'funnel-in-progress' },
+          { variant: 'stacked', label: 'Verify', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
+          { variant: 'stacked', label: 'Done', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
+          { variant: 'stacked', label: 'Target', value: formatTargetRatio(counts), testId: 'funnel-target' },
         ]}
       />
     </section>
@@ -267,14 +267,14 @@ export function severityToneClass(severity?: string | null): string {
 function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
   if (attention === null) {
     return html`
-      <section class=${CARD} aria-label="오늘의 하이라이트" data-testid="overview-highlight-empty">
-        <p class="text-sm text-[var(--color-fg-muted)]">특별한 신호 없음</p>
+      <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight-empty">
+        <p class="text-sm text-[var(--color-fg-muted)]">No notable signal</p>
       </section>
     `
   }
   const severity = attention.severity === '' ? 'info' : attention.severity
   return html`
-    <section class=${CARD} aria-label="오늘의 하이라이트" data-testid="overview-highlight">
+    <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight">
       <div class="flex items-center gap-2 min-w-0">
         <span class=${`text-2xs font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(severity)}`}>
           ${severity.toUpperCase()}
@@ -310,9 +310,9 @@ export function progressPct(active: DashboardMissionSessionCard | null): number 
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
   if (active === null) {
     return html`
-      <section class=${CARD} aria-label="진행 중 파티" data-testid="overview-party-empty">
-        <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">진행 중 파티</header>
-        <p class="text-sm text-[var(--color-fg-muted)]">활성 미션 없음</p>
+      <section class=${CARD} aria-label="Active mission" data-testid="overview-party-empty">
+        <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">Active Mission</header>
+        <p class="text-sm text-[var(--color-fg-muted)]">No active mission</p>
       </section>
     `
   }
@@ -322,15 +322,15 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const startedAt = active.started_at
   const blocker = active.blocker_summary
   return html`
-    <section class=${CARD} aria-label="진행 중 파티" data-testid="overview-party">
+    <section class=${CARD} aria-label="Active mission" data-testid="overview-party">
       <header class="flex items-center justify-between gap-3 mb-3">
-        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">진행 중 파티</h2>
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">Active Mission</h2>
         ${startedAt !== null && startedAt !== undefined && startedAt !== ''
           ? html`<${TimeAgo} timestamp=${startedAt} class="text-2xs text-[var(--color-fg-muted)]" />`
           : null}
       </header>
       <p class="text-sm text-[var(--color-fg-secondary)] mb-3 line-clamp-2" data-testid="overview-party-goal">
-        🎯 ${active.goal !== '' ? active.goal : '(목표 없음)'}
+        ${active.goal !== '' ? active.goal : '(no goal)'}
       </p>
       ${members.length > 0
         ? html`
@@ -401,14 +401,14 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   const top = pickActiveKeepers(keeperList, 3)
   if (top.length === 0) {
     return html`
-      <section class=${CARD} aria-label="활성 keeper" data-testid="overview-keepers-empty">
-        <p class="text-sm text-[var(--color-fg-muted)]">활성 keeper 없음</p>
+      <section class=${CARD} aria-label="Active keepers" data-testid="overview-keepers-empty">
+        <p class="text-sm text-[var(--color-fg-muted)]">No active keepers</p>
       </section>
     `
   }
   return html`
-    <section class=${CARD} aria-label="활성 keeper" data-testid="overview-keepers">
-      <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">활성 keeper</header>
+    <section class=${CARD} aria-label="Active keepers" data-testid="overview-keepers">
+      <header class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)] mb-2">Active Keepers</header>
       <ul class="flex flex-col gap-2">
         ${top.map(
           k => html`

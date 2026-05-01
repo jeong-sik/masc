@@ -9,7 +9,7 @@ import { EmptyState } from './common/empty-state'
 import { InfoCard } from './common/info-card'
 import { KeeperBadge } from './keeper-badge'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatTimeAgoEn } from '../lib/format-time'
 import {
   asBoolean,
   asNumber,
@@ -250,7 +250,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
           <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
             ${item.agent_name} · ${item.sandbox_profile}/${item.sandbox_backend} · ${item.network_mode}
           </div>
-          <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${item.goal || 'goal 없음'}</div>
+          <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${item.goal || 'No goal'}</div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
             ${item.active_goal_ids.map(goalId => html`
               <span class="rounded border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5">${goalId}</span>
@@ -266,7 +266,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
         </div>
         <div class="text-xs lg:min-w-[220px]">
           <${KpiStripIsland}
-            ariaLabel="domain 통계"
+            ariaLabel="Domain statistics"
             cols=${2}
             cells=${[
               { variant: 'stacked', label: 'score', value: item.score.toFixed(1) },
@@ -285,7 +285,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
 
 function FindingsList({ findings }: { findings: FindingItem[] }) {
   if (findings.length === 0) {
-    return html`<${EmptyState} message="현재 기록된 세이프 오토노미 finding이 없습니다." compact />`
+    return html`<${EmptyState} message="No safe-autonomy findings are recorded." compact />`
   }
   return html`
     <div class="space-y-2">
@@ -317,7 +317,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
 
 function SafeAutonomyTrend({ history }: { history: number[] }) {
   if (history.length === 0) {
-    return html`<${EmptyState} message="충분한 history가 쌓이면 trend가 표시됩니다." compact />`
+    return html`<${EmptyState} message="Trend appears after enough history is collected." compact />`
   }
   const min = Math.min(...history)
   const max = Math.max(...history)
@@ -351,7 +351,7 @@ function SafeAutonomyTrend({ history }: { history: number[] }) {
 
 function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
   if (timeline.length === 0) {
-    return html`<${EmptyState} message="최근 타임라인 이벤트가 없습니다." compact />`
+    return html`<${EmptyState} message="No recent timeline events." compact />`
   }
   return html`
     <div class="space-y-2">
@@ -369,7 +369,7 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
               </div>
             </div>
             <div class="shrink-0 text-3xs text-[var(--color-fg-muted)]">
-              ${item.ts_iso ? formatTimeAgo(item.ts_iso) : '정보 없음'}
+              ${item.ts_iso ? formatTimeAgoEn(item.ts_iso) : 'unknown'}
             </div>
           </div>
         </div>
@@ -385,10 +385,10 @@ export function SafeAutonomyPanel() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="안전 자율성" class="section">
+      <${Card} title="Safe Autonomy" class="section">
         <${AsyncContainer}
           state=${safeAutonomy.state}
-          loadingMessage="세이프 오토노미 scorecard를 불러오는 중..."
+          loadingMessage="Loading safe-autonomy scorecard..."
           render=${(data: SafeAutonomyData) => html`
             <div class="space-y-4">
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
@@ -404,15 +404,15 @@ export function SafeAutonomyPanel() {
                       <${StatusPill} status=${data.summary.status} />
                     </div>
                     <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
-                      Tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
-                      audit trail completeness를 keeper별로 한 번에 보여줍니다.
+                      Shows tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
+                      and audit trail completeness per keeper.
                     </div>
                     <div class="mt-2 text-3xs text-[var(--color-fg-muted)]">
-                      generated ${data.generated_at ? formatTimeAgo(data.generated_at) : '정보 없음'}
+                      generated ${data.generated_at ? formatTimeAgoEn(data.generated_at) : 'unknown'}
                     </div>
                   </div>
                   <${KpiStripIsland}
-                    ariaLabel="safe-autonomy 요약"
+                    ariaLabel="Safe-autonomy summary"
                     cols=${4}
                     cells=${[
                       { variant: 'stacked', label: 'keepers', value: data.summary.keeper_count },
@@ -430,28 +430,28 @@ export function SafeAutonomyPanel() {
                 ${data.domains.map(item => html`<${DomainCard} key=${item.id} item=${item} />`)}
               </div>
 
-              <${Card} title="키퍼 매트릭스" class="section">
+              <${Card} title="Keeper Matrix" class="section">
                 <div class="space-y-3">
                   ${data.per_keeper.length === 0
-                    ? html`<${EmptyState} message="표시할 keeper snapshot이 없습니다." compact />`
+                    ? html`<${EmptyState} message="No keeper snapshots to display." compact />`
                     : data.per_keeper.map(item => html`<${KeeperCard} key=${item.name} item=${item} />`)}
                 </div>
               <//>
 
-              <${Card} title="글로벌 스코어 트렌드" class="section">
+              <${Card} title="Global Score Trend" class="section">
                 <${SafeAutonomyTrend} history=${data.history} />
               <//>
 
               <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <${Card} title="발견" class="section">
+                <${Card} title="Findings" class="section">
                   <${FindingsList} findings=${data.findings} />
                 <//>
-                <${Card} title="타임라인" class="section">
+                <${Card} title="Timeline" class="section">
                   <${TimelineList} timeline=${data.timeline} />
                 <//>
               </div>
 
-              <${JsonViewerCard} title="아티팩트" data=${data.artifacts} />
+              <${JsonViewerCard} title="Artifacts" data=${data.artifacts} />
             </div>
           `}
         />

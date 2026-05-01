@@ -35,7 +35,7 @@ function Chip({
         type="button"
         class="ml-0.5 rounded-sm min-w-6 min-h-6 p-1 text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong transition-colors inline-flex items-center justify-center"
         onClick=${onClear}
-        aria-label=${`${label} 필터 제거`}
+        aria-label=${`Clear ${label} filter`}
       >
         <${X} size=${10} />
       </button>
@@ -55,33 +55,33 @@ export function ObservatoryFilterBar() {
     <div
       class="mb-3 flex flex-wrap items-center gap-2 rounded border border-card-border bg-bg-1/60 px-3 py-2"
       role="region"
-      aria-label="활성 관찰 필터"
+      aria-label="Active observability filters"
     >
-      <span class="text-3xs uppercase tracking-wider text-text-dim font-semibold">필터</span>
+      <span class="text-3xs uppercase tracking-wider text-text-dim font-semibold">Filters</span>
       ${keeper ? html`
         <${Chip}
-          label="키퍼"
+          label="Keeper"
           value=${keeper}
           onClear=${() => setObservatoryFilter({ keeper: null })}
         />
       ` : null}
       ${namespace ? html`
         <${Chip}
-          label="네임스페이스"
+          label="Namespace"
           value=${namespace}
           onClear=${() => setObservatoryFilter({ namespace: null })}
         />
       ` : null}
       ${operation ? html`
         <${Chip}
-          label="작업"
+          label="Operation"
           value=${operation}
           onClear=${() => setObservatoryFilter({ operation: null })}
         />
       ` : null}
       ${range ? html`
         <${Chip}
-          label="기간"
+          label="Range"
           value=${timeRangeLabel(range)}
           onClear=${() => setObservatoryFilter({ range: null })}
         />
@@ -91,7 +91,7 @@ export function ObservatoryFilterBar() {
         class="ml-auto rounded text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
         onClick=${() => clearObservatoryFilters()}
       >
-        모두 해제
+        Clear all
       </button>
     </div>
   `

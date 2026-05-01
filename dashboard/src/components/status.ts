@@ -31,23 +31,23 @@ const LazyJourneyPanel = lazy(async () => ({
 }))
 
 function sectionFallback(label: string) {
-  return html`<${LoadingState}>${label} 불러오는 중...<//>`
+  return html`<${LoadingState}>Loading ${label}...<//>`
 }
 
 export function sectionLabel(section: StatusSection): string {
   switch (section) {
     case 'observatory':
-      return '관찰소'
+      return 'Observatory'
     case 'journey':
-      return '여정'
+      return 'Journey'
     case 'runtime':
-      return '런타임'
+      return 'Runtime'
     case 'fleet-health':
-      return '플릿 상태'
+      return 'Fleet Health'
     case 'memory-subsystems':
-      return '메모리 서브시스템'
+      return 'Memory Subsystems'
     case 'agents':
-      return '에이전트 상태'
+      return 'Agents'
   }
 }
 

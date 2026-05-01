@@ -76,7 +76,7 @@ describe('GovernanceMonitor', () => {
     await flushUi()
 
     expect(get).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('30초 자동 갱신')
+    expect(container.textContent).toContain('Auto-refresh 30s')
 
     await vi.advanceTimersByTimeAsync(30_000)
     await flushUi()

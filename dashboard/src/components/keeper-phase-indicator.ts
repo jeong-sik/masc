@@ -1,11 +1,11 @@
-// Keeper phase indicator — shows the 12-state lifecycle phase
+// Keeper phase indicator — shows the 13-state lifecycle phase
 // as a color-coded badge with Korean label.
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
 // Color mapping follows the Anyang Sleepers design system (#8177,
-// #8235): the 12 phases collapse into 6 visual groups so that across
+// #8235): the 13 phases collapse into 6 visual groups so that across
 // a row of 40 keepers the palette reads as 6 semantic categories
-// rather than 12 similar-but-subtly-different hues. Individual phase
+// rather than 13 similar-but-subtly-different hues. Individual phase
 // is still distinguished by its icon and Korean label — the color
 // carries the health meaning, the icon carries the identity.
 //
@@ -36,7 +36,7 @@ interface PhaseStyle {
 //   working compacting · handing_off · draining · restarting → --accent (slate)
 //   warn    failing · overflowed                             → --warn
 //   paused  paused                                           → --paused
-//   inactive offline · stopped · dead                        → --text-muted / --bad-light
+//   inactive offline · stopped · dead · zombie               → --text-muted / --bad-light
 //
 // Restarting sits with "working" — operators read a restart as
 // recovery-in-progress, not a fresh failure. Dead keeps the bad-light
@@ -58,6 +58,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Crashed:    { label: '비정상종료',   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
   Restarting: { label: '재시작중',     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
   Dead:       { label: '종료',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
+  Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
 const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
@@ -67,7 +68,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
   return PHASE_STYLES[phase as KeeperPhase] ?? PHASE_STYLES.Offline
 }
 
-/** Phase badge — color-coded pill showing 12-state lifecycle phase. */
+/** Phase badge — color-coded pill showing the keeper lifecycle phase. */
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')

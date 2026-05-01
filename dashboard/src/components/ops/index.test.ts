@@ -120,7 +120,7 @@ describe('Ops surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('최근 운영 활동')
+    expect(container.textContent).toContain('Recent Activity')
     expect(container.textContent).toContain('QuickIntervene')
     expect(container.textContent).toContain('FlowControlPanel')
 
@@ -180,12 +180,12 @@ describe('Ops surface', () => {
 
     const panel = container.querySelector('[data-testid="keeper-utilities-panel"]')
     expect(panel).toBeTruthy()
-    expect(panel?.textContent).toContain('키퍼 유틸리티')
+    expect(panel?.textContent).toContain('Keeper Utilities')
     expect(panel?.textContent).toContain('probe from server')
-    expect(panel?.textContent).toContain('GitHub 인증 상태')
+    expect(panel?.textContent).toContain('GitHub Identity Status')
     expect(panel?.textContent).toContain('keeper_unknown_maintenance')
     expect(panel?.textContent).toContain('UI adapter pending')
-    expect(panel?.textContent).not.toContain('전체 공지')
+    expect(panel?.textContent).not.toContain('Broadcast')
   }, 60000)
 
   it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {
@@ -225,7 +225,7 @@ describe('Ops surface', () => {
 
     expect(container.textContent).toContain('QuickIntervene')
     expect(container.textContent).toContain('FlowControlPanel')
-    expect(container.textContent).toContain('최근 운영 활동')
+    expect(container.textContent).toContain('Recent Activity')
 
     // The placeholder-heavy review queue panel no longer exists, and the
     // review_queue/deferred_queue/review_summary fields were dropped from
@@ -273,7 +273,7 @@ describe('Ops surface', () => {
 
     const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('namespace가 일시정지')
+    expect(empty?.textContent).toContain('Namespace is paused')
     expect(empty?.textContent).toContain('배포 윈도우')
     expect(empty?.textContent).toContain('by vincent')
   }, 60000)
@@ -315,8 +315,8 @@ describe('Ops surface', () => {
 
     const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('최근 3일 내 운영 활동이 없습니다')
-    expect(empty?.textContent).not.toContain('일시정지')
+    expect(empty?.textContent).toContain('No operator activity in the last 3 days')
+    expect(empty?.textContent).not.toContain('paused')
   }, 60000)
 
   it('filters out entries older than 3 days so stale reviews stop showing', async () => {

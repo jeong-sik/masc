@@ -10,7 +10,7 @@ function initialActorName(): string {
 
 export const actorName = signal(initialActorName())
 export const broadcastMessage = signal('')
-export const pauseReason = signal('운영 점검')
+export const pauseReason = signal('Operator maintenance')
 export const taskTitle = signal('')
 export const taskDescription = signal('')
 export const taskPriority = signal('2')

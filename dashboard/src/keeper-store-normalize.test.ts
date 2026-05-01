@@ -15,6 +15,7 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('crashed')).toBe('Crashed')
     expect(toKeeperPhase('restarting')).toBe('Restarting')
     expect(toKeeperPhase('dead')).toBe('Dead')
+    expect(toKeeperPhase('zombie')).toBe('Zombie')
   })
 
   it('accepts PascalCase input for forward compatibility', () => {
@@ -22,6 +23,7 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('Running')).toBe('Running')
     expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
+    expect(toKeeperPhase('Zombie')).toBe('Zombie')
   })
 
   it('trims surrounding whitespace before matching', () => {

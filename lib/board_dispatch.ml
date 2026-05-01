@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Board_dispatch - Runtime backend selection for MASC Board
 
     Board now runs on the JSONL store only. Backend is selected once at
@@ -77,14 +95,14 @@ let start_flusher_actor ~sw store =
           (try Board.flush_dirty store
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
+           | exn -> Log.BoardLog.error "Flush failed: %s" (Exn.to_string exn))
       | Board_types.Sweep ->
           (try
              let swept = Board.sweep store in
              ignore swept
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
+           | exn -> Log.BoardLog.error "Sweep failed: %s" (Exn.to_string exn))
     done
   )
 
@@ -175,38 +193,38 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
       List.sort (fun (a : Board.post) (b : Board.post) ->
         let score_a = a.votes_up - a.votes_down in
         let score_b = b.votes_up - b.votes_down in
-        let cmp = compare score_b score_a in
+        let cmp = Stdlib.Int.compare score_b score_a in
         if cmp <> 0 then cmp
-        else compare b.created_at a.created_at) posts
+        else Stdlib.Float.compare b.created_at a.created_at) posts
   | Recent ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        compare b.created_at a.created_at) posts
+        Stdlib.Float.compare b.created_at a.created_at) posts
   | Updated ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        compare b.updated_at a.updated_at) posts
+        Stdlib.Float.compare b.updated_at a.updated_at) posts
   | Trending ->
       let now = Time_compat.now () in
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        let age_a = max 1.0 ((now -. a.created_at) /. 3600.0) in
-        let age_b = max 1.0 ((now -. b.created_at) /. 3600.0) in
+        let age_a = Stdlib.Float.max 1.0 ((now -. a.created_at) /. 3600.0) in
+        let age_b = Stdlib.Float.max 1.0 ((now -. b.created_at) /. 3600.0) in
         let score_a =
-          float_of_int (a.votes_up - a.votes_down + (a.reply_count * 2))
-          /. (age_a ** 0.5)
+          Stdlib.Float.of_int (a.votes_up - a.votes_down + (a.reply_count * 2))
+          /. (Stdlib.( **) age_a 0.5)
         in
         let score_b =
-          float_of_int (b.votes_up - b.votes_down + (b.reply_count * 2))
-          /. (age_b ** 0.5)
+          Stdlib.Float.of_int (b.votes_up - b.votes_down + (b.reply_count * 2))
+          /. (Stdlib.( **) age_b 0.5)
         in
-        compare score_b score_a) posts
+        Stdlib.Float.compare score_b score_a) posts
   | Discussed ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        let cmp = compare b.reply_count a.reply_count in
-        if cmp <> 0 then cmp else compare b.created_at a.created_at) posts
+        let cmp = Stdlib.Int.compare b.reply_count a.reply_count in
+        if cmp <> 0 then cmp else Stdlib.Float.compare b.created_at a.created_at) posts
 
 let normalize_author_filter = function
   | Some raw ->
       let trimmed = String.trim raw in
-      if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
+      if String.equal trimmed "" then None else Some (String.lowercase_ascii trimmed)
   | None -> None
 
 let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
@@ -262,13 +280,13 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
     let posts =
       match visibility_filter with
       | Some visibility ->
-          List.filter (fun (post : Board.post) -> post.visibility = visibility) posts
+          List.filter (fun (post : Board.post) -> Poly.equal post.visibility visibility) posts
       | None -> posts
     in
     match hearth with
     | Some hearth_name ->
         let hearth_name = String.lowercase_ascii (String.trim hearth_name) in
-        List.filter (fun (post : Board.post) -> post.hearth = Some hearth_name) posts
+        List.filter (fun (post : Board.post) -> Option.equal String.equal post.hearth (Some hearth_name)) posts
     | None -> posts
   in
   let apply_post_kind_filter posts =
@@ -278,8 +296,8 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
     |> (match post_kind_filter with
        | Some kind ->
            List.filter
-             (fun (p : Board.post) -> Board.classify_post_kind p = kind)
-       | None -> Fun.id)
+             (fun (p : Board.post) -> Poly.equal (Board.classify_post_kind p) kind)
+       | None -> Stdlib.Fun.id)
   in
   match backend () with
   | Jsonl store ->
@@ -310,7 +328,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
         | None -> filtered
         | Some needle ->
             let matching_comment_post_ids =
-              Board.list_comments store ~limit:max_int ()
+              Board.list_comments store ~limit:Stdlib.max_int ()
               |> matching_post_ids_for_comment_author_filter ~needle
             in
             List.filter

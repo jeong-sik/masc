@@ -1,3 +1,5 @@
+open Base
+
 (** Coord_goals — Goal-management MCP tool handlers.
 
     Reachable from {!Tool_coord.dispatch} for the 5 goal tools:

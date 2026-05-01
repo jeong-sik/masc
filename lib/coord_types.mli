@@ -1,3 +1,5 @@
+open Base
+
 (** Coord_types — Shared types for coordination modules.
 
     Type-SSOT for the [tool_coord] / [coord_status_rendering] /

@@ -160,6 +160,23 @@ let () =
                      && (try ignore (Str.search_forward (Str.regexp_string "TestKeeper") rendered 0); true
                          with Not_found -> false))
               | Error msg -> fail msg);
+          test_case "render_prompt_template leaves braces in values literal" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                  [ ("facts_json", {|{"template":"{{ .Release.Name }}"}|}) ]
+              with
+              | Ok rendered ->
+                  check bool "rendered keeps user braces" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "{{ .Release.Name }}")
+                            rendered 0);
+                       true
+                     with Not_found -> false)
+              | Error msg -> fail msg);
         ] );
       ( "override",
         [

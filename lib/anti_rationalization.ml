@@ -279,7 +279,10 @@ let build_prompt ?(few_shot_block = "") ?excuse_advisory
     Prompt_registry.render_prompt_template "verification.anti_rationalization" vars
   with
   | Ok p -> p
-  | Error _ ->
+  | Error msg ->
+    Log.Misc.warn
+      "anti_rationalization: prompt template render failed, using fallback: %s"
+      msg;
     sprintf
 {|You are a task completion reviewer. Evaluate whether the agent's notes describe actual completed work.
 

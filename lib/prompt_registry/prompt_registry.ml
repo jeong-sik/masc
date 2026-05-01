@@ -400,12 +400,6 @@ let update_metrics ~id ~version ~score () : unit =
 
 (** {1 Template Rendering} *)
 
-(* Static unresolved-var detector — same pattern, hoisted out of
-   [render_template] so [Re.compile] runs once at module load instead
-   of per render call. *)
-let unresolved_var_re =
-  Re.Pcre.re {|\{\{[^}]+\}\}|} |> Re.compile
-
 (* Byte-wise [pattern → replacement] substring substitution.
 
    Replaces [Re.replace_string (Re.str pattern |> Re.compile)] which
@@ -446,16 +440,21 @@ let replace_substring_all ~pattern ~replacement s =
 (** Render a prompt template with the given variables *)
 let render_template ~template ~vars () : (string, string) result =
   try
+    let missing =
+      extract_variables template
+      |> List.filter (fun name -> not (List.mem_assoc name vars))
+    in
+    if missing <> [] then
+      Error
+        (Printf.sprintf "Unresolved variables in template: %s"
+           (String.concat ", " missing))
+    else
     let result = ref template in
     List.iter (fun (name, value) ->
       let pattern = Printf.sprintf "{{%s}}" name in
       result := replace_substring_all ~pattern ~replacement:value !result
     ) vars;
-    let has_unresolved = Re.execp unresolved_var_re !result in
-    if has_unresolved then
-      Error "Unresolved variables in template"
-    else
-      Ok !result
+    Ok !result
   with e ->
     Error (Printf.sprintf "Render error: %s" (Printexc.to_string e))
 

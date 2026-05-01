@@ -4,7 +4,7 @@
     "lib_failwith": 0,
     "lib_list_hd": 4,
     "lib_list_tl": 0,
-    "lib_option_get": 2,
+    "lib_option_get": 1,
     "lib_obj_magic": 0,
     "test_failwith": 415,
     "test_list_hd": 322,

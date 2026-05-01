@@ -5,7 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    # State-only PR readiness events are handled by PR Automation. Keeping CI
+    # on code-changing events avoids canceling a still-useful build for the
+    # same PR concurrency group.
+    types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 
 permissions:

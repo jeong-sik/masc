@@ -792,7 +792,8 @@ module InternalTimers = struct
       [server_bootstrap_loops] wakes at this cadence to fetch repositories
       with [auto_sync = true]. Default: 300 (5 min). *)
   let repo_sync_interval_sec =
-    get_float ~default:300.0 "MASC_REPO_SYNC_INTERVAL_SEC"
+    let value = get_float ~default:300.0 "MASC_REPO_SYNC_INTERVAL_SEC" in
+    if value > 0.0 then value else 300.0
 
   (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
       this long are reaped by the janitor loop. Default: 300 (5 min). Raise

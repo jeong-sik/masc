@@ -441,12 +441,14 @@ let test_credentials_for_keeper_direct_wrong_type () =
 let test_credentials_for_keeper_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
       let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
-      let oc = open_out path in
-      Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () ->
-          output_string oc
-            "[mapping.keeper-1]\nrepositories = [\"*\"]\ncredential_id = 42\n");
+      let () =
+        let oc = open_out path in
+        Fun.protect
+          ~finally:(fun () -> close_out_noerr oc)
+          (fun () ->
+            output_string oc
+              "[mapping.keeper-1]\nrepositories = [\"*\"]\ncredential_id = 42\n")
+      in
       match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
       | Ok creds ->
           Alcotest.failf "expected mapping parse error, got %d creds"

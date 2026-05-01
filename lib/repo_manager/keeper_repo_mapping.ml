@@ -87,15 +87,29 @@ let load_all ~base_path =
             loop [] fields
         | Ok _ -> Ok [])
 
+type mapping_lookup =
+  | Mapping_found of keeper_repo_mapping
+  | Mapping_missing of string
+  | Mapping_store_error of string
+
+let lookup_mapping ~base_path keeper_id =
+  match load_all ~base_path with
+  | Error msg -> Mapping_store_error msg
+  | Ok mappings -> (
+      match
+        List.find_opt
+          (fun (m : keeper_repo_mapping) -> String.equal m.keeper_id keeper_id)
+          mappings
+      with
+      | Some mapping -> Mapping_found mapping
+      | None -> Mapping_missing keeper_id)
+
 let find_mapping ~base_path keeper_id =
-  let* mappings = load_all ~base_path in
-  match
-    List.find_opt
-      (fun (m : keeper_repo_mapping) -> String.equal m.keeper_id keeper_id)
-      mappings
-  with
-  | Some mapping -> Ok mapping
-  | None -> Error (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
+  match lookup_mapping ~base_path keeper_id with
+  | Mapping_found mapping -> Ok mapping
+  | Mapping_missing keeper_id ->
+      Error (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
+  | Mapping_store_error msg -> Error msg
 
 let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path keeper_id in
@@ -115,17 +129,15 @@ let allowed_repositories ~keeper_id ~base_path =
     unreadable, repository not found, credential not found).  Absence of
     mapping is not an error. *)
 let credentials_for_keeper ~base_path ~keeper_id =
-  match find_mapping ~base_path keeper_id with
-  | Error msg ->
-      if String.starts_with ~prefix:"No mapping found" msg then
-        Ok []
-      else (
-        Log.Misc.warn
-          "[KeeperRepoMapping] credentials_for_keeper: mapping store error \
-           for keeper %s (error: %s)"
-          keeper_id msg;
-        Error msg)
-  | Ok mapping ->
+  match lookup_mapping ~base_path keeper_id with
+  | Mapping_missing _ -> Ok []
+  | Mapping_store_error msg ->
+      Log.Misc.warn
+        "[KeeperRepoMapping] credentials_for_keeper: mapping store error \
+         for keeper %s (error: %s)"
+        keeper_id msg;
+      Error msg
+  | Mapping_found mapping ->
       let resolve_credential id =
         match Credential_store.find ~base_path id with
         | Ok c -> Ok c
@@ -181,11 +193,10 @@ let credentials_for_keeper ~base_path ~keeper_id =
       resolve_creds [] cred_ids)
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
-  match find_mapping ~base_path keeper_id with
-  | Error msg ->
-      if not (String.starts_with ~prefix:"No mapping found" msg)
-         && not (Hashtbl.mem logged_mapping_errors keeper_id)
-      then begin
+  match lookup_mapping ~base_path keeper_id with
+  | Mapping_missing _ -> true
+  | Mapping_store_error msg ->
+      if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
         Hashtbl.add logged_mapping_errors keeper_id ();
         Log.Misc.warn
           "[KeeperRepoMapping] is_allowed: mapping store error for keeper %s \
@@ -193,7 +204,7 @@ let is_allowed ~keeper_id ~repository_id ~base_path =
           keeper_id msg
       end;
       true
-  | Ok mapping ->
+  | Mapping_found mapping ->
       List.exists
         (fun id -> String.equal id repository_id || String.equal id "*")
         mapping.repository_ids
@@ -235,15 +246,15 @@ let save_mapping ~base_path mapping =
   save_all ~base_path (mapping :: filtered)
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
-  match find_mapping ~base_path keeper_id with
-  | Error msg ->
-      if not (String.starts_with ~prefix:"No mapping found" msg) then
-        Log.Misc.warn
-          "[KeeperRepoMapping] apply_mapping: mapping store error for \
-           keeper %s — returning unfiltered repositories (error: %s)"
-          keeper_id msg;
+  match lookup_mapping ~base_path keeper_id with
+  | Mapping_missing _ -> repositories
+  | Mapping_store_error msg ->
+      Log.Misc.warn
+        "[KeeperRepoMapping] apply_mapping: mapping store error for \
+         keeper %s — returning unfiltered repositories (error: %s)"
+        keeper_id msg;
       repositories
-  | Ok mapping ->
+  | Mapping_found mapping ->
       if List.exists (String.equal "*") mapping.repository_ids then
         repositories
       else

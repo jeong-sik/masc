@@ -194,6 +194,26 @@ export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   return get('/api/v1/dashboard/config')
 }
 
+/** Parse runtime context-ratio thresholds from the dashboard config response.
+    Falls back to the compiled defaults when keys are missing or malformed. */
+export function parseContextThresholds(
+  data: DashboardConfigResponse,
+  defaults: { critical: number; warn: number; compacting: number },
+): { critical: number; warn: number; compacting: number } {
+  const cat = data.categories.dashboard ?? []
+  const find = (env: string): number | null => {
+    const entry = cat.find(e => e.env === env)
+    if (!entry || entry.value == null) return null
+    const n = parseFloat(entry.value)
+    return Number.isFinite(n) ? n : null
+  }
+  return {
+    critical: find('MASC_DASHBOARD_CTX_HANDOFF_IMMINENT') ?? defaults.critical,
+    warn: find('MASC_DASHBOARD_CTX_PREPARING') ?? defaults.warn,
+    compacting: find('MASC_DASHBOARD_CTX_COMPACTING') ?? defaults.compacting,
+  }
+}
+
 export function fetchDashboardNamespaceTruth(opts?: AbortableRequestOptions): Promise<DashboardNamespaceTruthResponse> {
   return get('/api/v1/dashboard/project-snapshot', {
     timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,

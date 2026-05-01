@@ -825,12 +825,7 @@ let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
   | outcome ->
       Alcotest.failf
         "expected Some (Call_err (HttpError 404)) for 404-like InvalidRequest, got %s"
-         (match outcome with
-          | Some (Cascade_fsm.Call_err _) -> "some-call-err"
-           | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
-          | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
-          | Some Cascade_fsm.Slot_full -> "some-slot-full"
-          | None -> "none")
+        (Cascade_fsm.provider_outcome_option_to_string outcome)
 
 let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
   let err =
@@ -846,12 +841,7 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
   | outcome ->
       Alcotest.failf
         "expected Some (Call_err (HttpError 400)) for ordinary InvalidRequest, got %s"
-        (match outcome with
-         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
-         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
-         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
-         | Some Cascade_fsm.Slot_full -> "some-slot-full"
-         | None -> "none")
+        (Cascade_fsm.provider_outcome_option_to_string outcome)
 
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
@@ -867,12 +857,7 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   | outcome ->
       Alcotest.failf
         "expected runtime_mcp_auth InvalidConfig to cascade as AcceptRejected, got %s"
-        (match outcome with
-         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
-         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
-         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
-         | Some Cascade_fsm.Slot_full -> "some-slot-full"
-         | None -> "none")
+        (Cascade_fsm.provider_outcome_option_to_string outcome)
 
 let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   let raw_message =
@@ -904,12 +889,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   | outcome ->
       Alcotest.failf
         "expected resumable CLI session to cascade as NetworkError, got %s"
-        (match outcome with
-         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
-         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
-         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
-         | Some Cascade_fsm.Slot_full -> "some-slot-full"
-         | None -> "none")
+        (Cascade_fsm.provider_outcome_option_to_string outcome)
 
 let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
   let err =

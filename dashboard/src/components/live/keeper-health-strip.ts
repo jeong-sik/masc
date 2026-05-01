@@ -2,12 +2,13 @@
 
 import { html } from 'htm/preact'
 import { keeperHealthSummary, type KeeperPressure } from '../../live-store'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from '../../config/constants'
+import { contextThresholds } from '../../config/context-thresholds'
 
 function pressureColor(ratio: number): string {
-  if (ratio > CONTEXT_RATIO_CRITICAL) return 'bg-[var(--color-status-err)]'
-  if (ratio > CONTEXT_RATIO_WARN) return 'bg-[var(--color-status-warn)]'
-  if (ratio > CONTEXT_RATIO_COMPACTING) return 'bg-[var(--color-status-warn)]'
+  const t = contextThresholds.value
+  if (ratio > t.critical) return 'bg-[var(--color-status-err)]'
+  if (ratio > t.warn) return 'bg-[var(--color-status-warn)]'
+  if (ratio > t.compacting) return 'bg-[var(--color-status-warn)]'
   return 'bg-[var(--color-status-ok)]'
 }
 

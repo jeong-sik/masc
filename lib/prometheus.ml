@@ -283,6 +283,29 @@ let metric_keeper_turn_latency_bucket =
 let metric_keeper_turn_latency_by_model_bucket =
   "masc_keeper_turn_latency_by_model_bucket_total"
 
+(* P-DASH-01: provider cooldown skip counter.
+   When a cascade's provider is in cooldown and the keeper
+   fail-opens to a fallback cascade, increment this counter
+   so operators can see how often cooldown is triggering
+   cascade switches.  Labels: keeper, from_cascade, to_cascade. *)
+let metric_keeper_provider_cooldown_skip =
+  "masc_keeper_provider_cooldown_skip_total"
+
+(* P-DASH-01: provider cooldown remaining seconds gauge.
+   Exposes the current cooldown duration so operators can see
+   which cascade is blocked and for how long without log parsing.
+   Labels: keeper, cascade. *)
+let metric_keeper_provider_cooldown_remaining_sec =
+  "masc_keeper_provider_cooldown_remaining_sec"
+
+(* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
+   observable via [autonomous_waiter_snapshot_for_test] but were
+   only emitted as a debug log line.  Surfacing as a gauge lets
+   operators alert on queue pressure without log parsing.
+   Labels: keeper, channel. *)
+let metric_keeper_turn_queue_depth =
+  "masc_keeper_turn_queue_depth"
+
 (* #10125: keeper supervisor sweep observability.
 
    The supervisor sweep is a Pulse loop that recovers crashed

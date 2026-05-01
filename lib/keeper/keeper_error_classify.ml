@@ -449,13 +449,16 @@ let classify_post_commit_failure
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
     provider; this outer retry covers cases where all providers fail
-    transiently (e.g. TCP keepalive expiry across all backends). *)
-let max_transient_retries = 2
+    transiently (e.g. TCP keepalive expiry across all backends).
+
+    Runtime-configurable via [Env_config_keeper.KeeperRetryBackoff]. *)
+let max_transient_retries () =
+  Env_config_keeper.KeeperRetryBackoff.max_transient_retries ()
 
 (** Exponential backoff delay for transient retry [attempt] (1-indexed).
-    Delays: 1s, 2s — total wait 3s before giving up. *)
+    Delegates to [Env_config_keeper.KeeperRetryBackoff]. *)
 let transient_backoff_sec (attempt : int) : float =
-  Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
+  Env_config_keeper.KeeperRetryBackoff.transient_backoff_sec attempt
 
 (** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Oas.Error.sdk_error) : bool =

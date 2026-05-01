@@ -70,6 +70,10 @@ module KeeperWatchdog : sig
   val poll_sec : float
   val noop_threshold : int
   val grace_period_sec : float
+  val termination_window_sec : float
+  val escalation_threshold : int
+  val batch_window_sec : float
+  val batch_threshold : int
 end
 
 (** {1 Keeper poll intervals} *)
@@ -245,4 +249,13 @@ end
 
 module KeeperCascade : sig
   val provider_allowlist : unit -> string list option
+end
+
+(** {1 Transient retry backoff} *)
+
+module KeeperRetryBackoff : sig
+  val max_transient_retries : unit -> int
+  val transient_backoff_base_sec : unit -> float
+  val transient_backoff_cap_sec : unit -> float
+  val transient_backoff_sec : int -> float
 end

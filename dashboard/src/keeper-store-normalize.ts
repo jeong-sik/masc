@@ -11,7 +11,7 @@ import type {
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
 
 /** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
@@ -85,9 +85,10 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   if (latest.is_handoff) return 'handoff-imminent'
   if (latest.is_compaction) return 'compacting'
   const ratio = latest.context_ratio
-  if (ratio > CONTEXT_RATIO_CRITICAL) return 'handoff-imminent'
-  if (ratio > CONTEXT_RATIO_WARN) return 'preparing'
-  if (ratio > CONTEXT_RATIO_COMPACTING) return 'compacting'
+  const thresholds = contextThresholds.value
+  if (ratio > thresholds.critical) return 'handoff-imminent'
+  if (ratio > thresholds.warn) return 'preparing'
+  if (ratio > thresholds.compacting) return 'compacting'
   return 'active'
 }
 

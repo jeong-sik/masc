@@ -6,7 +6,7 @@ import type { JournalEntry } from './types'
 import type { PipelineStage } from './types/core'
 import { journal } from './sse'
 import { agents, agentMotionMap, keepers, staleKeepers } from './store'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from './config/constants'
+import { contextThresholds } from './config/context-thresholds'
 import type { AgentMotionSnapshot } from './components/common/agent-motion'
 
 // --- Filter toggles ---
@@ -168,10 +168,11 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
   let warningCount = 0
   let criticalCount = 0
 
+  const thresholds = contextThresholds.value
   const pressures: KeeperPressure[] = active.map(k => {
     const ratio = k.context_ratio ?? 0
-    if (ratio > CONTEXT_RATIO_CRITICAL) criticalCount++
-    else if (ratio > CONTEXT_RATIO_WARN || stale.has(k.name)) warningCount++
+    if (ratio > thresholds.critical) criticalCount++
+    else if (ratio > thresholds.warn || stale.has(k.name)) warningCount++
     return { name: k.name, ratio, stage: (k.pipeline_stage ?? 'idle') as PipelineStage }
   }).sort((a, b) => b.ratio - a.ratio)
 

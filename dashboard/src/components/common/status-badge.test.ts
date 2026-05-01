@@ -18,15 +18,15 @@ describe('statusDotColor', () => {
   })
 
   it('returns info for awaiting_verification', () => {
-    expect(statusDotColor('awaiting_verification')).toBe('bg-[var(--color-info-fg)]')
+    expect(statusDotColor('awaiting_verification')).toBe('bg-[var(--color-status-info)]')
   })
 
   it('returns info for interrupted', () => {
-    expect(statusDotColor('interrupted')).toBe('bg-[var(--color-info-fg)]')
+    expect(statusDotColor('interrupted')).toBe('bg-[var(--color-status-info)]')
   })
 
   it('returns info for listening', () => {
-    expect(statusDotColor('listening')).toBe('bg-[var(--color-info-fg)]')
+    expect(statusDotColor('listening')).toBe('bg-[var(--color-status-info)]')
   })
 
   it('returns idle for inactive', () => {
@@ -93,5 +93,13 @@ describe('StatusBadge', () => {
     const el = container.querySelector('[data-status-badge-tone]')
     expect(el?.classList.contains('offline')).toBe(true)
     expect(el?.className).not.toContain('text-[var(--color-fg-disabled)]')
+  })
+
+  it('lets the status-badge utility own the border', () => {
+    const container = document.createElement('div')
+    render(h(StatusBadge, { status: 'active' }), container)
+    const el = container.querySelector('[data-status-badge-tone]')
+    expect(el?.className).not.toContain('border-[var(--color-border-default)]')
+    expect(el?.className).not.toContain('border-solid')
   })
 })

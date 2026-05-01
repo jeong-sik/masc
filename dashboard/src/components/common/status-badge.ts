@@ -17,7 +17,7 @@ const DOT_CLASS: Record<StatusBadgeTone, string> = {
   ok: 'bg-[var(--color-status-ok)]',
   warn: 'bg-[var(--color-status-warn)]',
   bad: 'bg-[var(--color-status-err)]',
-  info: 'bg-[var(--color-info-fg)]',
+  info: 'bg-[var(--color-status-info)]',
   neutral: 'bg-[var(--color-status-idle)]',
 }
 
@@ -71,7 +71,7 @@ export function StatusBadge({ status, label, tone, children }: StatusBadgeProps)
   const content = children ?? label ?? (status != null ? statusLabel(status) : '')
   return html`
     <span
-      class="status-badge border border-solid border-[var(--color-border-default)] ${statusClass}"
+      class="status-badge ${statusClass}"
       data-status-badge-tone=${resolvedTone}
     >
       <span class="size-1.5 rounded-sm inline-block ${DOT_CLASS[resolvedTone]}"></span>

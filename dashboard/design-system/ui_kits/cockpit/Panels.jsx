@@ -52,7 +52,20 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
   const [colSide, toggleSide] = _useCol("sidebar");
   if (colSide) {
     return (
-      <aside className="side wx-collapsed" onClick={toggleSide} title="expand sidebar">
+      <aside
+        className="side wx-collapsed"
+        onClick={toggleSide}
+        onKeyDown={(e) => {
+          if (e.repeat) return;
+          if (_isToggleKey(e)) {
+            e.preventDefault();
+            toggleSide();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        title="expand sidebar"
+        aria-label="expand sidebar">
         <div className="wx-rail-vlabel">FLEET · GOALS</div>
       </aside>
     );
@@ -364,7 +377,20 @@ function Rail({ events, cascade }) {
   const [colRail, toggleRail] = _useCol("rail");
   if (colRail) {
     return (
-      <aside className="rail wx-collapsed" onClick={toggleRail} title="expand activity rail">
+      <aside
+        className="rail wx-collapsed"
+        onClick={toggleRail}
+        onKeyDown={(e) => {
+          if (e.repeat) return;
+          if (_isToggleKey(e)) {
+            e.preventDefault();
+            toggleRail();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        title="expand activity rail"
+        aria-label="expand activity rail">
         <div className="wx-rail-vlabel">ACTIVITY · NUDGES</div>
       </aside>
     );

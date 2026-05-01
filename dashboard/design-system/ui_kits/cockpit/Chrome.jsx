@@ -233,10 +233,17 @@ function Lifeline() {
   }));
   return (
     <div className={"life" + (col ? " wx-collapsed" : "")}>
-      <span className="life-label" onClick={toggleLife} title={col ? "expand lifeline" : "collapse lifeline"} style={{cursor:"pointer"}}>
+      <button
+        type="button"
+        className="life-label"
+        onClick={toggleLife}
+        title={col ? "expand lifeline" : "collapse lifeline"}
+        aria-expanded={!col}
+        aria-controls="cockpit-lifeline-trace"
+        style={{ cursor:"pointer", background:"none", border:0, padding:0 }}>
         {col ? "▸" : "▾"} Lifeline · 60s
-      </span>
-      <div className="life-trace">
+      </button>
+      <div className="life-trace" id="cockpit-lifeline-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
           <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
           {markers.map((m, i) => (

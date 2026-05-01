@@ -119,6 +119,7 @@
         test_keeper_id
         test_repo_store
         test_chronicle_types
+        test_chronicle_ingest
         test_credential_store
         test_credential_materializer
         test_keeper_repo_mapping
@@ -309,6 +310,7 @@
           test_keeper_id
           test_repo_store
           test_chronicle_types
+          test_chronicle_ingest
           test_credential_store
           test_credential_materializer
           test_keeper_repo_mapping

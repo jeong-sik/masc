@@ -1,0 +1,10 @@
+{
+  "name": "OPERATOR_TODO: taskmaster display name",
+  "role": "OPERATOR_TODO: define the keeper role (what taskmaster does in the system)",
+  "trait": "OPERATOR_TODO: define personality / operating style",
+  "keeper": {
+    "goal": "OPERATOR_TODO: define taskmaster's core purpose — what it pursues in every session (required; keeper spawn is blocked until this is filled in)",
+    "mention_targets": ["taskmaster"],
+    "proactive_enabled": false
+  }
+}

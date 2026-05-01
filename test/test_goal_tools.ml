@@ -2,6 +2,7 @@
 
 open Alcotest
 open Masc_mcp
+open Coord_types
 open Tool_coord
 
 let temp_dir () =

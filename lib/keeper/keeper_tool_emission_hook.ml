@@ -58,7 +58,8 @@ let accumulator_size acc =
   n
 
 let try_parse (s : string) : Yojson.Safe.t option =
-  try Some (Yojson.Safe.from_string s) with _ -> None
+  try Some (Yojson.Safe.from_string s)
+  with Yojson.Json_error _ -> None
 
 let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
   fun event ->

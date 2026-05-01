@@ -12,6 +12,9 @@
 
 open Alcotest
 
+let jsonrpc_notification method_name =
+  `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
+
 module Sse = Masc_mcp.Sse
 
 let run_domains_together count fn =
@@ -366,7 +369,7 @@ let test_update_last_event_id_nonexistent () =
 let test_broadcast_sends_to_clients () =
   let session_id = "test_broadcast_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = Sse.register ~kind:Sse.Observer session_id ~last_event_id:0 in
   Sse.broadcast (`Assoc [("test", `String "value")]);
   (* Events are queued in the per-session stream, not pushed directly *)
   let event = Sse.try_pop session_id in
@@ -389,7 +392,7 @@ let test_send_to_existing () =
   let session_id = "test_send_to_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
   let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
-  Sse.send_to session_id (`Assoc [("direct", `String "message")]);
+  Sse.send_to session_id (jsonrpc_notification "notifications/test");
   (* Events are queued in the per-session stream *)
   let event = Sse.try_pop session_id in
   check bool "received message via stream" true (event <> None);

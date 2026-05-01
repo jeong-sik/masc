@@ -566,10 +566,17 @@ let run_named
             record_hard_quota global ~provider_key:provider_cfg.model_id
               ~error_kind:(error_kind_of_string "hard_quota")
               ~error_reason:err_str ())
-        else if sdk_error_is_resumable_cli_session sdk_err then
+        else if sdk_error_is_resumable_cli_session sdk_err
+                || sdk_error_is_terminal_provider_runtime_failure sdk_err
+        then
           Cascade_health_tracker.(
             record_terminal_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind:(error_kind_of_string "resumable_cli_session")
+              ~error_kind:
+                (error_kind_of_string
+                   (if sdk_error_is_resumable_cli_session sdk_err then
+                      "resumable_cli_session"
+                    else
+                      "terminal_provider_runtime"))
               ~error_reason:err_str ())
         else (match sdk_error_soft_rate_limited sdk_err with
         | Some retry_after_opt ->

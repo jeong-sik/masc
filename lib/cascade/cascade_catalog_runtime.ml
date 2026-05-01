@@ -153,7 +153,14 @@ let discover_profiles = function
              match value with
              | `List _ when Base.String.is_suffix ~suffix:"_models" key ->
                  let suffix_len = String.length "_models" in
-                 Some (String.sub key 0 (String.length key - suffix_len))
+                 let profile =
+                   String.sub key 0 (String.length key - suffix_len)
+                 in
+                 if
+                   Cascade_config_loader.is_deprecated_logical_profile_name
+                     profile
+                 then None
+                 else Some profile
              | _ -> None)
       |> List.sort_uniq String.compare
   | _ -> []

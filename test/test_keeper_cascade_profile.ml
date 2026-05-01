@@ -102,27 +102,23 @@ let test_catalog_names_follow_live_config () =
       check (list string) "catalog_names follows cascade schema keys"
         [
           "custom_live";
-          "default";
-          "governance_judge";
-          "keeper_unified";
           "tool_rerank";
-          "tool_use_strict";
         ]
         catalog;
       check (list string) "keeper catalog excludes system-only cascades"
-        [ "custom_live"; "default"; "keeper_unified"; "tool_use_strict" ]
+        [ "custom_live" ]
         (Profile.keeper_catalog_names ~config_path:path ());
       check (list string) "system catalog follows explicit metadata"
-        [ "governance_judge"; "tool_rerank" ]
+        [ "tool_rerank" ]
         (Profile.system_catalog_names ~config_path:path ());
       check string "dynamic live profile survives canonicalization"
         "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "custom_live");
-      check string "keeper_unified catalog profile survives canonicalization"
-        "keeper_unified"
+      check string "keeper_unified is a logical alias, not profile"
+        "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "keeper_unified");
-      check string "tool_use_strict catalog profile survives canonicalization"
-        "tool_use_strict"
+      check string "tool_use_strict is a logical alias, not profile"
+        "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "tool_use_strict");
       check string "dynamic live profile requires exact match"
         "custom_live"
@@ -146,11 +142,11 @@ let test_resolve_live_with_catalog_requires_active_membership () =
       check string "active custom profile survives live resolution"
         "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "custom_live");
-      check string "keeper_unified catalog profile survives live resolution"
-        "keeper_unified"
+      check string "keeper_unified resolves through catalog fallback"
+        "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "keeper_unified");
-      check string "tool_use_strict catalog profile survives live resolution"
-        "tool_use_strict"
+      check string "tool_use_strict resolves through catalog fallback"
+        "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "tool_use_strict");
       check string "legacy alias resolves through active catalog fallback"
         "custom_live"
@@ -208,6 +204,24 @@ let test_missing_route_uses_catalog_fallback_not_logical_name () =
         "tool_rerank"
         (Profile.cascade_name_for_use ~config_path:path Profile.Tool_rerank_use))
 
+let test_routes_do_not_use_unvalidated_targets_without_catalog () =
+  with_temp_config
+    {|
+      {
+        "routes": {
+          "governance_judge": "missing_profile",
+          "llm_rerank": "missing_rerank"
+        }
+      }
+    |}
+    (fun path ->
+      check string "keeper logical route falls to safe keeper default"
+        "big_three"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Governance_judge);
+      check string "system logical route falls to safe system default"
+        "tool_rerank"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Tool_rerank_use))
+
 let test_missing_system_route_prefers_system_only_catalog_profile () =
   with_temp_config
     {|
@@ -251,6 +265,8 @@ let () =
             test_routes_resolve_logical_uses_to_configured_profiles;
           test_case "missing route uses catalog fallback" `Quick
             test_missing_route_uses_catalog_fallback_not_logical_name;
+          test_case "routes require validated catalog targets" `Quick
+            test_routes_do_not_use_unvalidated_targets_without_catalog;
           test_case "missing system route uses system-only fallback" `Quick
             test_missing_system_route_prefers_system_only_catalog_profile;
           test_case "catalog read failures stay empty" `Quick

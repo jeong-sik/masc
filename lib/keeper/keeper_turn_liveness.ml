@@ -1,4 +1,4 @@
-(* Keeper_turn_liveness — local-only cascade liveness decisions, ollama
+(* Keeper_turn_liveness — phase-buffer cascade liveness decisions, ollama
    saturation pre-skip, and turn liveload configuration.
 
    Extracted from keeper_unified_turn.ml (L328-499) during the god-file split. *)

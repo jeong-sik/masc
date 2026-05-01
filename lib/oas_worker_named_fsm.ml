@@ -277,6 +277,36 @@ let sdk_error_is_resumable_cli_session (err : Oas.Error.sdk_error) : bool =
       direct_api_message
       || message_looks_like_resumable_cli_session (Oas.Error.to_string err)
 
+let message_looks_like_terminal_provider_runtime_failure message =
+  let contains needle = String_util.contains_substring_ci message needle in
+  (contains "kimi_cli rejected" && contains "startup crash")
+  || contains "unicodedecodeerror"
+  || (contains "jsonrpcmessage"
+      && (contains "validationerror" || contains "invalid json"))
+  || (contains "error parsing sse message"
+      && (contains "jsonrpc" || contains "jsonrpcmessage"))
+
+let sdk_error_is_terminal_provider_runtime_failure
+    (err : Oas.Error.sdk_error) : bool =
+  let direct_api_message =
+    match err with
+    | Oas.Error.Api
+        (Llm_provider.Retry.NetworkError { message; _ }
+        | Llm_provider.Retry.Overloaded { message }
+        | Llm_provider.Retry.ServerError { message; _ }
+        | Llm_provider.Retry.InvalidRequest { message }
+        | Llm_provider.Retry.RateLimited { message; _ }
+        | Llm_provider.Retry.AuthError { message }
+        | Llm_provider.Retry.NotFound { message }
+        | Llm_provider.Retry.ContextOverflow { message; _ }
+        | Llm_provider.Retry.Timeout { message }) ->
+        message_looks_like_terminal_provider_runtime_failure message
+    | _ -> false
+  in
+  direct_api_message
+  || message_looks_like_terminal_provider_runtime_failure
+       (Oas.Error.to_string err)
+
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api api_err ->

@@ -62,6 +62,10 @@ type catalog_entry = {
       @since 0.174.0 *)
 }
 
+(** Deprecated logical route keys must not be treated as concrete catalog
+    profiles, even if legacy JSON still contains ["{name}_models"] keys. *)
+val is_deprecated_logical_profile_name : string -> bool
+
 (** Load the cascade catalog from [config_path].
 
     Discovery is schema-driven: a profile is included when the JSON

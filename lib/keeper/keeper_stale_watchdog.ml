@@ -316,8 +316,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let stall_seconds =
                  if in_turn_stale then in_turn_age else now -. last_turn
                in
+               let prior_failure_reason = entry.last_failure_reason in
                Keeper_registry.set_failure_reason ~base_path meta.name
-                 (Some (Keeper_registry.Stale_turn_timeout kill_class));
+                 (Keeper_registry.stale_watchdog_failure_reason
+                    ~prior:prior_failure_reason ~kill_class);
                (* tla-lint: allow-mutation: fiber signal — stop the wedged keeper after stale-turn classification *)
                Atomic.set reg.fiber_stop true;
                let window_count = record_stale_termination meta.name now in

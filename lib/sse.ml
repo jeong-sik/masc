@@ -206,6 +206,49 @@ let buffer_event event_id event_str =
     in
     { next_state = trimmed; result = () })
 
+(** JSON-RPC payloads are the only durable events safe for MCP coordinator
+    clients. Dashboard/activity JSON may share this SSE hub, but it is not
+    JSON-RPC and causes strict MCP clients to raise parse errors. *)
+let jsonrpc_message_for_coordinator = function
+  | `Assoc fields -> (
+      match List.assoc_opt "jsonrpc" fields with
+      | Some (`String "2.0") ->
+          List.mem_assoc "method" fields
+          || List.mem_assoc "id" fields
+          || List.mem_assoc "result" fields
+          || List.mem_assoc "error" fields
+      | _ -> false)
+  | _ -> false
+
+let event_data_payload event =
+  let prefix = "data: " in
+  let prefix_len = String.length prefix in
+  let data_lines =
+    event
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           if String.starts_with ~prefix line then
+             Some
+               (String.sub line prefix_len (String.length line - prefix_len))
+           else None)
+  in
+  match data_lines with
+  | [] -> None
+  | lines -> Some (String.concat "\n" lines)
+
+let event_string_jsonrpc_message_for_coordinator event =
+  match event_data_payload event with
+  | None -> false
+  | Some data -> (
+      try jsonrpc_message_for_coordinator (Yojson.Safe.from_string data) with
+      | Yojson.Json_error _ -> false)
+
+let event_matches_session_kind kind event =
+  match kind with
+  | Observer -> true
+  | Coordinator -> event_string_jsonrpc_message_for_coordinator event
+  | Presence -> false
+
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
   let lst = Atomic.get event_buffer in
@@ -221,6 +264,10 @@ let get_events_after last_id =
   List.fold_left (fun acc (id, ev, _ts) ->
     if id > last_id then ev :: acc else acc
   ) [] lst
+
+let get_events_after_for_kind kind last_id =
+  get_events_after last_id
+  |> List.filter (event_matches_session_kind kind)
 
 (** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
     Returns count of evicted events. *)
@@ -452,12 +499,15 @@ let set_clock (clock : float Eio.Time.clock_ty Eio.Resource.t) =
     5s is generous for a local TCP write; slow clients beyond this are dropped. *)
 let push_timeout_s = 5.0
 
-(** Test whether a client matches a broadcast target. *)
-let client_matches_target target (client : client) =
+let client_matches_target target ~jsonrpc_payload (client : client) =
   match target with
-  | All -> client.kind <> Presence
+  | All -> (
+      match client.kind with
+      | Observer -> true
+      | Coordinator -> jsonrpc_payload
+      | Presence -> false)
   | Observers -> client.kind = Observer
-  | Coordinators -> client.kind = Coordinator
+  | Coordinators -> client.kind = Coordinator && jsonrpc_payload
   | Presence_only -> client.kind = Presence
 
 (** {1 External Subscriber Hook}
@@ -664,6 +714,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
+  let jsonrpc_payload = jsonrpc_message_for_coordinator json in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
@@ -684,7 +735,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
   SMap.iter (fun session_id client ->
-    if client_matches_target target client
+    if client_matches_target target ~jsonrpc_payload client
        && current_event_id > Atomic.get client.last_event_id then begin
       (* Pre-check stream capacity to avoid blocking broadcast.
          No TOCTOU risk: single-domain Eio cooperative scheduling has no
@@ -747,6 +798,11 @@ let broadcast_presence json =
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
+  if not (jsonrpc_message_for_coordinator json) then
+    Log.Server.warn
+      "Dropping non-JSON-RPC payload for MCP coordinator session %s"
+      session_id
+  else
   let data = Yojson.Safe.to_string json in
   (* Atomic allocation — see [broadcast_impl] for rationale. *)
   let current_event_id = next_id () in

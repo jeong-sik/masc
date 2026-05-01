@@ -254,6 +254,20 @@ let runtime_blocker_surface_of_failure_reason
                 "OAS budget timeout repeated %d consecutive cycle(s); keeper was auto-paused before restart loop."
                 count)
            Oas_timeout_budget)
+  | Keeper_registry.Provider_runtime_error { code; detail } ->
+      Some
+        {
+          blocker_class = "provider_runtime_error";
+          summary = Printf.sprintf "%s: %s" code detail;
+          continue_gate = false;
+        }
+  | Keeper_registry.Tool_required_unsatisfied { code; detail } ->
+      Some
+        {
+          blocker_class = "tool_required_unsatisfied";
+          summary = Printf.sprintf "%s: %s" code detail;
+          continue_gate = false;
+        }
   | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
       let blocker_class =
         match kind with

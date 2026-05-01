@@ -1,6 +1,7 @@
 (** Coverage tests for Tool_coord *)
 
 open Masc_mcp
+open Tool_coord
 
 let () = Random.self_init ()
 

@@ -5,6 +5,7 @@
 
 open Alcotest
 open Masc_mcp
+open Tool_coord
 
 let temp_dir () =
   let path = Filename.temp_file "goal_fsm_bypass_10247_" "" in

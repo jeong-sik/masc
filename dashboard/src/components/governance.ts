@@ -13,7 +13,7 @@ import { StatusDot } from './common/status-dot'
 import { JsonViewerCard } from './common/json-viewer'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
-import { formatTimeAgoEn } from '../lib/format-time'
+import { TimeAgo } from './common/time-ago'
 import {
   governanceData,
   governanceError,
@@ -31,10 +31,6 @@ export { refreshGovernance } from './governance-store'
 function MetaTag({ children, mono = false }: { children: unknown; mono?: boolean }) {
   const cls = `rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
   return html`<span class=${cls}>${children}</span>`
-}
-
-function formatGovernanceTimestamp(value: string): string {
-  return formatTimeAgoEn(value)
 }
 
 function judgeRuntimeStatus(
@@ -193,7 +189,7 @@ function JudgeStatusBar() {
         ? html`
             <span class="ml-auto flex items-center gap-3 min-w-0">
               ${judge.generated_at
-                ? html`<span class="text-text-dim">${formatGovernanceTimestamp(judge.generated_at)}</span>`
+                ? html`<span class="text-text-dim"><${TimeAgo} timestamp=${judge.generated_at} /></span>`
                 : null}
               ${judge.last_error
                 ? html`<span class="${errorTone} truncate max-w-75">${judge.last_error}</span>`
@@ -251,7 +247,7 @@ function JudgmentsSection() {
           ${lastSeen || meta ? html`
             <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
               ${lastSeen ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
-                Last judgment ${formatGovernanceTimestamp(lastSeen)}
+                Last judgment <${TimeAgo} timestamp=${lastSeen} />
               </span>` : null}
               ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
             </div>
@@ -282,7 +278,7 @@ function JudgmentsSection() {
             ${j.guardrail_state?.requires_human_gate ? html`
               <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">Approval required</div>
             ` : null}
-            ${j.generated_at ? html`<div class="mt-1.5 text-2xs text-text-dim">${formatGovernanceTimestamp(j.generated_at)}</div>` : null}
+            ${j.generated_at ? html`<div class="mt-1.5 text-2xs text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
           </div>
         `)}
       </div>
@@ -421,7 +417,7 @@ function KeeperApprovalEmptyState() {
       ${ctx.lastActivity || meta ? html`
         <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-2xs ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
           ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
-            Last judge activity ${formatGovernanceTimestamp(ctx.lastActivity)}
+            Last judge activity <${TimeAgo} timestamp=${ctx.lastActivity} />
           </span>` : null}
           ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
         </div>
@@ -554,7 +550,7 @@ function KeeperApprovalQueueSection() {
                         ${item.risk_level}
                       </span>
                       <span class="ml-auto text-2xs text-text-dim">
-                        ${item.requested_at ? html`Requested ${formatGovernanceTimestamp(item.requested_at)}` : null}
+                        ${item.requested_at ? html`Requested <${TimeAgo} timestamp=${item.requested_at} />` : null}
                         ${item.waiting_s != null ? ` · waiting ${Math.max(0, Math.round(item.waiting_s))}s` : ''}
                       </span>
                     </div>
@@ -643,8 +639,8 @@ function ApprovalRulesSection() {
                       </span>
                       ${rule.max_risk ? html`<span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}
                       <span class="ml-auto text-2xs text-text-dim">
-                        ${rule.created_at ? html`Created ${formatGovernanceTimestamp(rule.created_at)}` : null}
-                        ${rule.last_matched_at ? html` · last matched ${formatGovernanceTimestamp(rule.last_matched_at)}` : null}
+                        ${rule.created_at ? html`Created <${TimeAgo} timestamp=${rule.created_at} />` : null}
+                        ${rule.last_matched_at ? html` · last matched <${TimeAgo} timestamp=${rule.last_matched_at} />` : null}
                       </span>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">

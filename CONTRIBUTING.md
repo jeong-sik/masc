@@ -48,7 +48,6 @@ bin/
 └── ...                       # Additional executables and build files
 
 lib/
-├── command_plane/            # CPv2 orchestration subsystems
 ├── keeper/                   # keeper runtime and turn loop
 ├── worker_contract_types/    # worker contract enums and shared runtime types
 ├── dashboard/                # dashboard providers and read models
@@ -70,7 +69,6 @@ test/                         # Alcotest suites + fixtures
 | **MCP Server** | `bin/main_eio.ml`, `lib/mcp_server_eio_*` | JSON-RPC over Streamable HTTP |
 | **Room** | `lib/room/`, `lib/tool_room.ml` | Agent collaboration rooms |
 | **Board** | `lib/board/`, `lib/tool_board.ml` | Posts, votes, comments |
-| **Command Plane** | `lib/command_plane/`, `lib/tool_command_plane.ml` | units, operations, detachments, policies |
 | **Keeper** | `lib/keeper/`, `lib/tool_keeper.ml` | long-running keeper runtime |
 | **Worker Contracts** | `lib/worker_contract_types/` | shared worker/runtime contract types |
 | **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |

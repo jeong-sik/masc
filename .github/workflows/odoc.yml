@@ -40,7 +40,7 @@ jobs:
           install-flags: --with-doc
 
       - name: Build library
-        run: opam exec -- dune build
+        run: opam exec -- dune build @install
 
       - name: Build documentation
         run: opam exec -- dune build @doc

@@ -149,6 +149,8 @@ describe('dashboardSlicesForRoute', () => {
       .toContain('execution')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'observatory' } }))
       .toContain('execution')
+    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
+      .toContain('execution')
     expect(dashboardSlicesForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health', view: 'comparison' },
@@ -161,6 +163,8 @@ describe('dashboardSlicesForRoute', () => {
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('goals')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
+      .toContain('composite')
+    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
       .toContain('composite')
   })
 

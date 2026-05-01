@@ -86,6 +86,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
+      if (routeState.params.section === 'cognition') {
+        return ['namespaceTruth', 'execution', 'missionSnapshot', 'autoresearch']
+      }
       if (routeState.params.section === 'runtime' && routeState.params.view === 'inspector') {
         return ['cascadeInspector']
       }

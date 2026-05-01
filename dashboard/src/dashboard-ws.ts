@@ -167,10 +167,10 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   }
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
-    if (section === 'observatory' || section === 'journey' || section === 'agents') {
+    if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
       slices.add('execution')
     }
-    if (section === 'agents') {
+    if (section === 'agents' || section === 'cognition') {
       slices.add('composite')
     }
     if (section === 'fleet-health' && routeState.params.view === 'comparison') {

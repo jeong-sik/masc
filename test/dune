@@ -543,6 +543,7 @@
         test_credential_alias_10440
         test_credential_provider
         test_cascade_trust
+        test_dashboard_k2_feeds
         test_keeper_profile_normalize_10552
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
@@ -739,6 +740,7 @@
         test_credential_alias_10440
         test_credential_provider
         test_cascade_trust
+        test_dashboard_k2_feeds
         test_keeper_profile_normalize_10552
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259

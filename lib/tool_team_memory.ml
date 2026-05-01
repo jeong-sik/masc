@@ -85,6 +85,11 @@ let validate_team_memory_room room =
          "team memory uses the flattened default namespace; room must be '%s'"
          default_namespace)
 
+let validate_authorized_room_id room =
+  match Coord.validate_room_id room with
+  | Ok room_id -> Ok room_id
+  | Error err -> Error ("invalid team memory room id: " ^ err)
+
 let resolve_keeper_access ~(config : Coord.config) ~(agent_name : string) =
   let trimmed = String.trim agent_name in
   if String.equal trimmed "" then
@@ -122,10 +127,11 @@ let authorize_team_memory ~(operation: string) ~(config : Coord.config) ~(agent_
           validate_team_memory_room room
       | Keeper_types.Shared_memory_keeper_only ->
           let private_room = Playground_paths.sanitize_keeper_name keeper_name in
-          if String.equal room "default" then
-            Ok private_room
-          else
-            Error "when using keeper_only memory, room must be 'default' in tool call"
+          (match validate_team_memory_room room with
+          | Ok _ -> Ok private_room
+          | Error _ ->
+              Error
+                "when using keeper_only memory, room must be 'default' in tool call")
       | Keeper_types.Shared_memory_room_readonly ->
           if String.equal operation "write" then
             Error (Printf.sprintf "team memory is readonly for keeper '%s'" keeper_name)
@@ -183,7 +189,7 @@ let validate_team_memory_key key =
     Validation.Safe_path.validate_relative trimmed
 
 let resolve_key_path ~(config : Coord.config) ~room ~key =
-  match validate_team_memory_room room with
+  match validate_authorized_room_id room with
   | Error err -> Error err
   | Ok room_id -> (
       match validate_team_memory_key key with
@@ -337,7 +343,7 @@ let rec collect_files acc dir =
     acc entries
 
 let search_json ~config (room, query) =
-  match validate_team_memory_room room with
+  match validate_authorized_room_id room with
   | Error err -> (false, err)
   | Ok room_id ->
       let normalized_query = String.trim query in

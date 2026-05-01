@@ -310,6 +310,26 @@ let test_apply_crash_to_dead () =
     ~event:SM.Restart_budget_exhausted in
   check phase_t "-> Dead" SM.Dead tr.new_phase
 
+let test_apply_credential_archived_to_dead () =
+  let tr = apply_ok
+    ~current_phase:SM.Running
+    ~conditions:running_conditions
+    ~event:SM.Credential_archived
+  in
+  check phase_t "credential archived -> Dead" SM.Dead tr.new_phase;
+  check bool "credential archived latched" true
+    tr.updated_conditions.credential_archived
+
+let test_apply_zombie_timeout_to_dead () =
+  let tr = apply_ok
+    ~current_phase:SM.Running
+    ~conditions:running_conditions
+    ~event:SM.Zombie_timeout
+  in
+  check phase_t "zombie timeout -> Dead" SM.Dead tr.new_phase;
+  check bool "zombie timeout latched" true
+    tr.updated_conditions.zombie_timeout_reached
+
 (* ── Transition coverage tests (#5273) ────────────────── *)
 
 let test_apply_compacting_to_crashed () =
@@ -428,7 +448,7 @@ let test_can_transition_running_to_buffer_states () =
   check bool "-> Stopped" true (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Stopped)
 
 let test_can_transition_running_invalid () =
-  check bool "no -> Dead" false (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Dead);
+  check bool "hard-stop -> Dead" true (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Dead);
   check bool "-> Crashed (fiber death)" true (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Crashed);
   check bool "no -> Restarting" false (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Restarting);
   check bool "no -> Offline" false (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Offline)
@@ -1560,6 +1580,8 @@ let test_invariant_derive_matches_matrix () =
     SM.Fiber_terminated { outcome="test" };
     SM.Supervisor_restart_attempt { attempt=1 };
     SM.Restart_budget_exhausted;
+    SM.Credential_archived;
+    SM.Zombie_timeout;
     SM.Guardrail_stop { reason="test" };
   ] in
   let non_terminal_phases = List.filter (fun p ->
@@ -1628,6 +1650,8 @@ let test_invariant_priority_chain () =
     context_overflow = true;
     compact_retry_exhausted = true;
     terminal_failure_latched = false;
+    credential_archived = false;
+    zombie_timeout_reached = false;
   } in
   (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
      Clear buffer ops to reach Stopped. *)
@@ -1778,6 +1802,8 @@ let test_setclear_coverage () =
     "context_overflow",          (fun c -> c.context_overflow);
     "compact_retry_exhausted",   (fun c -> c.compact_retry_exhausted);
     "terminal_failure_latched",  (fun c -> c.terminal_failure_latched);
+    "credential_archived",       (fun c -> c.credential_archived);
+    "zombie_timeout_reached",    (fun c -> c.zombie_timeout_reached);
   ] in
   (* Conditions with all booleans false *)
   let all_false : SM.conditions = {
@@ -1798,6 +1824,8 @@ let test_setclear_coverage () =
     context_overflow = false;
     compact_retry_exhausted = false;
     terminal_failure_latched = false;
+    credential_archived = false;
+    zombie_timeout_reached = false;
   } in
   (* Conditions with all booleans true *)
   let all_true : SM.conditions = {
@@ -1880,6 +1908,10 @@ let test_setclear_coverage () =
       SM.Supervisor_restart_attempt { attempt = 1 };
     "Restart_budget_exhausted",
       SM.Restart_budget_exhausted;
+    "Credential_archived",
+      SM.Credential_archived;
+    "Zombie_timeout",
+      SM.Zombie_timeout;
     "Guardrail_stop",
       SM.Guardrail_stop { reason = "test" };
     "Context_overflow_detected",
@@ -1925,6 +1957,8 @@ let test_setclear_coverage () =
      These fields are managed by external code, not the FSM event loop. *)
   let exempt_from_clearer = [
     "context_within_budget";  (* external: never touched by update_conditions *)
+    "credential_archived";    (* terminal latch, cleared only by operator recreation *)
+    "zombie_timeout_reached"; (* terminal latch, cleared only by operator recreation *)
   ] in
   let exempt_from_setter = [
     "context_within_budget";    (* external *)
@@ -2129,6 +2163,8 @@ let () =
       test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash;
       test_case "crash -> restart -> Running" `Quick test_apply_crash_restart_lifecycle;
       test_case "crash -> Dead" `Quick test_apply_crash_to_dead;
+      test_case "credential archived -> Dead" `Quick test_apply_credential_archived_to_dead;
+      test_case "zombie timeout -> Dead" `Quick test_apply_zombie_timeout_to_dead;
       test_case "Compacting + fiber death -> Crashed" `Quick test_apply_compacting_to_crashed;
       test_case "HandingOff + fiber death -> Crashed" `Quick test_apply_handingoff_to_crashed;
       test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining;

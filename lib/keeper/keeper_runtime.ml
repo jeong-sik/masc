@@ -22,16 +22,12 @@ open Keeper_types
     preserves disk-of-record (raw bytes), but compare uses the
     capped form that the prompt actually renders.  Disk data is
     preserved; loop terminates. *)
-(* Layer 2 PR-B (commit 6): delegate to [Keeper_personality_io].
-   compare path now uses [coerce] (trim only) — symmetric with the
-   read path migrated in commit 5. The Layer 1 "trim AND truncate"
-   workaround is no longer needed because read / write / compare all
-   see the same raw bytes; truncation lives at the prompt-render
-   boundary. *)
 let personality_text_equal a b =
   let one_field s : Keeper_personality_io.coerced_personality =
-    Keeper_personality_io.coerce
-      { will = s; needs = ""; desires = ""; instructions = "" }
+    { Keeper_personality_io.will = s; needs = ""; desires = ""; instructions = "" }
+    |> Keeper_personality_io.to_prompt_form
+         ~max_bytes:Keeper_config.prompt_render_max_bytes
+    |> Keeper_personality_io.coerce
   in
   match Keeper_personality_io.compare_normalized (one_field a) (one_field b) with
   | `Equal -> true

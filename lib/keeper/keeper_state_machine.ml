@@ -274,6 +274,9 @@ let can_transition ~from_phase ~to_phase =
   | Zombie, _ -> false
   (* Terminal failure can strike from any non-terminal phase *)
   | _, Zombie -> true
+  (* External hard-stop signals such as credential archival can terminate any
+     non-terminal keeper without going through crash/restart budget flow. *)
+  | _, Dead -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | Offline, _ -> false
@@ -317,12 +320,13 @@ let can_transition ~from_phase ~to_phase =
      to clear an overflow-induced pause) *)
   | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
   | Paused, _ -> false
-  (* Crashed -> Restarting (backoff done) | Dead (budget exhausted) *)
-  | Crashed, (Restarting | Dead) -> true
+  (* Crashed -> Restarting (backoff done). Dead is covered by the global
+     hard-stop/budget terminal transition above. *)
+  | Crashed, Restarting -> true
   | Crashed, _ -> false
-  (* Restarting -> Running (success) | Crashed (fail) | Dead (budget)
+  (* Restarting -> Running (success) | Crashed (fail)
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
-  | Restarting, (Running | Crashed | Dead | Draining | Paused) -> true
+  | Restarting, (Running | Crashed | Draining | Paused) -> true
   | Restarting, _ -> false
 
 let can_execute_turn = function
@@ -415,15 +419,13 @@ let derive_phase (c : conditions) : phase =
      which includes buffer operations. Guard Stopped against active buffer
      ops so the keeper stays in Draining until compaction/handoff exits. *)
 
+  (* 0. Forced terminal state — external cleanup/credential signals. *)
+  if c.credential_archived || c.zombie_timeout_reached then Dead
   (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
-  if c.stop_requested && c.drain_complete
+  else if c.stop_requested && c.drain_complete
      && not c.compaction_active && not c.handoff_active then Stopped
   (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive then Offline
-  (* 2a. CREDENTIAL_ARCHIVED — 강제 종료 *)
-  else if c.credential_archived then Dead
-  (* 2b. ZOMBIE timeout — OAS cleanup 실패 시 *)
-  else if c.zombie_timeout_reached then Dead
   (* 3. Terminal structural failure — Zombie (non-recoverable) *)
   else if c.terminal_failure_latched then Zombie
   (* 4. Fiber lifecycle — Dead / Restarting / Crashed *)
@@ -769,6 +771,8 @@ let conditions_to_json (c : conditions) =
     "context_overflow", `Bool c.context_overflow;
     "compact_retry_exhausted", `Bool c.compact_retry_exhausted;
     "terminal_failure_latched", `Bool c.terminal_failure_latched;
+    "credential_archived", `Bool c.credential_archived;
+    "zombie_timeout_reached", `Bool c.zombie_timeout_reached;
   ]
 
 let event_to_json (ev : event) : Yojson.Safe.t =

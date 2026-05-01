@@ -5,7 +5,7 @@ open Base
 
     Three external entries plus the internal pipeline.  Memory is
     stored as plain files under
-    \[<masc_dir>/team-memory/<room>/<key>\] with strict
+    \[<masc_dir>/shared/rooms/<room>/memory/<key>\] with strict
     path-traversal + secret-token guards.
 
     Tools advertised to the catalog:
@@ -15,9 +15,9 @@ open Base
 
     Internal: \[Sg\] (Oas tool-schema-gen alias), 4 schema field
     builders, 3 raw schemas, [parse], [schema_to_tool_schema],
-    [default_namespace], 6 validation / safe-path helpers
-    ([validate_team_memory_room], [resolve_keeper_access],
-    [authorize_team_memory], [is_safe_subpath],
+    [default_namespace], validation / safe-path helpers
+    ([validate_team_memory_room], [validate_authorized_room_id],
+    [resolve_keeper_access], [authorize_team_memory], [is_safe_subpath],
     [nearest_existing_path], [safe_realpath]),
     [encoded_traversal_markers], [contains_encoded_traversal],
     [validate_team_memory_key], [resolve_key_path],
@@ -55,7 +55,10 @@ val dispatch :
     \`Some (false, json_error "...")\`.
 
     Path safety enforced before reads / writes:
-    + [validate_team_memory_room] (allowed-room set).
+    + [validate_team_memory_room] (external tool call room must be the
+      flattened default namespace).
+    + [validate_authorized_room_id] (post-authorization room id is a
+      safe path segment).
     + [validate_team_memory_key] (no slashes / dots / encoded
       traversal markers).
     + [resolve_key_path] (final realpath stays under

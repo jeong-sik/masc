@@ -8,6 +8,11 @@ describe('statusDotColor', () => {
     expect(statusDotColor('in_progress')).toBe('bg-[var(--color-status-warn)]')
   })
 
+  it('normalizes hyphenated in-progress states', () => {
+    expect(statusDotColor('in-progress')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusBadgeTone('claimed')).toBe('warn')
+  })
+
   it('returns warn for running', () => {
     expect(statusDotColor('running')).toBe('bg-[var(--color-status-warn)]')
   })
@@ -46,6 +51,7 @@ describe('statusDotColor', () => {
 
   it('returns bad for error', () => {
     expect(statusDotColor('error')).toBe('bg-[var(--color-status-err)]')
+    expect(statusDotColor('failed')).toBe('bg-[var(--color-status-err)]')
   })
 
   it('returns muted for unknown status', () => {

@@ -127,7 +127,13 @@
   text-transform: uppercase;
   background: var(--color-bg-elevated);
   color: var(--color-fg-muted);
+  &.ok { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.warn { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.bad { background: var(--color-err-soft); color: var(--color-err-fg); }
+  &.info { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.neutral { background: var(--color-idle-soft); color: var(--color-idle-fg); }
   &.active { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.claimed { background: var(--color-warn-soft); color: var(--color-warn-fg); }
   &.busy { background: var(--color-warn-soft); color: var(--color-warn-fg); }
   &.listening { background: var(--color-info-soft); color: var(--color-info-fg); }
   &.idle { background: var(--color-idle-soft); color: var(--color-idle-fg); }
@@ -138,7 +144,7 @@
   &.running { background: var(--color-warn-soft); color: var(--color-warn-fg); }
   &.interrupted { background: var(--color-info-soft); color: var(--color-info-fg); }
   &.stopped { background: var(--color-idle-soft); color: var(--color-idle-fg); }
-  &.error { background: var(--color-err-soft); color: var(--color-err-fg); }
+  &.error, &.failed { background: var(--color-err-soft); color: var(--color-err-fg); }
 }
 
 @utility control-textarea {

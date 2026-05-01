@@ -22,7 +22,8 @@ const DOT_CLASS: Record<StatusBadgeTone, string> = {
 }
 
 export function statusBadgeTone(status: string): StatusBadgeTone {
-  switch (status.toLowerCase()) {
+  const normalized = status.trim().toLowerCase().replace(/-/g, '_')
+  switch (normalized) {
     case 'ok':
       return 'ok'
     case 'warn':
@@ -34,6 +35,7 @@ export function statusBadgeTone(status: string): StatusBadgeTone {
     case 'neutral':
       return 'neutral'
     case 'in_progress':
+    case 'claimed':
     case 'running':
       return 'warn'
     case 'awaiting_verification':
@@ -52,6 +54,7 @@ export function statusBadgeTone(status: string): StatusBadgeTone {
     case 'busy':
       return 'warn'
     case 'error':
+    case 'failed':
       return 'bad'
     default:
       return 'neutral'

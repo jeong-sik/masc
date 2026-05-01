@@ -386,48 +386,50 @@ let to_oas_approval_callback
           ?selected_model ~disposition:"Pass"
           ~disposition_reason:"always_approve_enabled" ~auto_approved:true ();
         Oas.Hooks.Approve
-      ) else if Option.is_some routine_label then (
-        let label = Option.get routine_label in
-        Keeper_approval_queue.audit_approval_event
-          ?base_path
-          ~event_type:"auto_approved_keeper_routine"
-          ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
-          ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
-          ?selected_model ~disposition:"Pass"
-          ~disposition_reason:label ~auto_approved:true ();
-        Log.Governance.debug
-          "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
-          keeper_name tool_name (risk_level_to_string risk) label;
-        Oas.Hooks.Approve
       ) else
-        match rule_match with
-        | Some matched ->
+        match routine_label with
+        | Some label ->
             Keeper_approval_queue.audit_approval_event
               ?base_path
-              ~event_type:"auto_approved_rule_match"
-              ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+              ~event_type:"auto_approved_keeper_routine"
+              ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
               ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
               ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
               ?selected_model ~disposition:"Pass"
-              ~disposition_reason:"healthy" ~rule_match:matched
-              ~auto_approved:true ();
+              ~disposition_reason:label ~auto_approved:true ();
+            Log.Governance.debug
+              "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
+              keeper_name tool_name (risk_level_to_string risk) label;
             Oas.Hooks.Approve
-        | None ->
-            Keeper_approval_queue.submit_and_await
-              ~keeper_name
-              ~tool_name
-              ~input
-              ?turn_id
-              ?task_id
-              ?goal_id
-              ?goal_ids
-              ?runtime_contract
-              ?selected_model
-              ~disposition:"Pause"
-              ~disposition_reason:"waiting_approval"
-              ~risk_level
-              ?clock
-              ()
+        | None -> (
+            match rule_match with
+            | Some matched ->
+                Keeper_approval_queue.audit_approval_event
+                  ?base_path
+                  ~event_type:"auto_approved_rule_match"
+                  ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+                  ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id
+                  ?goal_id
+                  ~goal_ids:(Option.value ~default:[] goal_ids)
+                  ?runtime_contract ?selected_model ~disposition:"Pass"
+                  ~disposition_reason:"healthy" ~rule_match:matched
+                  ~auto_approved:true ();
+                Oas.Hooks.Approve
+            | None ->
+                Keeper_approval_queue.submit_and_await
+                  ~keeper_name
+                  ~tool_name
+                  ~input
+                  ?turn_id
+                  ?task_id
+                  ?goal_id
+                  ?goal_ids
+                  ?runtime_contract
+                  ?selected_model
+                  ~disposition:"Pause"
+                  ~disposition_reason:"waiting_approval"
+                  ~risk_level
+                  ?clock
+                  ())
     else
       Oas.Hooks.Approve

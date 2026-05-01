@@ -233,8 +233,8 @@ and within_days d1 d2 days =
 let make_candidate commits =
   match commits with
   | [] -> assert false
-  | first :: _ ->
-    let last = List.hd (List.rev commits) in
+  | first :: rest ->
+    let last = List.fold_left (fun _ ev -> ev) first rest in
     let all_goals =
       commits
       |> List.map extract_goal_ids
@@ -299,16 +299,16 @@ let group_events ?(time_window_days = 7) events =
   let goal_groups = group_by_goal_id events in
   let ungrouped =
     goal_groups
-    |> List.filter (fun g ->
-      List.length g = 1
-      && extract_goal_ids (List.hd g) = [])
-    |> List.map List.hd
+    |> List.filter_map (function
+      | [ ev ] when extract_goal_ids ev = [] -> Some ev
+      | _ -> None)
   in
   let grouped =
     goal_groups
-    |> List.filter (fun g ->
-      List.length g > 1
-      || extract_goal_ids (List.hd g) <> [])
+    |> List.filter (function
+      | [] -> false
+      | [ ev ] -> extract_goal_ids ev <> []
+      | _ -> true)
   in
   let time_groups = group_by_time_window ungrouped ~days:time_window_days in
   let all_groups = grouped @ time_groups in

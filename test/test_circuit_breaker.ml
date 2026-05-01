@@ -195,6 +195,37 @@ let test_display_state_of_clears_after_success () =
   let s = CB.display_state_of ~keeper_name:name in
   check string "after success, back to clean" "clean" (display_state_str s)
 
+let trip_keeper name =
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /a");
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /b");
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /c")
+
+let test_display_state_of_success_closes_trip () =
+  let name = "p2-trip-success-closes" in
+  trip_keeper name;
+  let cooling = CB.display_state_of ~keeper_name:name in
+  check string "trip opens cooling" "cooling" (display_state_str cooling);
+  CB.record_success ~keeper_name:name;
+  let closed = CB.display_state_of ~keeper_name:name in
+  check string "success closes cooling" "clean" (display_state_str closed)
+
+let test_display_state_of_cooling_auto_resets () =
+  let name = "p2-trip-auto-reset" in
+  trip_keeper name;
+  let cooling = CB.display_state_of ~keeper_name:name in
+  check string "trip opens cooling" "cooling" (display_state_str cooling);
+  let after_window =
+    CB.display_state_of_at
+      ~now:(Unix.gettimeofday () +. CB.cooling_reset_sec +. 1.0)
+      ~keeper_name:name
+  in
+  check string "cooling expires to clean" "clean"
+    (display_state_str after_window)
+
 (* ── task-240: failure signature diagnostics ────────────────── *)
 
 let test_fingerprint_collapses_whitespace () =
@@ -328,5 +359,9 @@ let () =
         `Quick test_display_state_of_matches_snapshot;
       test_case "success clears back to clean"
         `Quick test_display_state_of_clears_after_success;
+      test_case "success closes a tripped cooling window"
+        `Quick test_display_state_of_success_closes_trip;
+      test_case "cooling window auto-resets"
+        `Quick test_display_state_of_cooling_auto_resets;
     ];
   ]

@@ -800,7 +800,7 @@ let broadcast_presence json =
 let send_to session_id json =
   if not (jsonrpc_message_for_coordinator json) then
     Log.Server.warn
-      "Dropping non-JSON-RPC payload for MCP coordinator session %s"
+      "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
   let data = Yojson.Safe.to_string json in

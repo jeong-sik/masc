@@ -56,6 +56,41 @@ let test_system_internal_details_deduplicate_canonical_keys () =
       check string "keeps non-canonical fields" "unit_test"
         Yojson.Safe.Util.(entry.details |> member "source" |> to_string))
 
+let entry ~timestamp ~agent_id ~action ~outcome =
+  {
+    Audit_log.timestamp;
+    agent_id;
+    action;
+    room_id = None;
+    details = `Null;
+    outcome;
+    cost_estimate = None;
+    token_count = None;
+    trace_id = None;
+  }
+
+let test_audit_events_filter_severity_before_paging () =
+  let entries =
+    [
+      entry ~timestamp:1.0 ~agent_id:"keeper-a" ~action:Audit_log.AuthFailure
+        ~outcome:(Audit_log.Failure "bad token");
+      entry ~timestamp:2.0 ~agent_id:"keeper-b" ~action:Audit_log.AuthSuccess
+        ~outcome:Audit_log.Success;
+      entry ~timestamp:3.0 ~agent_id:"keeper-c" ~action:Audit_log.AuthSuccess
+        ~outcome:Audit_log.Success;
+    ]
+  in
+  let json =
+    Audit_log.audit_events_response_json ~severity:"error" ~limit:2 entries
+  in
+  let open Yojson.Safe.Util in
+  check int "one error survives paging" 1 (json |> member "count" |> to_int);
+  let rows = json |> member "entries" |> to_list in
+  check int "one row" 1 (List.length rows);
+  let row = List.hd rows in
+  check string "older error retained" "keeper-a" (row |> member "actor" |> to_string);
+  check string "severity" "error" (row |> member "severity" |> to_string)
+
 let () =
   run "Audit_log"
     [
@@ -63,5 +98,7 @@ let () =
         [
           test_case "system_internal details deduplicate canonical keys" `Quick
             test_system_internal_details_deduplicate_canonical_keys;
+          test_case "audit event severity filters before paging" `Quick
+            test_audit_events_filter_severity_before_paging;
         ] );
     ]

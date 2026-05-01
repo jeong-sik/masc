@@ -110,6 +110,25 @@ val append_entry : config -> audit_entry -> unit
 (** Atomic append to today's day-file; creates the directory and
     file on first call. *)
 
+val audit_event_severity : audit_entry -> string
+(** Dashboard severity for an audit entry: ["info"], ["warn"], or ["error"]. *)
+
+val audit_event_json : audit_entry -> Yojson.Safe.t
+(** Project an audit entry into the global audit ledger event shape used by
+    [/api/v1/audit] and live SSE audit events. *)
+
+val audit_events_response_json :
+  ?actor:string ->
+  ?kind:string ->
+  ?severity:string ->
+  ?since:float ->
+  ?until:float ->
+  limit:int ->
+  audit_entry list ->
+  Yojson.Safe.t
+(** Filter and page chronological audit entries, returning
+    [{entries, count}]. Filters are applied before pagination. *)
+
 (** {1 Logging — generic} *)
 
 val log_action :

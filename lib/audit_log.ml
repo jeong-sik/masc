@@ -392,6 +392,78 @@ let audit_target ~action ~details =
   | Custom _ -> extract_str "tool_name"
   | _ -> None
 
+let audit_event_severity (entry : audit_entry) =
+  audit_severity ~action:entry.action ~outcome:entry.outcome
+
+let audit_event_json (entry : audit_entry) =
+  let kind = action_to_string entry.action in
+  let id =
+    audit_entry_id ~timestamp:entry.timestamp ~agent_id:entry.agent_id
+      ~action:entry.action
+  in
+  let target = audit_target ~action:entry.action ~details:entry.details in
+  let fields =
+    [
+      ("id", `String id);
+      ("ts", `String (format_iso8601 entry.timestamp));
+      ("actor", `String entry.agent_id);
+      ("kind", `String kind);
+      ("summary", `String (audit_summary ~action:entry.action ~details:entry.details));
+      ("severity", `String (audit_event_severity entry));
+    ]
+  in
+  let fields =
+    match target with
+    | Some value -> ("target", `String value) :: fields
+    | None -> fields
+  in
+  let fields =
+    if entry.details = `Null then fields else ("payload", entry.details) :: fields
+  in
+  `Assoc fields
+
+let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
+    (entries : audit_entry list) =
+  let filtered =
+    entries
+    |> (match actor with
+        | None -> Fun.id
+        | Some value ->
+            let actor = String.trim value in
+            List.filter (fun entry -> String.equal entry.agent_id actor))
+    |> (match kind with
+        | None -> Fun.id
+        | Some value ->
+            let kind = String.trim value in
+            List.filter (fun entry ->
+                String.starts_with ~prefix:kind (action_to_string entry.action)))
+    |> (match since with
+        | None -> Fun.id
+        | Some value -> List.filter (fun entry -> entry.timestamp >= value))
+    |> (match until with
+        | None -> Fun.id
+        | Some value -> List.filter (fun entry -> entry.timestamp <= value))
+    |> (match severity with
+        | None -> Fun.id
+        | Some value ->
+            let severity = String.trim value in
+            List.filter (fun entry ->
+                String.equal (audit_event_severity entry) severity))
+  in
+  let total = List.length filtered in
+  let drop_n = max 0 (total - limit) in
+  let rec drop_front n = function
+    | list when n <= 0 -> list
+    | [] -> []
+    | _ :: rest -> drop_front (n - 1) rest
+  in
+  let page = drop_front drop_n filtered in
+  `Assoc
+    [
+      ("entries", `List (List.map audit_event_json page));
+      ("count", `Int (List.length page));
+    ]
+
 let log_action
     (config : config)
     ~agent_id

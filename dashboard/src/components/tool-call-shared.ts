@@ -22,46 +22,54 @@ type ToolCategoryEntry = {
   label: string
 }
 
+const TOOL_TONE = {
+  brass: 'text-[var(--color-brass-fg)]',
+  info: 'text-[var(--color-info-fg)]',
+  ok: 'text-[var(--color-status-ok)]',
+  warn: 'text-[var(--color-warn-fg)]',
+  accent: 'text-[var(--color-accent-fg)]',
+} as const
+
 const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   // Shell / Bash — execution tools
   { match: n => n.includes('bash') || n.includes('shell'),
     icon: '>', color: 'text-[var(--color-status-ok)]', label: 'shell' },
   // Git / GitHub / Worktree — version control
   { match: n => n.includes('github') || n.includes('git') || n.includes('worktree'),
-    icon: 'G', color: 'text-[var(--color-accent-fg)]', label: 'git' },
+    icon: 'G', color: TOOL_TONE.brass, label: 'git' },
   // File write / edit — mutations
   { match: n => n.includes('edit') || n.includes('write') || n.includes('delete'),
     icon: 'E', color: 'text-[var(--color-status-warn)]', label: 'edit' },
   // File read / filesystem
   { match: n => n.includes('fs_read') || n.includes('code_read'),
-    icon: 'F', color: 'text-[var(--purple)]', label: 'file' },
+    icon: 'F', color: TOOL_TONE.info, label: 'file' },
   // Board / Social — community interaction
   { match: n => n.includes('board') || n.includes('social'),
-    icon: 'B', color: 'text-[var(--purple)]', label: 'board' },
+    icon: 'B', color: TOOL_TONE.accent, label: 'board' },
   // Search / Read / Library / Symbols
   { match: n => n.includes('search') || n.includes('symbols') || n.includes('library'),
-    icon: 'S', color: 'text-[var(--blue-400)]', label: 'search' },
+    icon: 'S', color: TOOL_TONE.info, label: 'search' },
   // Voice — audio/speech
   { match: n => n.includes('voice'),
-    icon: 'V', color: 'text-[#f472b6]', label: 'voice' },
+    icon: 'V', color: TOOL_TONE.brass, label: 'voice' },
   // Web — network access
   { match: n => n.includes('web') || n.includes('fetch'),
-    icon: 'W', color: 'text-[var(--sky-400)]', label: 'web' },
+    icon: 'W', color: TOOL_TONE.info, label: 'web' },
   // Coordination — tasks, transitions, heartbeat
   { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
     icon: 'C', color: 'text-[var(--color-status-warn)]', label: 'coord' },
   // Memory — recall, context, memory search
   { match: n => n.includes('memory') || n.includes('recall') || n.includes('context'),
-    icon: 'M', color: 'text-[#34d399]', label: 'memory' },
+    icon: 'M', color: TOOL_TONE.ok, label: 'memory' },
   // Status / Dashboard — observability
   { match: n => n.includes('status') || n.includes('dashboard') || n.includes('agents') || n.includes('agent_card'),
-    icon: 'D', color: 'text-[#c084fc]', label: 'status' },
+    icon: 'D', color: TOOL_TONE.info, label: 'status' },
   // Playwright / Browser — browser automation
   { match: n => n.includes('playwright') || n.includes('browser') || n.includes('navigate'),
-    icon: 'P', color: 'text-[#fb923c]', label: 'browser' },
+    icon: 'P', color: TOOL_TONE.warn, label: 'browser' },
   // Read (generic, after more specific patterns)
   { match: n => n.includes('read'),
-    icon: 'R', color: 'text-[var(--blue-400)]', label: 'read' },
+    icon: 'R', color: TOOL_TONE.info, label: 'read' },
 ]
 const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[var(--slate-400)]', label: 'tool' }
 
@@ -126,4 +134,3 @@ export function prettyArgs(args: Record<string, unknown> | string): string {
 export function normalizeToolName(name: string): string {
   return name.replace(/^(keeper_|masc_)/, '')
 }
-

@@ -51,15 +51,29 @@ let parse_task_contract_arg args =
 ;;
 
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
-    ?excluded_count () =
+    ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
   let scoped = meta.active_goal_ids <> [] in
+  let mode =
+    match effective_mode with
+    | Some mode -> mode
+    | None -> if scoped then "active_goal_ids" else "all_tasks"
+  in
+  let effective_goal_ids =
+    match effective_goal_ids with
+    | Some goal_ids -> goal_ids
+    | None -> meta.active_goal_ids
+  in
   let fields =
     [
-      ("mode", `String (if scoped then "active_goal_ids" else "all_tasks"));
+      ("mode", `String mode);
       ("scoped", `Bool scoped);
       ( "active_goal_ids",
         `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
       );
+      ( "effective_goal_ids",
+        `List (List.map (fun goal_id -> `String goal_id) effective_goal_ids)
+      );
+      ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
       ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
     ]
   in
@@ -69,6 +83,65 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     | None -> fields
   in
   `Assoc fields
+;;
+
+type claim_goal_scope = {
+  task_filter : Types.task -> bool;
+  mode : string;
+  effective_goal_ids : string list;
+  fallback_reason : string option;
+}
+
+let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
+  String.equal goal.Goal_store.title
+    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
+;;
+
+let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
+  goal_ids <> []
+  && List.for_all
+       (fun goal_id ->
+         match Goal_store.get_goal config ~goal_id with
+         | Some goal -> goal_title_matches_keeper_purpose ~meta goal
+         | None -> false)
+       goal_ids
+;;
+
+let active_goal_ids_have_claim_pool_task config goal_ids =
+  Coord.get_tasks_safe config
+  |> List.exists (fun task ->
+       Coord.task_is_claim_pool_candidate task
+       && Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task)
+;;
+
+let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
+  match meta.active_goal_ids with
+  | [] ->
+    { task_filter = (fun (_task : Types.task) -> true);
+      mode = "all_tasks";
+      effective_goal_ids = [];
+      fallback_reason = None;
+    }
+  | goal_ids ->
+    let scoped_filter task =
+      Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
+    in
+    if active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+       && not (active_goal_ids_have_claim_pool_task config goal_ids)
+    then
+      { task_filter = (fun (_task : Types.task) -> true);
+        mode = "auto_goal_fallback_all_tasks";
+        effective_goal_ids = [];
+        fallback_reason =
+          Some
+            "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks";
+      }
+    else
+      { task_filter = scoped_filter;
+        mode = "active_goal_ids";
+        effective_goal_ids = goal_ids;
+        fallback_reason = None;
+      }
 ;;
 
 let find_task_goal_id config task_id =
@@ -223,16 +296,11 @@ let handle_keeper_task_tool
                     "goal_id", Json_util.string_opt_to_json goal_id;
                   ])))
   | "keeper_task_claim" ->
-    let task_filter =
-      match meta.active_goal_ids with
-      | [] -> fun (_task : Types.task) -> true
-      | goal_ids ->
-        fun task -> Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
-    in
+    let claim_goal_scope = resolve_claim_goal_scope ~config ~meta in
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let result =
       Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
-        ~task_filter ()
+        ~task_filter:claim_goal_scope.task_filter ()
     in
     let auto_started_ok = ref false in
     (match result with
@@ -282,7 +350,10 @@ let handle_keeper_task_tool
       match result with
       | Coord.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
-          ( active_goal_scope_json ~meta ?matched_goal_id ()
+          ( active_goal_scope_json ~meta ?matched_goal_id
+              ~effective_mode:claim_goal_scope.mode
+              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
+              ?fallback_reason:claim_goal_scope.fallback_reason ()
           , [
               ( "claim_observation",
                 Tool_task.build_claim_observation_payload
@@ -301,9 +372,16 @@ let handle_keeper_task_tool
                   ] );
             ] )
       | Coord.Claim_next_no_eligible { excluded_count } ->
-          (active_goal_scope_json ~meta ~excluded_count (), [])
+          ( active_goal_scope_json ~meta ~excluded_count
+              ~effective_mode:claim_goal_scope.mode
+              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
+              ?fallback_reason:claim_goal_scope.fallback_reason ()
+          , [] )
       | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
-          (active_goal_scope_json ~meta (), [])
+          ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
+              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
+              ?fallback_reason:claim_goal_scope.fallback_reason ()
+          , [] )
     in
     Yojson.Safe.to_string
       (`Assoc

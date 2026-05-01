@@ -20,7 +20,7 @@ let create ?default_network_override
 let with_lock (t : t) f =
   Mutex.lock t.mutex;
   Fun.protect
-    ~finally:(fun () -> try Mutex.unlock t.mutex with _ -> ())
+    ~finally:(fun () -> Mutex.unlock t.mutex)
     f
 
 let strip_trailing_slashes path =

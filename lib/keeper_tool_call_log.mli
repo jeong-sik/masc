@@ -45,7 +45,6 @@ val set_turn_context :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?shared_memory_scope:string ->
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
@@ -59,14 +58,10 @@ val set_turn_context :
 
 val get_turn_context :
   keeper_name:string ->
-  unit ->
-  string option * string option * bool option * int option
-  * string option * string option * string option * int option
-  * int option * string option * string list option * string option
-  * string option * string option * string option
+  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
-    sandbox_profile, network_mode, shared_memory_scope, approval_mode)] for
+    sandbox_profile, network_mode, approval_mode)] for
     the keeper, or [None] values when no turn context has
     been recorded. *)
 
@@ -127,7 +122,6 @@ val log_call :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?shared_memory_scope:string ->
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->

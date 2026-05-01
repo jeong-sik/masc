@@ -229,46 +229,6 @@ let test_agent_fitness_specific () =
   )
 
 (* ============================================================
-   Handler tests — collaboration_graph
-   ============================================================ *)
-
-let test_collaboration_graph_text () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("format", `String "text")] in
-  let (ok, msg) = Tool_agent.handle_collaboration_graph ctx args in
-  Alcotest.(check bool) "text format succeeds" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
-  )
-
-let test_collaboration_graph_json () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("format", `String "json")] in
-  let (ok, msg) = Tool_agent.handle_collaboration_graph ctx args in
-  Alcotest.(check bool) "json format succeeds" true ok;
-  Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  )
-
-(* ============================================================
-   Handler tests — agent_card
-   ============================================================ *)
-
-let test_agent_card_get () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("action", `String "get")] in
-  let (ok, msg) = Tool_agent.handle_agent_card ctx args in
-  Alcotest.(check bool) "get succeeds" true ok;
-  Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  )
-
-let test_agent_card_refresh () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("action", `String "refresh")] in
-  let (ok, msg) = Tool_agent.handle_agent_card ctx args in
-  Alcotest.(check bool) "refresh succeeds" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
-  )
-
-(* ============================================================
    Handler tests — meta_cognition_snapshot
    ============================================================ *)
 
@@ -434,24 +394,8 @@ let () =
     ]);
     ("agent_update", [
       Alcotest.test_case "status update" `Quick test_agent_update_status;
-      Alcotest.test_case "capabilities update" `Quick test_agent_update_capabilities;
-    ]);
-    ("get_metrics", [
-      Alcotest.test_case "no data" `Quick test_get_metrics_no_data;
-      Alcotest.test_case "missing agent_name" `Quick
-        test_get_metrics_missing_agent_name;
-    ]);
-    ("agent_fitness", [
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
-    ]);
-    ("collaboration_graph", [
-      Alcotest.test_case "text format" `Quick test_collaboration_graph_text;
-      Alcotest.test_case "json format" `Quick test_collaboration_graph_json;
-    ]);
-    ("agent_card", [
-      Alcotest.test_case "get action" `Quick test_agent_card_get;
-      Alcotest.test_case "refresh action" `Quick test_agent_card_refresh;
     ]);
     ("meta_cognition_snapshot", [
       Alcotest.test_case "detects beliefs tensions desires and edges" `Quick

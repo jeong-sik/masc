@@ -31,7 +31,6 @@ type SurfaceSectionId =
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
-  | 'collab-mvp'     // Track 1: CRDT/editor/git graph/claim queue contract
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
@@ -231,13 +230,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Repositories',
       description: 'Registered repos, Git graph, branches, credentials, and keeper access scope.',
       params: { section: 'repositories' },
-    },
-    {
-      id: 'collab-mvp',
-      label: 'Collab MVP',
-      description: 'Yjs, CodeMirror, Git graph, claim queue, turn queue, and telemetry contract experiments.',
-      params: { section: 'collab-mvp' },
-      hidden: true,
     },
     {
       id: 'verification',

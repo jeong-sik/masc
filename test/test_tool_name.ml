@@ -16,7 +16,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Voice_sessions; Voice_speak; Write ]
 
 let all_masc : Tool_name.Masc.t list =
-  [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_update; Agents
+  [ Add_task; Agent_fitness; Agent_update; Agents
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
   ; Autoresearch_record_finding; Autoresearch_search_findings
   ; Autoresearch_status; Autoresearch_stop
@@ -36,7 +36,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Approval_get; Collaboration_graph; Config; Gc; Get_metrics; Mcp_session
+  ; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 

@@ -40,7 +40,6 @@ type turn_context = {
   sandbox_root: string option;
   allowed_paths: string list option;
   network_mode: string option;
-  shared_memory_scope: string option;
   approval_mode: string option;
   tool_surface_class: string option;
   visible_tool_count: int option;
@@ -67,7 +66,6 @@ let empty_turn_context = {
   sandbox_root = None;
   allowed_paths = None;
   network_mode = None;
-  shared_memory_scope = None;
   approval_mode = None;
   tool_surface_class = None;
   visible_tool_count = None;
@@ -89,8 +87,7 @@ let consume_truncation_info ~keeper_name () =
 let set_turn_context ~keeper_name ?agent_name ?lane ?tool_choice
     ?thinking_enabled ?thinking_budget ?prompt_fingerprint ?trace_id
     ?session_id ?generation ?turn ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
-    ?shared_memory_scope ?approval_mode ?tool_surface_class ?visible_tool_count
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class ?visible_tool_count
     ?required_tools ?missing_required_tools ?cascade_profile () =
   Hashtbl.replace pending_turn_context keeper_name
     {
@@ -111,7 +108,6 @@ let set_turn_context ~keeper_name ?agent_name ?lane ?tool_choice
       sandbox_root;
       allowed_paths;
       network_mode;
-      shared_memory_scope;
       approval_mode;
       tool_surface_class;
       visible_tool_count;
@@ -140,7 +136,6 @@ let get_turn_context ~keeper_name () =
   , ctx.goal_ids
   , ctx.sandbox_profile
   , ctx.network_mode
-  , ctx.shared_memory_scope
   , ctx.approval_mode )
 
 let optional_model model =
@@ -163,7 +158,6 @@ let runtime_contract_json_for_call ~keeper_name ?model () =
     ?sandbox_root:ctx.sandbox_root
     ?allowed_paths:ctx.allowed_paths
     ?network_mode:ctx.network_mode
-    ?shared_memory_scope:ctx.shared_memory_scope
     ?approval_mode:ctx.approval_mode
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count
@@ -350,7 +344,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ?(model : string = "") ?agent_name ?lane ?tool_choice ?thinking_enabled
     ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?generation
     ?turn ?keeper_turn_id ?task_id ?goal_ids ?sandbox_profile ?sandbox_root
-    ?allowed_paths ?network_mode ?shared_memory_scope ?approval_mode
+    ?allowed_paths ?network_mode ?approval_mode
     ?tool_surface_class ?visible_tool_count ?required_tools
     ?missing_required_tools ?cascade_profile ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
@@ -372,7 +366,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           , ctx_goal_ids
           , ctx_sandbox_profile
           , ctx_network_mode
-          , ctx_shared_memory_scope
           , ctx_approval_mode ) =
         get_turn_context ~keeper_name ()
       in
@@ -418,11 +411,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         match network_mode with
         | Some _ -> network_mode
         | None -> ctx_network_mode
-      in
-      let shared_memory_scope =
-        match shared_memory_scope with
-        | Some _ -> shared_memory_scope
-        | None -> ctx_shared_memory_scope
       in
       let approval_mode =
         match approval_mode with
@@ -530,10 +518,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         | Some value -> [("network_mode", `String value)]
         | None -> []
       in
-      let shared_memory_scope_field = match shared_memory_scope with
-        | Some value -> [("shared_memory_scope", `String value)]
-        | None -> []
-      in
       let approval_mode_field = match approval_mode with
         | Some value -> [("approval_mode", `String value)]
         | None -> []
@@ -559,7 +543,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           ?sandbox_root
           ?allowed_paths
           ?network_mode
-          ?shared_memory_scope
           ?approval_mode
           ?tool_surface_class
           ?visible_tool_count
@@ -599,8 +582,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            @ prompt_fingerprint_field
            @ trace_id_field @ session_id_field @ turn_field
            @ keeper_turn_id_field @ task_id_field @ goal_ids_field
-           @ sandbox_profile_field @ network_mode_field
-           @ shared_memory_scope_field @ approval_mode_field
+           @ sandbox_profile_field @ network_mode_field @ approval_mode_field
            @ result_bytes_field @ truncated_to_field)
       in
       (* Sanitize UTF-8 before persisting.  Tool output may contain invalid

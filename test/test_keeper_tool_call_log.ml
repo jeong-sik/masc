@@ -193,7 +193,6 @@ let test_turn_context_fields_stored () =
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
-      ~shared_memory_scope:"team"
       ~approval_mode:"manual"
       ~tool_surface_class:"execution"
       ~visible_tool_count:2

@@ -14,7 +14,7 @@ let test_agent_status_roundtrip () =
 let test_agent_status_of_string_r () =
   match agent_status_of_string_r "unknown_status" with
   | Ok _ -> Alcotest.fail "expected error for unknown status"
-  | Error msg -> Alcotest.(check string) "error message" "Unknown agent status: unknown_status" msg
+  | Error msg -> Alcotest.(check string) "error message" "unknown agent_status: \"unknown_status\"" msg
 
 let test_task_status_todo () =
   let status = Todo in
@@ -480,15 +480,6 @@ let () =
         in
         witness Network_none; witness Network_inherit;
         Alcotest.(check int) "count" 2 (List.length valid_network_mode_strings));
-      Alcotest.test_case "shared_memory_scope witness covers both variants" `Quick (fun () ->
-        let open Masc_mcp.Keeper_types_profile in
-        let witness s =
-          let actual = shared_memory_scope_to_string s in
-          if not (List.mem actual valid_shared_memory_scope_strings) then
-            Alcotest.failf "shared_memory_scope_to_string %S not in valid_shared_memory_scope_strings" actual
-        in
-        witness Shared_memory_disabled; witness Shared_memory_room;
-        Alcotest.(check int) "count" 2 (List.length valid_shared_memory_scope_strings));
       Alcotest.test_case "schema mirrors stay in sync" `Quick (fun () ->
         (* Cycle-avoidance: Keeper_schema cannot depend on
            Keeper_types_profile directly, so it hand-mirrors the SSOT.
@@ -499,10 +490,7 @@ let () =
           Masc_mcp.Keeper_schema.sandbox_profile_enum_strings;
         Alcotest.(check (list string)) "network_mode mirror"
           Masc_mcp.Keeper_types_profile.valid_network_mode_strings
-          Masc_mcp.Keeper_schema.network_mode_enum_strings;
-        Alcotest.(check (list string)) "shared_memory_scope mirror"
-          Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
-          Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
+          Masc_mcp.Keeper_schema.network_mode_enum_strings);
     ];
     "admin_section_ssot", [
       (* Issue #8546: schema advertised [auth; unit_policy] while the
@@ -729,53 +717,6 @@ let () =
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Board_votes.valid_vote_direction_strings
           Masc_mcp.Tool_shard.vote_direction_enum_strings);
-    ];
-    "agent_tool_variants_ssot", [
-      (* Issue #8501: introduces [agent_card_action] and
-         [collaboration_format] Variants where 4 sites previously
-         hand-validated raw strings. Same shape as #8480/#8484/#8490
-         mirror+sync pattern. *)
-      Alcotest.test_case "agent_card_action witness covers both variants" `Quick (fun () ->
-        let module T = Masc_mcp.Tool_agent in
-        let witness a =
-          let actual = T.agent_card_action_to_string a in
-          if not (List.mem actual T.valid_agent_card_action_strings) then
-            Alcotest.failf "agent_card_action_to_string %S not in valid_agent_card_action_strings" actual
-        in
-        witness T.Get; witness T.Refresh;
-        Alcotest.(check int) "count" 2 (List.length T.valid_agent_card_action_strings));
-      Alcotest.test_case "collaboration_format witness covers both variants" `Quick (fun () ->
-        let module T = Masc_mcp.Tool_agent in
-        let witness f =
-          let actual = T.collaboration_format_to_string f in
-          if not (List.mem actual T.valid_collaboration_format_strings) then
-            Alcotest.failf "collaboration_format_to_string %S not in valid_collaboration_format_strings" actual
-        in
-        witness T.Text; witness T.Json;
-        Alcotest.(check int) "count" 2 (List.length T.valid_collaboration_format_strings));
-      Alcotest.test_case "of_string_opt sound partial + back-compat" `Quick (fun () ->
-        let module T = Masc_mcp.Tool_agent in
-        Alcotest.(check bool) "agent_card_action 'get'" true
-          (T.agent_card_action_of_string_opt "get" = Some T.Get);
-        Alcotest.(check bool) "agent_card_action '' -> Get back-compat" true
-          (T.agent_card_action_of_string_opt "" = Some T.Get);
-        Alcotest.(check bool) "agent_card_action 'REFRESH' (case)" true
-          (T.agent_card_action_of_string_opt "REFRESH" = Some T.Refresh);
-        Alcotest.(check bool) "agent_card_action garbage rejected" true
-          (T.agent_card_action_of_string_opt "delete" = None);
-        Alcotest.(check bool) "collaboration_format 'json'" true
-          (T.collaboration_format_of_string_opt "json" = Some T.Json);
-        Alcotest.(check bool) "collaboration_format '' -> Text back-compat" true
-          (T.collaboration_format_of_string_opt "" = Some T.Text);
-        Alcotest.(check bool) "collaboration_format garbage rejected" true
-          (T.collaboration_format_of_string_opt "yaml" = None));
-      Alcotest.test_case "schema mirrors stay in sync" `Quick (fun () ->
-        Alcotest.(check (list string)) "agent_card_action mirror == SSOT"
-          Masc_mcp.Tool_agent.valid_agent_card_action_strings
-          Tool_schemas_agent.agent_card_action_enum_strings;
-        Alcotest.(check (list string)) "collaboration_format mirror == SSOT"
-          Masc_mcp.Tool_agent.valid_collaboration_format_strings
-          Tool_schemas_agent.collaboration_format_enum_strings);
     ];
     "sort_order_schema_ssot", [
       (* Issue #8513: Tool_shard.sort_order_enum_strings (used in

@@ -10,7 +10,7 @@ code_refs:
   - lib/institution_eio.ml
   - lib/procedural_memory.ml
   - lib/auto_recall.ml
-  - lib/hebbian_eio.ml
+  - lib/keeper/keeper_memory_recall.ml
   - lib/memory_oas_bridge.ml
   - lib/context_compact_oas.ml
 ---
@@ -21,7 +21,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Keeper |
-| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml`, `lib/memory_*.ml`, `lib/auto_recall.ml`, `lib/hebbian_eio.ml` |
+| Maps to | `lib/keeper/keeper_memory*.ml`, `lib/institution_eio.ml`, `lib/procedural_memory.ml`, `lib/context_*.ml`, `lib/memory_*.ml`, `lib/auto_recall.ml` |
 | Dependencies | 05-keeper-agent, 13-oas-integration |
 
 ---
@@ -50,7 +50,6 @@ graph TB
   end
   subgraph "Institution (collective)"
     IE[institution_eio.ml]
-    HE[hebbian_eio.ml]
   end
   subgraph "Procedural (learned)"
     PM[procedural_memory.ml]
@@ -448,13 +447,16 @@ Institution episode <-> OAS episode 변환 시:
 
 ---
 
-## 10. Hebbian Learning
+## 10. Retired Hebbian Learning
 
 ### 10.1 개요
 
-`hebbian_eio.ml`은 "함께 활동한 에이전트는 연결이 강화된다" 원칙의 협업 패턴 학습이다.
+Hebbian collaboration-pattern learning was retired with the legacy team/swarm
+surface. Current memory recall lives in keeper memory, institution episodes,
+procedural memory, and the OAS bridge listed above.
 
-파일 경로: `.masc/synapses/graph.json`
+The old `.masc/synapses/graph.json` path is historical and is not part of the
+current runtime contract.
 
 ### 10.2 시냅스 모델
 

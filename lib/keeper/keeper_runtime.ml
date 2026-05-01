@@ -337,8 +337,6 @@ let ensure_keeper_meta config name =
     let target_network_mode =
       apply_default defaults.network_mode
         (Keeper_types_profile.default_network_mode_for_profile target_sandbox_profile) in
-    let target_shared_memory_scope =
-      apply_default defaults.shared_memory_scope Keeper_types_profile.default_shared_memory_scope in
     let target_allowed_paths =
       apply_default defaults.allowed_paths [] in
 
@@ -435,7 +433,6 @@ let ensure_keeper_meta config name =
       || meta.tool_preset_source <> target_tool_preset_source
       || meta.sandbox_profile <> target_sandbox_profile
       || meta.network_mode <> target_network_mode
-      || meta.shared_memory_scope <> target_shared_memory_scope
       || meta.allowed_paths <> target_allowed_paths
       || meta.always_approve <> target_always_approve in
     let discovery_changed =
@@ -547,7 +544,6 @@ let ensure_keeper_meta config name =
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
-        shared_memory_scope = target_shared_memory_scope;
         allowed_paths = target_allowed_paths;
         work_discovery_enabled = target_wd_enabled;
         work_discovery_sources = target_wd_sources;

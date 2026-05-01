@@ -258,7 +258,7 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
   (** Catch-all for SDK errors outside the Io / Serialization families
-      (Api / Agent / Mcp / Config / Orchestration / A2a / Internal).
+      (Api / Agent / Mcp / Config / Orchestration / Internal).
       Distinct from Io_error so observers can tell a local
       checkpoint-store I/O failure apart from an SDK-level failure that
       surfaced during a load. (#8605 family) *)

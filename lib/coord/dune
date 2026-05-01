@@ -20,7 +20,6 @@
   coord_gc
   coord_init
   coord_lifecycle
-  coord_portal
   coord_query
   coord_status
   coord_task

@@ -131,7 +131,6 @@ type keeper_runtime_mcp_log_context = {
   sandbox_root : string option;
   allowed_paths : string list option;
   network_mode : string option;
-  shared_memory_scope : string option;
   approval_mode : string option;
   tool_surface_class : string option;
   visible_tool_count : int option;
@@ -237,10 +236,6 @@ let runtime_mcp_keeper_log_context_of_entry
       Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
       Some (Keeper_types.network_mode_to_string entry.meta.network_mode);
-    shared_memory_scope =
-      Some
-        (Keeper_types.shared_memory_scope_to_string
-           entry.meta.shared_memory_scope);
     approval_mode = keeper_oas_context.gemini_approval_mode;
     tool_surface_class =
       Some (runtime_mcp_tool_surface_class allowed_tool_names);
@@ -363,7 +358,6 @@ let record_runtime_mcp_keeper_trajectory
       ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
       ?network_mode:ctx.network_mode
-      ?shared_memory_scope:ctx.shared_memory_scope
       ?approval_mode:ctx.approval_mode
       ?tool_surface_class:ctx.tool_surface_class
       ?visible_tool_count:ctx.visible_tool_count
@@ -453,7 +447,6 @@ let record_runtime_mcp_keeper_tool_trace
     ?sandbox_root:ctx.sandbox_root
     ?allowed_paths:ctx.allowed_paths
     ?network_mode:ctx.network_mode
-    ?shared_memory_scope:ctx.shared_memory_scope
     ?approval_mode:ctx.approval_mode
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count

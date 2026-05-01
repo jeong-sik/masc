@@ -19,7 +19,6 @@ let str_contains s substring =
 
 let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
 let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
-let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
 let backlog_recovery_path config =
   Coord.backlog_path config ^ ".last-good"
@@ -450,33 +449,8 @@ let test_double_join () =
 
 (* --- Portal Edge Cases --- *)
 
-let test_portal_open_and_status () =
-  with_test_env (fun config ->
-    let result = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    (match result with
-     | Ok msg -> Alcotest.(check bool) "portal open" true (contains_portal msg)
-     | Error _ -> Alcotest.fail "portal_open_r should succeed");
 
-    let status = Coord.portal_status config ~agent_name:"claude" in
-    Alcotest.(check bool) "portal status has fields" true
-      (match status with `Assoc _ -> true | _ -> false)
-  )
 
-let test_portal_send_without_open () =
-  with_test_env (fun config ->
-    (* Send without opening portal first - returns Error *)
-    let result = Coord.portal_send_r config ~agent_name:"claude" ~message:"hello" in
-    Alcotest.(check bool) "send without open returns error" true
-      (match result with Error _ -> true | Ok _ -> false)
-  )
-
-let test_portal_close () =
-  with_test_env (fun config ->
-    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    let result = Coord.portal_close config ~agent_name:"claude" in
-    (* Portal close uses 🚪 emoji *)
-    Alcotest.(check bool) "portal close" true (String.length result > 0)
-  )
 
 (* ============================================================ *)
 (* Robustness Tests - Boundary Values & State Consistency       *)
@@ -1095,30 +1069,7 @@ let test_many_agents () =
 (* Portal Advanced Tests                                        *)
 (* ============================================================ *)
 
-let test_portal_reopen_after_close () =
-  with_test_env (fun config ->
-    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    let _ = Coord.portal_close config ~agent_name:"claude" in
 
-    (* Should be able to reopen *)
-    let result = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"codex" ~initial_message:None in
-    (match result with
-     | Ok msg -> Alcotest.(check bool) "reopen portal" true (contains_portal msg)
-     | Error _ -> Alcotest.fail "portal reopen should succeed")
-  )
-
-let test_portal_send_multiple () =
-  with_test_env (fun config ->
-    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-
-    (* Send multiple messages *)
-    let check_send label r =
-      match r with Ok msg -> Alcotest.(check bool) label true (String.length msg > 0) | Error _ -> Alcotest.fail label
-    in
-    check_send "send 1" (Coord.portal_send_r config ~agent_name:"claude" ~message:"First");
-    check_send "send 2" (Coord.portal_send_r config ~agent_name:"claude" ~message:"Second");
-    check_send "send 3" (Coord.portal_send_r config ~agent_name:"claude" ~message:"Third")
-  )
 
 (* ============================================================ *)
 (* Negative Priority Tests                                      *)
@@ -1608,10 +1559,6 @@ let () =
       Alcotest.test_case "project root .masc base path" `Quick
         test_worktree_project_root_for_masc_dir_base;
     ];
-    "portal", [
-      Alcotest.test_case "open and status" `Quick test_portal_open_and_status;
-      Alcotest.test_case "close" `Quick test_portal_close;
-    ];
 
     (* === Edge Case Tests === *)
     "task_errors", [
@@ -1620,9 +1567,6 @@ let () =
       Alcotest.test_case "complete nonexistent" `Quick test_complete_nonexistent_task;
       Alcotest.test_case "claim nonexistent" `Quick test_claim_nonexistent_task;
       Alcotest.test_case "double complete" `Quick test_double_complete;
-    ];
-    "portal_errors", [
-      Alcotest.test_case "send without open" `Quick test_portal_send_without_open;
     ];
 
     (* === Robustness: Boundary Values === *)
@@ -1728,10 +1672,6 @@ let () =
     ];
 
     (* === Portal Extended Tests === *)
-    "portal_extended", [
-      Alcotest.test_case "reopen after close" `Quick test_portal_reopen_after_close;
-      Alcotest.test_case "send multiple" `Quick test_portal_send_multiple;
-    ];
 
     (* === Priority Tests === *)
     "priority", [

@@ -85,11 +85,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~preferred:p.network_mode_opt
       ~fallback:p.profile_defaults.network_mode
   in
-  let shared_memory_scope =
-    resolve_shared_memory_scope
-      ~preferred:p.shared_memory_scope_opt
-      ~fallback:p.profile_defaults.shared_memory_scope
-  in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt
   in
@@ -399,7 +394,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         sandbox_profile;
         sandbox_image = None;
         network_mode;
-        shared_memory_scope;
         allowed_paths;
         tool_access;
         tool_preset_source = p.profile_defaults.tool_preset_source;

@@ -584,7 +584,6 @@ jobs:
         if: ${{ always() }}
         run: |
           echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
-          echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
       - name: Config doctor drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}

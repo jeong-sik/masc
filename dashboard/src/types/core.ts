@@ -1079,7 +1079,6 @@ export interface KeeperConfig {
   active_goal_ids: string[]
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
-  shared_memory_scope?: 'disabled' | 'room' | string
   sandbox_last_error?: string | null
   effective_sandbox_image?: string | null
   private_workspace_root?: string | null

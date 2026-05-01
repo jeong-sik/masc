@@ -1067,7 +1067,6 @@ let test_masc_dirname_ssot_contracts () =
     "lib/board_votes.ml";
     "lib/discovery_history.ml";
     "lib/handover_eio.ml";
-    "lib/hebbian_eio.ml";
     "lib/institution_eio.ml";
     "lib/repo_synthesis_benchmark.ml";
     "lib/tool_blob_store/tool_blob_store.ml";

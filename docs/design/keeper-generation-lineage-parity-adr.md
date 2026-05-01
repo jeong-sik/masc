@@ -45,7 +45,7 @@ Generation은 **같은 keeper의 versioned self**다.
 | compaction / handoff / continuity | `keeper_post_turn` | checkpoint + keeper meta |
 | memory bank | `keeper_agent_run` tail | `.masc/keepers/<name>.memory.jsonl` |
 | episode | `keeper_agent_run` tail | `.masc/institution_episodes.jsonl` |
-| hebbian | task lifecycle | `.masc/synapses/graph.json` |
+| collaboration signal | task lifecycle | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` |
 
 ### 4. Formal spec boundary
 

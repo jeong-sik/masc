@@ -19,7 +19,6 @@ val runtime_contract_json_from_fields :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?shared_memory_scope:string ->
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->

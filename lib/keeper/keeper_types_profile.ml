@@ -40,12 +40,6 @@ type network_mode =
   | Network_inherit [@tla.symbol "Network_inherit"]
 [@@deriving tla]
 
-type shared_memory_scope =
-  | Shared_memory_disabled
-  | Shared_memory_room
-  | Shared_memory_keeper_only
-  | Shared_memory_room_readonly
-
 let sandbox_profile_to_string = function
   | Local -> "local"
   | Docker -> "docker"
@@ -118,25 +112,6 @@ let all_network_modes = [ Network_none; Network_inherit ]
 let valid_network_mode_strings =
   List.map network_mode_to_string all_network_modes
 
-let shared_memory_scope_to_string = function
-  | Shared_memory_disabled -> "disabled"
-  | Shared_memory_room -> "room"
-  | Shared_memory_keeper_only -> "keeper_only"
-  | Shared_memory_room_readonly -> "room_readonly"
-
-let shared_memory_scope_of_string raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "disabled" -> Some Shared_memory_disabled
-  | "room" -> Some Shared_memory_room
-  | "keeper_only" -> Some Shared_memory_keeper_only
-  | "room_readonly" -> Some Shared_memory_room_readonly
-  | _ -> None
-
-(* Issue #8467: Variant SSOT for [shared_memory_scope]. *)
-let all_shared_memory_scopes = [ Shared_memory_disabled; Shared_memory_room; Shared_memory_keeper_only; Shared_memory_room_readonly ]
-let valid_shared_memory_scope_strings =
-  List.map shared_memory_scope_to_string all_shared_memory_scopes
-
 let default_sandbox_profile = Local
 
 let default_network_mode_for_profile = function
@@ -146,8 +121,6 @@ let default_network_mode_for_profile = function
      via Keeper_exec_shell.cmd_targets_git_or_gh; that upgrade is not
      visible here because it's a per-command decision, not a profile
      default. *)
-
-let default_shared_memory_scope = Shared_memory_disabled
 
 type 'a context = {
   config: Coord.config;
@@ -306,7 +279,6 @@ type keeper_profile_defaults = {
   sandbox_profile : sandbox_profile option;
   sandbox_image : string option;
   network_mode : network_mode option;
-  shared_memory_scope : shared_memory_scope option;
   github_identity : string option;
   git_identity_mode : string option;
   tool_preset : string option;
@@ -387,7 +359,6 @@ let empty_keeper_profile_defaults = {
   sandbox_profile = None;
   sandbox_image = None;
   network_mode = None;
-  shared_memory_scope = None;
   github_identity = None;
   git_identity_mode = None;
   tool_preset = None;
@@ -691,19 +662,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-        match str "shared_memory_scope" with
-        | Some raw -> (
-            match shared_memory_scope_of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid shared_memory_scope '%s' (allowed: %s)"
-                     raw (String.concat ", " valid_shared_memory_scope_strings)))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
@@ -823,9 +781,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        shared_memory_scope =
-          Option.bind (str "shared_memory_scope")
-            shared_memory_scope_of_string;
         github_identity = str "github_identity";
         git_identity_mode =
           normalize_git_identity_mode_opt (str "git_identity_mode");
@@ -886,7 +841,6 @@ let parsed_field_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "shared_memory_scope"
   ; "github_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
@@ -941,7 +895,6 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "shared_memory_scope"
   ; "github_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
@@ -1125,7 +1078,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 sandbox_profile = None;
                 sandbox_image = None;
                 network_mode = None;
-                shared_memory_scope = None;
                 github_identity = None;
                 git_identity_mode = None;
                 tool_preset = None;
@@ -1238,8 +1190,6 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    shared_memory_scope =
-      prefer overlay.shared_memory_scope base.shared_memory_scope;
     github_identity = prefer overlay.github_identity base.github_identity;
     git_identity_mode =
       prefer overlay.git_identity_mode base.git_identity_mode;
@@ -1427,8 +1377,7 @@ let classify_toml_failure_reason (err : string) : string =
   in
   if contains "invalid network_mode" then "invalid_network_mode"
   else if contains "invalid sandbox_profile" then "invalid_sandbox_profile"
-  else if contains "invalid shared_memory_scope" then "invalid_shared_memory_scope"
-  else if contains "invalid" then "invalid_enum"
+    else if contains "invalid" then "invalid_enum"
   else if contains "unknown" || contains "unexpected field" then "unknown_field"
   else if contains "parse" || contains "syntax" || contains "expected" then
     "parse_error"

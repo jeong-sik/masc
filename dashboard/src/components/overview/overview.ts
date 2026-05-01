@@ -3,7 +3,7 @@
 // "What's the party doing today?" in one glance, no scroll.
 // 5 sections, top-to-bottom (V2):
 //   0. Alert Panel     — failing agents and stalled tasks, actionable alerts first
-//   1. Highlight       — mission.summary.top_attention, one-line focus
+//   1. (Removed: Highlight moved to Lab)
 //   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
 //   3. Mission party   — one active session (goal, members, progress bar, blocker)
 //   4. Keeper strip    — top three keepers by recent heartbeat
@@ -23,7 +23,6 @@ import type { Agent, Task, Keeper } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
-  OperatorAttentionItem,
 } from '../../types/dashboard-mission'
 import { openAgentDetail } from '../agent-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
@@ -264,7 +263,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   `
 }
 
-// ─── Highlight ───────────────────────────────────────────────────────────────
+// ─── Shared Tone ─────────────────────────────────────────────────────────────
 
 export function severityToneClass(severity?: string | null): string {
   switch ((severity ?? '').toLowerCase()) {
@@ -277,39 +276,6 @@ export function severityToneClass(severity?: string | null): string {
     default:
       return 'text-[var(--color-fg-muted)]'
   }
-}
-
-function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
-  if (attention === null) {
-    return html`
-      <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight-empty">
-        <header class=${HEADER_ROW}>
-          <span class="flex min-w-0 items-center gap-2">
-            <span aria-hidden="true" class=${BRASS_RULE}></span>
-            <span>Top Signal</span>
-          </span>
-        </header>
-        <p class="text-xs text-[var(--color-fg-muted)]">No notable signal</p>
-      </section>
-    `
-  }
-  const severity = attention.severity === '' ? 'info' : attention.severity
-  return html`
-    <section class=${CARD} aria-label="Highlight" data-testid="overview-highlight">
-      <header class=${HEADER_ROW}>
-        <span class="flex min-w-0 items-center gap-2">
-          <span aria-hidden="true" class=${BRASS_RULE}></span>
-          <span>Top Signal</span>
-        </span>
-        <span class=${`shrink-0 ${severityToneClass(severity)}`}>
-          ${severity.toUpperCase()}
-        </span>
-      </header>
-      <div class="${COCKPIT_CELL} min-w-0">
-        <span class="block truncate text-xs text-[var(--color-fg-secondary)]">${attention.summary}</span>
-      </div>
-    </section>
-  `
 }
 
 // ─── Mission Party ───────────────────────────────────────────────────────────
@@ -494,13 +460,11 @@ export function Overview() {
   const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
   const counts = useMemo(() => computeFunnelCounts(taskList, active), [taskList, active])
-  const attention = snap?.summary?.top_attention ?? null
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
   const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`
     <div class="flex flex-col gap-2.5">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
-      <${Highlight} attention=${attention} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />
       <${KeeperStrip} keeperList=${keeperList} />

@@ -438,6 +438,25 @@ let test_credentials_for_keeper_direct_wrong_type () =
                  true
                  (contains_substring msg "Local")))
 
+let test_credentials_for_keeper_mapping_parse_error () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc
+            "[mapping.keeper-1]\nrepositories = [\"*\"]\ncredential_id = 42\n");
+      match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+      | Ok creds ->
+          Alcotest.failf "expected mapping parse error, got %d creds"
+            (List.length creds)
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions credential_id"
+            true
+            (contains_substring msg "credential_id"))
+
 let test_credentials_for_keeper_no_mapping () =
   with_temp_base_path (fun base_path ->
       match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"unknown" with
@@ -490,6 +509,8 @@ let () =
           Alcotest.test_case "direct credential overrides repo" `Quick test_credentials_for_keeper_direct_credential_overrides_repo;
           Alcotest.test_case "direct credential missing" `Quick test_credentials_for_keeper_direct_missing_credential;
           Alcotest.test_case "direct credential wrong type" `Quick test_credentials_for_keeper_direct_wrong_type;
+          Alcotest.test_case "mapping parse error" `Quick
+            test_credentials_for_keeper_mapping_parse_error;
           Alcotest.test_case "no mapping" `Quick test_credentials_for_keeper_no_mapping;
         ] );
     ]

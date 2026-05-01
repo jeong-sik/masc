@@ -117,12 +117,14 @@ let allowed_repositories ~keeper_id ~base_path =
 let credentials_for_keeper ~base_path ~keeper_id =
   match find_mapping ~base_path keeper_id with
   | Error msg ->
-      if not (String.starts_with ~prefix:"No mapping found" msg) then
+      if String.starts_with ~prefix:"No mapping found" msg then
+        Ok []
+      else (
         Log.Misc.warn
           "[KeeperRepoMapping] credentials_for_keeper: mapping store error \
            for keeper %s (error: %s)"
           keeper_id msg;
-      Ok []
+        Error msg)
   | Ok mapping ->
       let resolve_credential id =
         match Credential_store.find ~base_path id with

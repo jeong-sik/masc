@@ -124,8 +124,9 @@ function OutputPanel() {
 }
 
 function CascadePanel() {
-  const D = window.MASC_DATA || {};
-  const cascades = (D.cascade && Array.isArray(D.cascade) ? D.cascade : []).slice(0, 6);
+  // Use MASC_P2.cascadeAudit (array of cascade runs with hops) rather than
+  // MASC_DATA.cascade which is a single object without the required array shape.
+  const cascades = ((window.MASC_P2 && window.MASC_P2.cascadeAudit) || []).slice(0, 6);
   return (
     <div className="dr-cascade">
       <div className="dr-cascade-bar">
@@ -138,15 +139,15 @@ function CascadePanel() {
           <div key={i} className="dr-csc">
             <div className="dr-csc-h">
               <span className="id">{c.id || ("csc-" + i)}</span>
-              <span className="prompt">{c.prompt || "(no prompt)"}</span>
+              <span className="prompt">{[c.cascade || "(unknown)", c.trigger].filter(Boolean).join(" · ")}</span>
               <span className={"out " + (c.outcome === "ok" ? "ok" : "fail")}>{c.outcome || "—"}</span>
             </div>
             <div className="dr-csc-hops">
               {(c.hops || []).map((h, hi) => (
                 <span key={hi} className={"hop " + (h.status || "")}>
                   <span className="ix">{hi + 1}</span>
-                  <span className="prov">{h.provider || h.name}</span>
-                  <span className="ms">{h.latency_ms || h.ms || "—"}ms</span>
+                  <span className="prov">{h.model || h.provider || h.name}</span>
+                  <span className="ms">{h.ms || h.latency_ms || "—"}ms</span>
                 </span>
               ))}
             </div>
@@ -249,7 +250,9 @@ function Drawer() {
 
   // apply CSS var --h-drawer to document root so the grid can read it
   dUseEffect(() => {
-    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : 0;
+    // Keep the bar (26px) visible when closed so users can click tabs to open.
+    const CLOSED_H = 26; // matches .drawer.closed min-height in drawer.css
+    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : CLOSED_H;
     document.documentElement.style.setProperty("--h-drawer", h + "px");
     document.body.classList.toggle("drawer-open", drawer.open);
   }, [drawer.open, drawer.height]);

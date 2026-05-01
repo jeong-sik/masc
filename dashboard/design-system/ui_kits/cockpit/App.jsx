@@ -6,8 +6,8 @@ const { useState, useCallback, useEffect } = React;
 function App() {
   // sync mode/branch with the cockpit-state singleton (URL+localStorage)
   const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
-  // run layout profile — auto-collapses chrome per mode
-  if (window.useLayoutProfile) window.useLayoutProfile();
+  // run layout profile — always call (no-ops when not installed) to satisfy Rules of Hooks
+  (window.useLayoutProfile || (() => {}))();
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");

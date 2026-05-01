@@ -6,9 +6,8 @@
 const { useState: usePlaneState } = React;
 
 // ─── shared header ───────────────────────────────────────────
-function PlaneHeader({ title, subtitle, branch, keepers }) {
+function PlaneHeader({ title, subtitle, branch, keepers, popoutId }) {
   const sk = keepers || new Set();
-  const planeId = "plane-" + (title || "").toLowerCase().trim();
   return (
     <div className="plane-hdr">
       <span className="ti">{title}</span>
@@ -17,23 +16,25 @@ function PlaneHeader({ title, subtitle, branch, keepers }) {
         <span>⎇ <span className="br">{branch || "main"}</span></span>
         <span>·</span>
         <span><span className="kp">{sk.size}</span> keepers selected</span>
-        <a className="wx-popout"
-           href={"?widget=" + planeId}
-           target="_blank" rel="noopener"
-           title="open plane in new tab"
-           style={{marginLeft:"8px"}}>↗</a>
+        {popoutId && (
+          <a className="wx-popout"
+             href={"?widget=" + popoutId}
+             target="_blank" rel="noopener"
+             title="open plane in new tab"
+             style={{marginLeft:"8px"}}>↗</a>
+        )}
       </span>
     </div>
   );
 }
 
 // ─── shared tabbed shell ─────────────────────────────────────
-function PlaneShell({ title, subtitle, branch, keepers, tabs, defaultTab }) {
+function PlaneShell({ title, subtitle, branch, keepers, tabs, defaultTab, popoutId }) {
   const [tab, setTab] = usePlaneState(defaultTab || tabs[0].id);
   const cur = tabs.find(t => t.id === tab) || tabs[0];
   return (
     <div className="plane">
-      <PlaneHeader title={title} subtitle={subtitle} branch={branch} keepers={keepers} />
+      <PlaneHeader title={title} subtitle={subtitle} branch={branch} keepers={keepers} popoutId={popoutId} />
       <div className="plane-tabs">
         {tabs.map(t => (
           <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -53,6 +54,7 @@ function WorkPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Work Plane" subtitle="Goals · Tasks · Accountability"
+      popoutId="plane-work"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"goal-h",   label:"Goal · Horizon",     render: () => <window.GoalHorizonTrack/> },
@@ -75,6 +77,7 @@ function CommsPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Comms Plane" subtitle="Board · Messages · Composer v2"
+      popoutId="plane-comms"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"bd-feed", label:"Board · Feed",      render: () => <window.BoardFeed/> },
@@ -98,6 +101,7 @@ function ObservePlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Observability" subtitle="Cascade · Audit · Safe Autonomy · Cost · Heuristic"
+      popoutId="plane-observe"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"cs-list", label:"Cascade · List",       render: () => <window.CascadeList/> },
@@ -127,6 +131,7 @@ function CognitionPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Cognition" subtitle="Keeper Inspector · Decisions · Memory · Episodes · Autoresearch"
+      popoutId="plane-cognition"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"ki-bdi",  label:"Keeper · BDI",         render: () => <window.KeeperBDIPanel/> },
@@ -186,7 +191,7 @@ function IdePlane({ branch, keepers }) {
   const centerPanelId = `ide-v2-center-${mode}`;
   return (
     <div className="plane ide-v2 ide-v3" role="region" aria-label="IDE Plane">
-      <PlaneHeader title="IDE" subtitle="tree · editor · PR · graph · search" branch={branch} keepers={keepers} />
+      <PlaneHeader title="IDE" subtitle="tree · editor · PR · graph · search" branch={branch} keepers={keepers} popoutId="plane-ide" />
       <div className="ide-v2-modebar ide-v3-modebar">
         <div className="ide-v2-branch">
           <span className="lbl">branch</span>

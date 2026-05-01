@@ -531,6 +531,16 @@ let coerce_tool_timeout_sec (raw_timeout_sec : float option) : float option =
       let raw_sec = int_of_float (Float.ceil raw) in
       Some (float_of_int (max 5 (min 300 raw_sec)))
 
+(** Returns the env-var name that controls the timeout for [tool_name].
+    Used in timeout error messages so operators know which variable to tune. *)
+let tool_timeout_env_var_hint ~tool_name =
+  match tool_name with
+  | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
+  | "masc_board_comment_vote" ->
+      "MASC_TOOL_TIMEOUT_BOARD_SEC"
+  | _ ->
+      "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
+
 (** Optional per-tool timeout to prevent long calls from starving the request loop. *)
 let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : float option =
   match tool_name with
@@ -550,6 +560,25 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : f
          the outer MCP tools/call timeout above that budget so callers see the
          generation result or the OAS error instead of a premature MCP timeout. *)
       Some 150.0
+  | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
+  | "masc_board_comment_vote" ->
+      (* Board write tools acquire a shared Eio.Mutex over the in-memory store.
+         Under fleet-wide simultaneity (multiple keepers posting simultaneously)
+         the 60 s default timeout causes false failures: waiters time out before
+         the current lock-holder completes its JSONL flush.  Use a separate
+         MASC_TOOL_TIMEOUT_BOARD_SEC budget (default 90 s) so operators can tune
+         the board-write allowance independently of other tools.
+         See: fleet stall issue — 3 keepers × 3 board tools = 9 simultaneous
+         60 s timeouts in a single 8-second window. *)
+      let sec =
+        float_of_int
+          (int_of_env_default
+             "MASC_TOOL_TIMEOUT_BOARD_SEC"
+             ~default:90
+             ~min_v:5
+             ~max_v:300)
+      in
+      Some sec
   | _ ->
       let global_default_sec =
         float_of_int
@@ -626,9 +655,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
                (false,
                 Printf.sprintf
-                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC)"
+                  "Tool timed out after %.0fs: %s (env: %s)"
                   timeout_sec
-                  name))
+                  name
+                  (tool_timeout_env_var_hint ~tool_name:name)))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in

@@ -154,7 +154,23 @@ let test_regular_tool_uses_default_timeout () =
   | Some timeout_sec -> check bool "default timeout remains enabled" true (timeout_sec >= 5.)
   | None -> fail "expected masc_status to keep fixed timeout"
 
-let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
+let test_board_write_tools_use_board_timeout () =
+  List.iter (fun tool_name ->
+    match
+      Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+        ~tool_name
+        ~_arguments:(`Assoc [])
+    with
+    | Some timeout_sec ->
+        check bool
+          (Printf.sprintf "%s board timeout >= default 60 s" tool_name)
+          true
+          (timeout_sec >= 60.)
+    | None ->
+        fail (Printf.sprintf "expected %s to have a fixed timeout" tool_name))
+  [ "masc_board_post"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ]
+
+
   let base_path = temp_dir () in
   let keeper_name = "sangsu-context" in
   let meta =
@@ -435,6 +451,8 @@ let () =
           test_case "persona generate timeout exceeds OAS budget" `Quick
             test_persona_generate_timeout_exceeds_oas_budget;
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
+          test_case "board write tools use dedicated board timeout" `Quick
+            test_board_write_tools_use_board_timeout;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
           test_case "runtime MCP log context loads current task contract" `Quick

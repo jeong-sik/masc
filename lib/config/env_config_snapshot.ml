@@ -437,6 +437,8 @@ let board_entries =
       "Board backend type (e.g. jsonl, pg); None when unset";
     entry ~default:"30.0" "MASC_BOARD_FLUSH_INTERVAL_SEC"
       "Flush interval for board persistence (seconds)";
+    entry ~default:"90" "MASC_TOOL_TIMEOUT_BOARD_SEC"
+      "Timeout for board write tools (post/comment/vote), seconds (default 90, clamped 5-300)";
   ]
 
 let cache_entries =

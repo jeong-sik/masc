@@ -1,4 +1,5 @@
-// @ts-nocheck
+/// <reference types="node" />
+
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,20 +10,32 @@ const variablesCss = readFileSync(join(here, 'variables.css'), 'utf8')
 const baseCss = readFileSync(join(here, 'base.css'), 'utf8')
 const appTs = readFileSync(join(here, '..', 'app.ts'), 'utf8')
 
+function expectDeclaration(css: string, name: string, value: string) {
+  expect(css).toMatch(new RegExp(`${name}:\\s*${escapeRegExp(value)}\\s*;`))
+}
+
+function expectNoDeclaration(css: string, name: string, value: string) {
+  expect(css).not.toMatch(new RegExp(`${name}:\\s*${escapeRegExp(value)}\\s*;`))
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 describe('Cockpit token cascade', () => {
   it('bridges legacy dashboard aliases to generated cockpit tokens', () => {
-    expect(variablesCss).toContain('--bg-0: var(--color-bg-0);')
-    expect(variablesCss).toContain('--text-body: var(--color-fg-2);')
-    expect(variablesCss).toContain('--accent: var(--color-brass-1);')
-    expect(variablesCss).toContain('--color-accent-fg: var(--brass-1);')
+    expectDeclaration(variablesCss, '--bg-0', 'var(--color-bg-0)')
+    expectDeclaration(variablesCss, '--text-body', 'var(--color-fg-2)')
+    expectDeclaration(variablesCss, '--accent', 'var(--color-brass-1)')
+    expectDeclaration(variablesCss, '--color-accent-fg', 'var(--brass-1)')
 
-    expect(variablesCss).not.toContain('--bg-0: var(--bg-root);')
-    expect(variablesCss).not.toContain('--color-accent-fg: var(--accent);')
+    expectNoDeclaration(variablesCss, '--bg-0', 'var(--bg-root)')
+    expectNoDeclaration(variablesCss, '--color-accent-fg', 'var(--accent)')
   })
 
   it('keeps the app shell on semantic cockpit backgrounds', () => {
     expect(baseCss).toContain('rgb(var(--brass-glow) / 0.08)')
-    expect(baseCss).toContain('linear-gradient(180deg, var(--bg-root-deep) 0%, var(--color-bg-page) 48%, var(--bg-root-dim) 100%)')
+    expect(baseCss).toMatch(/linear-gradient\(\s*180deg,\s*var\(--bg-root-deep\)\s+0%,\s*var\(--color-bg-page\)\s+48%,\s*var\(--bg-root-dim\)\s+100%\s*\)/)
     expect(appTs).toContain('bg-[var(--color-bg-page)]')
     expect(appTs).toContain('bg-[var(--shell-header-bg)]')
     expect(appTs).toContain('bg-[var(--shell-rail-bg)]')

@@ -164,7 +164,7 @@
      source. */
   /* Background gradient stops for the dashboard page bg (base.css).
      Deep + dim flank the generated Cockpit root. */
-  --bg-root-deep: var(--color-bg-0);
+  --bg-root-deep: color-mix(in srgb, var(--color-bg-0) 84%, black);
   --bg-root-dim: var(--color-bg-1);
 
   /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct

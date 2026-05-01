@@ -237,19 +237,19 @@ let test_cleanup_keeps_recent () =
   check int "keeps recent" 0 removed
 
 (* ============================================================
-   Env Functions Tests
+   Config Accessor Tests
    ============================================================ *)
 
-let test_rate_from_env_returns_float () =
-  let rate = Rate_limit.rate_from_env () in
+let test_rate_of_config_returns_float () =
+  let rate = Rate_limit.rate_of_config () in
   check bool "rate is positive" true (rate > 0.0)
 
-let test_burst_from_env_returns_int () =
-  let burst = Rate_limit.burst_from_env () in
+let test_burst_of_config_returns_int () =
+  let burst = Rate_limit.burst_of_config () in
   check bool "burst is positive" true (burst > 0)
 
-let test_create_from_env () =
-  let limiter = Rate_limit.create_from_env () in
+let test_create_of_config () =
+  let limiter = Rate_limit.create_of_config () in
   check bool "rate positive" true ((Rate_limit.rate limiter) > 0.0);
   check bool "burst positive" true ((Rate_limit.burst limiter) > 0)
 
@@ -362,16 +362,16 @@ let test_default_agent_rate () =
 let test_default_agent_burst () =
   check int "default agent burst" 50 Rate_limit.default_agent_burst
 
-let test_agent_rate_from_env_returns_float () =
-  let rate = Rate_limit.agent_rate_from_env () in
+let test_agent_rate_of_config_returns_float () =
+  let rate = Rate_limit.agent_rate_of_config () in
   check bool "agent rate is positive" true (rate > 0.0)
 
-let test_agent_burst_from_env_returns_int () =
-  let burst = Rate_limit.agent_burst_from_env () in
+let test_agent_burst_of_config_returns_int () =
+  let burst = Rate_limit.agent_burst_of_config () in
   check bool "agent burst is positive" true (burst > 0)
 
-let test_create_agent_from_env () =
-  let limiter = Rate_limit.create_agent_from_env () in
+let test_create_agent_of_config () =
+  let limiter = Rate_limit.create_agent_of_config () in
   check bool "agent rate positive" true ((Rate_limit.rate limiter) > 0.0);
   check bool "agent burst positive" true ((Rate_limit.burst limiter) > 0)
 
@@ -553,10 +553,10 @@ let () =
       test_case "removes old" `Quick test_cleanup_removes_old;
       test_case "keeps recent" `Quick test_cleanup_keeps_recent;
     ];
-    "env", [
-      test_case "rate_from_env" `Quick test_rate_from_env_returns_float;
-      test_case "burst_from_env" `Quick test_burst_from_env_returns_int;
-      test_case "create_from_env" `Quick test_create_from_env;
+    "config", [
+      test_case "rate_of_config" `Quick test_rate_of_config_returns_float;
+      test_case "burst_of_config" `Quick test_burst_of_config_returns_int;
+      test_case "create_of_config" `Quick test_create_of_config;
     ];
     "global", [
       test_case "check_global" `Quick test_check_global;
@@ -584,9 +584,9 @@ let () =
     "per_agent_config", [
       test_case "default_agent_rate" `Quick test_default_agent_rate;
       test_case "default_agent_burst" `Quick test_default_agent_burst;
-      test_case "agent_rate_from_env" `Quick test_agent_rate_from_env_returns_float;
-      test_case "agent_burst_from_env" `Quick test_agent_burst_from_env_returns_int;
-      test_case "create_agent_from_env" `Quick test_create_agent_from_env;
+      test_case "agent_rate_of_config" `Quick test_agent_rate_of_config_returns_float;
+      test_case "agent_burst_of_config" `Quick test_agent_burst_of_config_returns_int;
+      test_case "create_agent_of_config" `Quick test_create_agent_of_config;
     ];
     "per_agent_global", [
       test_case "check_agent_global" `Quick test_check_agent_global;

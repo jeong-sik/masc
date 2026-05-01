@@ -138,9 +138,9 @@ val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)
 
-(** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
-    env var (default: 0.10). *)
-val daily_budget_usd_from_env : unit -> float
+(** Current daily budget from keeper runtime config
+    ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
+val daily_budget_usd : unit -> float
 
 (** Check whether the keeper has remaining budget for deliberation.
     Returns [true] when [cost_today_usd < daily_budget_usd]. *)

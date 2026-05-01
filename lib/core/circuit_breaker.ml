@@ -69,7 +69,7 @@ let create
     cooldown_sec = cooldown;
   }
 
-let create_from_env () = create ()
+let create_default () = create ()
 
 (** {1 Internal Helpers} *)
 
@@ -314,7 +314,7 @@ let wrap_result t ~agent_id (f : unit -> 'a) : ('a, string) result =
     [cancel:`Protect] ensures init finishes even if the forcing fiber
     is cancelled. *)
 
-let global = Eio.Lazy.from_fun ~cancel:`Protect create_from_env
+let global = Eio.Lazy.from_fun ~cancel:`Protect create_default
 
 let check_global ~agent_id = check (Eio.Lazy.force global) ~agent_id
 let record_failure_global ~agent_id ~reason = record_failure (Eio.Lazy.force global) ~agent_id ~reason

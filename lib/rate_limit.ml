@@ -212,13 +212,13 @@ let default_burst = 150
 let default_agent_rate = 20.0
 let default_agent_burst = 50
 
-let rate_from_env () = Env_config.Rate_bucket.rate
+let rate_of_config () = Env_config.Rate_bucket.rate
 
-let burst_from_env () = Env_config.Rate_bucket.burst
+let burst_of_config () = Env_config.Rate_bucket.burst
 
-let agent_rate_from_env () = Env_config.Rate_bucket.agent_rate
+let agent_rate_of_config () = Env_config.Rate_bucket.agent_rate
 
-let agent_burst_from_env () = Env_config.Rate_bucket.agent_burst
+let agent_burst_of_config () = Env_config.Rate_bucket.agent_burst
 
 (** {1 Limiter Creation} *)
 
@@ -233,11 +233,11 @@ let create ?(rate=default_rate) ?(burst=default_burst) () =
 let rate t = t.rate
 let burst t = t.burst
 
-let create_from_env () =
-  create ~rate:(rate_from_env ()) ~burst:(burst_from_env ()) ()
+let create_of_config () =
+  create ~rate:(rate_of_config ()) ~burst:(burst_of_config ()) ()
 
-let create_agent_from_env () =
-  create ~rate:(agent_rate_from_env ()) ~burst:(agent_burst_from_env ()) ()
+let create_agent_of_config () =
+  create ~rate:(agent_rate_of_config ()) ~burst:(agent_burst_of_config ()) ()
 
 (** {1 Rate Checking} *)
 
@@ -292,7 +292,7 @@ let cleanup limiter ~older_than_seconds =
     Uses [Eio.Lazy] for fiber-safe initialization.
     [cancel:`Protect] ensures init completes even if forcing fiber is cancelled. *)
 
-let global = Eio.Lazy.from_fun ~cancel:`Protect create_from_env
+let global = Eio.Lazy.from_fun ~cancel:`Protect create_of_config
 
 let check_global ~key =
   check (Eio.Lazy.force global) ~key
@@ -307,7 +307,7 @@ let remaining_global ~key =
     single agent cannot starve others even if they share the same egress IP. *)
 
 let agent_global =
-  Eio.Lazy.from_fun ~cancel:`Protect create_agent_from_env
+  Eio.Lazy.from_fun ~cancel:`Protect create_agent_of_config
 
 let check_agent_global ~key =
   check (Eio.Lazy.force agent_global) ~key

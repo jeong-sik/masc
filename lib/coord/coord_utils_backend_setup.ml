@@ -296,7 +296,7 @@ let backend_config_for base_path =
     Backend_types.base_path = backend_base_path;
     Backend_types.cluster_name;
     Backend_types.node_id = Backend_types.generate_node_id ();
-    Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages_from_env ();
+    Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages;
   }
 
 let create_backend cfg =

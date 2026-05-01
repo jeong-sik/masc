@@ -25,6 +25,7 @@ import { EmptyState } from './common/empty-state'
 import { TextInput } from './common/input'
 import { RouteLink } from './common/route-link'
 import { StatusChip, keeperStateTone } from './common/status-chip'
+import { TimeAgo } from './common/time-ago'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
 
@@ -594,7 +595,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     ? html`<div>Owner: <strong class="text-[var(--color-fg-secondary)]">${task.assignee}</strong></div>`
                     : html`<${TileHint} text="No assignee yet." />`}
                   ${task.updated_at
-                    ? html`<div class="text-xs text-[var(--color-fg-muted)]">Updated ${formatJourneyTimestamp(task.updated_at)}</div>`
+                    ? html`<div class="text-xs text-[var(--color-fg-muted)]">Updated <${TimeAgo} timestamp=${task.updated_at} /></div>`
                     : null}
                 `
               : html`<${TileHint} text="Tracking keeper continuity without a linked task." />`}

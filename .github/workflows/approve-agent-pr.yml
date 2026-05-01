@@ -1,0 +1,137 @@
+name: Approve Agent PR
+
+# Human-only approval gate for agent-authored PRs.
+#
+# WHY THIS WORKFLOW EXISTS (see issue #9733):
+# The pr-automation bypass label check verifies the label actor is a User
+# listed in AGENT_DRAFT_GUARD_HUMAN_ACTORS, but this cannot distinguish a
+# real human from an agent that runs under the same owner credentials.
+#
+# THIS WORKFLOW introduces a hard credential boundary:
+#   • It runs only via workflow_dispatch (human clicks "Run workflow" in
+#     the GitHub UI, or a human triggers it via `gh workflow run`).
+#   • The `await-human-approval` job requires the `human-approval`
+#     GitHub Environment.  Environment protection rules must be configured
+#     in Settings → Environments → human-approval with required reviewers.
+#     Even if an agent triggers the dispatch, a designated reviewer MUST
+#     click "Approve" in the GitHub UI before the job proceeds — this is
+#     an interactive gesture that cannot be automated with a bearer token.
+#   • After the environment gate is passed the `apply-approval` job adds
+#     the configured bypass label to the target PR using the Actions token,
+#     which records the Environment-approved deployment ID as part of the
+#     audit trail.
+#
+# SETUP (one-time, done in GitHub Settings):
+#   1. Go to Settings → Environments → New environment → "human-approval"
+#   2. Under "Required reviewers" add the human approver(s).
+#   3. Optionally enable "Prevent self-review" so the PR author cannot
+#      self-approve.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to approve (e.g. 42)'
+        required: true
+        type: string
+      reason:
+        description: 'Optional reason / context for approval'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  await-human-approval:
+    name: Await Human Approval (Environment Gate)
+    runs-on: ubuntu-latest
+    # The environment protection rule is the credential boundary.
+    # A required reviewer must approve this deployment in the GitHub UI
+    # before the job steps execute.  Agents cannot mint this approval
+    # even when sharing owner credentials.
+    environment: human-approval
+    outputs:
+      pr_number: ${{ steps.echo.outputs.pr_number }}
+    steps:
+      - name: Record approval context
+        id: echo
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REASON: ${{ inputs.reason }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # Validate pr_number is a positive integer before proceeding.
+          if ! [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid pr_number '${PR_NUMBER}': must be a positive integer (e.g. 42)."
+            exit 1
+          fi
+          echo "Human approval granted by ${ACTOR} for PR #${PR_NUMBER}."
+          if [[ -n "${REASON}" ]]; then
+            echo "Reason: ${REASON}"
+          fi
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+  apply-approval:
+    name: Apply Bypass Label
+    runs-on: ubuntu-latest
+    needs: await-human-approval
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Add human-approved-ready bypass label
+        uses: actions/github-script@v9
+        env:
+          AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
+        with:
+          script: |
+            const prNumber = parseInt('${{ needs.await-human-approval.outputs.pr_number }}', 10);
+            if (!prNumber || isNaN(prNumber)) {
+              core.setFailed('Invalid pr_number input: ' + '${{ inputs.pr_number }}');
+              return;
+            }
+            // Resolve the configured bypass label; fall back to default.
+            const bypassLabels = (process.env.AGENT_DRAFT_GUARD_BYPASS_LABELS || 'human-approved-ready')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            // Use the first non-automation-prone bypass label.
+            const automationProne = new Set(['allow-auto-merge']);
+            const targetLabel = bypassLabels.find((l) => !automationProne.has(l.toLowerCase())) || 'human-approved-ready';
+
+            core.info(`Adding bypass label '${targetLabel}' to PR #${prNumber} after environment-gated human approval.`);
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: [targetLabel],
+            });
+
+            const actor = '${{ github.actor }}';
+            const reason = '${{ inputs.reason }}';
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              '<!-- masc-human-approval-gate -->',
+              `Human approval granted by @${actor} via credential-separated environment gate.`,
+              '',
+              `Bypass label \`${targetLabel}\` applied. Approval workflow run: ${runUrl}`,
+              ...(reason ? ['', `Reason: ${reason}`] : []),
+              '',
+              'This approval was gated through the `human-approval` GitHub Environment, which requires',
+              'an interactive reviewer approval that cannot be automated with a shared owner credential.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+            core.info(`Bypass label '${targetLabel}' and approval comment added to PR #${prNumber}.`);

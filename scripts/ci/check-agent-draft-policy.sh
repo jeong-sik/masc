@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# check-agent-draft-policy.sh — CI gate: enforces human-approval bypass-label policy.
+#
+# CREDENTIAL BOUNDARY (see issue #9733):
+#   Simply checking who applied a bypass label cannot prove the actor was a
+#   human when agents share the owner's GitHub credentials — the label event
+#   actor appears identical for both.
+#
+#   Use the credential-separated approval workflow instead:
+#     .github/workflows/approve-agent-pr.yml
+#
+#   That workflow requires interactive approval through the `human-approval`
+#   GitHub Environment (Settings → Environments → human-approval → Required
+#   reviewers).  An agent holding the owner token cannot self-approve an
+#   environment deployment, so the resulting bypass label carries a
+#   non-forgeable credential boundary.
 set -euo pipefail
 
 title_re="${AGENT_DRAFT_GUARD_TITLE_RE:-^\[codex\]}"

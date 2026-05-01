@@ -1083,6 +1083,41 @@ let test_masc_dirname_ssot_contracts () =
          (file_not_contains_pattern file "\".masc\""))
     migrated_files
 
+let test_human_approval_credential_boundary_contracts () =
+  (* Issue #9733: the bypass-label actor check cannot distinguish a real
+     human from an agent using the same owner credentials.  The
+     approve-agent-pr workflow introduces a hard credential boundary by
+     requiring approval through a GitHub Environment with required reviewers.
+     Even an agent holding the owner token cannot self-approve an environment
+     deployment — that requires an interactive click in the GitHub UI. *)
+  check bool "approve-agent-pr workflow exists" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "name: Approve Agent PR");
+  check bool "approve-agent-pr workflow uses workflow_dispatch trigger" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "workflow_dispatch");
+  check bool "approve-agent-pr workflow accepts pr_number input" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "pr_number");
+  check bool "approve-agent-pr workflow gates on human-approval environment" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "environment: human-approval");
+  check bool "approve-agent-pr workflow applies bypass label after gate" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "addLabels");
+  check bool "approve-agent-pr workflow posts credential-boundary comment" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "masc-human-approval-gate");
+  check bool "approve-agent-pr workflow documents credential boundary purpose" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "credential boundary");
+  check bool "agent draft policy script documents credential-boundary workflow" true
+    (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
+       "approve-agent-pr.yml");
+  check bool "agent draft policy script documents human-approval environment" true
+    (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
+       "human-approval")
+
 let () =
   run "ci_hardening_source"
     [
@@ -1141,5 +1176,7 @@ let () =
              test_runtime_precondition_contracts;
            test_case "masc_dirname SSOT contracts (#9571 batch 1)" `Quick
              test_masc_dirname_ssot_contracts;
+           test_case "human approval credential boundary contracts (#9733)" `Quick
+             test_human_approval_credential_boundary_contracts;
          ]);
     ]

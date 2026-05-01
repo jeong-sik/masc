@@ -50,6 +50,37 @@ let file_contains_line_with_patterns file_rel patterns =
         in
         loop ())
 
+let file_contains_nearby_line_with_patterns file_rel ~anchor ~patterns ~max_lines =
+  let path = source_path file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let line_contains pattern line =
+          let re = Str.regexp_string pattern in
+          try ignore (Str.search_forward re line 0); true with Not_found -> false
+        in
+        let line_matches line =
+          List.for_all (fun pattern -> line_contains pattern line) patterns
+        in
+        let rec scan_remaining remaining =
+          if remaining < 0 then false
+          else
+            match input_line ic with
+            | line -> line_matches line || scan_remaining (remaining - 1)
+            | exception End_of_file -> false
+        in
+        let rec loop () =
+          match input_line ic with
+          | line ->
+              if line_contains anchor line then scan_remaining max_lines
+              else loop ()
+          | exception End_of_file -> false
+        in
+        loop ())
+
 let file_pattern_position file_rel pattern =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then None
@@ -353,11 +384,26 @@ let test_release_truth_contracts () =
   check bool "ci workflow no longer installs odoc" true
     (file_not_contains_pattern ".github/workflows/ci.yml" "Install odoc");
   check bool "odoc pages deploy is opt-in" true
+    (file_contains_nearby_line_with_patterns ".github/workflows/odoc.yml"
+       ~anchor:"name: Deploy to Pages"
+       ~patterns:[
+         "if:";
+         "github.ref == 'refs/heads/main'";
+         "vars.ODOC_PAGES_DEPLOY == 'true'";
+       ]
+       ~max_lines:2);
+  check bool "odoc workflow defines pages artifact upload step" true
     (file_contains_pattern ".github/workflows/odoc.yml"
-       "vars.ODOC_PAGES_DEPLOY == 'true'");
+       "Upload Pages artifact");
   check bool "odoc pages artifact follows deploy opt-in" true
-    (file_contains_pattern ".github/workflows/odoc.yml"
-       "Upload Pages artifact\n        if: ${{ github.ref == 'refs/heads/main' && vars.ODOC_PAGES_DEPLOY == 'true' }}");
+    (file_contains_nearby_line_with_patterns ".github/workflows/odoc.yml"
+       ~anchor:"Upload Pages artifact"
+       ~patterns:[
+         "if:";
+         "github.ref == 'refs/heads/main'";
+         "vars.ODOC_PAGES_DEPLOY == 'true'";
+       ]
+       ~max_lines:2);
   check bool "release/doc truth changes trigger build scope" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "docs/|README\\.md$|ROADMAP\\.md$|CHANGELOG\\.md$");

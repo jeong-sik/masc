@@ -22,7 +22,12 @@ let clear_retired_pg_envs () =
 
 let force_jsonl_fallback_env () =
   Unix.putenv Env_config_core.storage_type_env_key "filesystem";
-  clear_retired_pg_envs ()
+  clear_retired_pg_envs ();
+  let policy_path = "/tmp/gemini_headless_admin_policy.json" in
+  let oc = open_out policy_path in
+  output_string oc "{\"rules\":[{\"name\":\"no_ask_user\",\"effect\":\"deny\",\"condition\":{\"fact\":\"tool\",\"operator\":\"equal\",\"value\":\"ask_user\"}}]}";
+  close_out oc;
+  Unix.putenv "OAS_GEMINI_ADMIN_POLICY" policy_path
 
 let () =
   Prometheus.register_counter

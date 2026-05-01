@@ -908,6 +908,28 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
+      (* Periodic repository sync: fetch repositories with auto_sync enabled. *)
+      Eio.Fiber.fork ~sw (fun () ->
+        let rec sync_loop () =
+          Eio.Time.sleep clock
+            Env_config_runtime.InternalTimers.repo_sync_interval_sec;
+          (try
+             let now = Int64.of_float (Unix.time ()) in
+             match Repo_sync.sync_all ~base_path:state.room_config.base_path ~now with
+             | Ok repos ->
+               if repos <> [] then
+                 Log.Server.info "repo_sync: synced %d repositories"
+                   (List.length repos)
+             | Error msg ->
+               Log.Server.warn "repo_sync: sync_all failed: %s" msg
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.error "repo_sync: iteration failed: %s"
+               (Printexc.to_string exn));
+          sync_loop ()
+        in
+        sync_loop ());
   let resolved_base = state.room_config.base_path in
   let masc_dir = Coord.masc_root_dir state.room_config in
   A2a_tools.init ~masc_dir;

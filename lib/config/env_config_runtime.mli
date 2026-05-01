@@ -321,6 +321,7 @@ module InternalTimers : sig
   val provider_run_ttl_sec : float
   val stalled_session_threshold_sec : float
   val janitor_interval_sec : float
+  val repo_sync_interval_sec : float
   val rate_limit_bucket_ttl_sec : int
 end
 

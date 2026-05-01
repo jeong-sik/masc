@@ -110,7 +110,7 @@ let parse_git_diff_stat output =
         else
           let extract re =
             match Re.exec_opt re lower with
-            | Some g -> (try int_of_string (Re.Group.get g 1) with _ -> 0)
+            | Some g -> (try int_of_string (Re.Group.get g 1) with Failure _ -> 0)
             | None -> 0
           in
           let files_changed = extract files_changed_re in
@@ -146,7 +146,7 @@ let parse_wc_lines output =
         | [] -> None
         | n_str :: _ ->
             (try Some (`Assoc [ ("lines", `Int (int_of_string n_str)) ])
-             with _ -> None)
+             with Failure _ -> None)
 
 (* --- ls -la --- *)
 
@@ -185,7 +185,7 @@ let parse_ls_long output =
                          [ ("perms", `String perms); ("size", `Int (int_of_string size_str))
                          ; ("name", `String name) ]
                        :: !entries
-                   with _ -> ())
+                   with Failure _ -> ())
               | _ -> ()))
       lines;
     let n = List.length !entries in

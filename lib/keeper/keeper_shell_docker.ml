@@ -385,7 +385,7 @@ let repair_container_worktree_gitdirs ~host_root ~container_root =
                write_file path after;
                repaired + 1
              end
-           with _ -> repaired)
+           with Sys_error _ -> repaired)
        0
 
 (* ── Docker invocation ─────────────────────────────────── *)

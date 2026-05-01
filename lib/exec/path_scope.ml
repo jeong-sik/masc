@@ -59,11 +59,11 @@ let normalize_path ~cwd raw =
     Some
       (if basename = "." || basename = "" then parent_real
        else Filename.concat parent_real basename)
-  with _ -> None
+  with Unix.Unix_error _ -> None
 
 let normalize_cwd cwd =
   try Unix.realpath cwd
-  with _ -> cwd
+  with Unix.Unix_error _ -> cwd
 
 let starts_with_dir ~prefix abs =
   abs = prefix || String.starts_with ~prefix:(prefix ^ "/") abs

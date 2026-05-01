@@ -101,7 +101,7 @@ export function OasHealthChip() {
     return html`
       <${Card} title="OAS 런타임">
         <${EmptyState} message="아직 OAS 이벤트가 수신되지 않았습니다." />
-      </${Card}>
+      <//>
     `
   }
 
@@ -196,6 +196,6 @@ export function OasHealthChip() {
           ` : null}
         </div>
       ` : null}
-    </${Card}>
+    <//>
   `
 }

@@ -23,7 +23,7 @@ describe('RouteLink a11y', () => {
 
   it('default link passes axe', async () => {
     render(
-      html`<${RouteLink} tab="overview">Overview</${RouteLink}>`,
+      html`<${RouteLink} tab="overview">Overview<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
@@ -31,7 +31,7 @@ describe('RouteLink a11y', () => {
 
   it('aria-current=page passes axe', async () => {
     render(
-      html`<${RouteLink} tab="monitoring" ariaCurrent="page">Monitoring</${RouteLink}>`,
+      html`<${RouteLink} tab="monitoring" ariaCurrent="page">Monitoring<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
@@ -42,7 +42,7 @@ describe('RouteLink a11y', () => {
       html`<${RouteLink}
         tab="logs"
         title="Open the system logs view"
-      >Logs</${RouteLink}>`,
+      >Logs<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
@@ -53,7 +53,7 @@ describe('RouteLink a11y', () => {
       html`<${RouteLink}
         tab="command"
         params=${{ keeper: 'sigma' }}
-      >Command sigma</${RouteLink}>`,
+      >Command sigma<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()

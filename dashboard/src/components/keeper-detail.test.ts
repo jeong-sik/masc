@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/preact'
+import { html } from 'htm/preact'
 
 import type { Keeper } from '../types'
 import type { RouteState } from '../types'
+import { keepers } from '../store'
 
 const mocks = vi.hoisted(() => ({
+  fetchKeeperTransitions: vi.fn(async () => ({ transitions: [] })),
   loadKeeperConfig: vi.fn(async () => {}),
   resetKeeperConfig: vi.fn(),
   selectKeeper: vi.fn(),
@@ -17,6 +21,20 @@ const mocks = vi.hoisted(() => ({
   },
 }))
 
+vi.mock('../api/keeper', async () => {
+  const actual = await vi.importActual<typeof import('../api/keeper')>('../api/keeper')
+  return {
+    ...actual,
+    bootKeeper: vi.fn(async () => ({ ok: true })),
+    clearKeeper: vi.fn(async () => ({ ok: true })),
+    fetchKeeperTransitions: mocks.fetchKeeperTransitions,
+    pauseKeeper: vi.fn(async () => ({ ok: true })),
+    resumeKeeper: vi.fn(async () => ({ ok: true })),
+    shutdownKeeper: vi.fn(async () => ({ ok: true })),
+    wakeKeeper: vi.fn(async () => ({ ok: true })),
+  }
+})
+
 vi.mock('./keeper-config-panel', async () => {
   const actual = await vi.importActual<typeof import('./keeper-config-panel')>('./keeper-config-panel')
   return {
@@ -27,9 +45,74 @@ vi.mock('./keeper-config-panel', async () => {
   }
 })
 
-vi.mock('../keeper-runtime', () => ({
-  selectKeeper: mocks.selectKeeper,
+vi.mock('./keeper-detail-panels', () => ({
+  ContextChart: () => null,
+  CtxCompositionPanel: () => null,
+  EquipmentList: () => null,
+  InferenceTelemetryPanel: () => null,
+  KpiGrid: () => null,
+  MetricsCharts: () => null,
+  PromptTelemetryPanel: () => null,
+  RawDataDebug: () => null,
+  RelationshipList: () => null,
+  TokenTrendChart: () => null,
+  TraitsList: () => null,
 }))
+
+vi.mock('./keeper-detail-history', async () => {
+  const actual = await vi.importActual<typeof import('./keeper-detail-history')>('./keeper-detail-history')
+  return {
+    ...actual,
+    GenerationLineagePanel: () => null,
+    KeeperCheckpointPanel: () => null,
+  }
+})
+
+vi.mock('./keeper-state-diagram', () => ({
+  KeeperStateDiagramPanel: () => null,
+}))
+
+vi.mock('./keeper-memory-tier-panel', () => ({
+  KeeperMemoryTierPanel: () => null,
+}))
+
+vi.mock('./keeper-tool-telemetry', () => ({
+  KeeperToolTelemetry: () => null,
+}))
+
+vi.mock('./keeper-tool-call-inspector', () => ({
+  KeeperToolCallInspector: () => null,
+}))
+
+vi.mock('./keeper-supervisor-diagnostics', () => ({
+  SupervisorDiagnosticsPanel: () => null,
+}))
+
+vi.mock('./keeper-eval-quality', () => ({
+  KeeperEvalQualityPanel: () => null,
+}))
+
+vi.mock('./session-trace/session-trace-view', () => ({
+  SessionTraceView: () => null,
+}))
+
+vi.mock('./agent-detail-journal', () => ({
+  AgentJournalStream: () => null,
+}))
+
+vi.mock('./keeper-shared', () => ({
+  KeeperConversationPanel: () => null,
+  KeeperDiagnosticSummary: () => null,
+  KeeperRuntimeActions: () => null,
+}))
+
+vi.mock('../keeper-runtime', async () => {
+  const actual = await vi.importActual<typeof import('../keeper-runtime')>('../keeper-runtime')
+  return {
+    ...actual,
+    selectKeeper: mocks.selectKeeper,
+  }
+})
 
 vi.mock('../router', () => ({
   navigate: mocks.navigate,
@@ -37,6 +120,7 @@ vi.mock('../router', () => ({
 }))
 
 import {
+  KeeperDetailPage,
   clearKeeperDetailSelection,
   closeKeeperDetail,
   filterCheckpointHistory,
@@ -47,9 +131,16 @@ import {
 } from './keeper-detail'
 import type { KeeperCheckpointSummary } from '../api/keeper'
 
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
 describe('openKeeperDetail', () => {
   beforeEach(() => {
     selectedKeeper.value = null
+    keepers.value = []
+    mocks.fetchKeeperTransitions.mockClear()
     mocks.loadKeeperConfig.mockClear()
     mocks.resetKeeperConfig.mockClear()
     mocks.selectKeeper.mockClear()
@@ -138,6 +229,89 @@ describe('openKeeperDetail', () => {
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.selectKeeper).toHaveBeenCalledWith('')
+  })
+})
+
+describe('KeeperDetailPage', () => {
+  beforeEach(() => {
+    selectedKeeper.value = null
+    keepers.value = []
+    mocks.fetchKeeperTransitions.mockClear()
+    mocks.loadKeeperConfig.mockClear()
+    mocks.selectKeeper.mockClear()
+    mocks.route.value = {
+      tab: 'monitoring',
+      params: { section: 'agents', view: 'keepers', keeper: 'analyst' },
+      postId: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}), {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    })))
+  })
+
+  it('renders a live keeper detail route without tripping the monitoring error boundary', () => {
+    const analyst = {
+      name: 'analyst',
+      status: 'active',
+      phase: 'Running',
+      pipeline_stage: 'idle',
+      agent_name: 'keeper-analyst-agent',
+      runtime_class: 'keeper',
+      keepalive_running: true,
+      short_goal: '현재 대화의 근거와 핵심 수치를 먼저 정리한다.',
+      mid_goal: '세션 전반의 검증 기준을 유지한다.',
+      long_goal: '사실과 가설을 분리하는 구현 파트너가 된다.',
+      generation: 0,
+      turn_count: 97,
+      last_turn_ago_s: 1108,
+      primary_model: 'codex_cli:gpt-5.3-codex-spark',
+      active_model: 'claude_code:auto',
+      active_model_label: 'claude_code:auto',
+      context_ratio: 0.000008,
+      context_tokens: 8,
+      context_max: 1000000,
+      last_speech_act: 'defer',
+      recent_tool_names: ['keeper_stay_silent', 'keeper_tasks_list', 'keeper_shell'],
+      agent: {
+        exists: true,
+        name: 'keeper-analyst-agent',
+        agent_type: 'agent',
+        status: 'active',
+        capabilities: ['keeper', 'preset:research'],
+        current_task: null,
+        joined_at: '2026-05-01T00:46:51Z',
+        last_seen: '2026-05-01T00:48:26Z',
+        age_s: 1206,
+        last_seen_ago_s: 1111,
+        is_zombie: false,
+      },
+      diagnostic: {
+        summary: 'Keeper runtime is reconciling back into live presence.',
+        continuity_state: 'recovering',
+        continuity_summary: 'Keeper runtime is reconciling back into live presence.',
+        health_state: 'stale',
+        quiet_reason: null,
+        next_action_path: 'recover',
+        recoverable: true,
+        last_reply_status: 'never',
+        last_reply_at: null,
+        last_reply_preview: null,
+        last_error: null,
+        keepalive_running: true,
+        next_eligible_at_s: null,
+      },
+      trust: {
+        disposition: 'Pause',
+        disposition_reason: 'tool_required_unsatisfied',
+        needs_attention: true,
+      },
+    } as unknown as Keeper
+    keepers.value = [analyst]
+
+    render(html`<${KeeperDetailPage} />`)
+    expect(screen.getByText('analyst')).toBeTruthy()
+    expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
   })
 })
 
@@ -275,4 +449,3 @@ describe('lineageTransitionLabel', () => {
     expect(lineageTransitionLabel(4, 5)).toBe('gen 4 -> gen 5')
   })
 })
-

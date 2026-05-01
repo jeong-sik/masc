@@ -400,7 +400,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : '누적 lineage 길이'}
           />
         </div>
-      </${KpiSection}>
+      <//>
 
       <${KpiSection} title="메모리 압력" question="지금 위험한가?">
         <div class="flex flex-col gap-3">
@@ -454,7 +454,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             </div>
           ` : null}
         </div>
-      </${KpiSection}>
+      <//>
 
       <${KpiSection} title="자율성 패턴" question="스스로 돌고 있나?">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -481,7 +481,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             hint="아무 작업 없는 턴"
           />
         </div>
-      </${KpiSection}>
+      <//>
 
       <${KpiSection} title="결과" question="무엇을 해냈고 실패했고 검증을 통과했나?">
         ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`
@@ -489,7 +489,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             outcomes 집계를 불러오는 중이거나, 이 키퍼는 아직 관찰된 전이가 없습니다.
           </div>
         `}
-      </${KpiSection}>
+      <//>
     </div>
   `
 }

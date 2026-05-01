@@ -28,7 +28,7 @@ describe('StatusChip a11y', () => {
   })
 
   it('children API passes axe', async () => {
-    render(html`<${StatusChip}>Active</${StatusChip}>`, container)
+    render(html`<${StatusChip}>Active<//>`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -47,7 +47,7 @@ describe('StatusChip a11y', () => {
 
   it('uppercase=false (plain pill) passes axe', async () => {
     render(
-      html`<${StatusChip} uppercase=${false}>file/path.ts</${StatusChip}>`,
+      html`<${StatusChip} uppercase=${false}>file/path.ts<//>`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()

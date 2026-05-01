@@ -35,19 +35,19 @@ function authErrorReason(summary: DashboardShellAuthSummary): string | null {
   const detail = cleanErrorMessage(summary.auth_error_detail ?? summary.keeper_msg_error)
   switch (summary.auth_error_code) {
     case 'missing_token':
-      return detail ?? 'Bearer token이 필요합니다.'
+      return detail ?? 'Bearer token is required.'
     case 'invalid_token':
-      return detail ?? 'Bearer token을 검증하지 못했습니다.'
+      return detail ?? 'Bearer token could not be verified.'
     case 'token_expired':
-      return detail ?? 'Bearer token이 만료되었습니다.'
+      return detail ?? 'Bearer token has expired.'
     case 'actor_mismatch':
-      return detail ?? `현재 actor @${requestedActor}와 토큰 소유자 ${tokenAgent ?? 'unknown'}가 일치하지 않습니다.`
+      return detail ?? `Current actor @${requestedActor} does not match token owner ${tokenAgent ?? 'unknown'}.`
     case 'same_origin_blocked':
-      return detail ?? '동일 출처가 아닌 브라우저 요청은 Bearer token이 필요합니다.'
+      return detail ?? 'Cross-origin browser requests require a Bearer token.'
     case 'insufficient_role':
-      return detail ?? '현재 세션 역할로는 이 작업을 수행할 수 없습니다.'
+      return detail ?? 'Current session role cannot perform this action.'
     case 'unknown':
-      return detail ?? '인증 상태를 확인해야 합니다.'
+      return detail ?? 'Auth status must be checked.'
     default:
       return detail
   }
@@ -62,7 +62,7 @@ export function dashboardAuthAccess(
       allowed: false,
       required_role: requiredRole,
       effective_role: null,
-      reason: '인증 상태 확인 중입니다.',
+      reason: 'Checking auth status.',
     }
   }
 
@@ -74,7 +74,7 @@ export function dashboardAuthAccess(
   const explicitReason = authErrorReason(summary)
   const roleReason = roleInsufficient
     ? compactWhitespace(
-        `현재 역할은 ${effectiveRole ?? 'unknown'}입니다. ${requiredRole} 권한이 필요합니다.`,
+        `Current role is ${effectiveRole ?? 'unknown'}; ${requiredRole} role is required.`,
       )
     : null
 

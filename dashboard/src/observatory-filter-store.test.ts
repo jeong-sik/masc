@@ -110,20 +110,20 @@ describe('observatory-filter-store', () => {
     expect(router.navigate).toHaveBeenCalledWith('overview', { range: '24h' })
   })
 
-  it('timeRangeLabel returns human-readable Korean label', () => {
-    expect(timeRangeLabel('5m')).toBe('최근 5분')
-    expect(timeRangeLabel('1h')).toBe('최근 1시간')
-    expect(timeRangeLabel('6h')).toBe('최근 6시간')
-    expect(timeRangeLabel('24h')).toBe('최근 24시간')
-    expect(timeRangeLabel('7d')).toBe('최근 7일')
+  it('timeRangeLabel returns human-readable label', () => {
+    expect(timeRangeLabel('5m')).toBe('Last 5m')
+    expect(timeRangeLabel('1h')).toBe('Last 1h')
+    expect(timeRangeLabel('6h')).toBe('Last 6h')
+    expect(timeRangeLabel('24h')).toBe('Last 24h')
+    expect(timeRangeLabel('7d')).toBe('Last 7d')
   })
 
   it('timeRangeShortLabel returns short label without prefix', () => {
-    expect(timeRangeShortLabel('5m')).toBe('5분')
-    expect(timeRangeShortLabel('1h')).toBe('1시간')
-    expect(timeRangeShortLabel('6h')).toBe('6시간')
-    expect(timeRangeShortLabel('24h')).toBe('24시간')
-    expect(timeRangeShortLabel('7d')).toBe('7일')
+    expect(timeRangeShortLabel('5m')).toBe('5m')
+    expect(timeRangeShortLabel('1h')).toBe('1h')
+    expect(timeRangeShortLabel('6h')).toBe('6h')
+    expect(timeRangeShortLabel('24h')).toBe('24h')
+    expect(timeRangeShortLabel('7d')).toBe('7d')
   })
 
   it('timeRangeToMs converts presets to milliseconds', () => {

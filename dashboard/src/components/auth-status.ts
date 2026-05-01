@@ -21,6 +21,7 @@ import { refreshShell, shellAuthSummary } from '../store'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { KvRow } from './kv-row'
+import { X } from 'lucide-preact'
 
 const popoverOpen = signal(false)
 const tokenInput = signal('')
@@ -42,7 +43,7 @@ function cleanErrorMessage(value: string | null | undefined): string | null {
 }
 
 function mutationStatusLabel(allowed: boolean): string {
-  return allowed ? '가능' : '차단'
+  return allowed ? 'Allowed' : 'Blocked'
 }
 
 function authBadgeSummary(): {
@@ -59,24 +60,24 @@ function authBadgeSummary(): {
   if (validated) {
     return {
       dotColor: 'bg-[var(--color-status-ok)] shadow-[0_0_6px_rgba(74,222,128,0.6)]',
-      label: `검증됨 @${actor} · ${role}`,
+      label: `Verified @${actor} · ${role}`,
     }
   }
   if (hasError) {
     return {
       dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgba(244,63,94,0.45)]',
-      label: '인증 오류',
+      label: 'Auth error',
     }
   }
   if (remote) {
     return {
       dotColor: 'bg-[var(--color-status-err)]',
-      label: '미인증',
+      label: 'Unverified',
     }
   }
   return {
     dotColor: 'bg-[var(--color-status-warn)]',
-    label: '로컬',
+    label: 'Local',
   }
 }
 
@@ -96,11 +97,11 @@ async function handleSetToken(): Promise<void> {
   if (summary?.token_valid) {
     const actor = summary.effective_agent ?? summary.token_agent ?? currentDashboardActor()
     const role = summary.effective_role ?? summary.default_role ?? 'unknown'
-    showToast(`검증됨 @${actor} · ${role}`, 'success')
+    showToast(`Verified @${actor} · ${role}`, 'success')
     return
   }
   showToast(
-    cleanErrorMessage(summary?.auth_error_detail) ?? '토큰을 검증하지 못했습니다.',
+    cleanErrorMessage(summary?.auth_error_detail) ?? 'Failed to verify token.',
     'error',
     6000,
   )
@@ -113,14 +114,14 @@ async function handleClearToken(): Promise<void> {
   popoverOpen.value = false
   const summary = shellAuthSummary.value
   const message = isRemoteAccess()
-    ? cleanErrorMessage(summary?.auth_error_detail) ?? '토큰을 제거했습니다. 현재 미인증 상태입니다.'
-    : '토큰을 제거했습니다. 현재 로컬 상태입니다.'
+    ? cleanErrorMessage(summary?.auth_error_detail) ?? 'Token cleared; the session is now unverified.'
+    : 'Token cleared; the session is now local.'
   showToast(message, 'warning')
 }
 
 async function handleApplyActor(): Promise<void> {
   if (shellAuthSummary.value?.token_valid) {
-    showToast('검증된 세션은 token owner를 단일 actor로 사용합니다.', 'warning', 5000)
+    showToast('Verified sessions use the token owner as the single actor.', 'warning', 5000)
     return
   }
   const nextValue = actorInput.value.trim()
@@ -134,7 +135,7 @@ async function handleApplyActor(): Promise<void> {
   const summary = shellAuthSummary.value
   const type = summary?.auth_error_code === 'actor_mismatch' ? 'warning' : 'success'
   const detail = cleanErrorMessage(summary?.auth_error_detail)
-  showToast(detail ?? `actor를 @${normalized}로 설정했습니다.`, type, 5000)
+  showToast(detail ?? `Dashboard actor set to @${normalized}.`, type, 5000)
 }
 
 function openPopover(): void {
@@ -155,8 +156,8 @@ export function AuthStatus() {
         aria-haspopup="true"
         aria-controls=${popoverId}
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
-        title="인증 상태"
-        aria-label="인증 상태"
+        title="Auth status"
+        aria-label="Auth status"
       >
         <span class="size-[7px] rounded-sm inline-block ${dotColor}"></span>
         <span>${label}</span>
@@ -207,7 +208,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
   const effectiveRole = summary?.effective_role ?? summary?.default_role ?? 'unknown'
   const mutationAccess = dashboardAuthAccess(summary, 'worker')
   const blockReason = cleanErrorMessage(summary?.auth_error_detail ?? summary?.keeper_msg_error ?? mutationAccess.reason)
-    ?? '없음'
+    ?? 'None'
   const authenticated = summary?.token_valid === true
   const actorOverrideLocked = authenticated
 
@@ -218,9 +219,9 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
       role="dialog"
       aria-labelledby=${labelId}
       data-state="open"
-      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50"
+      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[0_10px_24px_rgba(0,0,0,0.22)] p-3 z-50"
     >
-      <h2 id=${labelId} class="sr-only">인증 상태 패널</h2>
+      <h2 id=${labelId} class="sr-only">Auth status panel</h2>
       <div class="flex flex-col gap-3">
         <div class="flex flex-col text-2xs">
           <${KvRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} wrap=${true} />
@@ -232,17 +233,17 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--color-fg-muted)]">행위자 재정의</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">Actor override</div>
           ${actorOverrideLocked ? html`
             <div class="text-2xs text-[var(--color-fg-muted)]">
-              검증된 세션은 token owner를 단일 actor로 사용합니다. 로컬 actor override는 저장되더라도 요청 actor로 쓰이지 않습니다.
+              Verified sessions use the token owner as the single actor. Local actor overrides are stored but not sent as the request actor.
             </div>
           ` : null}
           <div class="flex gap-2">
             <${TextInput}
               type="text"
-              placeholder="대시보드 행위자"
-              ariaLabel="대시보드 행위자"
+              placeholder="Dashboard actor"
+              ariaLabel="Dashboard actor"
               class="min-w-0 flex-1 !py-1.5 !px-2 !text-2xs"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}
@@ -255,21 +256,21 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
-            >적용</button>
+            >Apply</button>
           </div>
         </div>
 
         <div class="flex flex-col gap-2">
           <div class="text-2xs text-[var(--color-fg-muted)]">
             ${authenticated
-              ? 'Bearer token이 서버에서 검증되었습니다.'
-              : 'Bearer token을 입력하면 원격 환경에서 mutation 작업을 검증할 수 있습니다.'}
+              ? 'Bearer token verified by the server.'
+              : 'Enter a Bearer token to verify mutation work in remote environments.'}
           </div>
           ${authenticated ? html`
             <button type="button"
               class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
               onClick=${() => { void handleClearToken() }}
-            >토큰 제거</button>
+            >Clear token</button>
           ` : html`
             <div class="flex flex-col gap-2">
               <${TextInput}
@@ -284,7 +285,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               <button type="button"
                 class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
                 onClick=${() => { void handleSetToken() }}
-              >토큰 설정</button>
+              >Set token</button>
             </div>
           `}
         </div>
@@ -299,10 +300,10 @@ export function RemoteWarningBanner() {
 
   const message =
     summary?.auth_error_code === 'invalid_token' || summary?.auth_error_code === 'token_expired'
-      ? '저장된 Bearer token이 검증되지 않았습니다. 새 토큰으로 교체하세요.'
+      ? 'Stored Bearer token is not verified. Replace it with a fresh token.'
       : summary?.auth_error_code === 'actor_mismatch'
-        ? '토큰 owner와 dashboard actor가 달라 mutation 작업이 차단되었습니다. actor 또는 token을 정리하세요.'
-        : '원격 접속이 감지되었습니다. Mutation 작업을 위해 검증된 Bearer token을 설정하세요.'
+        ? 'Token owner and dashboard actor differ, so mutations are blocked. Align the actor or token.'
+        : 'Remote access detected. Set a verified Bearer token before running mutations.'
 
   return html`
     <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--color-status-warn)]">
@@ -310,14 +311,14 @@ export function RemoteWarningBanner() {
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
           class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
-          aria-label="인증 패널 열기"
+          aria-label="Open auth panel"
           onClick=${openPopover}
-        >인증 열기</button>
+        >Open auth</button>
         <button type="button"
-          class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer text-2xs transition-colors"
-          aria-label="인증 배너 닫기"
+          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
+          aria-label="Dismiss auth banner"
           onClick=${() => { bannerDismissed.value = true }}
-        >✕</button>
+        ><${X} size=${13} /><//>
       </div>
     </div>
   `

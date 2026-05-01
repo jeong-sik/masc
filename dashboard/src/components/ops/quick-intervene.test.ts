@@ -72,12 +72,12 @@ describe('QuickIntervene', () => {
     render(html`<${QuickIntervene} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('빠른 개입')
-    expect((container.querySelector('select[aria-label="개입 대상"]') as HTMLSelectElement | null)?.value).toBe('namespace')
+    expect(container.textContent).toContain('Quick Intervention')
+    expect((container.querySelector('select[aria-label="Intervention target"]') as HTMLSelectElement | null)?.value).toBe('namespace')
     expect(container.querySelector('input[name="quick_intervene_actor"]')).toBeNull()
 
     const toggle = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.includes('고급 설정'))
+      .find(button => button.textContent?.includes('Advanced'))
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 

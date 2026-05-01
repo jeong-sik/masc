@@ -111,7 +111,7 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('30초 자동 갱신')
+    expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('95.5%')
     expect(container.textContent).toContain('최근 24시간 기준 집계')
     expect(container.textContent).toContain('Window Calls')

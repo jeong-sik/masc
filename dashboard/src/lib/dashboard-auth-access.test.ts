@@ -29,7 +29,7 @@ describe('dashboardAuthAccess', () => {
       allowed: false,
       required_role: 'worker',
       effective_role: null,
-      reason: '인증 상태 확인 중입니다.',
+      reason: 'Checking auth status.',
     })
   })
 

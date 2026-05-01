@@ -198,27 +198,27 @@ describe('missionInterveneParams', () => {
 
 describe('workflowTargetLabel', () => {
   it('returns default label for null', () => {
-    expect(workflowTargetLabel(null)).toBe('대상 정보 없음')
+    expect(workflowTargetLabel(null)).toBe('No target')
   })
 
   it('returns default label for undefined', () => {
-    expect(workflowTargetLabel(undefined)).toBe('대상 정보 없음')
+    expect(workflowTargetLabel(undefined)).toBe('No target')
   })
 
   it('returns default label when target_type is null', () => {
-    expect(workflowTargetLabel(makeContext({ target_type: null }))).toBe('대상 정보 없음')
+    expect(workflowTargetLabel(makeContext({ target_type: null }))).toBe('No target')
   })
 
-  it('returns 프로젝트 for root target', () => {
-    expect(workflowTargetLabel(makeContext({ target_type: 'root' }))).toBe('프로젝트')
+  it('returns Namespace for root target', () => {
+    expect(workflowTargetLabel(makeContext({ target_type: 'root' }))).toBe('Namespace')
   })
 
-  it('returns 프로젝트 for namespace target', () => {
-    expect(workflowTargetLabel(makeContext({ target_type: 'namespace' }))).toBe('프로젝트')
+  it('returns Namespace for namespace target', () => {
+    expect(workflowTargetLabel(makeContext({ target_type: 'namespace' }))).toBe('Namespace')
   })
 
-  it('returns 프로젝트 for room target', () => {
-    expect(workflowTargetLabel(makeContext({ target_type: 'room' }))).toBe('프로젝트')
+  it('returns Namespace for room target', () => {
+    expect(workflowTargetLabel(makeContext({ target_type: 'room' }))).toBe('Namespace')
   })
 
   it('returns type · id for non-root with id', () => {
@@ -235,83 +235,83 @@ describe('workflowTargetLabel', () => {
 // ================================================================
 
 describe('workflowActionLabel', () => {
-  it('returns "전체 공지" for broadcast', () => {
-    expect(workflowActionLabel('broadcast')).toBe('전체 공지')
+  it('returns "Broadcast" for broadcast', () => {
+    expect(workflowActionLabel('broadcast')).toBe('Broadcast')
   })
 
-  it('returns "프로젝트 일시정지" for namespace_pause', () => {
-    expect(workflowActionLabel('namespace_pause')).toBe('프로젝트 일시정지')
+  it('returns "Pause Namespace" for namespace_pause', () => {
+    expect(workflowActionLabel('namespace_pause')).toBe('Pause Namespace')
   })
 
-  it('returns "프로젝트 일시정지" for room_pause', () => {
-    expect(workflowActionLabel('room_pause')).toBe('프로젝트 일시정지')
+  it('returns "Pause Namespace" for room_pause', () => {
+    expect(workflowActionLabel('room_pause')).toBe('Pause Namespace')
   })
 
-  it('returns "프로젝트 재개" for namespace_resume', () => {
-    expect(workflowActionLabel('namespace_resume')).toBe('프로젝트 재개')
+  it('returns "Resume Namespace" for namespace_resume', () => {
+    expect(workflowActionLabel('namespace_resume')).toBe('Resume Namespace')
   })
 
-  it('returns "프로젝트 재개" for room_resume', () => {
-    expect(workflowActionLabel('room_resume')).toBe('프로젝트 재개')
+  it('returns "Resume Namespace" for room_resume', () => {
+    expect(workflowActionLabel('room_resume')).toBe('Resume Namespace')
   })
 
-  it('returns "프로젝트 작업 주입" for task_inject', () => {
-    expect(workflowActionLabel('task_inject')).toBe('프로젝트 작업 주입')
+  it('returns "Inject Task" for task_inject', () => {
+    expect(workflowActionLabel('task_inject')).toBe('Inject Task')
   })
 
-  it('returns "소셜 스위프" for social_sweep', () => {
-    expect(workflowActionLabel('social_sweep')).toBe('소셜 스위프')
+  it('returns "Social Sweep" for social_sweep', () => {
+    expect(workflowActionLabel('social_sweep')).toBe('Social Sweep')
   })
 
-  it('returns "session 업데이트" for team_turn', () => {
-    expect(workflowActionLabel('team_turn')).toBe('session 업데이트')
+  it('returns "Session Update" for team_turn', () => {
+    expect(workflowActionLabel('team_turn')).toBe('Session Update')
   })
 
-  it('returns "session 노트" for team_note', () => {
-    expect(workflowActionLabel('team_note')).toBe('session 노트')
+  it('returns "Session Note" for team_note', () => {
+    expect(workflowActionLabel('team_note')).toBe('Session Note')
   })
 
-  it('returns "session 방송" for team_broadcast', () => {
-    expect(workflowActionLabel('team_broadcast')).toBe('session 방송')
+  it('returns "Session Broadcast" for team_broadcast', () => {
+    expect(workflowActionLabel('team_broadcast')).toBe('Session Broadcast')
   })
 
-  it('returns "session 작업" for team_task_inject', () => {
-    expect(workflowActionLabel('team_task_inject')).toBe('session 작업')
+  it('returns "Session Task" for team_task_inject', () => {
+    expect(workflowActionLabel('team_task_inject')).toBe('Session Task')
   })
 
-  it('returns "session 중지" for team_stop', () => {
-    expect(workflowActionLabel('team_stop')).toBe('session 중지')
+  it('returns "Stop Session" for team_stop', () => {
+    expect(workflowActionLabel('team_stop')).toBe('Stop Session')
   })
 
-  it('returns "keeper 메시지" for keeper_msg', () => {
-    expect(workflowActionLabel('keeper_msg')).toBe('keeper 메시지')
+  it('returns "Keeper Message" for keeper_msg', () => {
+    expect(workflowActionLabel('keeper_msg')).toBe('Keeper Message')
   })
 
-  it('returns "keeper 메시지" for keeper_message', () => {
-    expect(workflowActionLabel('keeper_message')).toBe('keeper 메시지')
+  it('returns "Keeper Message" for keeper_message', () => {
+    expect(workflowActionLabel('keeper_message')).toBe('Keeper Message')
   })
 
-  it('returns "keeper probe" for keeper_probe', () => {
-    expect(workflowActionLabel('keeper_probe')).toBe('keeper probe')
+  it('returns "Keeper Probe" for keeper_probe', () => {
+    expect(workflowActionLabel('keeper_probe')).toBe('Keeper Probe')
   })
 
-  it('returns "keeper recover" for keeper_recover', () => {
-    expect(workflowActionLabel('keeper_recover')).toBe('keeper recover')
+  it('returns "Keeper Recover" for keeper_recover', () => {
+    expect(workflowActionLabel('keeper_recover')).toBe('Keeper Recover')
   })
 
   it('returns raw actionType for unknown values', () => {
     expect(workflowActionLabel('custom_action')).toBe('custom_action')
   })
 
-  it('returns "추천 액션" for null', () => {
-    expect(workflowActionLabel(null)).toBe('추천 액션')
+  it('returns "Recommended Action" for null', () => {
+    expect(workflowActionLabel(null)).toBe('Recommended Action')
   })
 
-  it('returns "추천 액션" for undefined', () => {
-    expect(workflowActionLabel(undefined)).toBe('추천 액션')
+  it('returns "Recommended Action" for undefined', () => {
+    expect(workflowActionLabel(undefined)).toBe('Recommended Action')
   })
 
-  it('returns "추천 액션" for empty string', () => {
-    expect(workflowActionLabel('')).toBe('추천 액션')
+  it('returns "Recommended Action" for empty string', () => {
+    expect(workflowActionLabel('')).toBe('Recommended Action')
   })
 })

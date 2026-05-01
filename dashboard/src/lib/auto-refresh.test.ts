@@ -23,9 +23,9 @@ describe('auto-refresh', () => {
   })
 
   it('formats labels from the configured interval', () => {
-    expect(formatAutoRefreshLabel(30_000)).toBe('30초 자동 갱신')
-    expect(formatAutoRefreshLabel(60_000)).toBe('1분 자동 갱신')
-    expect(formatAutoRefreshLabel(500)).toBe('1초 자동 갱신')
+    expect(formatAutoRefreshLabel(30_000)).toBe('Auto-refresh 30s')
+    expect(formatAutoRefreshLabel(60_000)).toBe('Auto-refresh 1m')
+    expect(formatAutoRefreshLabel(500)).toBe('Auto-refresh 1s')
   })
 
   it('deduplicates back-to-back visibility and focus refresh triggers', async () => {

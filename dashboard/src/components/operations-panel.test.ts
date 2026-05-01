@@ -27,7 +27,7 @@ async function loadPanel() {
     LabInspector: () => html`<div data-testid="inspector">Inspector</div>`,
   }))
   vi.doMock('./safe-autonomy', () => ({
-    SafeAutonomyPanel: () => html`<div data-testid="safe-autonomy">SafeAutonomy</div>`,
+    SafeAutonomyPanel: () => html`<div data-testid="safety">Safety</div>`,
   }))
   return import('./operations-panel')
 }
@@ -62,7 +62,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('SafeAutonomy')
+    expect(container.textContent).toContain('Safety')
   })
 
   it('renders only Ops when view is ops', async () => {
@@ -71,9 +71,9 @@ describe('OperationsPanel', () => {
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('Ops')
-    expect(container.textContent).not.toContain('Governance')
-    expect(container.textContent).not.toContain('SafeAutonomy')
+    expect(container.querySelector('[data-testid="ops"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="governance"]')).toBeNull()
+    expect(container.querySelector('[data-testid="safety"]')).toBeNull()
   })
 
   it('renders only Governance when view is governance', async () => {
@@ -84,7 +84,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).not.toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).not.toContain('SafeAutonomy')
+    expect(container.querySelector('[data-testid="safety"]')).toBeNull()
   })
 
   it('renders FilterChips options without legacy connectors view', async () => {
@@ -96,12 +96,12 @@ describe('OperationsPanel', () => {
     const buttons = tablist?.querySelectorAll('[role="tab"]') ?? []
     expect(buttons.length).toBe(5)
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
-    expect(labels).toContain('전체')
-    expect(labels).toContain('개입')
-    expect(labels).toContain('거버넌스')
-    expect(labels).toContain('안전성')
-    expect(labels).toContain('인스펙터')
-    expect(labels).not.toContain('커넥터')
+    expect(labels).toContain('All')
+    expect(labels).toContain('Intervene')
+    expect(labels).toContain('Governance')
+    expect(labels).toContain('Safety')
+    expect(labels).toContain('Inspector')
+    expect(labels).not.toContain('Connectors')
   })
 
   it('falls back to default for unknown view param', async () => {
@@ -112,7 +112,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('SafeAutonomy')
+    expect(container.querySelector('[data-testid="safety"]')).not.toBeNull()
   })
 
   it('marks the active chip with aria-selected=true', async () => {
@@ -122,10 +122,10 @@ describe('OperationsPanel', () => {
     await flushUi()
 
     const buttons = container.querySelectorAll('button[type="button"]')
-    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === '거버넌스')
+    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'Governance')
     expect(governanceBtn?.getAttribute('aria-selected')).toBe('true')
 
-    const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === '전체')
+    const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'All')
     expect(defaultBtn?.getAttribute('aria-selected')).toBe('false')
   })
 })

@@ -16,11 +16,11 @@ type OpsView = 'default' | 'ops' | 'governance' | 'safety' | 'inspector'
 const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'safety', 'inspector']
 
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
-  { key: 'default', label: '전체' },
-  { key: 'ops', label: '개입' },
-  { key: 'governance', label: '거버넌스' },
-  { key: 'safety', label: '안전성' },
-  { key: 'inspector', label: '인스펙터' },
+  { key: 'default', label: 'All' },
+  { key: 'ops', label: 'Intervene' },
+  { key: 'governance', label: 'Governance' },
+  { key: 'safety', label: 'Safety' },
+  { key: 'inspector', label: 'Inspector' },
 ]
 
 function currentView(): OpsView {

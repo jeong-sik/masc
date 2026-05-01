@@ -263,14 +263,14 @@ describe('deriveAgentAlerts', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0]!.severity).toBe('critical')
     expect(alerts[0]!.name).toBe('a1')
-    expect(alerts[0]!.reason).toBe('오프라인')
+    expect(alerts[0]!.reason).toBe('Offline')
   })
 
   it('returns critical alert for inactive agent', () => {
     const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'inactive' })])
     expect(alerts).toHaveLength(1)
     expect(alerts[0]!.severity).toBe('critical')
-    expect(alerts[0]!.reason).toBe('비활성')
+    expect(alerts[0]!.reason).toBe('Inactive')
   })
 
   it('uses koreanName as display when available', () => {

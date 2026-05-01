@@ -8,12 +8,12 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { Card } from './common/card'
 import type { KpiCellKind } from './kpi-shared'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
-import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { StatusDot } from './common/status-dot'
 import { JsonViewerCard } from './common/json-viewer'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { TimeAgo } from './common/time-ago'
 import {
   governanceData,
   governanceError,
@@ -47,15 +47,15 @@ function judgeRuntimeStatus(
 function judgeStatusLabel(status: string, judge?: GovernanceJudgeSummary): string {
   switch (status) {
     case 'online':
-      return '온라인'
+      return 'Online'
     case 'refreshing':
-      return '갱신 중'
+      return 'Refreshing'
     case 'stale_visible':
-      return '캐시 유지'
+      return 'Using cache'
     case 'backoff':
       return 'backoff'
     case 'offline':
-      return judge?.last_error ? '오류' : '오프라인'
+      return judge?.last_error ? 'Error' : 'Offline'
     default:
       return status
   }
@@ -66,7 +66,7 @@ function degradedReasonLabel(reason?: string | null): string {
     case 'timeout':
       return 'timeout'
     case 'error':
-      return '오류'
+      return 'error'
     case 'backoff':
       return 'backoff'
     default:
@@ -85,8 +85,8 @@ function GovernanceSummaryStrip() {
   const approvalCount = data?.approval_queue?.length ?? summary?.needs_human_gate ?? 0
   const judgeOnlyLabel =
     approvalCount > 0
-      ? `judge-only / 최근 판단 ${judgmentCount}건 / 승인 ${approvalCount}건`
-      : `judge-only / 최근 판단 ${judgmentCount}건`
+      ? `judge-only / ${judgmentCount} recent judgments / ${approvalCount} approvals`
+      : `judge-only / ${judgmentCount} recent judgments`
   const status = judgeRuntimeStatus(judge, summary)
   const liveJudgeState = judgeStatusLabel(status, judge)
   const liveJudgeModel = judge?.model_used?.trim() || judge?.keeper_name?.trim() || '-'
@@ -98,15 +98,15 @@ function GovernanceSummaryStrip() {
       <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
-          모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
-          ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}
-          <span class="opacity-80 ml-1">테스트 잔재일 가능성이 높습니다.</span>
+          All open cases are older than ${formatAgeSummary(oldestAge)}.
+          ${lastActivityAge != null ? html` Last activity: ${formatAgeSummary(lastActivityAge)} ago.` : null}
+          <span class="opacity-80 ml-1">Likely leftover test data.</span>
         </div>
       </div>
     ` : null}
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
-        <h2 class="text-lg font-bold text-text-strong tracking-wide">실시간 판정</h2>
+        <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judgment</h2>
         <span class="rounded border border-[var(--white-5)] bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
@@ -121,39 +121,39 @@ function GovernanceSummaryStrip() {
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
-          ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
+          ${governanceLoading.value ? 'Refreshing...' : 'Refresh'}
         <//>
       </div>
     </div>
     <div class="mb-5">
       <${KpiStripIsland}
-        ariaLabel="governance 요약"
+        ariaLabel="Governance summary"
         cols=${4}
         cells=${[
           {
             variant: 'stacked',
-            label: 'Judge 상태',
+            label: 'Judge Status',
             value: liveJudgeState,
-            caption: judge?.keeper_name?.trim() || '실시간 judge',
+            caption: judge?.keeper_name?.trim() || 'live judge',
             kind: (judgeUnhealthy ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined,
           },
           {
             variant: 'stacked',
-            label: 'Judge 모델',
+            label: 'Judge Model',
             value: liveJudgeModel,
-            caption: judge?.model_used?.trim() ? '런타임 보고' : '알 수 없음',
+            caption: judge?.model_used?.trim() ? 'runtime report' : 'unknown',
           },
           {
             variant: 'stacked',
-            label: '최근 판단',
+            label: 'Recent Judgments',
             value: judgmentCount,
-            caption: '실시간',
+            caption: 'live',
           },
           {
             variant: 'stacked',
-            label: '관리자 승인 대기',
+            label: 'Admin Queue',
             value: approvalCount,
-            caption: approvalCount > 0 ? '검토 필요' : (judgeHealthy ? '정상' : 'live'),
+            caption: approvalCount > 0 ? 'review needed' : (judgeHealthy ? 'healthy' : 'live'),
             kind: (approvalCount > 0 ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined,
           },
         ] satisfies KpiStripIslandData['cells']}
@@ -182,7 +182,7 @@ function JudgeStatusBar() {
     <div class="mb-4 flex items-center gap-3 rounded border border-[var(--white-5)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
-        <span class="font-medium text-text-muted">평가 모델 ${label}</span>
+        <span class="font-medium text-text-muted">Judge model ${label}</span>
       </span>
       ${judge.model_used ? html`<span class="text-text-dim">${judge.model_used}</span>` : null}
       ${judge.generated_at || judge.last_error
@@ -207,30 +207,30 @@ function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'defaul
   const status = judgeRuntimeStatus(judge, summary)
   if (status === 'stale_visible') {
     return {
-      message: `AI Judge ${degradedReasonLabel(judge?.degraded_reason)} 이후 fresh judgment 캐시를 유지 중입니다. 새 판단은 복구 후 갱신됩니다.`,
+      message: `AI Judge is holding the fresh-judgment cache after ${degradedReasonLabel(judge?.degraded_reason)}. New judgments refresh after recovery.`,
       tone: 'warn',
     }
   }
   if (status === 'backoff') {
-    return { message: 'AI Judge backoff: local slots saturated. 새 판단은 local slot 확보 후 재개됩니다.', tone: 'warn' }
+    return { message: 'AI Judge backoff: local slots are saturated. New judgments resume after a local slot opens.', tone: 'warn' }
   }
   const lastError = judge?.last_error?.trim()
   if (lastError) {
-    return { message: `AI Judge 오류: ${lastError}`, tone: 'warn' }
+    return { message: `AI Judge error: ${lastError}`, tone: 'warn' }
   }
   if (status === 'offline') {
-    return { message: 'AI Judge 오프라인 — keeper 기동 여부를 확인하세요.', tone: 'warn' }
+    return { message: 'AI Judge is offline. Check whether the keeper is running.', tone: 'warn' }
   }
   const lastSeen = judge?.generated_at ?? summary?.judge_last_seen_at
   if (lastSeen) {
-    return { message: '최근 판단 이후 새 입력 대기 중입니다. keeper가 새 판단을 올리면 여기 표시됩니다.', tone: 'default' }
+    return { message: 'Waiting for new input after the latest judgment. New keeper judgments appear here.', tone: 'default' }
   }
-  return { message: 'AI Judge가 판단을 생성하면 자동으로 여기 표시됩니다. 현재 수집된 판단이 없습니다.', tone: 'default' }
+  return { message: 'AI Judge judgments appear here automatically. No judgments have been collected yet.', tone: 'default' }
 }
 
 function JudgmentsSection() {
   const judgments = governanceData.value?.judgments ?? []
-  const title = 'AI Judge 판단'
+  const title = 'AI Judge Judgments'
 
   if (judgments.length === 0) {
     const { message, tone } = judgmentsEmptyStateMessage()
@@ -247,7 +247,7 @@ function JudgmentsSection() {
           ${lastSeen || meta ? html`
             <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
               ${lastSeen ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
-                마지막 판단 <${TimeAgo} timestamp=${lastSeen} />
+                Last judgment <${TimeAgo} timestamp=${lastSeen} />
               </span>` : null}
               ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
             </div>
@@ -265,7 +265,7 @@ function JudgmentsSection() {
             <div class="flex items-center gap-2 mb-1.5">
               <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
-              ${j.confidence != null ? html`<span class="ml-auto text-2xs text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
+              ${j.confidence != null ? html`<span class="ml-auto text-2xs text-text-muted">Confidence ${Math.round(j.confidence * 100)}%</span>` : null}
             </div>
             <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
             ${j.recommended_action ? html`
@@ -276,7 +276,7 @@ function JudgmentsSection() {
               </div>
             ` : null}
             ${j.guardrail_state?.requires_human_gate ? html`
-              <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">승인 필요</div>
+              <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">Approval required</div>
             ` : null}
             ${j.generated_at ? html`<div class="mt-1.5 text-2xs text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
           </div>
@@ -379,12 +379,12 @@ function KeeperApprovalAlertBanner() {
       </div>
       <div class="flex-1 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
-          <span class="text-2xl font-extrabold leading-none">${items.length}건</span>
-          <span class="text-sm font-semibold">Keeper HITL 승인 대기</span>
-          ${maxRisk ? html`<span class="text-2xs font-bold uppercase tracking-wider opacity-80">최고 ${maxRisk}</span>` : null}
+          <span class="text-2xl font-extrabold leading-none">${items.length}</span>
+          <span class="text-sm font-semibold">Keeper HITL approvals pending</span>
+          ${maxRisk ? html`<span class="text-2xs font-bold uppercase tracking-wider opacity-80">max ${maxRisk}</span>` : null}
         </div>
         <div class="mt-1 text-xs opacity-85">
-          위험도 threshold를 넘은 keeper tool call이 사용자 판단을 기다리고 있습니다.
+          Keeper tool calls above the risk threshold are waiting for operator judgment.
         </div>
       </div>
       <${ActionButton}
@@ -393,7 +393,7 @@ function KeeperApprovalAlertBanner() {
         class="shrink-0"
         onClick=${scrollToKeeperApprovalSection}
       >
-        지금 검토 →
+        Review now
       <//>
     </div>
   `
@@ -417,7 +417,7 @@ function KeeperApprovalEmptyState() {
       ${ctx.lastActivity || meta ? html`
         <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-2xs ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
           ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
-            마지막 judge 활동 <${TimeAgo} timestamp=${ctx.lastActivity} />
+            Last judge activity <${TimeAgo} timestamp=${ctx.lastActivity} />
           </span>` : null}
           ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
         </div>
@@ -437,8 +437,8 @@ function keeperHitlEmptyContext(): {
   const status = judgeRuntimeStatus(judge, summary)
   if (status === 'stale_visible') {
     return {
-      primary: `AI Judge ${degradedReasonLabel(judge?.degraded_reason)} 이후 fresh judgment 캐시를 유지 중입니다.`,
-      secondary: '새 HITL 판정은 judge 복구 후 갱신됩니다.',
+      primary: `AI Judge is holding the fresh-judgment cache after ${degradedReasonLabel(judge?.degraded_reason)}.`,
+      secondary: 'New HITL judgments refresh after the judge recovers.',
       lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
       tone: 'warn',
     }
@@ -446,7 +446,7 @@ function keeperHitlEmptyContext(): {
   if (status === 'backoff') {
     return {
       primary: 'AI Judge backoff: local slots saturated.',
-      secondary: 'local slot이 확보되면 HITL 판정 생성이 재개됩니다.',
+      secondary: 'HITL judgment generation resumes after a local slot opens.',
       lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
       tone: 'warn',
     }
@@ -454,16 +454,16 @@ function keeperHitlEmptyContext(): {
   const lastError = judge?.last_error?.trim()
   if (lastError) {
     return {
-      primary: `AI Judge 오류로 HITL 평가가 멈춰 있을 수 있습니다: ${lastError}`,
-      secondary: '거부/승인 대기열은 judge가 복구된 뒤에 채워집니다.',
+      primary: `AI Judge error may be blocking HITL evaluation: ${lastError}`,
+      secondary: 'Reject/approve queues fill after the judge recovers.',
       lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
       tone: 'warn',
     }
   }
   if (status === 'offline') {
     return {
-      primary: 'AI Judge 오프라인 — HITL 판정 생성이 중단되었습니다.',
-      secondary: 'keeper 기동 여부를 먼저 확인하세요.',
+      primary: 'AI Judge is offline; HITL judgment generation is stopped.',
+      secondary: 'Check whether the keeper is running first.',
       lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
       tone: 'warn',
     }
@@ -471,15 +471,15 @@ function keeperHitlEmptyContext(): {
   const lastActivity = judge?.generated_at ?? summary?.judge_last_seen_at ?? null
   if (lastActivity) {
     return {
-      primary: '위험도 threshold를 넘는 tool call이 없습니다 — 시스템이 정상 작동 중입니다.',
-      secondary: '새 HITL 요청이 들어오면 여기에 자동 표시됩니다.',
+      primary: 'No tool calls exceed the risk threshold; the system is operating normally.',
+      secondary: 'New HITL requests appear here automatically.',
       lastActivity,
       tone: 'ok',
     }
   }
   return {
-    primary: '현재 대시보드에서 처리할 keeper 승인 요청이 없습니다.',
-    secondary: 'AI Judge가 HITL 평가를 시작하면 이 목록이 채워집니다.',
+    primary: 'No keeper approval requests are ready for this dashboard.',
+    secondary: 'This list fills when AI Judge starts HITL evaluation.',
     lastActivity: null,
     tone: 'default',
   }
@@ -503,13 +503,13 @@ function KeeperApprovalQueueSection() {
     : 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
-    <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
+    <${Card} title="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-xs text-text-muted">
-          위험도가 threshold를 넘은 keeper tool call이 여기서 대기합니다.
+          Keeper tool calls above the risk threshold wait here.
         </div>
         <span class="rounded border ${countBadgeClass}">
-          ${items.length}건 대기
+          ${items.length} pending
         </span>
       </div>
       ${hasItems ? html`
@@ -517,8 +517,8 @@ function KeeperApprovalQueueSection() {
           <${TextInput}
             type="search"
             value=${query.value}
-            placeholder="keeper / tool / 위험도 필터"
-            ariaLabel="Keeper HITL 승인 필터"
+            placeholder="keeper / tool / risk filter"
+            ariaLabel="Keeper HITL approval filter"
             testId="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-70 flex-1 !px-2 !py-1 !text-2xs"
@@ -530,7 +530,7 @@ function KeeperApprovalQueueSection() {
         : isFiltering && visibleItems.length === 0
           ? html`
               <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]" data-testid="keeper-hitl-approval-empty-filter">
-                필터 결과 없음 (${items.length} items)
+                No filter results (${items.length} items)
               </div>
             `
           : html`
@@ -550,8 +550,8 @@ function KeeperApprovalQueueSection() {
                         ${item.risk_level}
                       </span>
                       <span class="ml-auto text-2xs text-text-dim">
-                        ${item.requested_at ? html`요청 <${TimeAgo} timestamp=${item.requested_at} />` : null}
-                        ${item.waiting_s != null ? ` · 대기 ${Math.max(0, Math.round(item.waiting_s))}s` : ''}
+                        ${item.requested_at ? html`Requested <${TimeAgo} timestamp=${item.requested_at} />` : null}
+                        ${item.waiting_s != null ? ` · waiting ${Math.max(0, Math.round(item.waiting_s))}s` : ''}
                       </span>
                     </div>
                     ${item.input_preview
@@ -573,7 +573,7 @@ function KeeperApprovalQueueSection() {
                         : null}
                     </div>
                     <div class="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto]">
-                      <${JsonViewerCard} data=${item.input ?? {}} title="승인 입력" />
+                      <${JsonViewerCard} data=${item.input ?? {}} title="Approval Input" />
                       <div class="flex min-[1100px]:flex-col gap-2 min-[1100px]:justify-start">
                         <${ActionButton}
                           variant="primary"
@@ -582,7 +582,7 @@ function KeeperApprovalQueueSection() {
                           onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
                           disabled=${Boolean(actingId)}
                         >
-                          ${disabled ? '처리 중...' : '승인'}
+                          ${disabled ? 'Processing...' : 'Approve'}
                         <//>
                         <${ActionButton}
                           variant="ghost"
@@ -591,7 +591,7 @@ function KeeperApprovalQueueSection() {
                           onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
                           disabled=${Boolean(actingId)}
                         >
-                          ${disabled ? '처리 중...' : '승인 + Always'}
+                          ${disabled ? 'Processing...' : 'Approve + Always'}
                         <//>
                         <${ActionButton}
                           variant="danger"
@@ -600,7 +600,7 @@ function KeeperApprovalQueueSection() {
                           onClick=${() => void respondToKeeperApproval(item.id, 'reject')}
                           disabled=${Boolean(actingId)}
                         >
-                          ${disabled ? '처리 중...' : '거부'}
+                          ${disabled ? 'Processing...' : 'Reject'}
                         <//>
                       </div>
                     </div>
@@ -618,12 +618,12 @@ function ApprovalRulesSection() {
   const rules = governanceData.value?.approval_rules ?? []
   const actingId = governanceApprovalActing.value
   return html`
-    <${Card} title="Always 규칙" class="section mb-5" variant="compact">
+    <${Card} title="Always Rules" class="section mb-5" variant="compact">
       <div class="mb-3 text-xs text-text-muted">
-        승인된 요청에서 파생된 자동 승인 규칙입니다. Critical, destructive shell/git, 수동 결정 대기 상태는 규칙이 있어도 자동 승인되지 않습니다.
+        Auto-approval rules derived from approved requests. Critical, destructive shell/git, and manual-decision states are never auto-approved even when a rule exists.
       </div>
       ${rules.length === 0
-        ? html`<${EmptyState} message="저장된 Always 규칙이 없습니다." compact />`
+        ? html`<${EmptyState} message="No stored Always rules." compact />`
         : html`
             <div class="flex flex-col gap-3" data-testid="governance-approval-rules">
               ${rules.map((rule: KeeperApprovalRule) => {
@@ -639,8 +639,8 @@ function ApprovalRulesSection() {
                       </span>
                       ${rule.max_risk ? html`<span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}
                       <span class="ml-auto text-2xs text-text-dim">
-                        ${rule.created_at ? html`생성 <${TimeAgo} timestamp=${rule.created_at} />` : null}
-                        ${rule.last_matched_at ? html` · 최근 매치 <${TimeAgo} timestamp=${rule.last_matched_at} />` : null}
+                        ${rule.created_at ? html`Created <${TimeAgo} timestamp=${rule.created_at} />` : null}
+                        ${rule.last_matched_at ? html` · last matched <${TimeAgo} timestamp=${rule.last_matched_at} />` : null}
                       </span>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
@@ -656,7 +656,7 @@ function ApprovalRulesSection() {
                         onClick=${() => void deleteKeeperApprovalRule(rule.id)}
                         disabled=${Boolean(actingId)}
                       >
-                        ${deleting ? '삭제 중...' : '삭제'}
+                        ${deleting ? 'Deleting...' : 'Delete'}
                       <//>
                     </div>
                   </div>

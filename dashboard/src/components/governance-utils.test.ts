@@ -158,12 +158,12 @@ describe('filteredItemsByFilter', () => {
 // ================================================================
 
 describe('kindLabel', () => {
-  it('returns "사건" for case', () => {
-    expect(kindLabel('case')).toBe('사건')
+  it('returns "Case" for case', () => {
+    expect(kindLabel('case')).toBe('Case')
   })
 
-  it('returns "청원" for petition', () => {
-    expect(kindLabel('petition')).toBe('청원')
+  it('returns "Petition" for petition', () => {
+    expect(kindLabel('petition')).toBe('Petition')
   })
 
   it('returns raw value for unknown', () => {
@@ -185,26 +185,25 @@ describe('formatAgeSummary', () => {
   })
 
   it('formats minutes for < 3600 seconds', () => {
-    expect(formatAgeSummary(120)).toBe('2분')
-    expect(formatAgeSummary(3599)).toBe('59분')
+    expect(formatAgeSummary(120)).toBe('2m')
+    expect(formatAgeSummary(3599)).toBe('59m')
   })
 
   it('formats hours for < 86400 seconds', () => {
-    expect(formatAgeSummary(3600)).toBe('1시간')
-    expect(formatAgeSummary(86399)).toBe('23시간')
+    expect(formatAgeSummary(3600)).toBe('1h')
+    expect(formatAgeSummary(86399)).toBe('23h')
   })
 
   it('formats days for >= 86400 seconds', () => {
-    expect(formatAgeSummary(86400)).toBe('1일')
-    expect(formatAgeSummary(172800)).toBe('2일')
+    expect(formatAgeSummary(86400)).toBe('1d')
+    expect(formatAgeSummary(172800)).toBe('2d')
   })
 
   it('handles 0 seconds', () => {
-    expect(formatAgeSummary(0)).toBe('0분')
+    expect(formatAgeSummary(0)).toBe('0m')
   })
 })
 
 // ================================================================
 // formatParamValue
 // ================================================================
-

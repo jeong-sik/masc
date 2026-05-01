@@ -112,17 +112,17 @@ describe('currentSectionShareUrl (pure)', () => {
 })
 
 describe('formatUptimeSecondsHuman (pure)', () => {
-  it('null / undefined → "알 수 없음"', () => {
-    expect(formatUptimeSecondsHuman(null)).toBe('알 수 없음')
-    expect(formatUptimeSecondsHuman(undefined)).toBe('알 수 없음')
+  it('null / undefined -> "Unknown"', () => {
+    expect(formatUptimeSecondsHuman(null)).toBe('Unknown')
+    expect(formatUptimeSecondsHuman(undefined)).toBe('Unknown')
   })
 
-  it('NaN → "알 수 없음" (no "NaNs" in the dropdown)', () => {
-    expect(formatUptimeSecondsHuman(Number.NaN)).toBe('알 수 없음')
+  it('NaN -> "Unknown" (no "NaNs" in the dropdown)', () => {
+    expect(formatUptimeSecondsHuman(Number.NaN)).toBe('Unknown')
   })
 
-  it('negative → "알 수 없음" (no "-5s" — clock skew guard)', () => {
-    expect(formatUptimeSecondsHuman(-5)).toBe('알 수 없음')
+  it('negative -> "Unknown" (no "-5s" clock skew guard)', () => {
+    expect(formatUptimeSecondsHuman(-5)).toBe('Unknown')
   })
 
   it('sub-minute → "Xs" compact', () => {
@@ -231,11 +231,11 @@ describe('composeDocumentTitle (pure)', () => {
 })
 
 describe('describeReconnecting (pure)', () => {
-  it('disconnectedAt=0 → bare \"재연결 중...\" label, empty title', () => {
+  it('disconnectedAt=0 -> bare "Reconnecting..." label, empty title', () => {
     // Fresh page load / never disconnected state: nothing to show
     // yet. Regression guard: no ghost \"0s\" suffix.
     const r = describeReconnecting({ disconnectedAt: 0, now: 1_000_000, reconnects: 0 })
-    expect(r.label).toBe('재연결 중...')
+    expect(r.label).toBe('Reconnecting...')
     expect(r.title).toBe('')
   })
 
@@ -244,8 +244,8 @@ describe('describeReconnecting (pure)', () => {
     // shouldn't yank the operator's attention with a running timer.
     const now = 10_000_000
     const r = describeReconnecting({ disconnectedAt: now - 2_000, now, reconnects: 0 })
-    expect(r.label).toBe('재연결 중')
-    // Title also suppresses the \"연결 끊김\" timestamp below 5s since
+    expect(r.label).toBe('Reconnecting')
+    // Title also suppresses the disconnect timestamp below 5s since
     // the elapsed reading itself isn't shown.
     expect(r.title).toBe('')
   })
@@ -253,20 +253,20 @@ describe('describeReconnecting (pure)', () => {
   it('5–59s disconnect → compact seconds suffix', () => {
     const now = 10_000_000
     const r = describeReconnecting({ disconnectedAt: now - 15_000, now, reconnects: 0 })
-    expect(r.label).toBe('재연결 중 · 15s')
+    expect(r.label).toBe('Reconnecting · 15s')
   })
 
   it('≥60s disconnect → rounded minutes', () => {
     const now = 10_000_000
     const r = describeReconnecting({ disconnectedAt: now - 125_000, now, reconnects: 0 })
     // 125s → 2m (Math.round)
-    expect(r.label).toBe('재연결 중 · 2m')
+    expect(r.label).toBe('Reconnecting · 2m')
   })
 
   it('title includes disconnect timestamp + cumulative reconnect count', () => {
     // Regression guard: operator diagnosing a reconnect loop needs
-    // both \"when did we lose it\" and \"how many times have we
-    // bounced so far\" — drop either and the badge loses its
+    // both "when did we lose it" and "how many times have we
+    // bounced so far" - drop either and the badge loses its
     // diagnostic value.
     const now = 10_000_000
     const r = describeReconnecting({
@@ -274,30 +274,30 @@ describe('describeReconnecting (pure)', () => {
       now,
       reconnects: 3,
     })
-    expect(r.title).toMatch(/연결 끊김 \d{2}:\d{2}:\d{2}/)
-    expect(r.title).toContain('누적 재연결 3회')
+    expect(r.title).toMatch(/Disconnected at \d{2}:\d{2}:\d{2}/)
+    expect(r.title).toContain('Reconnect attempts 3')
   })
 
-  it('reconnects=0 suppresses the cumulative counter (no \"누적 재연결 0회\")', () => {
+  it('reconnects=0 suppresses the cumulative counter (no "Reconnect attempts 0")', () => {
     // \"Zero reconnects so far\" is the expected state for the first
     // disconnect — printing it as \"0회\" is noise, not signal.
     const now = 10_000_000
     const r = describeReconnecting({ disconnectedAt: now - 30_000, now, reconnects: 0 })
-    expect(r.title).not.toContain('0회')
-    expect(r.title).not.toContain('누적 재연결')
+    expect(r.title).not.toContain('Reconnect attempts 0')
+    expect(r.title).not.toContain('Reconnect attempts')
   })
 
   it('clock skew (now < disconnectedAt) → floors elapsed to 0, no negative display', () => {
     // Regression guard: system-clock drift between browser tab and
     // NTP-resynced OS can briefly produce now < disconnectedAt.
-    // We must not render \"재연결 중 · -3s\".
+    // We must not render "Reconnecting · -3s".
     const now = 10_000_000
     const r = describeReconnecting({
       disconnectedAt: now + 3_000,
       now,
       reconnects: 0,
     })
-    expect(r.label).toBe('재연결 중')
+    expect(r.label).toBe('Reconnecting')
     expect(r.label).not.toContain('-')
   })
 })
@@ -355,7 +355,7 @@ describe('summarizeAttentionPreview (pure)', () => {
     expect(line!.endsWith('...')).toBe(true)
   })
 
-  it('respects max=3 and appends a "외 Nbrought-over" tail when there are more', () => {
+  it('respects max=3 and appends a remaining-count tail when there are more', () => {
     const items = Array.from({ length: 7 }, (_, i) => ({
       summary: `item-${i}`,
       kind: 'generic',
@@ -363,7 +363,7 @@ describe('summarizeAttentionPreview (pure)', () => {
     const preview = summarizeAttentionPreview(items, 3)
     expect(preview.slice(0, 3)).toEqual(['item-0', 'item-1', 'item-2'])
     // 7 - 3 = 4 more
-    expect(preview[3]).toBe('… 외 4건')
+    expect(preview[3]).toBe('... +4 more')
   })
 
   it('no tail when we rendered every item (exact fit)', () => {
@@ -373,43 +373,43 @@ describe('summarizeAttentionPreview (pure)', () => {
     ]
     const preview = summarizeAttentionPreview(items, 3)
     expect(preview).toEqual(['a', 'b'])
-    expect(preview.some(l => l.startsWith('… 외'))).toBe(false)
+    expect(preview.some(l => l.startsWith('... +'))).toBe(false)
   })
 })
 
 describe('composeHealthIndicatorTitle (pure)', () => {
   it('no attention lines → bare label (tooltip stays terse when state is boring)', () => {
-    expect(composeHealthIndicatorTitle('정상', [])).toBe('정상')
-    expect(composeHealthIndicatorTitle('신호 없음', [])).toBe('신호 없음')
+    expect(composeHealthIndicatorTitle('Healthy', [])).toBe('Healthy')
+    expect(composeHealthIndicatorTitle('Offline', [])).toBe('Offline')
   })
 
   it('label on line 1, attention items indented beneath', () => {
-    const title = composeHealthIndicatorTitle('주의 2건', ['foo blocker', 'bar gate fail'])
-    expect(title).toBe('주의 2건\n  · foo blocker\n  · bar gate fail')
+    const title = composeHealthIndicatorTitle('Attention 2', ['foo blocker', 'bar gate fail'])
+    expect(title).toBe('Attention 2\n  · foo blocker\n  · bar gate fail')
   })
 
   it('newlines (not <br>) — native title tooltips render \\n verbatim on Chrome/Safari/Firefox', () => {
     // Regression guard: a well-meaning future refactor might swap \n
     // for <br> thinking this is an HTML attribute. Title is plain text;
     // <br> would render as literal "<br>" in the tooltip.
-    const title = composeHealthIndicatorTitle('주의 1건', ['x'])
+    const title = composeHealthIndicatorTitle('Attention 1', ['x'])
     expect(title.split('\n')).toHaveLength(2)
     expect(title).not.toContain('<br>')
   })
 })
 
 describe('composeBuildBadgeTitle (pure)', () => {
-  it('no build / no fallback → "버전 정보 없음" (matches existing label)', () => {
-    expect(composeBuildBadgeTitle(null, null)).toBe('버전 정보 없음')
-    expect(composeBuildBadgeTitle(undefined, undefined)).toBe('버전 정보 없음')
-    expect(composeBuildBadgeTitle(null, '')).toBe('버전 정보 없음')
+  it('no build / no fallback -> "Build unavailable" (matches existing label)', () => {
+    expect(composeBuildBadgeTitle(null, null)).toBe('Build unavailable')
+    expect(composeBuildBadgeTitle(undefined, undefined)).toBe('Build unavailable')
+    expect(composeBuildBadgeTitle(null, '')).toBe('Build unavailable')
   })
 
   it('fallback version only → uses it + "dev" suffix (loose build info)', () => {
     const t = composeBuildBadgeTitle(null, '0.9.13')
-    expect(t).toContain('서버 빌드')
+    expect(t).toContain('Server build')
     expect(t).toContain('· v0.9.13 · dev')
-    expect(t).toContain('클릭하여 상세 보기')
+    expect(t).toContain('Click for details')
   })
 
   it('full build (version + commit + uptime) → all three lines', () => {
@@ -419,19 +419,19 @@ describe('composeBuildBadgeTitle (pure)', () => {
     )
     expect(t).toContain('· v0.9.13 · a8b7412a3')
     // 9000s → 2h 30m per formatUptimeSecondsHuman
-    expect(t).toContain('업타임 2h 30m')
-    expect(t).toContain('클릭하여 상세 보기')
+    expect(t).toContain('Uptime 2h 30m')
+    expect(t).toContain('Click for details')
   })
 
-  it('unknown uptime (null / negative) → skips the 업타임 line (no ghost "알 수 없음")', () => {
+  it('unknown uptime (null / negative) -> skips the Uptime line (no ghost "Unknown")', () => {
     // Regression guard: we explicitly filter out the "unknown" sentinel
     // so the hover tooltip stays compact during pre-boot / clock-skew.
     const t = composeBuildBadgeTitle(
       { release_version: '0.9.13', commit: 'abc1234', uptime_seconds: null },
       null,
     )
-    expect(t).not.toContain('업타임')
-    expect(t).not.toContain('알 수 없음')
+    expect(t).not.toContain('Uptime')
+    expect(t).not.toContain('Unknown')
   })
 
   it('newline separated (native title tooltip plain text)', () => {

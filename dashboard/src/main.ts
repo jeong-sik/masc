@@ -12,11 +12,6 @@ import './styles/variables.css'
 import './styles/base.css'
 import './styles/keyframes.css'
 
-// Opt-in paper theme — activated by ?theme=paper or
-// localStorage.dashboardTheme = "paper". Component code is unchanged;
-// the theme only swaps the values behind existing --color-* tokens.
-import './styles/paper-theme.css'
-
 // Global utilities and layout
 import './styles/global.css'
 
@@ -29,6 +24,7 @@ import './styles/governance.css'
 import './styles/governance-agent.css'
 import './styles/ops.css'
 import './styles/tools.css'
+import './styles/paper-theme.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -36,31 +32,60 @@ import { App } from './app'
 import { performanceMonitor } from './lib/performance-monitor'
 import { startWebVitalsCapture } from './utils/performance-metrics'
 
-// Theme resolution precedence: ?theme= URL param (session scoped) >
-// localStorage.dashboardTheme (persistent) > default (unset).
-// Invalid values are silently dropped so a typo cannot break layout.
-function resolveTheme(): string | null {
-  const valid = new Set(['paper'])
-  const fromUrl = new URLSearchParams(window.location.search).get('theme')
-  if (fromUrl && valid.has(fromUrl)) {
-    try { localStorage.setItem('dashboardTheme', fromUrl) } catch { /* quota */ }
-    return fromUrl
+const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
+const THEME_SEARCH_PARAM = 'theme'
+
+type ThemeId = 'paper' | null
+
+function normalizeTheme(raw: string | null): ThemeId {
+  if (raw === 'paper' || raw === 'light') {
+    return 'paper'
   }
-  if (fromUrl === '') {
-    try { localStorage.removeItem('dashboardTheme') } catch { /* quota */ }
+  // Preserve compatibility with existing callers that may send dark-themed values
+  // while keeping the default dashboard branch at the non-paper
+  // baseline (`dark-fantasy` in the generated token stack).
+  if (raw === 'dark' || raw === 'dark-fantasy' || raw === null || raw === '') {
     return null
   }
+  return null
+}
+
+function persistTheme(theme: ThemeId): void {
   try {
-    const stored = localStorage.getItem('dashboardTheme')
-    if (stored && valid.has(stored)) return stored
+    if (theme === 'paper') {
+      THEME_STORAGE_KEYS.forEach((key) => localStorage.setItem(key, theme))
+    } else {
+      THEME_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
+    }
+  } catch { /* quota / privacy */ }
+}
+
+function resolveTheme(): ThemeId {
+  const fromUrl = new URLSearchParams(window.location.search).get(THEME_SEARCH_PARAM)
+  if (fromUrl !== null) {
+    const normalized = normalizeTheme(fromUrl)
+    persistTheme(normalized)
+    return normalized
+  }
+  try {
+    for (const key of THEME_STORAGE_KEYS) {
+      const stored = localStorage.getItem(key)
+      if (stored) return normalizeTheme(stored)
+    }
   } catch { /* access denied */ }
   return null
 }
 
-const theme = resolveTheme()
-if (theme) {
-  document.documentElement.dataset.theme = theme
+function applyTheme(theme: ThemeId): void {
+  if (theme === 'paper') {
+    document.documentElement.dataset.theme = 'paper'
+  } else {
+    delete document.documentElement.dataset.theme
+  }
 }
+
+const theme = resolveTheme()
+applyTheme(theme)
 
 const root = document.getElementById('app')
 if (root) {

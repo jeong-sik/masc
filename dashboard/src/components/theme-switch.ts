@@ -15,6 +15,8 @@ import { signal } from '@preact/signals'
 import { ringFocusClasses } from './common/ring'
 
 type ThemeId = 'paper' | null
+const THEME_SEARCH_PARAM = 'theme'
+const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
 
 function readDomTheme(): ThemeId {
   const attr = document.documentElement.dataset.theme
@@ -30,12 +32,31 @@ const currentTheme = signal<ThemeId>(
 function applyTheme(next: ThemeId): void {
   if (next === null) {
     delete document.documentElement.dataset.theme
-    try { localStorage.removeItem('dashboardTheme') } catch { /* quota / privacy */ }
+    try {
+      THEME_STORAGE_KEYS.forEach((key) => {
+        localStorage.removeItem(key)
+      })
+    } catch { /* quota / privacy */ }
   } else {
     document.documentElement.dataset.theme = next
-    try { localStorage.setItem('dashboardTheme', next) } catch { /* quota / privacy */ }
+    try {
+      THEME_STORAGE_KEYS.forEach((key) => {
+        localStorage.setItem(key, next)
+      })
+    } catch { /* quota / privacy */ }
   }
+  syncThemeSearchParam(next)
   currentTheme.value = next
+}
+
+function syncThemeSearchParam(next: ThemeId): void {
+  const url = new URL(window.location.href)
+  if (next === 'paper') {
+    url.searchParams.set(THEME_SEARCH_PARAM, next)
+  } else {
+    url.searchParams.delete(THEME_SEARCH_PARAM)
+  }
+  history.replaceState(null, '', url.toString())
 }
 
 function toggleTheme(): void {

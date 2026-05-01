@@ -1,8 +1,19 @@
 // Keeper Health Strip — compact keeper status overview for Live Monitor
 
 import { html } from 'htm/preact'
-import { keeperHealthSummary, type KeeperPressure } from '../../live-store'
+import {
+  keeperHealthSummary,
+  type KeeperHealthSummary,
+  type KeeperPressure,
+} from '../../live-store'
 import { contextThresholds } from '../../config/context-thresholds'
+import { StatusChip } from '../common/status-chip'
+
+interface KeeperHealthChip {
+  key: string
+  label: string
+  tone: string
+}
 
 function pressureColor(ratio: number): string {
   const t = contextThresholds.value
@@ -27,12 +38,27 @@ function ContextBar({ p }: { p: KeeperPressure }) {
   `
 }
 
+export function keeperHealthStatusChips(
+  summary: Pick<KeeperHealthSummary, 'criticalCount' | 'warningCount'>,
+): KeeperHealthChip[] {
+  const alertCount = summary.warningCount + summary.criticalCount
+  const chips: KeeperHealthChip[] = alertCount > 0
+    ? [{ key: 'warning', label: `${alertCount} 주의`, tone: 'warn' }]
+    : [{ key: 'ok', label: '정상', tone: 'ok' }]
+
+  if (summary.criticalCount > 0) {
+    chips.push({ key: 'critical', label: `${summary.criticalCount} 위험`, tone: 'bad' })
+  }
+
+  return chips
+}
+
 export function KeeperHealthStrip() {
   const summary = keeperHealthSummary.value
 
   if (summary.totalCount === 0) return null
 
-  const alertCount = summary.warningCount + summary.criticalCount
+  const statusChips = keeperHealthStatusChips(summary)
 
   return html`
     <div class="flex items-center gap-4 rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] px-4 py-2.5">
@@ -53,13 +79,13 @@ export function KeeperHealthStrip() {
       `}
 
       <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
-        ${alertCount > 0
-          ? html`<span class="text-xs font-medium text-[var(--color-status-warn)]">${alertCount} 주의</span>`
-          : html`<span class="text-xs text-[var(--color-fg-muted)]">정상</span>`
-        }
-        ${summary.criticalCount > 0 && html`
-          <span class="text-xs font-medium text-[var(--color-status-err)]">${summary.criticalCount} 위험</span>
-        `}
+        ${statusChips.map(chip => html`
+          <${StatusChip}
+            key=${chip.key}
+            tone=${chip.tone}
+            uppercase=${false}
+          >${chip.label}<//>
+        `)}
       </div>
     </div>
   `

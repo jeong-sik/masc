@@ -80,7 +80,6 @@ type degraded_retry_budget_decision =
 
 val next_fail_open_cascade_for_turn_with_budget :
   ?rotation_cascades:string list ->
-  is_retry:bool ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:string ->

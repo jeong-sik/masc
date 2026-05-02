@@ -4937,8 +4937,8 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
       check (float 0.01)
         "first attempt keeps half the usable turn budget for fallback"
         592.5 budget.effective_timeout_sec;
-      check (float 0.01) "remaining budget records post-guard usable budget"
-        1185.0 budget.remaining_turn_budget_sec;
+      check (float 0.01) "remaining budget records raw wall-clock remaining"
+        1200.0 budget.remaining_turn_budget_sec;
       check string "source records retry reserve"
         "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
@@ -5099,10 +5099,24 @@ let test_non_retry_still_refuses_tiny_budget () =
   | Some _ ->
       fail "is_retry=false should refuse budget when remaining < guard + min"
 
+let test_per_attempt_retry_refuses_zero_remaining () =
+  (* Wall-clock gate: a retry with 0.0s remaining would be immediately
+     cancelled by the outer turn timeout — resolver must return None. *)
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:0.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "is_retry=true with 0.0s remaining should return None"
+
 let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~is_retry:true
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
       ~tool_requirement:"optional"
@@ -5118,7 +5132,7 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
       check string "fallback reason" "oas_timeout_budget"
         retry.fallback_reason
   | UT.Degraded_retry_budget_exhausted _ ->
-      fail "is_retry=true should allow degraded retry even with tiny remaining"
+      fail "degraded retry should be allowed even with tiny remaining"
   | UT.No_degraded_retry -> fail "expected degraded retry"
 
 let test_pure_local_labels_detection () =
@@ -7045,6 +7059,8 @@ let () =
             test_per_attempt_retry_budget_capped_by_remaining_when_healthy;
           test_case "non-retry still refuses tiny budget" `Quick
             test_non_retry_still_refuses_tiny_budget;
+          test_case "per-attempt retry refuses zero remaining (#12675)" `Quick
+            test_per_attempt_retry_refuses_zero_remaining;
           test_case "degraded retry gate allows retry with tiny remaining (#12675)" `Quick
             test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining;
           test_case "pure local label detection" `Quick

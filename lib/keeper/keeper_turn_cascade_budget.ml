@@ -165,25 +165,30 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
        near-zero remaining and the OAS call times out before the model
        even begins processing (TurnBudgetExhausted with turns_used=1).
 
-       GitHub #12675. *)
-    let effective_timeout_sec =
-      Float.min adaptive_timeout_sec (Float.max min_oas_timeout_budget_sec remaining_turn_budget_s)
-    in
-    let source =
-      match runtime.oas_timeout_override_sec.value with
-      | Some _ -> "override_per_attempt_retry"
-      | None -> "adaptive_per_attempt_retry"
-    in
-    Some
-      {
-        effective_timeout_sec;
-        adaptive_timeout_sec;
-        keeper_turn_timeout_sec = runtime.turn_timeout_sec.value;
-        remaining_turn_budget_sec = Float.max 0.0 remaining_turn_budget_s;
-        estimated_input_tokens = max 0 estimated_input_tokens;
-        max_turns;
-        source;
-      }
+       Hard gate: if the outer turn wall-clock is already exhausted the
+       OAS call would be cancelled immediately — return None so callers
+       see a clean budget failure rather than a noisy retry/rotation. *)
+    if remaining_turn_budget_s <= 0.0 then None
+    else begin
+      let effective_timeout_sec =
+        Float.min adaptive_timeout_sec (Float.max min_oas_timeout_budget_sec remaining_turn_budget_s)
+      in
+      let source =
+        match runtime.oas_timeout_override_sec.value with
+        | Some _ -> "override_per_attempt_retry"
+        | None -> "adaptive_per_attempt_retry"
+      in
+      Some
+        {
+          effective_timeout_sec;
+          adaptive_timeout_sec;
+          keeper_turn_timeout_sec = runtime.turn_timeout_sec.value;
+          remaining_turn_budget_sec = remaining_turn_budget_s;
+          estimated_input_tokens = max 0 estimated_input_tokens;
+          max_turns;
+          source;
+        }
+    end
   end else begin
     let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
     if usable_budget < min_oas_timeout_budget_sec
@@ -232,7 +237,7 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
           effective_timeout_sec;
           adaptive_timeout_sec;
           keeper_turn_timeout_sec = runtime.turn_timeout_sec.value;
-          remaining_turn_budget_sec = usable_budget;
+          remaining_turn_budget_sec = remaining_turn_budget_s;
           estimated_input_tokens = max 0 estimated_input_tokens;
           max_turns;
           source;
@@ -286,7 +291,6 @@ type degraded_retry_budget_decision =
 
 let next_fail_open_cascade_for_turn_with_budget
     ?rotation_cascades
-    ~(is_retry : bool)
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : string)
@@ -303,9 +307,11 @@ let next_fail_open_cascade_for_turn_with_budget
   with
   | None -> No_degraded_retry
   | Some retry ->
+      (* The candidate is always a retry, so use per-attempt budget semantics
+         regardless of whether the current attempt was itself a retry. *)
       if
         oas_retry_budget_available_for_turn
-          ~is_retry ~estimated_input_tokens ~max_turns
+          ~is_retry:true ~estimated_input_tokens ~max_turns
           ~remaining_turn_budget_s
       then Degraded_retry_allowed retry
       else Degraded_retry_budget_exhausted retry

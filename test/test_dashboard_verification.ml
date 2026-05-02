@@ -46,6 +46,14 @@ let restore_config_input name (prior_env, prior_boot) =
        | Some v -> Config_boot_overrides.set name v
        | None -> Config_boot_overrides.clear name)
 
+let restore_process_config_input name (prior_env, prior_boot) =
+  (match prior_env with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  match prior_boot with
+  | Some v -> Config_boot_overrides.set name v
+  | None -> Config_boot_overrides.clear name
+
 (** Create an isolated MASC base_path for the duration of [f].
     Restores [MASC_BASE_PATH] and [MASC_BASE_PATH_INPUT] afterwards so
     subsequent tests in the same binary see the original value. *)
@@ -91,6 +99,46 @@ let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
   | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
 
 let member key j = Yojson.Safe.Util.member key j
+
+let test_temp_base_path_overrides_and_restores_env_inputs () =
+  let prior_base = snapshot_config_input "MASC_BASE_PATH" in
+  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_process_config_input "MASC_BASE_PATH" prior_base;
+      restore_process_config_input "MASC_BASE_PATH_INPUT" prior_input)
+    (fun () ->
+      let original_base =
+        Filename.concat (Filename.get_temp_dir_name ())
+          "masc-dashboard-verify-original-base"
+      in
+      let original_input =
+        Filename.concat (Filename.get_temp_dir_name ())
+          "masc-dashboard-verify-original-input"
+      in
+      Unix.putenv "MASC_BASE_PATH" original_base;
+      Unix.putenv "MASC_BASE_PATH_INPUT" original_input;
+      with_temp_base_path (fun base_path ->
+        Alcotest.(check (option string)) "base path overridden"
+          (Some base_path) (Sys.getenv_opt "MASC_BASE_PATH");
+        Alcotest.(check (option string)) "base path input overridden"
+          (Some base_path) (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
+        let _ =
+          create_pending_request ~base_path ~task_id:"task-env-override"
+            ~worker:"keeper-alpha" ~criteria:[V.Custom "env isolated"]
+            ~evidence:["ref-env"]
+        in
+        let j = D.requests_json () in
+        match member "total" j with
+        | `Int 1 -> ()
+        | `Int n ->
+            Alcotest.fail
+              (Printf.sprintf "expected temp base_path request, got %d" n)
+        | _ -> Alcotest.fail "total not int");
+      Alcotest.(check (option string)) "base path restored"
+        (Some original_base) (Sys.getenv_opt "MASC_BASE_PATH");
+      Alcotest.(check (option string)) "base path input restored"
+        (Some original_input) (Sys.getenv_opt "MASC_BASE_PATH_INPUT"))
 
 (* ── Tests ──────────────────────────────────────────── *)
 
@@ -376,6 +424,8 @@ let () =
     "requests_json", [
       Alcotest.test_case "restores boot override config inputs" `Quick
         test_config_input_override_restores_boot_override;
+      Alcotest.test_case "overrides and restores env inputs" `Quick
+        test_temp_base_path_overrides_and_restores_env_inputs;
       Alcotest.test_case "shape" `Quick test_requests_json_shape;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
       Alcotest.test_case "ignores legacy root entries" `Quick

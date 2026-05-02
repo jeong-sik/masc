@@ -18,10 +18,28 @@ interface Trace {
   position: number
 }
 
+type YjsLocation = Pick<Location, 'host' | 'protocol'>
+
+export function resolveYjsWebsocketUrl(
+  configuredUrl: string | undefined,
+  dev: boolean,
+  location: YjsLocation | null,
+): string | null {
+  const configured = configuredUrl?.trim()
+  if (configured) return configured
+  if (!dev || !location?.host) return null
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${location.host}/yjs`
+}
+
 function yjsWebsocketUrl(): string | null {
   if (runningUnderVitest()) return null
-  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL?.trim()
-  return configured || null
+  const location = typeof window === 'undefined' ? null : window.location
+  return resolveYjsWebsocketUrl(
+    import.meta.env?.VITE_MASC_YJS_WS_URL,
+    import.meta.env?.DEV === true,
+    location,
+  )
 }
 
 export function WorldVisualizer() {

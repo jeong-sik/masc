@@ -5,6 +5,20 @@
 
     @since 0.99.5 *)
 
+(* ── Strict-mode rejection type ────────────────────────── *)
+
+type health_filter_rejection =
+  | All_missing_api_key of int
+  | All_local_unhealthy of { local_count : int; cloud_count : int }
+
+let health_filter_rejection_to_string = function
+  | All_missing_api_key n ->
+    Printf.sprintf "all %d provider(s) lack required API key" n
+  | All_local_unhealthy { local_count; cloud_count } ->
+    Printf.sprintf
+      "all %d local endpoint(s) unhealthy, %d cloud provider(s) available but strict mode disallows fallback"
+      local_count cloud_count
+
 (* ── Cascade-level error classification ────────────────── *)
 
 (** Decide whether an error should cascade to the next provider.
@@ -100,5 +114,50 @@ let filter_healthy_internal ~sw ~net (providers : Llm_provider.Provider_config.t
 
 let filter_healthy ~sw ~net providers =
   fst (filter_healthy_internal ~sw ~net providers)
+
+let filter_healthy_strict ~sw ~net (providers : Llm_provider.Provider_config.t list)
+    : (Llm_provider.Provider_config.t list, health_filter_rejection) result =
+  let initial_count = List.length providers in
+  (* Step 0: Remove cloud providers missing required API keys — fail closed *)
+  let with_keys = List.filter has_required_api_key providers in
+  if with_keys = [] && initial_count > 0 then
+    Error (All_missing_api_key initial_count)
+  else
+    let providers =
+      let dropped = initial_count - List.length with_keys in
+      if dropped > 0 then begin
+        Llm_provider.Diag.debug "cascade_health_filter"
+          "strict: dropped %d provider(s) missing API keys" dropped
+      end;
+      with_keys
+    in
+    let local_providers = List.filter is_local_provider providers in
+    let cloud_providers =
+      List.filter (fun cfg -> not (is_local_provider cfg)) providers
+    in
+    if local_providers = [] then
+      Ok providers
+    else
+      let endpoints =
+        local_providers
+        |> List.map (fun (cfg : Llm_provider.Provider_config.t) -> cfg.base_url)
+        |> List.sort_uniq String.compare
+      in
+      let statuses =
+        Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
+      in
+      let any_healthy =
+        List.exists
+          (fun (s : Llm_provider.Discovery.endpoint_status) -> s.healthy)
+          statuses
+      in
+      if any_healthy then
+        Ok providers
+      else
+        Error
+          (All_local_unhealthy
+             { local_count = List.length local_providers
+             ; cloud_count = List.length cloud_providers
+             })
 
 (* ── Inline tests ──────────────────────────────────────── *)

@@ -44,6 +44,17 @@ val resolve_named_providers_result :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result
+val resolve_named_providers_result_strict :
+  ?provider_filter:string list ->
+  ?require_tool_choice_support:bool ->
+  ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
+  cascade_name:Keeper_cascade_profile.runtime_name ->
+  unit ->
+  (Llm_provider.Provider_config.t list, string) result
+(** Strict variant of {!resolve_named_providers_result} for execution paths.
+    Provider filter resolution fails closed instead of silently
+    broadening to the full provider set. *)
 val resolve_named_providers :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->

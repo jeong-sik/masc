@@ -620,6 +620,11 @@ let parse_model_strings
 (* Health filtering (extracted to Cascade_health_filter) *)
 let is_local_provider = Cascade_health_filter.is_local_provider
 let filter_healthy = Cascade_health_filter.filter_healthy
+let filter_healthy_strict = Cascade_health_filter.filter_healthy_strict
+let health_filter_rejection_to_string = Cascade_health_filter.health_filter_rejection_to_string
+type health_filter_rejection = Cascade_health_filter.health_filter_rejection =
+  | All_missing_api_key of int
+  | All_local_unhealthy of { local_count : int; cloud_count : int }
 
 (* ── Context window resolution ──────────────────────────── *)
 
@@ -1033,6 +1038,18 @@ let expand_model_strings_for_execution ?rotation_scope (items : string list) =
   |> List.concat_map (expand_auto_model_string ?rotation_scope)
   |> dedupe_stable
 
+(* ── Provider filter rejection (strict mode) ───────────── *)
+
+type provider_filter_rejection =
+  | Filter_matched_none of { filter : string list; available_kinds : string list }
+
+let provider_filter_rejection_to_string = function
+  | Filter_matched_none { filter; available_kinds } ->
+    Printf.sprintf
+      "provider_filter matched no providers: filter=[%s] available=[%s]"
+      (String.concat "," filter)
+      (String.concat "," available_kinds)
+
 (* Filter providers by kind name (exact, case-insensitive).
    Valid filter values: "ollama", "glm", "anthropic", "gemini", "openai_compat",
    "claude_code", "kimi", "kimi_cli", "gemini_cli", "codex_cli".
@@ -1055,6 +1072,27 @@ let apply_provider_filter ~provider_filter ~label providers =
           Llm_provider.Provider_config.string_of_provider_kind p.kind) providers));
       providers)
     else filtered
+
+let apply_provider_filter_strict ~provider_filter ~label providers =
+  match provider_filter with
+  | None | Some [] -> Ok providers
+  | Some filters ->
+    let lc_filters = List.map String.lowercase_ascii filters in
+    let matches (p : Llm_provider.Provider_config.t) =
+      List.mem (Llm_provider.Provider_config.string_of_provider_kind p.kind) lc_filters
+    in
+    let filtered = List.filter matches providers in
+    if filtered = [] then
+      Error
+        (Filter_matched_none
+           { filter = filters
+           ; available_kinds =
+             providers
+             |> List.map (fun (p : Llm_provider.Provider_config.t) ->
+               Llm_provider.Provider_config.string_of_provider_kind p.kind)
+             |> List.sort_uniq String.compare
+           })
+    else Ok filtered
 
 (* ── Local Capacity Query ──────────────────────────────── *)
 

@@ -871,6 +871,47 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
              (String.concat ", " returned));
         Ok providers)
 
+let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?runtime_mcp_policy ~cascade_name () =
+  match lookup_active_profile ?sw ?net ?clock cascade_name with
+  | Error _ as e -> e
+  | Ok (_snapshot, normalized, profile) ->
+      let ordered_entries =
+        Cascade_config.order_weighted_entries
+          ~rotation_scope:normalized
+          profile.weighted_entries
+      in
+      let parsed_declared_providers =
+        Cascade_config.parse_weighted_entries
+             ~api_key_env_overrides:profile.api_key_env_overrides
+             ~cascade_name:normalized
+          ordered_entries
+      in
+      let filtered_declared_providers =
+        match Cascade_config.apply_provider_filter_strict
+                ~provider_filter ~label:normalized parsed_declared_providers with
+        | Error rejection ->
+            Error (Cascade_config.provider_filter_rejection_to_string rejection)
+        | Ok ps -> Ok ps
+      in
+      (match filtered_declared_providers with
+       | Error _ as e -> e
+       | Ok filtered ->
+       let providers =
+         Provider_tool_support.apply_required_tool_use_filter
+           ?runtime_mcp_policy
+           ~require_tool_choice_support ~require_tool_support
+           ~label:normalized filtered
+       in
+       if providers = [] then
+         Error
+           (Printf.sprintf
+              "cascade %s resolved to no callable providers"
+              normalized)
+       else Ok providers)
+
 let resolve_inference_params ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with
   | Ok (_snapshot, _normalized, profile) -> Ok profile.inference_params

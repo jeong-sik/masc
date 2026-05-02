@@ -822,7 +822,12 @@ let handle_crash_auto_pause (ctx : _ context)
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config { meta with paused = true; auto_resume_after_sec }
+            ctx.config
+            { meta with
+              paused = true;
+              auto_resume_after_sec;
+              updated_at = now_iso ();
+            }
         with
         | Ok () -> ()
         | Error err ->

@@ -1075,6 +1075,7 @@
 (include stanzas/test_join_required_guard_counter.inc)
 (include stanzas/test_k2_pipeline_e2e.inc)
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
+(include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 (include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
 (include stanzas/test_keeper_cascade_auto_pause_task074.inc)

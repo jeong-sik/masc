@@ -105,7 +105,7 @@ button { font: inherit; }
   padding: 4px 10px;
   background: transparent; border: 0; color: var(--color-fg-muted);
   font: 600 var(--fs-10)/1 var(--font-sans); letter-spacing: var(--track-caps); text-transform: uppercase;
-  border-radius: 2px; cursor: pointer;
+  border-radius: var(--r-0); cursor: pointer;
 }
 .tb-mode:hover { color: var(--color-fg-primary); }
 .tb-mode.active { background: var(--color-bg-elevated); color: var(--color-accent-fg); }
@@ -143,7 +143,7 @@ button { font: inherit; }
 .tk-ev { display: inline-flex; align-items: center; gap: 8px; font: var(--fs-11)/1 var(--font-mono); color: var(--color-fg-secondary); }
 .tk-ev .t { color: var(--color-fg-disabled); }
 .tk-ev .n { color: var(--color-fg-primary); }
-.tk-ev .k { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--fs-9); padding: 2px 5px; border-radius: 2px; font-weight: var(--fw-semi); }
+.tk-ev .k { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--fs-9); padding: 2px 5px; border-radius: var(--r-0); font-weight: var(--fw-semi); }
 .tk-ev .k.tool  { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.08); }
 .tk-ev .k.err   { color: var(--err-fg);  background: rgb(196 106 90 / .1); }
 .tk-ev .k.claim { color: var(--info-fg); background: rgb(106 142 176 / .1); }
@@ -435,7 +435,7 @@ button { font: inherit; }
 /* Chip */
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 1px 7px; border-radius: 2px;
+  padding: 1px 7px; border-radius: var(--r-0);
   font: var(--fs-9)/1.6 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase;
   border: 1px solid transparent;
 }

@@ -171,7 +171,7 @@ body.widget-solo-mode #root { height: 100vh; }
   color: var(--color-fg-disabled);
   font: var(--fs-10)/1 var(--font-mono);
   cursor: pointer;
-  border-radius: 2px;
+  border-radius: var(--r-0);
   margin-left: 4px;
   text-decoration: none;
 }

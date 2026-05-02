@@ -19,7 +19,7 @@ const TABLIST_DEFAULT_CLASS =
   'inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-0.5'
 
 const TAB_DEFAULT_CLASS = [
-  'relative inline-flex items-center justify-center rounded-sm border border-transparent px-2.5 py-1',
+  'relative inline-flex items-center justify-center rounded-[var(--r-0)] border border-transparent px-2.5 py-1',
   'text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]',
   'transition-colors duration-[var(--t-fast)]',
   'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',

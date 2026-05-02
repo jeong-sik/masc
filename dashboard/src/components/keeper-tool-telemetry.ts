@@ -278,14 +278,14 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           const barWidth = (stat.call_count / maxCount) * 100
           return html`
             <div class="flex items-center gap-2 py-1 group">
-              <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
+              <div class="size-5 rounded-[var(--r-1)] flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
                 ${cat.icon}
               </div>
               <div class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--color-fg-muted)] truncate" title=${stat.name}>
                 ${normalizeToolName(stat.name)}
               </div>
-              <div class="flex-1 h-3 rounded bg-[var(--white-5)] overflow-hidden">
-                <div class="h-full rounded transition-all duration-300"
+              <div class="flex-1 h-3 rounded-[var(--r-1)] bg-[var(--white-5)] overflow-hidden">
+                <div class="h-full rounded-[var(--r-1)] transition-all duration-300"
                   style="width: ${barWidth}%; background: ${stat.failure_count > 0 ? 'var(--color-status-warn)' : 'var(--color-accent-fg)'}; opacity: 0.7">
                 </div>
               </div>
@@ -319,7 +319,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <div class="flex flex-col gap-1.5">
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
-            <div class="flex items-center justify-between py-1 px-2 rounded bg-[var(--white-3)]">
+            <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] bg-[var(--white-3)]">
               <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${normalizeToolName(stat.name)}</span>
               <div class="flex items-center gap-3">
                 <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatDuration(stat.avg_duration_ms)}</span>

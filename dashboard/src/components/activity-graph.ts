@@ -199,7 +199,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
             생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
-            <span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
+            <span class="rounded-[var(--r-1)] bg-[var(--white-6)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
           </button>
         </div>
       </div>
@@ -215,7 +215,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${actionCategoryClass(group)}">
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${actionCategoryClass(group)}">
                         ${categoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-2xs font-medium text-[var(--color-fg-primary)]">${group.actor}</span>` : null}
@@ -231,7 +231,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 </div>
                 <div class="mt-3 flex flex-wrap gap-1.5">
                   ${group.kinds.slice(0, 4).map(kind => html`
-                    <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
+                    <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
                       ${activityEventKindLabel(kind)}
                     </span>
                   `)}
@@ -259,7 +259,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="mt-3 flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
                     ${group.rawEvents.map(event => html`
                       <div class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
-                        <span class="inline-flex min-w-18 items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                        <span class="inline-flex min-w-18 items-center rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                           ${activityEventKindLabel(event.kind)}
                         </span>
                         <div class="min-w-0 flex-1">
@@ -311,12 +311,12 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
                 <span class="text-base font-semibold text-[var(--color-fg-primary)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
                 <span class="text-2xs text-[var(--color-fg-muted)]">${node.weight}회</span>
               </div>
-              <div class="h-1 rounded-sm bg-[var(--color-bg-panel-alt)] overflow-hidden">
-                <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style="width:${pct}%"></div>
+              <div class="h-1 rounded-[var(--r-0)] bg-[var(--color-bg-panel-alt)] overflow-hidden">
+                <div class="h-full rounded-[var(--r-0)] bg-[var(--cyan)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style="width:${pct}%"></div>
               </div>
             </div>
             <span class="text-sm font-semibold text-[var(--color-fg-muted)]-light min-w-8 text-right">${score.toFixed(1)}</span>
-            <span class="text-2xs py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-2xs py-0.5 px-[7px] rounded-[var(--r-1)] ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}

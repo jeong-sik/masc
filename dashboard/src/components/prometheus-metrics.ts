@@ -156,7 +156,7 @@ function typeBadge(type: string): ReturnType<typeof html> {
     gauge: 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
     summary: 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   }
-  return html`<span class="inline-block rounded px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--color-fg-muted)]'}">${type}</span>`
+  return html`<span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--color-fg-muted)]'}">${type}</span>`
 }
 
 function labelPills(labels: Record<string, string>): ReturnType<typeof html> | null {
@@ -165,7 +165,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
   return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
     if (k === 'keeper') {
       return html`<button
-        class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--color-accent-fg)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
+        class="rounded-[var(--r-1)] bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--color-accent-fg)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
         title="키퍼 상세 보기"
         aria-label="키퍼 상세 보기"
         onClick=${(e: Event) => {
@@ -176,7 +176,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
     }
     if (k === 'tool_name' || k === 'tool') {
       return html`<button
-        class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--color-status-warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--color-status-warn)] transition-colors cursor-pointer"
+        class="rounded-[var(--r-1)] bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--color-status-warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--color-status-warn)] transition-colors cursor-pointer"
         title="도구 품질 보기"
         aria-label="도구 품질 보기"
         onClick=${(e: Event) => {
@@ -185,7 +185,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
         }}
       >${k}=${v}</button>`
     }
-    return html`<span class="rounded bg-[var(--white-5)] px-1 py-0.5 text-3xs text-[var(--color-fg-muted)] font-mono">${k}=${v}</span>`
+    return html`<span class="rounded-[var(--r-1)] bg-[var(--white-5)] px-1 py-0.5 text-3xs text-[var(--color-fg-muted)] font-mono">${k}=${v}</span>`
   })}</span>`
 }
 
@@ -356,11 +356,11 @@ export function PrometheusMetrics() {
                 <span class="text-xs text-[var(--color-fg-muted)]">${meta.description}</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="rounded-sm bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                <span class="rounded-[var(--r-0)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${catMetrics.length}개 메트릭
                 </span>
                 ${activeSamples > 0 && html`
-                  <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-3xs text-[var(--color-status-ok)]">
+                  <span class="rounded-[var(--r-0)] bg-[var(--ok-10)] px-2 py-0.5 text-3xs text-[var(--color-status-ok)]">
                     ${activeSamples}개 활성
                   </span>
                 `}

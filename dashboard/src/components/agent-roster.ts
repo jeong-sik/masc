@@ -595,7 +595,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
                 <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
+                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-180 text-sm leading-loose text-[var(--color-fg-primary)]">${pageDescription}</p>
             </div>
@@ -636,12 +636,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-xs font-semibold text-[var(--color-fg-secondary)]">${fallbackStateTitle}</strong>
-                      <span class="inline-flex items-center rounded-sm border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">${countSourceLabel}</span>
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">${countSourceLabel}</span>
                     </div>
                     <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                      <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
-                      ${configuredKeeperHint ? html`<span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
+                      <span class="rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
+                      ${configuredKeeperHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
                     </div>
                   </div>
                 </div>
@@ -743,7 +743,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="min-w-0 overflow-hidden text-[17px] font-semibold leading-[1.3] text-[var(--color-fg-secondary)] transition-colors group-hover:text-[var(--color-accent-fg)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
                       ${agent.synthetic ? html`
-                        <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--color-border-default)] bg-[var(--white-6)] px-2 py-0.5 text-3xs italic text-[var(--color-fg-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
+                        <span class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-6)] px-2 py-0.5 text-3xs italic text-[var(--color-fg-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
                           파생
                         </span>
                       ` : null}
@@ -760,7 +760,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
               ${stateNote ? html`
                 <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                  <span class="inline-flex items-center rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]">
+                  <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]">
                     ${stateNote.label}
                   </span>
                   ${lastActivityAt
@@ -781,7 +781,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`
                       : null}
                     ${fsmStageKey && fsmStageText ? html`
-                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-medium ${stageBadgeClass(fsmStageKey)}" title=${monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium ${stageBadgeClass(fsmStageKey)}" title=${monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
                         ${fsmStageText}
                       </span>
                     ` : null}
@@ -790,7 +790,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ` : null}
 
               <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                   ${lastActivityLabel}
                   <span class="ml-1 text-[var(--color-fg-primary)]">
                     ${lastActivityAt
@@ -801,19 +801,19 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
                 </span>
                 ${isKeeper && contextMeta ? html`
-                  <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>CTX</span>
                     <span class="font-mono font-medium ${contextMeta.pct > 85 ? 'text-[var(--color-status-err)]' : contextMeta.pct > 60 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-secondary)]'}">${contextMeta.pct}%</span>
                     ${contextMeta.detail ? html`
                       <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${contextMeta.detail}</span>
                     ` : null}
-                    <span class="inline-block h-1.5 w-12 overflow-hidden rounded-sm bg-[var(--white-6)]">
-                      <span class="block h-full rounded-sm ${contextMeta.pct > 85 ? 'bg-[var(--color-status-err)]' : contextMeta.pct > 60 ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'}" style="width:${contextMeta.pct}%"></span>
+                    <span class="inline-block h-1.5 w-12 overflow-hidden rounded-[var(--r-0)] bg-[var(--white-6)]">
+                      <span class="block h-full rounded-[var(--r-0)] ${contextMeta.pct > 85 ? 'bg-[var(--color-status-err)]' : contextMeta.pct > 60 ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'}" style="width:${contextMeta.pct}%"></span>
                     </span>
                   </span>
                 ` : null}
                 ${modelMeta && modelDisplay ? html`
-                  <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>${modelMeta.label}</span>
                     <span class="max-w-[18rem] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-3xs text-[var(--color-fg-primary)]" translate="no" title=${modelMeta.value}>${modelDisplay}</span>
                   </span>
@@ -822,15 +822,15 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
               ${(recentTools.length > 0 || toolCallCount != null || toolAuditAt) ? html`
                 <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-                  <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
+                  <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
                   <${AgentCapability} tools=${recentTools} maxVisible=${3} />
                   ${toolCallCount != null && toolCallCount > 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
+                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       ${toolCallCount}회 관찰됨
                     </span>
                   ` : null}
                   ${toolAuditAt ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
+                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       감사 <${TimeAgo} timestamp=${toolAuditAt} />
                     </span>
                   ` : null}

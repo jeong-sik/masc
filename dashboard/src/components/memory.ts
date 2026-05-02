@@ -461,9 +461,9 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
-          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 
           <!-- Delete button — reveal on row hover via opacity utilities -->
           <${ActionButton}

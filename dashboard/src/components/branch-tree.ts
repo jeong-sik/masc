@@ -61,7 +61,7 @@ export function BranchTree({ repository_id, branches, default_branch }: BranchTr
                 ${branch}
               </span>
               ${isDefault
-                ? html`<span class="text-3xs font-bold px-1.5 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shrink-0">기본</span>`
+                ? html`<span class="text-3xs font-bold px-1.5 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shrink-0">기본</span>`
                 : null}
             </li>
           `

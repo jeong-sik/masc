@@ -18,7 +18,7 @@
 
 import { html } from 'htm/preact'
 
-const SKELETON_BASE = 'animate-pulse bg-[var(--white-4)] rounded'
+const SKELETON_BASE = 'animate-pulse bg-[var(--white-4)] rounded-[var(--r-1)]'
 
 export interface SkeletonProps {
   /** Tailwind width class or arbitrary value via class. Default w-full. */

@@ -585,7 +585,7 @@ export function RuntimeMonitor() {
                   ${(metric.top_tools ?? []).length > 0
                     ? html`<div class="flex flex-wrap gap-1 mt-1">
                         ${metric.top_tools?.slice(0, 5).map(t => html`
-                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">
                             ${t.tool} <span class="ml-0.5 text-[var(--color-fg-secondary)]">${t.count}</span>
                           </span>
                         `)}

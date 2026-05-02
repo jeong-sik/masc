@@ -492,13 +492,13 @@ export function KeeperRepoMapping() {
                       <div class="flex flex-col gap-1 min-w-0 text-2xs text-text-muted md:items-end">
                         ${selectedCredential ? html`
                           <div class="flex items-center gap-1.5 min-w-0">
-                            <span class="px-2 py-0.5 rounded border ${credentialStateBadgeClass(selectedCredential.state)}">
+                            <span class="px-2 py-0.5 rounded-[var(--r-1)] border ${credentialStateBadgeClass(selectedCredential.state)}">
                               ${credentialStateLabel(selectedCredential.state)}
                             </span>
                             <span class="font-mono truncate">${selectedCredential.gh_config_dir ?? 'gh_config_dir 없음'}</span>
                           </div>
                           ${selectedLoginCommand ? html`
-                            <code class="block max-w-full overflow-x-auto rounded bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">
+                            <code class="block max-w-full overflow-x-auto rounded-[var(--r-1)] bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">
                               ${selectedLoginCommand}
                             </code>
                           ` : null}
@@ -528,7 +528,7 @@ export function KeeperRepoMapping() {
                         return html`
                           <label
                             key="${keeperId}-${repo.id}"
-                            class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--white-5)] transition-colors"
+                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--white-5)] transition-colors"
                           >
                             <input
                               type="checkbox"

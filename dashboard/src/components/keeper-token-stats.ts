@@ -99,11 +99,11 @@ export function KeeperTokenStats() {
                 <td class="py-1 px-2 text-right">${r.tokens.toLocaleString()}</td>
                 <td class="py-1 pl-2">
                   <div
-                    class="h-1.5 rounded-sm bg-[var(--color-bg-surface)]"
+                    class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]"
                     role="presentation"
                   >
                     <div
-                      class="h-full rounded-sm bg-[var(--color-accent-fg)]"
+                      class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]"
                       style=${`width: ${((r.tokens / maxTokens) * 100).toFixed(1)}%`}
                     ></div>
                   </div>

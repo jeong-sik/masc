@@ -991,21 +991,21 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               <div class="flex flex-wrap gap-2" data-testid="runtime-truth-strip">
                 <span
                   data-runtime-truth="live"
-                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.live === runtimeTallies.total ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
+                  class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${runtimeTallies.live === runtimeTallies.total ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
                   title="통합 observer 의 is_live 카운트"
                 >
                   런타임 활성: ${runtimeTallies.live}/${runtimeTallies.total}
                 </span>
                 <span
                   data-runtime-truth="blocked"
-                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
+                  class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
                   title="운영자 disposition, 터미널 에러, 또는 tool contract 위반 evidence 가 있는 row"
                 >
                   근거 차단: ${runtimeTallies.blocked}
                 </span>
                 <span
                   data-runtime-truth="stale"
-                  class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.stale + runtimeTallies.idle === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
+                  class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${runtimeTallies.stale + runtimeTallies.idle === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
                   title="활성 상태가 아니거나 운영자 임계값보다 오래 idle 통합 상태를 유지한 row"
                 >
                   유휴/지연: ${runtimeTallies.stale + runtimeTallies.idle}
@@ -1024,7 +1024,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                   return html`
                     <span
                       data-invariant=${k}
-                      class="rounded border px-2 py-0.5 text-xs ${tone}"
+                      class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${tone}"
                       title=${`위반 keeper: ${count}`}
                     >
                       ${INVARIANT_LABELS[k]}: ${count}
@@ -1083,7 +1083,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       <span
                         data-runtime-attention
                         data-runtime-level=${attention.level}
-                        class="inline-block self-start rounded border px-2 py-0.5 ${RUNTIME_ATTENTION_CLASS[attention.level]}"
+                        class="inline-block self-start rounded-[var(--r-1)] border px-2 py-0.5 ${RUNTIME_ATTENTION_CLASS[attention.level]}"
                         title=${attention.title}
                       >${attention.label}</span>
                       <span
@@ -1113,7 +1113,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                                     key=${key}
                                     data-runtime-action
                                     data-runtime-action-type=${action.action_type}
-                                    class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="self-start rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                                     title=${action.reason}
                                     aria-label=${action.reason}
                                     disabled=${busy}
@@ -1134,7 +1134,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             <button
                               type="button"
                               data-runtime-assist
-                              class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                              class="self-start rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
                               aria-label="감독형 진단 요청"
                               disabled=${assisting}
@@ -1160,13 +1160,13 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             data-cell
                             data-axis=${a.key}
                             data-runtime-phase-conflict=${cell.runtimePhaseConflict ? 'true' : 'false'}
-                            class="inline-block self-start rounded border px-2 py-0.5 ${cell.className}"
+                            class="inline-block self-start rounded-[var(--r-1)] border px-2 py-0.5 ${cell.className}"
                             title=${cell.title}
                           >${cell.label}</span>
                           <div
                             data-spark
                             data-axis=${a.key}
-                            class="flex h-2 overflow-hidden rounded-sm border border-[var(--white-10)] bg-[var(--white-5)]"
+                            class="flex h-2 overflow-hidden rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-5)]"
                             title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
                           >
                             ${series.map((v, i) => html`

@@ -99,7 +99,7 @@ export function OperationalMeaningPanel({
           <div class="mt-1 text-xl font-semibold text-[var(--color-fg-secondary)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)] leading-relaxed">${insight.detail}</div>
         </div>
-        <span class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
+        <span class=${`rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
           ${insight.tone}
         </span>
       </div>
@@ -110,7 +110,7 @@ export function OperationalMeaningPanel({
 
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${insight.evidence.map(item => html`
-          <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">
+          <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">
             ${item}
           </span>
         `)}
@@ -138,7 +138,7 @@ export function OperationalMeaningPanel({
               <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${lane.field}</span>
-                  <span class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
+                  <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>
@@ -409,7 +409,7 @@ export function PipelineStep({
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
             <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--color-fg-muted)]">${label}</span>
-            ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
+            ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded-[var(--r-1)] px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
             <span class=${`text-3xs font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>

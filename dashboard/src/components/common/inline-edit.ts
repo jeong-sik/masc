@@ -59,7 +59,7 @@ export function InlineEdit({
   if (!editing) {
     return html`
       <span
-        class="inline-block cursor-text rounded px-1 py-0.5 text-sm text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)]"
+        class="inline-block cursor-text rounded-[var(--r-1)] px-1 py-0.5 text-sm text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)]"
         onClick=${startEdit}
         data-testid=${testId}
         role="button"

@@ -1,5 +1,5 @@
 // StatCell — label/value/detail stat box for mission cards and grids.
-// Replaces 12+ inline p-3 rounded bg-[var(--white-4)] grid gap-1 patterns.
+// Replaces 12+ inline p-3 rounded-[var(--r-1)] bg-[var(--white-4)] grid gap-1 patterns.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

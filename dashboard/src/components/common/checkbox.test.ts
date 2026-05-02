@@ -136,8 +136,8 @@ describe('Checkbox', () => {
   it('base classes are still present even when `class` extension is given', () => {
     render(html`<${Checkbox} class="extra-hook" />`, container)
     const cn = container.querySelector('input')!.className
-    // Accent + rounded are part of CHECKBOX_BASE; regression would strip them.
-    expect(cn).toContain('rounded')
+    // Accent + rounded-[var(--r-1)] are part of CHECKBOX_BASE; regression would strip them.
+    expect(cn).toContain('rounded-[var(--r-1)]')
     expect(cn).toContain('accent-[var(--color-accent-fg)]')
   })
 })

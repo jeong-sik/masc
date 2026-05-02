@@ -843,7 +843,7 @@ function ConnectorLivePanel({
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>${connector.bot_user_name}</${MutedSpan}>`
           : null}
         <span class="text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
+        <span class=${`inline-flex items-center gap-1.5 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
@@ -859,7 +859,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
+                  class="cursor-pointer rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -873,7 +873,7 @@ function ConnectorLivePanel({
             : null}
           <button
             type="button"
-            class="cursor-pointer rounded border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
+            class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
             aria-label="toggle header details"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
           >${ui.headerExpanded ? '▴' : '▾'}</button>
@@ -970,7 +970,7 @@ function ConnectorLivePanel({
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                 aria-label="키퍼 디렉토리 상태: 사용 불가"
               >
                 <span aria-hidden="true">⚠</span>
@@ -997,7 +997,7 @@ function ConnectorLivePanel({
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                  class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                   aria-label="키퍼 설정 상태: 설정된 키퍼 없음"
                   data-no-keepers-status-chip
                 >
@@ -1038,7 +1038,7 @@ function ConnectorLivePanel({
                 <div class="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex flex-wrap items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                      class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                       aria-label="사이드카 프로세스 상태: 실행 중 아님"
                       data-sidecar-status-chip
                     >
@@ -1215,7 +1215,7 @@ function ConnectorLivePanel({
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
-                                                class="!rounded-sm !py-0.5"
+                                                class="!rounded-[var(--r-0)] !py-0.5"
                                                 title=${roomId}
                                                 ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
@@ -1326,7 +1326,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div class="flex items-center gap-2">
           <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
-          <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
+          <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
             ${tone.label}
           </span>
         </div>
@@ -1407,7 +1407,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
+        <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
           ${tone.label}
         </span>
       </div>
@@ -1427,7 +1427,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       </div>
       ${lastError
         ? html`
-            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </div>
           `
@@ -1456,7 +1456,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
               : null}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${badgeClass}`}>
+        <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${badgeClass}`}>
           ${event.outcome}
         </span>
       </div>

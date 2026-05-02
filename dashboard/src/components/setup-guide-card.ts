@@ -76,7 +76,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
+      class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -129,7 +129,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-ok)]"
+                  class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-ok)]"
                   aria-label="설정 가이드 완료"
                   data-setup-complete-badge
                 >
@@ -183,7 +183,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
-                        class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>

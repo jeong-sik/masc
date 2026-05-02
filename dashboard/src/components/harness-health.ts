@@ -212,9 +212,9 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
       </div>
 
       <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-disabled)]">
-        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
-        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
-        <span class="rounded-sm border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
       </div>
 
       <${MermaidGraph}

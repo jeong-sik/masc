@@ -112,7 +112,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${name}</div>
         <div
-          class="inline-flex items-center rounded px-2 py-0.5 text-3xs font-semibold tracking-wide mt-1"
+          class="inline-flex items-center rounded-[var(--r-1)] px-2 py-0.5 text-3xs font-semibold tracking-wide mt-1"
           style="${phaseInlineStyle(phase)}"
           role="status"
         >

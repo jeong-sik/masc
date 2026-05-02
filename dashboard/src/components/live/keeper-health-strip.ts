@@ -34,7 +34,7 @@ function ContextBar({ p }: { p: KeeperPressure }) {
   const pct = Math.round(p.ratio * 100)
   return html`
     <div
-      class="relative h-5 w-1.5 rounded-sm ${pressureColor(p.ratio)} border ${stageIndicator(p.stage)} opacity-90"
+      class="relative h-5 w-1.5 rounded-[var(--r-0)] ${pressureColor(p.ratio)} border ${stageIndicator(p.stage)} opacity-90"
       title="${p.name}: ctx ${pct}% (${p.stage})"
     />
   `

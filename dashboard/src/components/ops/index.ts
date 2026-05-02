@@ -221,7 +221,7 @@ export function Ops() {
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[var(--color-fg-secondary)] leading-relaxed">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-[var(--r-1)] bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[var(--color-fg-muted)] text-xs">
             ${workflowReady
               ? 'Target and inputs were prefilled from the recommended action.'

@@ -188,7 +188,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function CredentialTypeBadge({ type }: { type: CredentialType }) {
   return html`
-    <span class="text-2xs font-bold px-2 py-0.5 rounded border ${credentialTypeBadgeClass(type)} shadow-sm">
+    <span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${credentialTypeBadgeClass(type)} shadow-sm">
       ${credentialTypeLabel(type)}
     </span>
   `
@@ -196,7 +196,7 @@ function CredentialTypeBadge({ type }: { type: CredentialType }) {
 
 function CredentialStateBadge({ state }: { state?: CredentialState | null }) {
   return html`
-    <span class="text-2xs font-bold px-2 py-0.5 rounded border ${credentialStateBadgeClass(state)} shadow-sm">
+    <span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${credentialStateBadgeClass(state)} shadow-sm">
       ${credentialStateLabel(state)}
     </span>
   `

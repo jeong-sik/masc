@@ -166,7 +166,7 @@ export function AddRepoDialog() {
           </h2>
           <button
             type="button"
-            class="p-1 rounded text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+            class="p-1 rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
             aria-label="닫기"
             onClick=${closeAddRepoDialog}
           >

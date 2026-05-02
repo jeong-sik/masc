@@ -32,7 +32,7 @@ const FIELD_COLOR: Record<string, string> = {
 function LegendItem({ dotClass, label }: { dotClass: string; label: string }) {
   return html`
     <span class="flex items-center gap-1">
-      <span class="inline-block h-2 w-3 rounded-sm ${dotClass}"></span>${label}
+      <span class="inline-block h-2 w-3 rounded-[var(--r-0)] ${dotClass}"></span>${label}
     </span>
   `
 }
@@ -182,7 +182,7 @@ export function SwimlaneTimeline({
             const isBusiest = busiestLane === lane.short && count > 0
             return html`
               <span
-                class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono tabular-nums ${
+                class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono tabular-nums ${
                   count === 0
                     ? 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
                     : isBusiest
@@ -419,7 +419,7 @@ export function TransitionTrail({
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
           const dimmed = hoveredSegment != null && !inSegment
           const rowCls = inSegment
-            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded-[var(--r-1)] px-1'
             : ''
           const reason = inferTransitionReason(entry.field, entry.from, entry.to)
           const tooltip = reason
@@ -480,7 +480,7 @@ export function TopTransitionsPanel({
           const dimmed = hoveredSegment != null && !matchesHover
           const widthPct = Math.max(4, Math.round((entry.count / maxCount) * 100))
           const rowCls = matchesHover
-            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded-[var(--r-1)] px-1'
             : ''
           return html`
             <div
@@ -492,7 +492,7 @@ export function TopTransitionsPanel({
               <span class="text-[var(--color-fg-muted)]">→</span>
               <span class="text-[var(--color-fg-secondary)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
-                <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden">
+                <span class="h-1 w-12 rounded-[var(--r-0)] bg-[var(--white-8)] overflow-hidden">
                   <span
                     class="block h-full bg-[var(--color-accent-fg)]"
                     style=${`width: ${widthPct}%`}
@@ -565,7 +565,7 @@ export function DwellHistogramPanel({
                     && hoveredSegment.field === lane.field
                     && hoveredSegment.value === entry.value
                   const rowCls = highlighted
-                    ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-0.5'
+                    ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded-[var(--r-1)] px-0.5'
                     : ''
                   return html`
                     <div
@@ -573,7 +573,7 @@ export function DwellHistogramPanel({
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-15 shrink-0 text-[var(--color-fg-primary)] truncate">${displayState(entry.value)}</span>
-                      <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
+                      <span class="flex-1 h-1.5 rounded-[var(--r-0)] bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}

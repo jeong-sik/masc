@@ -228,7 +228,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
             <span class="text-[var(--color-fg-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
-            <div class="mt-1.5 h-2 rounded-sm bg-[var(--white-6)] overflow-hidden flex">
+            <div class="mt-1.5 h-2 rounded-[var(--r-0)] bg-[var(--white-6)] overflow-hidden flex">
               <div
                 class="h-full bg-[var(--ok-48)] transition-[width] duration-300"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}
@@ -308,7 +308,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                     <td class="py-2 px-3 text-right font-mono text-[var(--color-fg-secondary)]">${c.score_after.toFixed(4)}</td>
                     <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}">${formatDelta(c.delta)}</td>
                     <td class="py-2 px-3 text-center">
-                      <span class="px-1.5 py-0.5 rounded text-3xs font-semibold ${
+                      <span class="px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-semibold ${
                         c.decision === 'keep'
                           ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
                           : 'bg-[var(--bad-soft)] text-[var(--color-status-err)] border border-[var(--bad-20)]'

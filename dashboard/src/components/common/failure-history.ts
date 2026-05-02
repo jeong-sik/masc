@@ -122,7 +122,7 @@ export function FailureHistory({
                 ${f.retryable && !f.resolved && onRetry
                   ? html`
                       <button
-                        class="rounded px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--white-5)]"
+                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--white-5)]"
                         onClick=${() => onRetry(f.id)}
                         aria-label="${f.message} 재시도"
                       >
@@ -133,7 +133,7 @@ export function FailureHistory({
                 ${onDismiss && !f.resolved
                   ? html`
                       <button
-                        class="rounded px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]"
+                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]"
                         onClick=${() => onDismiss(f.id)}
                         aria-label="${f.message} 해제"
                       >

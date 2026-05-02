@@ -127,7 +127,7 @@ function RangeSelector() {
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
-          class="rounded px-2 py-0.5 font-medium transition-colors ${
+          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === preset
               ? 'bg-accent/20 text-accent'
               : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
@@ -157,7 +157,7 @@ function ViewSelector({
       ] as const).map(view => html`
         <button
           type="button"
-          class="rounded px-2 py-0.5 font-medium transition-colors ${
+          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === view.key
               ? 'bg-accent/20 text-accent'
               : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
@@ -304,7 +304,7 @@ export function Observatory() {
             >
               ${liveMode.value ? html`
                 <span class="relative flex h-2 w-2" aria-hidden="true">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok-10)] opacity-75"></span>
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--ok-10)] opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-2 w-2 bg-[var(--ok-10)]"></span>
                 </span>
                 자동 갱신

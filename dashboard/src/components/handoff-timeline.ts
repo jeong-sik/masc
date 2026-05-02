@@ -349,7 +349,7 @@ export function HandoffTimeline({
                     : 'text-text-muted hover:text-text hover:bg-bg-1/60'
                   const clickable = typeof onSelectKeeper === 'function'
                   const rowLabelCls =
-                    `w-32 shrink-0 truncate text-2xs font-mono rounded px-1 text-left ${labelCls}` +
+                    `w-32 shrink-0 truncate text-2xs font-mono rounded-[var(--r-1)] px-1 text-left ${labelCls}` +
                     (clickable
                       ? ` cursor-pointer ${ringFocusClasses()}`
                       : '')

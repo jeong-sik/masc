@@ -85,7 +85,7 @@ export function SectionCard({
   // SPEC `.section-head` upgrade — SectionHead atom replaces the
   // legacy SectionHeader. The strip wants to sit flush against the
   // card's top edge, so the outer SurfaceCard padding is forced to 0
-  // (overflow-hidden lets the strip clip into the rounded corner) and
+  // (overflow-hidden lets the strip clip into the rounded-[var(--r-1)] corner) and
   // the body padding moves into a dedicated wrapper. The `light`
   // variant deliberately keeps the bg-transparent override — the
   // SectionHead's bg-surface still reads as a strip because it sits

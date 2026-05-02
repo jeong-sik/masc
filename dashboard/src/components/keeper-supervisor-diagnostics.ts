@@ -38,7 +38,7 @@ function registryStateBadge(state: string | null) {
     Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--stalled-fg)]' },
   }
   const c = colors[state] ?? { bg: 'bg-[var(--white-4)]', text: 'text-[var(--color-fg-muted)]' }
-  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
+  return html`<span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
 const COHORT_COLORS: Record<CrashCategory, string> = {
@@ -59,7 +59,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
   return html`
     <div>
       <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
-      <div class="flex w-full h-3 rounded-sm overflow-hidden bg-[var(--white-5)]">
+      <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--white-5)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
                title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
@@ -93,7 +93,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
       <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--purple-12)]">
+          <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--purple-12)]">
             <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
             <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
@@ -174,7 +174,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
-                    class="text-3xs font-medium px-2 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
+                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
                     onClick=${() => { crashShowAll.value = !crashShowAll.value }}
                     aria-pressed=${crashShowAll.value}>
                     ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}
@@ -194,7 +194,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 ${visible.length === 0 ? html`
                   <div class="py-2 px-2 text-2xs text-[var(--color-fg-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
-                  <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
+                  <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--white-3)]">
                     <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>

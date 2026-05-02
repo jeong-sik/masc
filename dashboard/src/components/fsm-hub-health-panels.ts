@@ -78,7 +78,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
       : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
   return html`
     <span
-      class=${`rounded-sm border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
+      class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
       title=${flagTooltip(label, on)}
     >
       ${label}
@@ -123,7 +123,7 @@ export function InvariantsPanel({
           Safety
         </div>
         <span
-          class=${`rounded-sm border px-2 py-0.5 text-3xs font-mono tabular-nums ${
+          class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono tabular-nums ${
             allOk
               ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
               : 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]'

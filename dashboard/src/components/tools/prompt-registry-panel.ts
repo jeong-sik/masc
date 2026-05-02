@@ -260,7 +260,7 @@ export function PromptRegistryPanel() {
                 <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
-                    <span class="rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</span>
+                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</span>
                   `)}
                 </div>
               </div>

@@ -170,7 +170,7 @@ describe('KpiCell component', () => {
   // ── progress prop ──
   // The progress bar fill carries `transition: width 500ms` + a width% — a
   // stable signature happy-dom can resolve, even though it doesn't compute
-  // layout. aria-label encodes a rounded, clamped progress for SR users.
+  // layout. aria-label encodes a rounded-[var(--r-1)], clamped progress for SR users.
 
   it('omits the progress bar when progress is undefined', () => {
     const el = mount({ label: 'CTX', value: '40k' })
@@ -194,7 +194,7 @@ describe('KpiCell component', () => {
     expect(el.innerHTML).toContain('width: 0%')
   })
 
-  it('describes progress in the aria-label (rounded, clamped)', () => {
+  it('describes progress in the aria-label (rounded-[var(--r-1)], clamped)', () => {
     const el = mount({ label: 'CTX', value: '40k', progress: 73.4 })
     expect(el.getAttribute('aria-label')).toContain('progress 73%')
   })

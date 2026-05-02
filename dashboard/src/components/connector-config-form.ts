@@ -318,7 +318,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -411,7 +411,7 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
           unsupported type — refactor BotConfig?
         </div>
       `
@@ -443,7 +443,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
           type="button"
-          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
+          class="mt-2 cursor-pointer rounded-[var(--r-1)] border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
           aria-label="config schema 다시 가져오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
@@ -542,7 +542,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
+                <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url

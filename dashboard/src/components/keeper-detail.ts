@@ -200,7 +200,7 @@ function RuntimeBadge({ tone, children }: { tone: 'warn' | 'bad'; children: unkn
   const toneCls = tone === 'warn'
     ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
     : 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
-  return html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${toneCls}">${children}</span>`
+  return html`<span class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-semibold ${toneCls}">${children}</span>`
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
@@ -439,7 +439,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${trustDisposition
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
+              <span class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
                 검증 ${trustDispositionLabel}
               </span>
             `

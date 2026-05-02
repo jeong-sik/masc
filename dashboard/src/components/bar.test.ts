@@ -61,7 +61,7 @@ describe('Bar', () => {
     expect(el.getAttribute('aria-valuemax')).toBe('100')
   })
 
-  it('defaults aria-label to the rounded percent', () => {
+  it('defaults aria-label to the rounded-[var(--r-1)] percent', () => {
     const el = mount({ value: 67.4 })
     expect(el.getAttribute('aria-label')).toBe('67%')
   })

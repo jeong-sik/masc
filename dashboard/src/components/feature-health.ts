@@ -175,7 +175,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]">
+        <div class="rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]">
           ${categoryData.total}
         </div>
       </div>

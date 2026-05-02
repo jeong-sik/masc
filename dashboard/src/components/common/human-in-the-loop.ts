@@ -163,13 +163,13 @@ export function HumanInTheLoop({
 
       <div class="flex gap-2">
         <button
-          class="flex-1 rounded bg-[var(--ok-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
+          class="flex-1 rounded-[var(--r-1)] bg-[var(--ok-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
           onClick=${handleApprove}
         >
           승인
         </button>
         <button
-          class="flex-1 rounded bg-[var(--error-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
+          class="flex-1 rounded-[var(--r-1)] bg-[var(--error-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
           onClick=${handleReject}
         >
           거부

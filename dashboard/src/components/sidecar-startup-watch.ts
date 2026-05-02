@@ -108,7 +108,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
       </div>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-4 text-[var(--color-status-warn)] hover:bg-[var(--warn-10)]"
+        class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-4 text-[var(--color-status-warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
           openSidecarLogs(connectorId)
           // Don't clear startAt yet — operator might toggle logs back closed
@@ -118,7 +118,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
       >📋 로그 열기</button>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--color-status-warn)]/70 hover:text-[var(--color-status-warn)]"
+        class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--color-status-warn)]/70 hover:text-[var(--color-status-warn)]"
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}
       >×</button>

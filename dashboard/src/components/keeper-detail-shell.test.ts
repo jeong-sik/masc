@@ -53,7 +53,7 @@ describe('KeeperDetailSection', () => {
     expect(section?.getAttribute('aria-label')).toBe('Debug')
   })
 
-  it('applies scroll margin and rounded styling', () => {
+  it('applies scroll margin and rounded-[var(--r-1)] styling', () => {
     render(
       html`<${KeeperDetailSection}
         id="keeper-config"

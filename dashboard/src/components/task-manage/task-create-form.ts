@@ -28,7 +28,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
         <div class="text-xs leading-relaxed text-text-muted">
           ${linkedGoalId
             ? html`
-              <span class="inline-flex items-center gap-1 rounded border border-accent/30 bg-[var(--accent-10)] px-1.5 py-0.5 text-2xs text-accent">
+              <span class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-1.5 py-0.5 text-2xs text-accent">
                 goal ${linkedGoalTitle ?? linkedGoalId}
               </span>
               에 직접 연결된 backlog 태스크를 생성합니다.

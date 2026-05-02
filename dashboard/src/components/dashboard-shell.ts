@@ -118,12 +118,12 @@ export function ConnectionStatus() {
       class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
       title=${titleAttr || undefined}
     >
-      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
+      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
         >Attention ${attentionCount}<//>
       ` : null}
     </div>
@@ -140,7 +140,7 @@ export function ErrorCounterBadge() {
     <div class="relative" role="status">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
+        class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
         title=${count > 0 ? `${count} unacknowledged errors` : 'No errors'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
         aria-expanded=${open}
@@ -239,7 +239,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class=${`cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`Server build ${label}`}
         title=${hoverTitle}
@@ -385,7 +385,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
   const titleText = composeHealthIndicatorTitle(label, attentionLines)
 
-  const dot = html`<span class="block size-2 shrink-0 rounded-sm ${dotClass} shadow-sm"></span>`
+  const dot = html`<span class="block size-2 shrink-0 rounded-[var(--r-0)] ${dotClass} shadow-sm"></span>`
 
   if (collapsed) {
     return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
@@ -414,7 +414,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           </div>
         ` : null}
         <button type="button"
-          class=${`flex size-6 items-center justify-center rounded-sm border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--white-10)] hover:bg-[var(--white-4)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+          class=${`flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--white-10)] hover:bg-[var(--white-4)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
           aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick=${onToggle}
           title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -437,7 +437,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex h-7 w-full items-center justify-center rounded-sm border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -453,10 +453,10 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex min-h-7 w-full items-center gap-1.5 rounded-sm border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex size-5 shrink-0 items-center justify-center rounded-sm ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--white-3)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
+                  <span class="flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--white-3)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
                     <${SurfaceIcon} icon=${surface.icon} size=${13} />
                   </span>
                   <div class="flex-1 min-w-0">
@@ -473,7 +473,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           <${RouteLink}
                             tab=${surface.id}
                             params=${item.params}
-                            class="block w-full rounded-sm border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-primary)]'}"
+                            class="block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-primary)]'}"
                             ariaCurrent=${isSectionActive ? 'page' : undefined}
                           >
                             <div class="truncate">${item.label}</div>
@@ -666,7 +666,7 @@ function SurfaceLead() {
               const crumbEl = crumb.navigableTab !== null && !isLast
                 ? html`<${RouteLink}
                     tab=${crumb.navigableTab}
-                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]"
+                    class="cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]"
                   >${crumb.label}<//>`
                 : html`<span
                     class="px-1 py-0.5 ${isLast ? 'text-[var(--color-fg-primary)]' : ''}"

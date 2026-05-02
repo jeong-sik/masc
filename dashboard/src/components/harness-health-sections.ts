@@ -257,9 +257,9 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
       ${entries.map(([gate, count]) => html`
         <div class="flex items-center gap-2">
           <span class="w-20 text-right font-mono text-xs text-[var(--color-fg-muted)]">${gate}</span>
-          <div class="h-4 flex-1 overflow-hidden rounded bg-[var(--white-6)]">
+          <div class="h-4 flex-1 overflow-hidden rounded-[var(--r-1)] bg-[var(--white-6)]">
             <div
-              class="h-full rounded opacity-80 transition-all"
+              class="h-full rounded-[var(--r-1)] opacity-80 transition-all"
               style=${{ width: `${(count / max) * 100}%`, background: 'var(--color-accent-fg)' }}
             />
           </div>
@@ -444,7 +444,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
             ${item.strategies.length > 0 ? html`
               <div class="mt-2 flex flex-wrap gap-1">
                 ${item.strategies.map(strategy => html`
-                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
+                  <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
                 `)}
               </div>
             ` : null}

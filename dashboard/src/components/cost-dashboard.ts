@@ -321,8 +321,8 @@ function ModelRow({
         $${cost.toFixed(2)}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
-        <div class="h-1.5 rounded-sm bg-[var(--color-bg-surface)]">
-          <div class="h-full rounded-sm bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>
+        <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
+          <div class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>
         </div>
       </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${p50 == null ? 'text-text-disabled' : ''}">
@@ -332,9 +332,9 @@ function ModelRow({
         ${p95 == null ? html`<span class="text-text-disabled">—</span>` : `${p95}ms`}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
-        <div class="h-1.5 rounded-sm bg-[var(--color-bg-surface)]">
+        <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
           <div
-            class="h-full rounded-sm ${overBudget ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'}"
+            class="h-full rounded-[var(--r-0)] ${overBudget ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'}"
             style=${`width: ${p95Pct.toFixed(1)}%`}
           ></div>
         </div>
@@ -371,8 +371,8 @@ function KeeperRow({
         $${cost.toFixed(2)}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
-        <div class="h-1.5 rounded-sm bg-[var(--color-bg-surface)]">
-          <div class="h-full rounded-sm bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>
+        <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
+          <div class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>
         </div>
       </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${p50 == null ? 'text-text-disabled' : ''}">
@@ -382,9 +382,9 @@ function KeeperRow({
         ${p95 == null ? html`<span class="text-text-disabled">—</span>` : `${Math.round(p95)}ms`}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
-        <div class="h-1.5 rounded-sm bg-[var(--color-bg-surface)]">
+        <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
           <div
-            class="h-full rounded-sm ${overBudget ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'}"
+            class="h-full rounded-[var(--r-0)] ${overBudget ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'}"
             style=${`width: ${p95Pct.toFixed(1)}%`}
           ></div>
         </div>
@@ -520,7 +520,7 @@ function CostLatency({ buckets, p50, p95 }: {
           const bad = b.lo_ms >= 8000
           return html`
             <div key=${i} class="flex flex-1 flex-col items-center gap-1">
-              <div class="w-full rounded-sm ${bad ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-accent-fg)]'}" style=${`height: ${Math.max(4, pct * 1.5).toFixed(1)}px`}></div>
+              <div class="w-full rounded-[var(--r-0)] ${bad ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-accent-fg)]'}" style=${`height: ${Math.max(4, pct * 1.5).toFixed(1)}px`}></div>
               <span class="font-mono text-2xs text-text-muted">${fmtLo(b.lo_ms)}</span>
             </div>
           `
@@ -576,7 +576,7 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
                 <td class="px-2 py-1.5 text-right font-mono">${e.raw_value.toFixed(3)}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.threshold.toFixed(3)}</td>
                 <td class="px-2 py-1.5 text-center">
-                  <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${e.triggered ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
+                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${e.triggered ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
                     ${e.triggered ? 'TRIGGERED' : 'ok'}
                   </span>
                 </td>
@@ -644,7 +644,7 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
                 <td class="px-2 py-1.5 text-text-strong">${e.agent_name}</td>
                 <td class="px-2 py-1.5 font-mono text-text-muted">${e.room_id}</td>
                 <td class="px-2 py-1.5">
-                  <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
+                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
                     ${fmtKind(e.kind)}
                   </span>
                 </td>
@@ -841,7 +841,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                 type="button"
                 role="radio"
                 aria-checked=${viewMode.value === 'model'}
-                class="rounded px-2 py-0.5 text-2xs ${viewMode.value === 'model'
+                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'model'
                   ? 'bg-[var(--accent-15)] text-accent'
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { viewMode.value = 'model'; void loadModelMetrics(windowMinutes.value) }}
@@ -852,7 +852,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                 type="button"
                 role="radio"
                 aria-checked=${viewMode.value === 'keeper'}
-                class="rounded px-2 py-0.5 text-2xs ${viewMode.value === 'keeper'
+                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'keeper'
                   ? 'bg-[var(--accent-15)] text-accent'
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { viewMode.value = 'keeper'; void loadKeeperMetrics(windowMinutes.value) }}
@@ -867,7 +867,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   type="button"
                   role="radio"
                   aria-checked=${windowMinutes.value === o.key}
-                  class="rounded border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
+                  class="rounded-[var(--r-1)] border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
                     ? 'border-accent/50 bg-[var(--accent-15)] text-accent'
                   : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
                   onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key, view) }}

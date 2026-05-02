@@ -124,7 +124,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
       <div class="flex flex-wrap gap-1.5">
         ${divs.map(d => html`
           <span
-            class="px-2 py-0.5 rounded-sm border border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] text-2xs font-mono tabular-nums"
+            class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] text-2xs font-mono tabular-nums"
             title=${d.reason}
           >
             ${d.field}=${String(d.value)}

@@ -356,7 +356,7 @@ function OutcomesLedger({ keeper, outcomes }: {
 //   3) "스스로 돌고 있나?"          → autonomy     (자율 턴/행동 비율)
 //   4) "무엇을 해냈고 실패했나?"   → outcomes     (backed by KeeperOutcomes)
 //
-// Each section is a rounded card with a ko-language question-header.
+// Each section is a rounded-[var(--r-1)] card with a ko-language question-header.
 // PR 5 will expand the outcomes section with the full Success/Failure
 // Ledger, Validator pass-rate grouping, and Resilience Profile.
 

@@ -330,7 +330,7 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <${BoolBadge} value=${value} />
     </div>
@@ -384,8 +384,8 @@ function Callout({
 
 function BoolBadge({ value }: { value: boolean }) {
   return value
-    ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-[var(--white-5)] text-text-dim border border-[var(--white-10)] shadow-sm">OFF</span>`
+    ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--white-10)] shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -422,7 +422,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
         : 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
-  return html`<span class="text-3xs font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
+  return html`<span class="text-3xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 
 function PromptBlock({
@@ -454,12 +454,12 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
     <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
+        class="relative inline-flex h-5 w-9 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
         aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
         aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-sm bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-3.5 w-3.5 rounded-[var(--r-0)] bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `
@@ -761,7 +761,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -934,7 +934,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
-        <div class="py-2 px-3 rounded bg-[var(--white-3)]">
+        <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
             <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
@@ -1035,7 +1035,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             ${goalOptions.map((goal) => {
               const checked = rd.active_goal_ids.includes(goal.id)
               return html`
-                <label class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
+                <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
                   <input
                     type="checkbox"
                     checked=${checked}
@@ -1063,7 +1063,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">검증자</span>
+        <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}
@@ -1140,7 +1140,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
+                          <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

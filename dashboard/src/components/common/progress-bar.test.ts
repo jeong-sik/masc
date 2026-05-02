@@ -87,7 +87,7 @@ describe('ProgressBar component', () => {
     expect(fill.getAttribute('style')).toContain('width: 42.50%')
   })
 
-  it('data-progress-bar-pct is integer-rounded for clean E2E selectors', () => {
+  it('data-progress-bar-pct is integer-rounded-[var(--r-1)] for clean E2E selectors', () => {
     render(html`<${ProgressBar} pct=${33.7} />`, container)
     expect(container.querySelector('[data-progress-bar]')!.getAttribute('data-progress-bar-pct')).toBe('34')
   })

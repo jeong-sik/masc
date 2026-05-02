@@ -125,7 +125,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
@@ -147,7 +147,7 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
     <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
       ${LEVELS.map(level => {
         const isActive = level === active
-        const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
+        const base = 'cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
         const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--color-fg-primary)]'
         const idleCls = 'border-[var(--white-8)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
         return html`
@@ -230,7 +230,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                 ? html`
                     <button
                       type="button"
-                      class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+                      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
                       aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
@@ -244,7 +244,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
         ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
           ? html`
-              <div class="rounded bg-[var(--color-bg-page)] p-2">
+              <div class="rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2">
                 <${SkeletonText} lines=${8} ariaLabel="로그 불러오는 중" />
               </div>
             `
@@ -259,7 +259,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   </div>
                 `
               : html`
-                  <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
+                  <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
                 `
             : html`
                 <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">

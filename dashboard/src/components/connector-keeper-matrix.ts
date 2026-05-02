@@ -205,7 +205,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
   return html`
     <button
       type="button"
-      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
+      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded-[var(--r-1)] px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
@@ -265,7 +265,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 ${matrix.columns.map(colId => html`
                   <button
                     type="button"
-                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
+                    class="flex cursor-pointer items-center justify-center gap-1 rounded-[var(--r-1)] px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                     aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
@@ -355,7 +355,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   return html`
     <button
       type="button"
-      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
+      class=${`flex cursor-pointer items-center gap-2 truncate rounded-[var(--r-1)] px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
       aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}

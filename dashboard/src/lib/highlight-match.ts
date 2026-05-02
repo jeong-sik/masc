@@ -64,7 +64,7 @@ export function highlightMatch(text: string, needle: string): readonly unknown[]
     if (start > cursor) parts.push(text.slice(cursor, start))
     const matched = text.slice(start, end)
     parts.push(
-      html`<mark class="bg-yellow-500/20 text-inherit rounded-sm px-0.5">${matched}</mark>`,
+      html`<mark class="bg-yellow-500/20 text-inherit rounded-[var(--r-0)] px-0.5">${matched}</mark>`,
     )
     cursor = end
   }

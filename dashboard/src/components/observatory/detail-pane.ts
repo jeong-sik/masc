@@ -72,14 +72,14 @@ export function DetailPane() {
           <span class="text-3xs uppercase tracking-widest text-accent font-semibold">상세</span>
           <span class="text-xs font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
-            <span class="rounded-sm border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
+            <span class="rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
               ${outcome.label}
             </span>
           ` : null}
         </div>
         <button
           type="button"
-          class="rounded px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--white-5)]"
+          class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--white-5)]"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >

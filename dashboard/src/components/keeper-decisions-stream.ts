@@ -51,7 +51,7 @@ export function summarizeDecisionEvents(events: readonly KeeperDecision[]): Deci
 
 function MetricCell({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
+    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
       <div class="font-mono text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">${label}</div>
       <div class="mt-1 font-mono text-lg font-semibold leading-none text-[var(--color-fg-primary)]">${value}</div>
     </div>
@@ -80,13 +80,13 @@ export function KeeperDecisionsTable({
         <${MetricCell} label="tool-linked" value=${stats.tool} />
       </div>
 
-      <div class="flex items-center justify-between rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
         <span class="font-mono text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">
           keeper decisions · ${events.length} events · limit ${limit}
         </span>
       </div>
 
-      <div class="overflow-x-auto rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
+      <div class="overflow-x-auto rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
         <table class="w-full min-w-[760px]" aria-label="Keeper decision events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">
@@ -140,7 +140,7 @@ export function KeeperDecisionsStream({ limit = 200 }: { limit?: number }) {
       <div class="mb-3 flex justify-end">
         <button
           type="button"
-          class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${() => { void loadDecisions(limit) }}
         >
           refresh

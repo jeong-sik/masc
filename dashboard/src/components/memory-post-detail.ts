@@ -43,8 +43,8 @@ function expiryChip(post: BoardPost) {
   if (!post.expires_at) return null
   const expiresAtMs = Date.parse(post.expires_at)
   if (!Number.isFinite(expiresAtMs)) return null
-  if (expiresAtMs <= Date.now()) return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-3xs tracking-wide uppercase bg-[var(--bad-15)] text-[var(--bad-light)] border border-[var(--bad-30)]">만료됨</span>`
-  return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-3xs tracking-wide uppercase bg-[var(--warn-15)] text-[var(--color-status-warn)] border border-[var(--warn-30)]">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
+  if (expiresAtMs <= Date.now()) return html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-0)] text-3xs tracking-wide uppercase bg-[var(--bad-15)] text-[var(--bad-light)] border border-[var(--bad-30)]">만료됨</span>`
+  return html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-0)] text-3xs tracking-wide uppercase bg-[var(--warn-15)] text-[var(--color-status-warn)] border border-[var(--warn-30)]">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
 }
 
 // ── Comment tree building ──────────────────────────────────────────
@@ -337,9 +337,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
-                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${expiryChip(post)}
                   </div>
                   ${post.classification_reason

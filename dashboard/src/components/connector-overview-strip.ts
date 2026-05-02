@@ -274,17 +274,17 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         aria-pressed=${selected ? 'true' : 'false'}
       >
         <span
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-base"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--r-1)] text-base"
           style=${accent}
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
             <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${displayName}</span>
-            <span class=${`rounded-sm border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+            <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
+                    class="rounded-[var(--r-0)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -460,7 +460,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
   const glyph = TILE_NOTICE_GLYPH[notice.tone]
   return html`
     <div
-      class=${`flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-3xs ${tone}`}
+      class=${`flex min-w-0 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-3xs ${tone}`}
       role="alert"
       aria-label=${`${notice.label}: ${notice.detail}`}
       title=${notice.detail}

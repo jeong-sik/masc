@@ -1,5 +1,5 @@
 // CountBadge / StatusBadge — small pill indicators
-// Replaces 20+ inline badge patterns (text-3xs px-1.5 py-px rounded)
+// Replaces 20+ inline badge patterns (text-3xs px-1.5 py-px rounded-[var(--r-1)])
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

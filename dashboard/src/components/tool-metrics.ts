@@ -83,7 +83,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
         return html`
           <div class="tool-bar-row" key=${item.name}>
             <div class="flex items-center gap-1.5 overflow-hidden">
-              <span class="flex-shrink-0 size-4 rounded text-3xs font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
+              <span class="flex-shrink-0 size-4 rounded-[var(--r-1)] text-3xs font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--color-fg-primary)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs" title=${item.name}>${item.name}</span>
             </div>
             <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--white-4)]">${cat.label}</span>
@@ -106,17 +106,17 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-essential">공개 MCP</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-essential">공개 MCP</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-standard">내부 전용</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-standard">내부 전용</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-full">숨김</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-full">숨김</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>

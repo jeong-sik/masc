@@ -87,7 +87,7 @@ export function ExcusePatterns() {
           <div class="flex items-center gap-3">
             <button
               type="submit"
-              class="px-4 py-2 bg-[var(--color-accent-fg)] text-white rounded hover:opacity-90 disabled:opacity-50 text-sm font-medium"
+              class="px-4 py-2 bg-[var(--color-accent-fg)] text-white rounded-[var(--r-1)] hover:opacity-90 disabled:opacity-50 text-sm font-medium"
               disabled=${saving.value}
             >
               ${saving.value ? '저장 중...' : '패턴 저장'}

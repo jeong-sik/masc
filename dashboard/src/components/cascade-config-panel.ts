@@ -316,7 +316,7 @@ export function keepersWithUnknownCanonical(
 }
 
 function KeeperChip({ row }: { row: KeeperCascadeRow }) {
-  const base = 'rounded border px-2 py-0.5 text-xs flex items-center gap-1'
+  const base = 'rounded-[var(--r-1)] border px-2 py-0.5 text-xs flex items-center gap-1'
   const borderTone = row.drift
     ? 'border-[var(--color-status-warn)] text-[var(--color-fg-primary)]'
     : 'border-[var(--color-border-default)] text-[var(--color-fg-primary)]'

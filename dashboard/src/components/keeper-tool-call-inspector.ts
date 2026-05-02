@@ -102,7 +102,7 @@ function CopyableToolCallBlock({
           size=${12}
         />
       </div>
-      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--color-fg-secondary)]`}>${value}</pre>
+      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded-[var(--r-1)] p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--color-fg-secondary)]`}>${value}</pre>
     </div>
   `
 }

@@ -306,7 +306,7 @@ describe('describeReconnecting (pure)', () => {
     expect(r.label).toBe('Reconnecting · 15s')
   })
 
-  it('≥60s disconnect → rounded minutes', () => {
+  it('≥60s disconnect → rounded-[var(--r-1)] minutes', () => {
     const now = 10_000_000
     const r = describeReconnecting({ disconnectedAt: now - 125_000, now, reconnects: 0 })
     // 125s → 2m (Math.round)

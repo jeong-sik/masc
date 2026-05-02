@@ -61,7 +61,7 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
                 e => html`
                   <div
                     key=${e.id}
-                    class="flex items-start gap-2 rounded px-2 py-1 hover:bg-[var(--white-6)]"
+                    class="flex items-start gap-2 rounded-[var(--r-1)] px-2 py-1 hover:bg-[var(--white-6)]"
                     role="listitem"
                   >
                     <span

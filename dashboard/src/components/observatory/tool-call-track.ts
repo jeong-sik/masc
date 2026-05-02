@@ -131,7 +131,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded-[var(--r-1)] bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
                     ${count}
                   </span>
                 ` : null}</span>

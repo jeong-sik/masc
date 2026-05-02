@@ -76,7 +76,7 @@ export function toolBadge(label: string, tone: 'default' | 'ok' | 'warn' | 'surf
       : tone === 'surface' ? 'text-[var(--color-status-stalled)] bg-[var(--stalled-soft)]'
       : 'text-[var(--color-fg-muted)] bg-[var(--white-8)]'
   return html`
-    <span class="text-2xs rounded-sm px-2 py-0.5 ${toneClass}">
+    <span class="text-2xs rounded-[var(--r-0)] px-2 py-0.5 ${toneClass}">
       ${label}
     </span>
   `

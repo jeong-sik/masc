@@ -325,10 +325,10 @@ export function RepoDetailPanel() {
                       <${GitBranch} size=${12} class="text-[var(--color-fg-muted)]" aria-hidden="true" />
                       <span class="text-xs font-medium text-text-strong">${branch.name}</span>
                       ${branch.is_default
-                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--accent-10)] text-accent border border-accent/20">기본</span>`
+                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--accent-10)] text-accent border border-accent/20">기본</span>`
                         : null}
                       ${branch.is_remote
-                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-text-dim border border-[var(--white-10)]">원격</span>`
+                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--white-10)]">원격</span>`
                         : null}
                     </div>
                     ${branch.last_commit_at

@@ -93,7 +93,7 @@ export function ConfirmDialogOverlay() {
     >
       <div class="p-5">
         <div class="flex items-start gap-4">
-          <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">
+          <div class="shrink-0 size-10 rounded-[var(--r-0)] border flex items-center justify-center ${iconBg} ${iconColor}">
             <${IconComponent} size=${20} />
           </div>
           <div class="flex-1 min-w-0 pt-0.5">

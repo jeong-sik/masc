@@ -258,13 +258,13 @@ export function AgentDetailOverlay() {
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
-                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-[var(--white-5)] px-2 py-0.5 rounded">${secondaryLabel}</span>` : ''}
+                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-[var(--white-5)] px-2 py-0.5 rounded-[var(--r-1)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--white-5)] px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--white-5)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
@@ -284,7 +284,7 @@ export function AgentDetailOverlay() {
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
                           <button
                             type="button"
-                            class=${`text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded`}
+                            class=${`text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded-[var(--r-1)]`}
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
                             title="키퍼 상세 페이지 열기"
                             aria-label="${keeper.name} 키퍼 상세 보기"
@@ -293,8 +293,8 @@ export function AgentDetailOverlay() {
                           ${keeperIdentity ? html`<span class="text-text-dim text-xs"><span aria-hidden="true">· </span>${keeperIdentity}</span>` : ''}
                         </span>`
                       : null}
-                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--white-5)] px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded border border-accent/10">${continuitySummary}</span>` : null}
+                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--white-5)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}
@@ -303,7 +303,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="px-4 py-2 text-sm rounded bg-card/60 shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] bg-card/60 shadow-sm"
               onClick=${() => { void refreshAgentDetail() }}
               disabled=${loading.value}
             >
@@ -312,7 +312,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="danger"
               size="lg"
-              class="px-4 py-2 text-sm rounded shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] shadow-sm"
               onClick=${handlePurge}
               disabled=${purgePending.value}
             >

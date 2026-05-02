@@ -173,7 +173,7 @@ describe('progressPct', () => {
     expect(progressPct(makeSession({ required_count: 0 }))).toBeNull()
   })
 
-  it('computes seen/required rounded percentage', () => {
+  it('computes seen/required rounded-[var(--r-1)] percentage', () => {
     expect(progressPct(makeSession({ required_count: 10, seen_count: 3 }))).toBe(30)
     expect(progressPct(makeSession({ required_count: 4, seen_count: 1 }))).toBe(25)
   })

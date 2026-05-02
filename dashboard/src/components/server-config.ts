@@ -60,18 +60,18 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
       : 'text-[var(--color-accent-fg)] font-medium'
 
   return html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--color-bg-hover)] transition-colors">
+    <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] transition-colors">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--color-fg-secondary)]">${entry.env}</code>
           ${isEnv ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
           ` : null}
           ${!isEnv && entry.source !== 'default' ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">${entry.source}</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">${entry.source}</span>
           ` : null}
           ${entry.sensitive ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)]">sensitive</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)]">sensitive</span>
           ` : null}
         </div>
         <div class="text-xs text-[var(--color-fg-muted)] mt-0.5">${entry.description}</div>
@@ -114,7 +114,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--color-fg-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">
+          <span class="text-3xs px-2 py-0.5 rounded-[var(--r-0)] bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">
             ${customCount} custom
           </span>
         ` : null}

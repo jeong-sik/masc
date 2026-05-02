@@ -246,10 +246,10 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         <div ref=${containerRef} class="w-full" role="img" aria-label="에이전트별 활동 타임라인"></div>
       </div>
       <div class="flex flex-wrap gap-3 mt-3 text-2xs text-[var(--color-fg-muted)]">
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--color-status-warn)] inline-block"></span>작업</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--color-status-ok)] inline-block"></span>운영</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--cyan)] inline-block"></span>자율</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--white-25)] inline-block"></span>접속</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-[var(--r-0)] bg-[var(--color-status-warn)] inline-block"></span>작업</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-[var(--r-0)] bg-[var(--color-status-ok)] inline-block"></span>운영</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-[var(--r-0)] bg-[var(--cyan)] inline-block"></span>자율</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-[var(--r-0)] bg-[var(--white-25)] inline-block"></span>접속</span>
       </div>
     <//>
   `

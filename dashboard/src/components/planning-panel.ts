@@ -86,7 +86,7 @@ function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordination
   return html`
     <li class="min-w-0 rounded-[var(--r-1)] border border-card-border/40 bg-white/[0.03] px-2 py-1">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <span class="rounded border border-card-border/50 bg-black/15 px-1.5 py-0.5 text-3xs font-semibold uppercase text-text-muted">
+        <span class="rounded-[var(--r-1)] border border-card-border/50 bg-black/15 px-1.5 py-0.5 text-3xs font-semibold uppercase text-text-muted">
           ${evidenceLabel(evidence)}
         </span>
         <span class="min-w-0 truncate text-2xs font-medium text-text-strong">
@@ -105,7 +105,7 @@ function CoordinationViolationRow({ violation }: { violation: DashboardCoordinat
   return html`
     <li class="rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-2">
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="rounded border px-2 py-0.5 text-3xs font-semibold uppercase ${severityToneClass(violation.severity)}">
+        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${severityToneClass(violation.severity)}">
           ${violation.severity ?? 'info'}
         </span>
         <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? 'coordination'}</span>

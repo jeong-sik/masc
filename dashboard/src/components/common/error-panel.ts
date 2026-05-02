@@ -91,7 +91,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5 text-xs">
                 <span class="font-medium text-[var(--color-fg-secondary)] truncate">${e.agentName}</span>
-                <span class="shrink-0 text-2xs px-1 py-px rounded ${badgeBg}">${label}</span>
+                <span class="shrink-0 text-2xs px-1 py-px rounded-[var(--r-1)] ${badgeBg}">${label}</span>
                 ${e.taskId ? html`<span class="text-[var(--color-fg-muted)] truncate max-w-20">${e.taskId}</span>` : null}
                 ${e.count > 1 ? html`<span class="shrink-0 text-2xs text-[var(--color-status-warn)]">×${e.count}</span>` : null}
               </div>

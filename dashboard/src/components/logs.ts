@@ -417,7 +417,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"

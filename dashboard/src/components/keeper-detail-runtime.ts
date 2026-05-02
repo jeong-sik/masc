@@ -55,7 +55,7 @@ export function resolveKeeperCurrentTaskLabel(
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${value}</span>
     </div>
@@ -70,7 +70,7 @@ function ToolChip({ name }: { name: string }) {
     <${ActionButton}
       variant="primary"
       size="sm"
-      class="!rounded-sm !py-0.5 !text-3xs !text-[var(--color-accent-fg)] inline-flex items-center gap-1"
+      class="!rounded-[var(--r-0)] !py-0.5 !text-3xs !text-[var(--color-accent-fg)] inline-flex items-center gap-1"
       title=${`${cat.label}: ${name}`}
       ariaLabel=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
@@ -124,7 +124,7 @@ export function AllowlistPreview({
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
           ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
+              <span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-0)] text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
                 +${hiddenCount}
               </span>
             `
@@ -261,7 +261,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   }
 
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <div class="flex items-center gap-2">
         ${isOverride && deltaText
@@ -658,7 +658,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
         <span class="text-xs text-[var(--color-fg-muted)]">감사</span>
         <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>

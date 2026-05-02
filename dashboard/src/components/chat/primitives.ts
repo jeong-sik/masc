@@ -139,7 +139,7 @@ function ChatMessageBubble({
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
             class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-2xs font-semibold uppercase tracking-1 ${
-              isMessenger ? 'size-8 rounded-card' : 'size-10 rounded'
+              isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
             ${avatarMonogram(entry)}
@@ -157,7 +157,7 @@ function ChatMessageBubble({
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -169,14 +169,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-semibold uppercase tracking-3`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-semibold uppercase tracking-3`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--color-fg-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -185,7 +185,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
+                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
                             ${timestamp}
                           </span>
                         `
@@ -202,7 +202,7 @@ function ChatMessageBubble({
               <button
                 type="button"
                 class=${`border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--color-fg-primary)] ${
-                  isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
+                  isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
                 aria-expanded=${expanded}
@@ -216,7 +216,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-sm border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
+              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
                 ${item}
               </span>
             `)}
@@ -280,7 +280,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-sm border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--color-fg-primary)]"
+                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--color-fg-primary)]"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}

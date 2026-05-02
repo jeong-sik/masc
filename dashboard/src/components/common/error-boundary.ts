@@ -71,7 +71,7 @@ export class ErrorBoundary extends Component<Props, State> {
               <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-warn)]">
                 recoverable · ${this.props.label ?? '컴포넌트'}
               </h3>
-              <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
+              <pre class="overflow-x-auto whitespace-pre-wrap rounded-[var(--r-1)] bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
               <button
                 type="button"
                 class="mt-3 inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-transparent px-3 py-1 text-xs text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn)]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-warn)]"
@@ -97,7 +97,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <div class="min-w-0 flex-1">
             <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-err)]">${this.props.label ?? 'Component'} 렌더링 오류</h3>
-            <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
+            <pre class="overflow-x-auto whitespace-pre-wrap rounded-[var(--r-1)] bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
             <div class="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"

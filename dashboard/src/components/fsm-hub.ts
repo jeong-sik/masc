@@ -708,8 +708,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--color-fg-muted)] border-[var(--warn-20)]' : 'text-[var(--color-fg-disabled)] border-[var(--white-10)]'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-3xs opacity-70"><span aria-hidden="true">· </span>턴 #${snapshot.last_outcome.turn_id}</span>` : null}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono ${idleIsLong ? 'text-[var(--color-fg-muted)] border-[var(--warn-20)]' : 'text-[var(--color-fg-disabled)] border-[var(--white-10)]'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-3xs opacity-70"><span aria-hidden="true">· </span>턴 #${snapshot.last_outcome.turn_id}</span>` : null}</span>`
     : null
   const receiptLabel = snapshot ? executionReceiptLabel(snapshot.execution) : null
 
@@ -735,7 +735,7 @@ function StatusBar({
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
-            class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+            class=${`text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-all ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
                 : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
@@ -747,7 +747,7 @@ function StatusBar({
             ${refreshFlash ? '✓' : '↻'}
           </button>
           <button
-            class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -757,7 +757,7 @@ function StatusBar({
           ${liveBadge}
           ${snapshot && receiptLabel ? html`
             <span
-              class=${`inline-block max-w-[28rem] truncate align-middle px-2 py-0.5 rounded-sm border text-3xs font-mono ${executionReceiptClass(snapshot.execution)}`}
+              class=${`inline-block max-w-[28rem] truncate align-middle px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono ${executionReceiptClass(snapshot.execution)}`}
               title=${executionReceiptTitle(snapshot.execution)}
             >
               receipt ${receiptLabel}
@@ -766,7 +766,7 @@ function StatusBar({
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
-              class="px-1.5 py-0.5 rounded border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
+              class="px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
               title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
             >
               ⏸ 일시 중지
@@ -790,7 +790,7 @@ function StatusBar({
               placeholder="keeper 이름 필터"
               ariaLabel="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-30 max-w-45 !rounded-sm !bg-[var(--white-3)] !px-2.5 !py-0.5 !text-3xs font-mono"
+              class="min-w-30 max-w-45 !rounded-[var(--r-0)] !bg-[var(--white-3)] !px-2.5 !py-0.5 !text-3xs font-mono"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`
@@ -807,7 +807,7 @@ function StatusBar({
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
+                class=${`rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
@@ -837,14 +837,14 @@ function StatusBar({
       ${snapshot ? html`
         <div class="mt-1.5 flex items-center gap-2 text-3xs font-mono flex-wrap">
           ${/* KPI micro-metrics */ ''}
-          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--color-fg-primary)]">
+          <span class="px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--white-8)] text-[var(--color-fg-primary)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
-          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[var(--info-border)] text-[var(--info-fg)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
+          <span class=${`px-1.5 py-0.5 rounded-[var(--r-1)] border ${transitionCount > 0 ? 'border-[var(--info-border)] text-[var(--info-fg)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
             ${transitionCount} 전환
           </span>
           <span
-            class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
+            class=${`relative px-1.5 py-0.5 rounded-[var(--r-1)] border overflow-hidden ${
               observationCount >= MAX_OBSERVATIONS
                 ? 'border-[var(--warn-border)] text-[var(--warn-fg)]'
                 : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'
@@ -872,7 +872,7 @@ function StatusBar({
 
 // ── Skeleton Loading (Linear/Stripe pattern) ────────────
 
-const shimmerCls = 'animate-pulse rounded bg-[var(--white-5)]'
+const shimmerCls = 'animate-pulse rounded-[var(--r-1)] bg-[var(--white-5)]'
 
 function SkeletonBar({ w, h = 'h-3' }: { w: string; h?: string }) {
   return html`<div class=${`${shimmerCls} ${w} ${h}`}></div>`

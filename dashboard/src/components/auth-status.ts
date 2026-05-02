@@ -159,7 +159,7 @@ export function AuthStatus() {
         title="Auth status"
         aria-label="Auth status"
       >
-        <span class="size-[7px] rounded-sm inline-block ${dotColor}"></span>
+        <span class="size-[7px] rounded-[var(--r-0)] inline-block ${dotColor}"></span>
         <span>${label}</span>
       </button>
       ${popoverOpen.value ? html`<${AuthPopover} popoverId=${popoverId} labelId=${labelId} />` : null}
@@ -310,7 +310,7 @@ export function RemoteWarningBanner() {
       <span>${message}</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
           aria-label="Open auth panel"
           onClick=${openPopover}
         >Open auth</button>

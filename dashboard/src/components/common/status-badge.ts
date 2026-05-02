@@ -77,7 +77,7 @@ export function StatusBadge({ status, label, tone, children }: StatusBadgeProps)
       data-status-badge-tone=${resolvedTone}
       data-status-badge-status=${normalizedStatus}
     >
-      <span class="size-1.5 rounded-sm inline-block ${DOT_CLASS[resolvedTone]}"></span>
+      <span class="size-1.5 rounded-[var(--r-0)] inline-block ${DOT_CLASS[resolvedTone]}"></span>
       ${content}
     </span>
   `

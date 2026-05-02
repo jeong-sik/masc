@@ -198,7 +198,7 @@ export function PersonaGenerator() {
         </div>
 
         ${personaAuthoringResult.value ? html`
-          <pre class="max-h-48 overflow-auto rounded border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-err)]'}">${personaAuthoringResult.value.message}</pre>
+          <pre class="max-h-48 overflow-auto rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-err)]'}">${personaAuthoringResult.value.message}</pre>
         ` : null}
       </div>
     </div>

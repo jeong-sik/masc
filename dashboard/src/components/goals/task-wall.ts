@@ -81,7 +81,7 @@ export function TaskWall() {
         ${cols.map(col => html`
           <div
             key=${col.keeper}
-            class="flex flex-col gap-1 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2"
+            class="flex flex-col gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2"
           >
             <div class="flex items-baseline justify-between gap-1 text-2xs">
               <span class="font-mono ${col.keeper === UNASSIGNED ? 'text-text-disabled' : 'text-text-strong'}">
@@ -94,7 +94,7 @@ export function TaskWall() {
                 <li key=${t.id}>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-1.5 rounded-sm border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-accent/40 hover:bg-[var(--accent-10)]"
+                    class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-accent/40 hover:bg-[var(--accent-10)]"
                     title=${`${t.id} · ${t.status ?? 'unknown'}`}
                     onClick=${() => navigate('workspace', { section: 'planning', task: t.id })}
                   >

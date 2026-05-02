@@ -79,7 +79,7 @@ export function PipelineStageBadge({
     STAGES.find((s) => s.key === current)?.label ?? current
 
   return html`
-    <span class="pipeline-stage-badge rounded-sm stage-${current}">
+    <span class="pipeline-stage-badge rounded-[var(--r-0)] stage-${current}">
       ${label}
     </span>
   `

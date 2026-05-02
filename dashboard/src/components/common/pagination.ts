@@ -43,7 +43,7 @@ export interface CursorPaginationProps {
 const NAV_CLS = 'inline-flex items-center gap-2'
 const LIST_CLS = 'inline-flex items-center gap-1'
 const PAGE_BUTTON_CLS = [
-  'inline-flex h-6 min-w-6 items-center justify-center rounded-sm border px-2',
+  'inline-flex h-6 min-w-6 items-center justify-center rounded-[var(--r-0)] border px-2',
   'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
   'font-mono text-2xs tabular-nums text-[var(--color-fg-secondary)]',
   'transition-colors duration-[var(--t-fast)]',
@@ -60,7 +60,7 @@ const CURSOR_NAV_CLS = [
   'bg-[var(--color-bg-surface)] px-3 py-2 font-mono',
 ].join(' ')
 const CURSOR_BUTTON_CLS = [
-  'inline-flex h-6 items-center gap-1 rounded-sm border border-[var(--color-border-default)] px-2',
+  'inline-flex h-6 items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2',
   'text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]',
   'transition-colors duration-[var(--t-fast)]',
   'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',

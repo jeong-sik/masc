@@ -77,8 +77,8 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   return html`
     <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--color-fg-muted)]">
       <span class="relative flex size-2">
-        <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--color-status-ok)] opacity-75"></span>
-        <span class="relative inline-flex size-2 rounded-sm bg-[var(--color-status-ok)]"></span>
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--color-status-ok)] opacity-75"></span>
+        <span class="relative inline-flex size-2 rounded-[var(--r-0)] bg-[var(--color-status-ok)]"></span>
       </span>
       에이전트 작업 중...
     </div>

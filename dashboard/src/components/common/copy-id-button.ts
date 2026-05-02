@@ -34,7 +34,7 @@ export function CopyIdButton({ value, label, ariaLabel, size = 12 }: CopyIdButto
   return html`
     <button
       type="button"
-      class=${`inline-flex shrink-0 cursor-pointer items-center justify-center rounded min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] opacity-60 transition-all hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] hover:opacity-100 focus-visible:opacity-100 ${ringFocusClasses({ tone: 'accent-subtle', width: 1 })}`}
+      class=${`inline-flex shrink-0 cursor-pointer items-center justify-center rounded-[var(--r-1)] min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] opacity-60 transition-all hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] hover:opacity-100 focus-visible:opacity-100 ${ringFocusClasses({ tone: 'accent-subtle', width: 1 })}`}
       aria-label=${ariaLabel || (label ? `${label} 복사` : '복사')}
       title=${ariaLabel || (label ? `${label} 복사` : '복사')}
       onClick=${onCopy}

@@ -96,15 +96,15 @@ export function DistributionBars({
                         ${item.detail ? html`<div class="truncate text-3xs text-[var(--color-fg-muted)]">${item.detail}</div>` : null}
                       </div>
                       <span
-                        class="shrink-0 rounded-sm border px-2 py-0.5 text-3xs font-semibold"
+                        class="shrink-0 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold"
                         style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                       >
                         ${valueFormatter(item.value)}
                       </span>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-sm bg-[var(--white-5)]">
+                    <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--white-5)]">
                       <div
-                        class="h-full rounded-sm transition-[width] duration-[var(--t-slow)]"
+                        class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)]"
                         style=${`width:${Math.min(width, 100)}%;background:${palette.fill};opacity:0.8;`}
                       ></div>
                     </div>
@@ -143,7 +143,7 @@ export function SegmentedBar({
         ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
-              <div class="flex h-3 overflow-hidden rounded-sm bg-[var(--white-5)]">
+              <div class="flex h-3 overflow-hidden rounded-[var(--r-0)] bg-[var(--white-5)]">
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100
@@ -174,7 +174,7 @@ export function SegmentedBar({
                   return html`
                     <span
                       title=${`${item.label}: ${formattedValue}`}
-                      class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs font-medium"
+                      class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
                       <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>

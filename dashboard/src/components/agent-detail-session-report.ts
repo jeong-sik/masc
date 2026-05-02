@@ -191,8 +191,8 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           const icon = taskEventIcon(evt.type)
           const color = taskEventColor(evt.type)
           return html`
-            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
-              <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--white-5)] px-2 py-0.5 rounded">${icon}</span>
+            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">
+              <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--white-5)] px-2 py-0.5 rounded-[var(--r-1)]">${icon}</span>
               <span class="text-xs text-text-body flex-1 truncate">${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
             </div>
@@ -221,7 +221,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
         aria-expanded=${expanded}
       >
         <div class="flex items-center gap-2">
-          <span class="size-2 rounded-sm ${index === 0 ? 'bg-accent' : 'bg-[var(--white-20)]'}"></span>
+          <span class="size-2 rounded-[var(--r-0)] ${index === 0 ? 'bg-accent' : 'bg-[var(--white-20)]'}"></span>
           <${TimeAgo} timestamp=${report.ts} />
         </div>
         ${isLong ? html`

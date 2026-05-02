@@ -74,7 +74,7 @@ export function VersionHistory({
                   ${isCurrent
                     ? html`
                         <span
-                          class="rounded bg-[var(--color-accent)] px-1.5 text-3xs text-white"
+                          class="rounded-[var(--r-1)] bg-[var(--color-accent)] px-1.5 text-3xs text-white"
                           >현재</span
                         >
                       `

@@ -30,6 +30,9 @@
     revisit with an allowlist or drop the [model] label. *)
 let http_status_metric = "masc_llm_provider_http_status_total"
 
+(** Canonical metric name for silent capability drops. *)
+let capability_drop_metric = "masc_llm_provider_capability_drops_total"
+
 (** Emit a single HTTP status observation to the Prometheus counter.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
@@ -44,6 +47,12 @@ let emit_http_status ~provider ~model_id ~status =
         ("model", model_id);
         ("status", string_of_int status);
       ]
+    ()
+
+(** Emit a capability drop observation to the Prometheus counter. *)
+let emit_capability_drop ~model_id ~field =
+  Prometheus.inc_counter capability_drop_metric
+    ~labels:[("model", model_id); ("field", field)]
     ()
 
 (** Per-HTTP-request latency histogram.  Distinct from
@@ -88,6 +97,9 @@ let make_sink () : Llm_provider.Metrics.t =
     on_request_end =
       (fun ~model_id ~latency_ms ->
         emit_request_latency ~model_id ~latency_ms);
+    on_capability_drop =
+      (fun ~model_id ~field ->
+        emit_capability_drop ~model_id ~field);
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

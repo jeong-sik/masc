@@ -28,6 +28,9 @@ val emit_http_status :
     source of truth for the label shape. *)
 val emit_request_latency : model_id:string -> latency_ms:int -> unit
 
+(** Emit a capability drop observation to the Prometheus counter. *)
+val emit_capability_drop : model_id:string -> field:string -> unit
+
 (** Construct the OAS Metrics.t sink without installing it.  Useful
     for tests that want to pass [~metrics] explicitly without
     touching global state. *)

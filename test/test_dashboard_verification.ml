@@ -30,25 +30,56 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let snapshot_config_input name =
+  Sys.getenv_opt name, Config_boot_overrides.get_opt name
+
+let override_config_input name value =
+  match Sys.getenv_opt name with
+  | Some _ -> Unix.putenv name value
+  | None -> Config_boot_overrides.set name value
+
+let restore_config_input name (prior_env, prior_boot) =
+  match prior_env with
+  | Some v -> Unix.putenv name v
+  | None ->
+      (match prior_boot with
+       | Some v -> Config_boot_overrides.set name v
+       | None -> Config_boot_overrides.clear name)
+
 (** Create an isolated MASC base_path for the duration of [f].
     Restores [MASC_BASE_PATH] and [MASC_BASE_PATH_INPUT] afterwards so
     subsequent tests in the same binary see the original value. *)
 let with_temp_base_path f =
   let dir = Filename.temp_dir "masc_dashboard_verify_test" "" in
-  let prior_base = Sys.getenv_opt "MASC_BASE_PATH" in
-  let prior_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let restore_env name = function
-    | Some v -> Unix.putenv name v
-    | None -> Unix.putenv name ""
-  in
-  Unix.putenv "MASC_BASE_PATH" dir;
-  Unix.putenv "MASC_BASE_PATH_INPUT" dir;
+  let prior_base = snapshot_config_input "MASC_BASE_PATH" in
+  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
+  override_config_input "MASC_BASE_PATH" dir;
+  override_config_input "MASC_BASE_PATH_INPUT" dir;
   let cleanup () =
-    restore_env "MASC_BASE_PATH" prior_base;
-    restore_env "MASC_BASE_PATH_INPUT" prior_input;
+    restore_config_input "MASC_BASE_PATH" prior_base;
+    restore_config_input "MASC_BASE_PATH_INPUT" prior_input;
     rm_rf dir
   in
   Fun.protect ~finally:cleanup (fun () -> f dir)
+
+let test_config_input_override_restores_boot_override () =
+  let name = "MASC_TEST_DASHBOARD_VERIFICATION_BOOT_OVERRIDE" in
+  let original = snapshot_config_input name in
+  Fun.protect ~finally:(fun () -> restore_config_input name original) (fun () ->
+    if Option.is_some (Sys.getenv_opt name) then
+      Alcotest.fail (Printf.sprintf "%s unexpectedly set in test env" name);
+    Config_boot_overrides.set name "before";
+    let snapshot = snapshot_config_input name in
+    override_config_input name "during";
+    Alcotest.(check (option string)) "process env remains unset"
+      None (Sys.getenv_opt name);
+    Alcotest.(check (option string)) "boot override set"
+      (Some "during") (Config_boot_overrides.get_opt name);
+    restore_config_input name snapshot;
+    Alcotest.(check (option string)) "process env still unset"
+      None (Sys.getenv_opt name);
+    Alcotest.(check (option string)) "boot override restored"
+      (Some "before") (Config_boot_overrides.get_opt name))
 
 let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
   let output = `Assoc [
@@ -343,6 +374,8 @@ let test_summary_recent_clamp () =
 let () =
   Alcotest.run "dashboard_verification" [
     "requests_json", [
+      Alcotest.test_case "restores boot override config inputs" `Quick
+        test_config_input_override_restores_boot_override;
       Alcotest.test_case "shape" `Quick test_requests_json_shape;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
       Alcotest.test_case "ignores legacy root entries" `Quick

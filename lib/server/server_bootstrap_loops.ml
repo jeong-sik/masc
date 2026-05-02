@@ -38,7 +38,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                        "created"
                    | Error msg ->
                        (* The error string is double-wrapped by the time it
-                          reaches us ("worktree creation failed: ❌ IO
+                          reaches us ("worktree creation failed: IO
                           error: <inner>"), so prefix-match by substring on
                           the inner tag rather than expecting an exact
                           match.  ambiguous_task_repo and

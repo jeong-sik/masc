@@ -886,7 +886,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let hint = Masc_error_recovery.recovery_hint message in
       match hint with
       | None -> message
-      | Some h -> message ^ "\n\n💡 Recovery: " ^ h
+      | Some h -> message ^ "\n\nRecovery: " ^ h
   in
   (match keeper_entry with
    | Some entry ->

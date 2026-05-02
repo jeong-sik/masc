@@ -204,7 +204,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
 
         if Sys.file_exists worktree_path then
           Ok
-            (Printf.sprintf "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
+            (Printf.sprintf "Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
                worktree_path branch_name worktree_path)
         else (
           (* Fetch origin first; never create from a silently stale remote ref.
@@ -245,7 +245,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               if exit_code = 0 then
                 Ok
                   (Printf.sprintf
-                     "✅ Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
+                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
                      worktree_path branch_name note worktree_path)
               else Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base)))
 
@@ -274,11 +274,11 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
             |> List.filter_map Fun.id
           in
           let msg =
-            Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name
+            Printf.sprintf "Worktree removed: %s\n   Branch: %s" worktree_path branch_name
           in
           match warnings with
           | [] -> Ok msg
-          | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
+          | ws -> Ok (msg ^ "\n    Warnings: " ^ String.concat "; " ws))
         else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
 
 (** List all worktrees in the repository *)

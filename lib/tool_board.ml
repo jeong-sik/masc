@@ -439,9 +439,9 @@ let handle_post_create args =
     | None -> false
   in
   if title_is_empty then
-    (false, "❌ title is required")
+    (false, "title is required")
   else if Option.is_none author || Option.equal String.equal author (Some "") || Option.equal String.equal author (Some "anonymous") then
-    (false, "❌ author is required")
+    (false, "author is required")
   else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
@@ -459,7 +459,7 @@ let handle_post_create args =
     | None -> Board.Internal
   in
   match resolve_board_post_kind ~author raw_post_kind with
-  | Error msg -> (false, "❌ " ^ msg)
+  | Error msg -> (false, "" ^ msg)
   | Ok post_kind ->
       match
         Board_dispatch.create_post ~author ~content ?title ?body ~post_kind ?meta_json
@@ -467,9 +467,9 @@ let handle_post_create args =
       with
       | Ok post ->
           let json = Board.post_to_yojson post in
-          (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
+          (true, Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
       | Error e ->
-          (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+          (false, Printf.sprintf "%s" (board_error_to_string e))
 
 (** Issue #8449 PR B: [sort_order] is now a re-export of
     [Board_dispatch.sort_order] (type-alias with definition equality),
@@ -529,7 +529,7 @@ let handle_post_list_uncached args =
     | Some value -> parse_sort_order value
   in
   match sort_by_result with
-  | Error msg -> (false, Printf.sprintf "❌ %s" msg)
+  | Error msg -> (false, Printf.sprintf "%s" msg)
   | Ok sort_by ->
       (* Fetch exactly what we need: offset posts to skip + limit posts to show.
          Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
@@ -554,7 +554,7 @@ let handle_post_list_uncached args =
           List.filteri (fun i _ -> i < limit) sorted_posts
       in
       if Stdlib.List.length posts = 0 then
-        (true, "📭 No posts found.")
+        (true, "No posts found.")
       else
         (* Check for new activity since timestamp *)
         let has_new_activity (p : Board.post) =
@@ -571,15 +571,15 @@ let handle_post_list_uncached args =
         in
         let formatted = List.map format_post_with_indicator posts in
         let sort_label = match sort_by with
-          | Hot -> "🔥 Hot"
-          | Trending -> "📈 Trending"
-          | Recent -> "🕐 Recent"
-          | Updated -> "🔄 Recently Updated"
-          | Discussed -> "💬 Most Discussed"
+          | Hot -> "Hot"
+          | Trending -> "Trending"
+          | Recent -> "Recent"
+          | Updated -> "Recently Updated"
+          | Discussed -> "Most Discussed"
         in
         let separator = if compact then "\n" else "\n\n---\n\n" in
         let mode_label = if compact then " (compact)" else "" in
-        let header = Printf.sprintf "📋 Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
+        let header = Printf.sprintf "Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
         (true, header ^ "\n" ^ String.concat separator formatted)
 
 let handle_post_list args =
@@ -598,15 +598,15 @@ let handle_post_get args =
       (* Idempotent: post no longer exists (deleted/expired/TTL).
          Return success so keeper tool metrics don't count this as failure.
          The LLM still sees a clear message that the post is gone. *)
-      (true, Printf.sprintf "📭 Post %s no longer exists (deleted or expired)." post_id)
-  | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+      (true, Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id)
+  | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
   | Ok (post, comments) ->
       let post_str = format_post post in
       let comments_str = if Stdlib.List.length comments = 0 then
-        "\n\n💬 No comments."
+        "\n\nNo comments."
       else
         let formatted = format_comment_tree comments in
-        Printf.sprintf "\n\n💬 **Comments (%d)**:\n%s"
+        Printf.sprintf "\n\n**Comments (%d)**:\n%s"
           (List.length comments)
           (String.concat "\n" formatted)
       in
@@ -632,9 +632,9 @@ let handle_comment_add args =
           ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in
-      (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
+      (true, Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
   | Error e ->
-      (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+      (false, Printf.sprintf "%s" (board_error_to_string e))
 
 (** SOUL Evolution callback - registered at startup to break dependency cycle *)
 type evolution_callback = {
@@ -676,7 +676,7 @@ let handle_vote args =
                   in
                   let is_positive = ((=) direction Board.Up) in
                   cb.record_feedback ~name:author ~dimension ~is_positive;
-                  Printf.sprintf " [🧬 %s evolved: %s %s]"
+                  Printf.sprintf " [%s evolved: %s %s]"
                     author dimension (if is_positive then "+0.01" else "-0.01")
                 end else ""
             | Error e ->
@@ -695,26 +695,26 @@ let handle_vote args =
        | Error _ ->
            (true, "Already voted (idempotent). Score unchanged."))
   | Error e ->
-      (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+      (false, Printf.sprintf "%s" (board_error_to_string e))
 
 let handle_stats _args =
   let stats = Board_dispatch.stats () in
-  (true, Printf.sprintf "📊 Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
+  (true, Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
 
 (** Search posts by keyword *)
 let handle_search args =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
-  if String.equal query "" then (false, "❌ query required")
+  if String.equal query "" then (false, "query required")
   else
     let results = Board_dispatch.search ~query ~limit in
-    if Stdlib.List.length results = 0 then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
+    if Stdlib.List.length results = 0 then (true, Printf.sprintf "'%s' 검색 결과 없음" query)
     else
       let fmt = if compact then format_post_compact else format_post in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in
-      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
+      (true, Printf.sprintf "'%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
 
 (** Vote on comment *)
 let handle_comment_vote args =
@@ -722,18 +722,18 @@ let handle_comment_vote args =
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
   let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
-  if String.equal comment_id "" then (false, "❌ comment_id required")
+  if String.equal comment_id "" then (false, "comment_id required")
   else
     match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
     | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if String.equal direction_str "down" then "👎" else "👍") score)
     | Error (Board.Already_voted _) ->
         (true, Printf.sprintf "%s Already voted (idempotent)." (if String.equal direction_str "down" then "👎" else "👍"))
-    | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+    | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
 
 (** Agent profile *)
 let handle_profile args =
   let agent = get_string args "agent" "" in
-  if String.equal agent "" then (false, "❌ agent required")
+  if String.equal agent "" then (false, "agent required")
   else
     let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
@@ -743,18 +743,18 @@ let handle_profile args =
     let all_comments : Board.comment list = Board_dispatch.list_comments () in
     let agent_comments = List.filter (fun (c : Board.comment) -> String.equal (norm (Board.Agent_id.to_string c.author)) agent_norm) all_comments in
     let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
-    (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
+    (true, Printf.sprintf "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
       agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))
 
 (** Hearth list *)
 let handle_hearth_list _args =
   let hearths = Board_dispatch.list_hearths () in
-  if Stdlib.List.length hearths = 0 then (true, "🔥 No active hearths.")
+  if Stdlib.List.length hearths = 0 then (true, "No active hearths.")
   else
     let formatted = List.map (fun (name, count) ->
-      Printf.sprintf "🔥 **%s** (%d posts)" name count
+      Printf.sprintf "**%s** (%d posts)" name count
     ) hearths in
-    (true, Printf.sprintf "🔥 Active Hearths:\n%s" (String.concat "\n" formatted))
+    (true, Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted))
 
 (** {1 Tool Definitions} *)
 
@@ -813,7 +813,7 @@ let tool_post_list : Types.tool_schema = {
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
-      ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
+      ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show an activity indicator")]);
       ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body/TTL/visibility")]);
     ]);
   ];

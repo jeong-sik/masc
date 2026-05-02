@@ -290,7 +290,7 @@ let handle_tool_admin_update ctx args =
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
       if not ((=) (U.member "default_role" args) `Null) then
-        (false, "❌ default_role is no longer supported")
+        (false, "default_role is no longer supported")
       else
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -305,7 +305,7 @@ let handle_tool_admin_update ctx args =
         | None -> Ok current.token_expiry_hours
       in
       (match expiry_hours with
-      | Error err -> (false, "❌ " ^ err)
+      | Error err -> (false, err)
       | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with

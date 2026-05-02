@@ -61,13 +61,13 @@ let add_task
   try
     with_file_lock config backlog_path (fun () ->
       match read_backlog_r config with
-      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Error msg -> Printf.sprintf "Error: %s" msg
       | Ok backlog ->
         (* Dedup guard: reject if an active task with the same normalized title exists *)
         (match find_duplicate_task backlog ~title ~goal_id with
          | Some existing_id ->
            Printf.sprintf
-             "⚠️ Duplicate rejected: '%s' matches existing %s. Use that task instead."
+             "Duplicate rejected: '%s' matches existing %s. Use that task instead."
              title
              existing_id
          | None ->
@@ -133,12 +133,12 @@ let add_task
              broadcast
                config
                ~from_agent:actor
-               ~content:(Printf.sprintf "📋 New quest: %s" title)
+               ~content:(Printf.sprintf "New quest: %s" title)
            in
-           Printf.sprintf "✅ Added %s: %s" task_id title))
+           Printf.sprintf "Added %s: %s" task_id title))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
+  | e -> Printf.sprintf "Error: %s" (Printexc.to_string e)
 ;;
 
 (** Add multiple tasks in a batch *)
@@ -148,7 +148,7 @@ let batch_add_tasks_internal ?created_by config tasks =
   let actor = Option.value ~default:"system" created_by in
   with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with
-    | Error msg -> Printf.sprintf "❌ Error adding batch tasks: %s" msg
+    | Error msg -> Printf.sprintf "Error adding batch tasks: %s" msg
     | Ok backlog ->
       (try
          let next_num = ref (next_task_number config backlog) in
@@ -222,15 +222,15 @@ let batch_add_tasks_internal ?created_by config tasks =
          (Atomic.get Coord_hooks.on_task_mutation_fn) ();
          let msg =
            Printf.sprintf
-             "📋 New batch of %d quests added: %s"
+             "New batch of %d quests added: %s"
              (List.length added_tasks)
              summary
          in
          let _ = broadcast config ~from_agent:actor ~content:msg in
-         Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
+         Printf.sprintf "Added %d tasks: %s" (List.length added_tasks) summary
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)))
+       | e -> Printf.sprintf "Error adding batch tasks: %s" (Printexc.to_string e)))
 ;;
 
 let batch_add_tasks ?created_by config tasks =

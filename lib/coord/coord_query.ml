@@ -19,7 +19,7 @@ let update_priority config ~task_id ~priority =
 
       match task_opt with
       | None ->
-          Printf.sprintf "❌ Task %s not found" task_id
+          Printf.sprintf "Task %s not found" task_id
       | Some task ->
           let old_priority = task.priority in
           let new_tasks = List.map (fun (t : task) ->
@@ -43,11 +43,11 @@ let update_priority config ~task_id ~priority =
           ]);
           (Atomic.get Coord_hooks.on_task_mutation_fn) ();
 
-          Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
+          Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority priority
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
+      Printf.sprintf "Error: %s" (Printexc.to_string e)
   )
 
 (** Get raw task list (for orchestrator).
@@ -136,7 +136,7 @@ let audit_orphan_tasks config : (Types.task * string) list =
       || let prefix = assignee ^ "-" in
          List.exists (fun name ->
            String.length name > String.length prefix
-           && Base.String.is_prefix name ~prefix
+           && String.starts_with name ~prefix
          ) active_names
     in
     let backlog = read_backlog config in
@@ -315,12 +315,12 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
   in
   if tasks = [] then
     if backlog.tasks = [] then
-      "📋 No tasks. ACTION: STOP calling keeper_tasks_list — the backlog is empty. Move on to other work or end your turn."
+      "No tasks. ACTION: STOP calling keeper_tasks_list — the backlog is empty. Move on to other work or end your turn."
     else
-      "📋 No active tasks (all done/cancelled). ACTION: STOP calling keeper_tasks_list — do not re-check. Move on to other work or end your turn."
+      "No active tasks (all done/cancelled). ACTION: STOP calling keeper_tasks_list — do not re-check. Move on to other work or end your turn."
   else begin
     let buf = Buffer.create 256 in
-    Buffer.add_string buf "📋 Quest Board\n";
+    Buffer.add_string buf "Quest Board\n";
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
@@ -340,7 +340,7 @@ let get_messages config ~since_seq ~limit =
   ensure_initialized config;
 
   let buf = Buffer.create 256 in
-  Buffer.add_string buf "💬 Recent Messages\n";
+  Buffer.add_string buf "Recent Messages\n";
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
   let messages = get_messages_raw config ~since_seq ~limit in
   List.iter

@@ -64,7 +64,7 @@ end = struct
       Error (Printf.sprintf "agent_id too long: %d chars (max 64)" (String.length s))
     else if String.contains s '/' || String.contains s '\\' then
       Error "agent_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
+    else if String.contains s '.' && String.starts_with s ~prefix:".." then
       Error "agent_id cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
       Error (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
@@ -115,7 +115,7 @@ end = struct
       Error (Printf.sprintf "task_id too long: %d chars (max 128)" (String.length s))
     else if String.contains s '/' || String.contains s '\\' then
       Error "task_id cannot contain path separators"
-    else if String.contains s '.' && Base.String.is_prefix s ~prefix:".." then
+    else if String.contains s '.' && String.starts_with s ~prefix:".." then
       Error "task_id cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
       Error (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
@@ -172,7 +172,7 @@ end = struct
       reject "path cannot be empty"
     else if path.[0] = '/' then
       reject "absolute paths not allowed"
-    else if Base.String.is_prefix path ~prefix:".." then
+    else if String.starts_with path ~prefix:".." then
       reject "path traversal not allowed"
     else if Re.execp traversal_re path then
       reject "path traversal not allowed"

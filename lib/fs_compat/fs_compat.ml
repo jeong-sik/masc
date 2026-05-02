@@ -69,7 +69,7 @@ let test_exec_home_guard ~op path =
     Stdlib.Sys.executable_name |> Stdlib.Filename.basename |> String.lowercase_ascii
   in
   let is_test_exec =
-    String.length basename >= 5 && Base.String.is_prefix basename ~prefix:"test_"
+    String.length basename >= 5 && String.starts_with basename ~prefix:"test_"
   in
   if not is_test_exec then ()
   else
@@ -96,7 +96,7 @@ let test_exec_home_guard ~op path =
           let home_len = String.length home_norm in
           if home_len > 0
              && String.length path >= home_len
-             && Base.String.is_prefix path ~prefix:home_norm
+             && String.starts_with path ~prefix:home_norm
           then
             raise
               (Test_isolation_breach
@@ -228,8 +228,8 @@ let is_atomic_orphan_name name =
   let p = String.length atomic_tmp_prefix in
   let s = String.length atomic_tmp_suffix in
   n >= p + s
-  && Base.String.is_prefix name ~prefix:atomic_tmp_prefix
-  && Base.String.is_suffix name ~suffix:atomic_tmp_suffix
+  && String.starts_with name ~prefix:atomic_tmp_prefix
+  && String.ends_with ~suffix:atomic_tmp_suffix name
 
 let cleanup_atomic_orphans
     ~(base_path : string)

@@ -84,22 +84,22 @@ let handle_keeper_masc_code_read
   let offset = Safe_ops.json_int ~default:0 "offset" args in
   let limit = Safe_ops.json_int ~default:100 "limit" args in
   if path = ""
-  then error_json "❌ Path required: 'path' parameter"
+  then error_json "Path required: 'path' parameter"
   else (
     match resolve_keeper_read_path ~config ~meta ~raw_path:path with
     | Error e -> error_json e
     | Ok target ->
       if not (Sys.file_exists target)
-      then error_json (Printf.sprintf "❌ File not found: %s" path)
+      then error_json (Printf.sprintf "File not found: %s" path)
       else if Tool_code.is_binary_file target
-      then error_json "❌ Binary file detected"
+      then error_json "Binary file detected"
       else (
         let file_size = (Unix.stat target).Unix.st_size in
         if file_size > Tool_code.max_file_size
         then
           error_json
             (Printf.sprintf
-               "❌ File too large: %d bytes (max: %d)"
+               "File too large: %d bytes (max: %d)"
                file_size
                Tool_code.max_file_size)
         else (
@@ -128,7 +128,7 @@ let handle_keeper_masc_code_read
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             error_json
-              (Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn)))))
+              (Printf.sprintf "Failed to read file: %s" (Printexc.to_string exn)))))
 ;;
 
 let handle_keeper_masc_tool

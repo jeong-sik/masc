@@ -539,7 +539,7 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
       Printf.bprintf buf "  • %s (%.0f%% weight): %s\n"
         v.name (v.weight *. 100.0) v.description;
       if v.anti_patterns <> [] then
-        Printf.bprintf buf "    ⚠️ Avoid: %s\n" (String.concat ", " v.anti_patterns)
+        Printf.bprintf buf "    Avoid: %s\n" (String.concat ", " v.anti_patterns)
     ) (List.sort (fun a b -> compare b.weight a.weight) inst.culture |> List.filteri (fun i _ -> i < 3))
   end;
 
@@ -557,7 +557,7 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
       |> List.filteri (fun i _ -> i < max_patterns)
     in
     List.iter (fun (p : pattern) ->
-      Printf.bprintf buf "  📋 %s (%.0f%% success, %d uses)\n"
+      Printf.bprintf buf "  %s (%.0f%% success, %d uses)\n"
         p.name (p.success_rate *. 100.0) p.usage_count;
       Printf.bprintf buf "     Trigger: %s\n" p.trigger;
       if List.length p.steps <= 3 then
@@ -619,7 +619,7 @@ let format_for_welcome (inst : institution) : string =
       |> List.filteri (fun i _ -> i < 3)
     in
     let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
-    Buffer.add_string buf "💎 Values: ";
+    Buffer.add_string buf "Values: ";
     Buffer.add_string buf (String.concat ", " value_names);
     Buffer.add_char buf '\n'
   end;
@@ -627,7 +627,7 @@ let format_for_welcome (inst : institution) : string =
   (* One procedural tip - pattern match for safety *)
   (match List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural with
    | best :: _ ->
-       Buffer.add_string buf "💡 Tip: ";
+       Buffer.add_string buf "Tip: ";
        Buffer.add_string buf best.name;
        Buffer.add_string buf " → ";
        Buffer.add_string buf best.trigger;

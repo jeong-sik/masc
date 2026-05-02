@@ -490,7 +490,7 @@ let decode_cursor ~kind cursor =
   | Ok decoded ->
       let prefix = kind ^ ":" in
       let prefix_len = String.length prefix in
-      if Base.String.is_prefix decoded ~prefix
+      if String.starts_with decoded ~prefix
       then
         int_of_string_opt
           (String.sub decoded prefix_len (String.length decoded - prefix_len))

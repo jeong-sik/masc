@@ -250,28 +250,28 @@ let format_as_markdown (h : handover_record) : string =
   add (Printf.sprintf "**Task**: %s | **Reason**: %s" h.task_id h.handover_reason);
   add "";
 
-  add "## 🎯 Current Goal";
+  add "## Current Goal";
   add h.current_goal;
   add "";
 
-  add "## 📊 Progress";
+  add "## Progress";
   add h.progress_summary;
   add "";
 
   if h.completed_steps <> [] then begin
-    add "### ✅ Completed";
+    add "### Completed";
     List.iter (fun s -> add ("- " ^ s)) h.completed_steps;
     add ""
   end;
 
   if h.pending_steps <> [] then begin
-    add "### ⏳ Pending";
+    add "### Pending";
     List.iter (fun s -> add ("- " ^ s)) h.pending_steps;
     add ""
   end;
 
   if h.key_decisions <> [] then begin
-    add "## 🧠 Key Decisions (Why)";
+    add "## Key Decisions (Why)";
     List.iter (fun s -> add ("- " ^ s)) h.key_decisions;
     add ""
   end;
@@ -283,13 +283,13 @@ let format_as_markdown (h : handover_record) : string =
   end;
 
   if h.warnings <> [] then begin
-    add "## ⚠️ Warnings";
+    add "## Warnings";
     List.iter (fun s -> add ("- " ^ s)) h.warnings;
     add ""
   end;
 
   if h.unresolved_errors <> [] then begin
-    add "## ❌ Unresolved Errors";
+    add "## Unresolved Errors";
     List.iter (fun s -> add ("- " ^ s)) h.unresolved_errors;
     add ""
   end;

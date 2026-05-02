@@ -69,10 +69,10 @@ let register_capabilities config ~agent_name ~capabilities =
 
           Printf.sprintf "📡 %s capabilities: %s" actual_name (String.concat ", " capabilities)
       | Error _ ->
-          Printf.sprintf "⚠ Invalid agent file for %s" actual_name
+          Printf.sprintf "Invalid agent file for %s" actual_name
     )
   end else
-    Printf.sprintf "⚠ Agent %s not found. Join first!" agent_name
+    Printf.sprintf "Agent %s not found. Join first!" agent_name
 
 (** Update agent metadata (status/capabilities).
     Since #4638 agent metadata always lives under the root agents_dir. *)
@@ -139,7 +139,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
                               ("capabilities", `List (List.map (fun s -> `String s) updated_caps));
                               ("ts", `String (now_iso ()));
                             ]);
-                            Ok (Printf.sprintf "✅ %s updated" actual_name)
+                            Ok (Printf.sprintf "%s updated" actual_name)
                        ))
             )
           in

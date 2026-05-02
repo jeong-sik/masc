@@ -425,7 +425,7 @@ module Router = struct
             String.length route.path > 7
             && String.sub route.path 0 7 = "PREFIX:"
             && let prefix = String.sub route.path 7 (String.length route.path - 7) in
-               Base.String.is_prefix req_path ~prefix
+               String.starts_with req_path ~prefix
             && List.mem req_method route.methods
           ) routes
         in
@@ -642,11 +642,11 @@ let run ~sw ~net ~clock config routes =
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
   if String.equal effective_host config.host then
-    Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n"
+    Printf.printf "MASC MCP Server listening on http://%s:%d\n"
       effective_host config.port
   else
     Printf.printf
-      "🚀 MASC MCP Server listening on http://%s:%d (configured=%s, parse failed → loopback)\n"
+      "MASC MCP Server listening on http://%s:%d (configured=%s, parse failed → loopback)\n"
       effective_host config.port config.host;
   Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 

@@ -264,7 +264,7 @@ let run ~sw ~net ~clock config request_handler =
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
 
-  Printf.printf "🚀 MASC MCP Server (HTTP/2) listening on http://%s:%d\n" config.host config.port;
+  Printf.printf "MASC MCP Server (HTTP/2) listening on http://%s:%d\n" config.host config.port;
   Printf.printf "   HTTP/2 multiplexing: unlimited SSE streams per connection\n%!";
 
   let initial_backoff_s = 0.05 in

@@ -96,19 +96,19 @@ let apply_tail_order order items =
 let resolve_status_target (ctx : _ context) args =
   let requested_name = effective_status_name ctx args in
   if not (validate_name requested_name) then
-    Error "❌ invalid keeper name"
+    Error "invalid keeper name"
   else
     match read_meta_resolved ctx.config requested_name with
-    | Error e -> Error ("❌ " ^ e)
+    | Error e -> Error ("" ^ e)
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
         (match keeper_name_from_agent_name requested_name with
          | Some stripped_name ->
              Error
                (Printf.sprintf
-                  "❌ keeper not found: %s (also tried %s)"
+                  "keeper not found: %s (also tried %s)"
                   requested_name stripped_name)
-         | None -> Error (Printf.sprintf "❌ keeper not found: %s" requested_name))
+         | None -> Error (Printf.sprintf "keeper not found: %s" requested_name))
 
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)

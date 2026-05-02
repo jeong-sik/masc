@@ -49,13 +49,13 @@ let claim_task config ~agent_name ~task_id =
   ensure_initialized config;
   (* Validate inputs *)
   match validate_agent_name agent_name, validate_task_id task_id with
-  | Error e, _ -> Printf.sprintf "❌ %s" e
-  | _, Error e -> Printf.sprintf "❌ %s" e
+  | Error e, _ -> Printf.sprintf "%s" e
+  | _, Error e -> Printf.sprintf "%s" e
   | Ok _, Ok _ ->
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       match read_backlog_r config with
-      | Error msg -> Printf.sprintf "❌ Error: %s" msg
+      | Error msg -> Printf.sprintf "Error: %s" msg
       | Ok backlog ->
         (try
            let found = ref false in
@@ -90,14 +90,14 @@ let claim_task config ~agent_name ~task_id =
                backlog.tasks
            in
            if not !found
-           then Printf.sprintf "❌ Task %s not found" task_id
+           then Printf.sprintf "Task %s not found" task_id
            else (
              match !blocked_reason with
-             | Some r -> Printf.sprintf "🚫 Task %s blocked from re-claim: %s" task_id r
+             | Some r -> Printf.sprintf "Task %s blocked from re-claim: %s" task_id r
              | None ->
                (match !already_claimed with
                 | Some other ->
-                  Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
+                  Printf.sprintf "Task %s is already claimed by %s" task_id other
                 | None ->
                   let new_backlog =
                     { tasks = new_tasks
@@ -112,7 +112,7 @@ let claim_task config ~agent_name ~task_id =
                     broadcast
                       config
                       ~from_agent:agent_name
-                      ~content:(Printf.sprintf "📋 Claimed %s" task_id)
+                      ~content:(Printf.sprintf "Claimed %s" task_id)
                   in
                   Coord_task_classify.emit_task_activity
                     config
@@ -141,10 +141,10 @@ let claim_task config ~agent_name ~task_id =
                            (Types.Claimed
                               { assignee = agent_name; claimed_at = now_iso () })
                          ());
-                  Printf.sprintf "✅ %s claimed %s" agent_name task_id))
+                  Printf.sprintf "%s claimed %s" agent_name task_id))
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | e -> Printf.sprintf "❌ Error: %s" (Printexc.to_string e)))
+         | e -> Printf.sprintf "Error: %s" (Printexc.to_string e)))
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
@@ -245,7 +245,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
              broadcast
                config
                ~from_agent:agent_name
-               ~content:(Printf.sprintf "📋 Claimed %s" task_id)
+               ~content:(Printf.sprintf "Claimed %s" task_id)
            in
            Coord_task_classify.emit_task_activity
              config
@@ -283,7 +283,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | _ -> ());
-           Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
+           Ok (Printf.sprintf "%s claimed %s" agent_name task_id)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Types.IoError (Printexc.to_string e))))

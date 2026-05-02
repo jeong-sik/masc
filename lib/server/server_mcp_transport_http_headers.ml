@@ -63,7 +63,7 @@ let body_jsonrpc_method body_str =
 
 let is_notification_method method_ =
   let prefix = "notifications/" in
-  Base.String.is_prefix method_ ~prefix
+  String.starts_with method_ ~prefix
 
 let is_initialize_method method_ = String.equal method_ "initialize"
 

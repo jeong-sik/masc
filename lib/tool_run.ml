@@ -43,7 +43,7 @@ let handle_run_init ctx args : tool_result =
   | Ok run ->
       (true, Yojson.Safe.to_string (Run_eio.run_record_to_json run))
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to init run: %s" e)
+      (false, Printf.sprintf "Failed to init run: %s" e)
 
 let handle_run_plan ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -55,7 +55,7 @@ let handle_run_plan ctx args : tool_result =
   | Ok run ->
       (true, Yojson.Safe.to_string (Run_eio.run_record_to_json run))
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to update run plan: %s" e)
+      (false, Printf.sprintf "Failed to update run plan: %s" e)
 
 let handle_run_log ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -67,7 +67,7 @@ let handle_run_log ctx args : tool_result =
   | Ok entry ->
       (true, Yojson.Safe.to_string (Run_eio.log_entry_to_json entry))
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to append run log: %s" e)
+      (false, Printf.sprintf "Failed to append run log: %s" e)
 
 let handle_run_deliverable ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -79,7 +79,7 @@ let handle_run_deliverable ctx args : tool_result =
   | Ok run ->
       (true, Yojson.Safe.to_string (Run_eio.run_record_to_json run))
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to set run deliverable: %s" e)
+      (false, Printf.sprintf "Failed to set run deliverable: %s" e)
 
 let handle_run_get ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -88,7 +88,7 @@ let handle_run_get ctx args : tool_result =
   else
     match Run_eio.get ctx.config ~task_id with
     | Ok json -> (true, Yojson.Safe.to_string json)
-    | Error e -> (false, Printf.sprintf "❌ Failed to get run: %s" e)
+    | Error e -> (false, Printf.sprintf "Failed to get run: %s" e)
 
 let handle_run_list ctx _args : tool_result =
   let json = Run_eio.list ctx.config in

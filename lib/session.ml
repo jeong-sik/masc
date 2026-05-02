@@ -409,7 +409,7 @@ let status_string registry =
 
     let inactive = get_inactive_agents registry ~threshold:Coord_resilience.default_warning_threshold in
     if inactive <> [] then begin
-      Buffer.add_string buf "\n\n⚠️ **INACTIVE AGENTS**: ";
+      Buffer.add_string buf "\n\n**INACTIVE AGENTS**: ";
       Buffer.add_string buf (String.concat ", " inactive);
       Buffer.add_string buf "\n   @mention으로 깨워주세요!"
     end;

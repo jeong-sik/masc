@@ -555,7 +555,7 @@ let handle_reset ctx args =
   let confirm = get_bool args "confirm" false in
   if not confirm then
     { success = false;
-      message = "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed." }
+      message = "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed." }
   else begin
     invalidate_status_cache ();
     { success = true; message = Coord.reset ctx.config }
@@ -649,7 +649,7 @@ let handle_coordination_fsm_snapshot ctx _args =
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
 let handle_heartbeat ctx _args =
   let message = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
-  (* Coord.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
+  (* Coord.heartbeat returns "..." on failure (agent not found, invalid file) *)
   let success = not (String.length message >= 3
     && Char.code message.[0] = 0xe2
     && Char.code message.[1] = 0x9a

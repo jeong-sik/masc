@@ -171,7 +171,7 @@ let handle_read_resource_eio state id params =
                 ("application/json", Some content)
               else
                 ("application/json", Some "{\"error\": \"No institution memory found\"}")
-          | s when Base.String.is_prefix s ~prefix:"library" ->
+          | s when String.starts_with s ~prefix:"library" ->
               let library_dir = Filename.concat config.base_path "docs/library" in
               if not (Sys.file_exists library_dir) then
                 ("text/markdown", Some "Library directory not found. Create docs/library/ first.")
@@ -224,7 +224,7 @@ let handle_read_resource_eio state id params =
                   with Sys_error _ -> (fallback_name, "", "", "", [])
                 in
                 let strip_frontmatter content =
-                  if Base.String.is_prefix content ~prefix:"---" then
+                  if String.starts_with content ~prefix:"---" then
                     match String.index_from_opt content 3 '\n' with
                     | None -> content
                     | Some first_nl ->

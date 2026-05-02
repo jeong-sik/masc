@@ -528,7 +528,7 @@ let filter_forward_looking_summary (summary : string) : string =
     List.exists
       (fun label ->
         let prefix = label ^ ":" in
-        Base.String.is_prefix trimmed ~prefix)
+        String.starts_with trimmed ~prefix)
       backward_labels
   in
   let is_inert_next_line line =

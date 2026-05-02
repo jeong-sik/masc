@@ -326,6 +326,68 @@ let test_observe_uses_precollected_board_events () =
       check bool "board event schedules turn" true
         (WO.should_run_keeper_cycle ~meta:minimal_meta obs))
 
+let test_board_signal_stimulus_becomes_pending_board_event () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let post =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author:"alice"
+            ~title:"Need test-keeper"
+            ~content:"@test-keeper please react from the queued stimulus"
+            ~post_kind:Masc_mcp.Board.Human_post ()
+        with
+        | Ok post -> post
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      let post_id = Masc_mcp.Board.Post_id.to_string post.id in
+      let payload =
+        `Assoc
+          [
+            ("source", `String "board_signal");
+            ("kind", `String "post_created");
+            ("post_id", `String post_id);
+            ("author", `String "alice");
+            ("title", `String "Need test-keeper");
+            ( "content",
+              `String "@test-keeper please react from the queued stimulus" );
+            ("hearth", `Null);
+            ("wake_reason", `String "explicit_mention");
+          ]
+        |> Yojson.Safe.to_string
+      in
+      let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+        {
+          post_id;
+          urgency = Masc_mcp.Keeper_event_queue.Immediate;
+          arrived_at = Time_compat.now ();
+          payload;
+        }
+      in
+      match
+        WO.pending_board_event_of_stimulus
+          ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta stimulus
+      with
+      | None -> fail "queued board stimulus was not converted"
+      | Some event ->
+          check string "post id" post_id event.post_id;
+          check string "author" "alice" event.author;
+          check string "title from board snapshot" "Need test-keeper" event.title;
+          check bool "explicit mention" true event.explicit_mention;
+          check (list string) "matched target" [ "test-keeper" ]
+            event.matched_targets;
+          check bool "schedules turn" true
+            (WO.should_run_keeper_cycle ~meta:minimal_meta
+               { base_observation with pending_board_events = [ event ] }))
+
 let test_observe_splits_absolute_and_claimable_backlog () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -6429,6 +6491,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
+          test_case "queued board stimulus becomes board event" `Quick
+            test_board_signal_stimulus_becomes_pending_board_event;
           test_case "splits absolute and claimable backlog" `Quick
             test_observe_splits_absolute_and_claimable_backlog;
           test_case "default keepers ignore unmatched non-mention board events" `Quick

@@ -355,24 +355,44 @@ let run_keepalive_unified_turn
          a real runtime transition: a stimulus that triggered the
          heartbeat override (PR-C2 #12412) is now actually consumed
          here. *)
-      (match
-         Keeper_registry.dequeue_event
-           ~base_path:ctx.config.base_path
-           meta_after_triage.name
-       with
-       | None -> ()
-       | Some stim ->
-           let urgency_str =
-             match stim.urgency with
-             | Keeper_event_queue.Immediate -> "immediate"
-             | Keeper_event_queue.Normal -> "normal"
-             | Keeper_event_queue.Low -> "low"
-           in
-           Log.Keeper.info
-             "turn entry: consumed stimulus stimulus_id=%s urgency=%s payload_len=%d (keeper=%s)"
-             stim.post_id urgency_str
-             (String.length stim.payload)
-             meta_after_triage.name);
+      let queued_board_event =
+        match
+          Keeper_registry.dequeue_event
+            ~base_path:ctx.config.base_path
+            meta_after_triage.name
+        with
+        | None -> None
+        | Some stim ->
+            let urgency_str =
+              match stim.urgency with
+              | Keeper_event_queue.Immediate -> "immediate"
+              | Keeper_event_queue.Normal -> "normal"
+              | Keeper_event_queue.Low -> "low"
+            in
+            Log.Keeper.info
+              "turn entry: consumed stimulus stimulus_id=%s urgency=%s payload_len=%d (keeper=%s)"
+              stim.post_id urgency_str
+              (String.length stim.payload)
+              meta_after_triage.name;
+            Keeper_world_observation.pending_board_event_of_stimulus
+              ~continuity_summary:meta_after_triage.continuity_summary
+              ~meta:meta_after_triage stim
+      in
+      let pending_board_events =
+        match queued_board_event with
+        | None -> pending_board_events
+        | Some event
+          when List.exists
+                 (fun existing -> String.equal existing.Keeper_world_observation.post_id event.post_id)
+                 pending_board_events ->
+            pending_board_events
+        | Some event ->
+            Log.Keeper.info
+              "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
+              event.Keeper_world_observation.post_id
+              meta_after_triage.name;
+            event :: pending_board_events
+      in
       let obs =
         let allowed_tool_names =
           Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage

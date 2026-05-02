@@ -4,9 +4,10 @@
     each implying a different [in_playground] state.  The factory
     centralizes the {!Keeper_shell_docker.effective_sandbox_profile}
     invariant, evaluates [in_playground] from the call-site [cwd], and
-    memoizes one runtime per [(in_playground, cwd)] so a Docker
-    container is created at most once per distinct dispatch context
-    within a turn.
+    memoizes one runtime per [(in_playground, network_mode)] so a Docker
+    container is created at most once per compatible dispatch context
+    within a turn.  The runtime can still execute from different cwd
+    values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
 
     Background: pre-PR-3b, [keeper_tools_oas.make_tool_bundle] inspected
     [meta.sandbox_profile] eagerly at turn-start and produced [None]
@@ -40,7 +41,7 @@ val resolve :
 (** Returns [Some runtime] when {!Keeper_shell_docker.effective_sandbox_profile}
     yields [Docker] (with [in_playground] derived from [cwd] vs the
     keeper's playground root); [None] when [Local].  Memoizes per
-    [(in_playground, cwd)] so subsequent calls reuse the same
+    [(in_playground, network_mode)] so subsequent calls reuse the same
     container. *)
 
 val resolve_opt :

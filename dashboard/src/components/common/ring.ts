@@ -5,13 +5,13 @@
 // `ring-1|ring-2|ring-accent|ring-inset`):
 //
 //   13 sites — keyboard focus indicator
-//              `focus-visible:outline-none focus-visible:ring-1 ring-accent`
+//              `focus-visible:outline-none focus-visible:ring-1 ring-accent-fg`
 //              with 5 distinct offset/color permutations
 //                (`ring-offset-2 ring-offset-[var(--color-bg-page)]`,
 //                 `ring-offset-1 ring-offset-bg-1`, `ring-offset-2 ring-offset-[var(--color-bg-surface)]`,
-//                 no-offset, `ring-accent/40` color variant).
+//                 no-offset, `ring-accent-fg/40` color variant).
 //    4 sites — persistent selection highlight on list items / event tracks
-//              (`ring-2 ring-accent ring-offset-1 ring-offset-bg-1`).
+//              (`ring-2 ring-accent-fg ring-offset-1 ring-offset-bg-1`).
 //    1 site  — decorative inner ring on a modal panel
 //              (`ring-1 ring-white/5`).
 //
@@ -58,11 +58,11 @@ export type RingOffset = 0 | 1 | 2
 export type RingOffsetSurface = 'page' | 'surface' | 'bg-1'
 
 const TONE_CLASS: Record<RingTone, string> = {
-  accent: 'ring-accent',
-  // `accent-soft` = `ring-accent/40` — same hue, half-strength.
+  accent: 'ring-accent-fg',
+  // `accent-soft` = `ring-accent-fg/40` — same hue, half-strength.
   // Used by agent-detail.ts:286 anchor underline focus, where a
   // full-strength accent ring would compete with the underline.
-  'accent-soft': 'ring-accent/40',
+  'accent-soft': 'ring-accent-fg/40',
   // `accent-medium` = `ring-[var(--accent-45)]` — accent at 45%
   // opacity. Dominant focus-ring tone for primary form controls and
   // buttons (8+ callsites: app/theme-switch/dashboard-shell, common
@@ -125,7 +125,7 @@ export interface RingFocusOpts {
 /** Compose the canonical focus-ring class string.
  *
  *  Default produces:
- *    `focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent`
+ *    `focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-fg`
  *
  *  The `outline-none` reset is included because every callsite in the
  *  audit pairs the ring with `outline-none` to suppress the browser's
@@ -167,7 +167,7 @@ export interface RingSelectOpts {
 /** Compose a persistent (non-focus) selection ring. Apply
  *  conditionally based on `isSelected` / `isActive` state.
  *
- *  Default: `ring-2 ring-accent` — matches the dominant select pattern
+ *  Default: `ring-2 ring-accent-fg` — matches the dominant select pattern
  *  on event-track / tool-call-track (selection vs hover distinction
  *  needs higher visual weight than focus). */
 export function ringSelectClasses(opts: RingSelectOpts = {}): string {

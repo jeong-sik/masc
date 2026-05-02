@@ -72,7 +72,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
               const isSelected = selected !== null
                 && selected.kind === 'event'
                 && selected.entry === entry
-              const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
+              const ringClass = isSelected ? 'ring-2 ring-accent-fg ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
                   class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-[width] cursor-pointer ${ringClass}"

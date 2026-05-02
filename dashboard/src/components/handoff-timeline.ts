@@ -345,7 +345,7 @@ export function HandoffTimeline({
                 ${visibleRows.map(row => {
                   const isSelected = selectedKeeper === row.keeper
                   const labelCls = isSelected
-                    ? 'text-text ring-1 ring-accent bg-accent/10'
+                    ? 'text-text ring-1 ring-accent-fg bg-accent/10'
                     : 'text-text-muted hover:text-text hover:bg-bg-1/60'
                   const clickable = typeof onSelectKeeper === 'function'
                   const rowLabelCls =

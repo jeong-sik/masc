@@ -10,7 +10,7 @@ describe('ringFocusClasses (pure)', () => {
   it('default = accent / width 1 / no offset / focus-visible variant', () => {
     const cls = ringFocusClasses()
     expect(cls).toBe(
-      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
+      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-fg',
     )
   })
 
@@ -48,7 +48,7 @@ describe('ringFocusClasses (pure)', () => {
 
   it('accent-soft uses /40 alpha', () => {
     expect(ringFocusClasses({ tone: 'accent-soft' })).toContain(
-      'focus-visible:ring-accent/40',
+      'focus-visible:ring-accent-fg/40',
     )
   })
 
@@ -117,7 +117,7 @@ describe('ringFocusClasses (pure)', () => {
 
   it('visible=false uses bare focus: prefix (legacy mouse+keyboard)', () => {
     const cls = ringFocusClasses({ visible: false })
-    expect(cls).toBe('focus:outline-none focus:ring-1 focus:ring-accent')
+    expect(cls).toBe('focus:outline-none focus:ring-1 focus:ring-accent-fg')
     expect(cls).not.toContain('focus-visible:')
   })
 
@@ -154,9 +154,9 @@ describe('ringFocusClasses (pure)', () => {
 })
 
 describe('ringSelectClasses (pure)', () => {
-  it('default = ring-2 ring-accent (no focus-visible prefix)', () => {
+  it('default = ring-2 ring-accent-fg (no focus-visible prefix)', () => {
     const cls = ringSelectClasses()
-    expect(cls).toBe('ring-2 ring-accent')
+    expect(cls).toBe('ring-2 ring-accent-fg')
   })
 
   it('does NOT add outline-none (selection ring is persistent, not focus)', () => {
@@ -172,7 +172,7 @@ describe('ringSelectClasses (pure)', () => {
 
   it('offset 1 + bg-1 (default surface) → event-track pattern', () => {
     const cls = ringSelectClasses({ offset: 1 })
-    expect(cls).toBe('ring-2 ring-accent ring-offset-1 ring-offset-bg-1')
+    expect(cls).toBe('ring-2 ring-accent-fg ring-offset-1 ring-offset-bg-1')
   })
 
   it('width 1 produces ring-1', () => {

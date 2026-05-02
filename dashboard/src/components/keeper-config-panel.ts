@@ -445,7 +445,7 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inner'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inner'
 
 // ── Inline editing components for runtime config ────────
 
@@ -475,7 +475,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
       <div class="flex items-center gap-1.5">
         <input type="number"
           aria-label=${label}
-          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded-[var(--r-1)] py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
+          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded-[var(--r-1)] py-1 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}

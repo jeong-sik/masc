@@ -836,6 +836,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
   const latestNextAction = trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = trust?.operator_disposition_reason?.trim() || null
+  const shouldShowOperatorDispositionReason =
+    operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
 
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -889,11 +891,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${latestNextAction ? html`
               <span>권장 ${latestNextAction}</span>
             ` : null}
-            ${/* Show operator_disposition_reason only when trustSummary is absent to avoid
-               repeating the root-cause twice. trustSummary coalesces attention_reason,
-               disposition_reason, sandbox_summary, and mutation_guard_summary — any of
-               those already convey the stopped-reaction context. */
-              operatorDispositionReason && !trustSummary ? html`
+            ${/* Show receipt-level operator cause when it adds detail beyond trustSummary. */
+              shouldShowOperatorDispositionReason ? html`
               <span>운영자 ${operatorDispositionReason}</span>
             ` : null}
           </div>

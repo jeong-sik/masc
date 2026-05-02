@@ -544,63 +544,17 @@ let check_circuit_breaker t ~provider_key =
         Ok ()
       end)
 
-(* Compute the [pct]-th percentile (0.0-1.0) of the populated portion of
-   the latency ring.  [None] when no samples have been recorded.
-
-   Method: copy the populated slice into a fresh array, sort ascending,
-   pick by linear-interpolation between adjacent ranks (NIST H.7 / type
-   7; same convention numpy/pandas use).  The full distribution is only
-   needed for monitoring and bounded weighting reads, so the O(n log n)
-   sort on n <= [latency_ring_size] is intentionally simple. *)
-let percentile_locked state pct =
-  match state.latency_ring with
-  | None -> None
-  | Some ring when state.latency_count = 0 -> ignore ring; None
-  | Some ring ->
-    let n = state.latency_count in
-    let buf = Array.sub ring 0 n in
-    Array.sort Float.compare buf;
-    if n = 1 then Some buf.(0)
-    else
-      let rank = pct *. float_of_int (n - 1) in
-      let lo = int_of_float (Float.floor rank) in
-      let hi = int_of_float (Float.ceil rank) in
-      if lo = hi then Some buf.(lo)
-      else
-        let frac = rank -. float_of_int lo in
-        Some (buf.(lo) *. (1.0 -. frac) +. buf.(hi) *. frac)
-
 (** Compute effective weight for a provider.
 
-    [effective_weight = config_weight * success_rate * latency_penalty]
+    [effective_weight = config_weight * success_rate]
 
     Providers in cooldown get weight 0 (skipped).  Unknown providers
     get their full config weight (optimistic). *)
 let effective_weight t ~provider_key ~config_weight =
   if is_in_cooldown t ~provider_key then 0
   else
-    with_lock t (fun () ->
-      match Hashtbl.find_opt t.providers provider_key with
-      | None -> config_weight
-      | Some state ->
-        let now = Unix.gettimeofday () in
-        let recent = prune_old_events now state.events in
-        let total = List.length recent in
-        let successes =
-          List.length (List.filter (fun e -> e.outcome = Success) recent)
-        in
-        let rate =
-          if total = 0 then 1.0
-          else float_of_int successes /. float_of_int total
-        in
-        let latency_penalty =
-          match percentile_locked state 0.95 with
-          | Some p95 when p95 > 1000.0 -> 1000.0 /. p95
-          | _ -> 1.0
-        in
-        max 1
-          (int_of_float
-             (float_of_int config_weight *. rate *. latency_penalty)))
+    let rate = success_rate t ~provider_key in
+    max 1 (int_of_float (float_of_int config_weight *. rate))
 
 (** Summary for debugging/telemetry. *)
 let provider_summary t ~provider_key =
@@ -635,6 +589,33 @@ type provider_info = {
   p95_latency_ms : float option;
   latency_samples : int;
 }
+
+(* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
+   the latency ring.  [None] when no samples have been recorded.
+
+   Method: copy the populated slice into a fresh array, sort ascending,
+   pick by linear-interpolation between adjacent ranks (NIST H.7 / type
+   7 — same convention numpy / pandas use).  The full distribution is
+   only needed for monitoring, not for high-frequency strategy reads,
+   so the O(n log n) sort on n≤[latency_ring_size] (default 100) is
+   intentionally simple and bounded. *)
+let percentile_locked state pct =
+  match state.latency_ring with
+  | None -> None
+  | Some ring when state.latency_count = 0 -> ignore ring; None
+  | Some ring ->
+    let n = state.latency_count in
+    let buf = Array.sub ring 0 n in
+    Array.sort Float.compare buf;
+    if n = 1 then Some buf.(0)
+    else
+      let rank = pct *. float_of_int (n - 1) in
+      let lo = int_of_float (Float.floor rank) in
+      let hi = int_of_float (Float.ceil rank) in
+      if lo = hi then Some buf.(lo)
+      else
+        let frac = rank -. float_of_int lo in
+        Some (buf.(lo) *. (1.0 -. frac) +. buf.(hi) *. frac)
 
 let take_first_n n lst =
   let rec loop k acc = function

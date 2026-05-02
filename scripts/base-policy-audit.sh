@@ -70,7 +70,11 @@ fi
 
 # Number of .mli files in lib/ that contain "open Base".
 count_mli_open_base() {
-  rg -l "open Base" lib/ -g '*.mli' 2>/dev/null | wc -l | tr -d ' '
+  local count=0
+  while IFS= read -r _file; do
+    count=$((count + 1))
+  done < <(rg -l "open Base" lib/ -g '*.mli' 2>/dev/null)
+  printf '%s' "$count"
 }
 
 # Number of .ml files in lib/ that contain both "open Base" AND

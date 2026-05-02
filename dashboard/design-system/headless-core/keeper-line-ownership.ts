@@ -41,10 +41,9 @@ export function keeperHueIndex(keeperId: string): AgentColorSlot {
 }
 
 function validLineRange(event: KeeperEdit): { start: number; end: number } | null {
-  if (!Number.isFinite(event.line_start) || !Number.isFinite(event.line_end)) return null
-  const start = Math.trunc(event.line_start)
-  const end = Math.trunc(event.line_end)
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null
+  if (!Number.isSafeInteger(event.line_start) || !Number.isSafeInteger(event.line_end)) return null
+  const start = event.line_start
+  const end = event.line_end
   if (start < 1 || end < 1 || end < start) return null
   return { start, end }
 }
@@ -69,7 +68,7 @@ export function createKeeperLineOwnershipAccumulator(
   const filePath = (): string => activeFilePath
   const ownership = (): ReadonlyMap<number, LineOwnership> => ownershipByLine
   const eventsForLine = (line: number): ReadonlyArray<KeeperEdit> =>
-    eventsByLine.get(Math.trunc(line)) ?? []
+    Number.isSafeInteger(line) ? eventsByLine.get(line) ?? [] : []
   const knownKeepers = (): ReadonlyArray<string> => [...keepers].sort()
 
   const ingest = (event: KeeperEdit): boolean => {

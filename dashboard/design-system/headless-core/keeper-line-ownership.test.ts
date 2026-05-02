@@ -62,6 +62,8 @@ describe('createKeeperLineOwnershipAccumulator', () => {
     expect(s.ingest(edit({ line_start: Number.NaN, line_end: 1 }))).toBe(false)
     expect(s.ingest(edit({ line_start: 1, line_end: Number.POSITIVE_INFINITY }))).toBe(false)
     expect(s.ingest(edit({ line_start: Number.MAX_SAFE_INTEGER + 1, line_end: Number.MAX_SAFE_INTEGER + 1 }))).toBe(false)
+    expect(s.ingest(edit({ line_start: 1.2, line_end: 2 }))).toBe(false)
+    expect(s.ingest(edit({ line_start: 1, line_end: 2.8 }))).toBe(false)
     expect(s.ownership().size).toBe(0)
   })
 
@@ -76,6 +78,7 @@ describe('createKeeperLineOwnershipAccumulator', () => {
       last_edit_ms: 1000,
     })
     expect(s.eventsForLine(2).map((event) => event.keeper_id)).toEqual(['nick0cave'])
+    expect(s.eventsForLine(2.8)).toEqual([])
     expect(s.knownKeepers()).toEqual(['nick0cave'])
   })
 

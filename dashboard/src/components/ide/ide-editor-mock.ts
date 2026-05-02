@@ -114,7 +114,7 @@ export function IdeEditorMock() {
           margin: 0,
           overflow: 'auto',
           fontFamily: 'var(--font-mono)',
-          font: 'var(--fs-13)',
+          fontSize: 'var(--fs-13)',
           lineHeight: 1.6,
         }}
       >
@@ -149,12 +149,12 @@ function MockEditorRow(line: MockLine, owner: LineOwnership | undefined) {
         title=${owner ? `${owner.keeper_id} · ${owner.last_edit_kind}` : undefined}
         style=${{
           color,
-          font: 'var(--fs-11)',
+          fontSize: 'var(--fs-11)',
           textAlign: 'right',
         }}
       >${owner?.keeper_id ?? '—'}</span>
       <span aria-hidden="true" style=${{ width: '6px', height: '6px', borderRadius: '50%', background: dot, justifySelf: 'center' }} />
-      <span style=${{ color: 'var(--color-fg-disabled)', font: 'var(--fs-11)', minWidth: '24px', textAlign: 'right' }}>${line.num}</span>
+      <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', minWidth: '24px', textAlign: 'right' }}>${line.num}</span>
       <span style=${{ color: 'var(--color-fg-secondary)', whiteSpace: 'pre' }}>${line.text}</span>
     </li>
   `

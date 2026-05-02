@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_permission_map — Shared tool→permission resolution.
 

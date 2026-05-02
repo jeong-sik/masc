@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime — local model runtime management and
     benchmarking tools.

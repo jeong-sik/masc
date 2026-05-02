@@ -1,4 +1,3 @@
-open Base
 
 (** Board_dispatch — single-backend board dispatch + signal hooks.
 

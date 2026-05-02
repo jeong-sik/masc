@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_inline_dispatch_comm — communication tool handlers.
 

@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -150,7 +149,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
               let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
               let now = Time_compat.now () in
               match Hashtbl.find_opt store.vote_log vote_key with
-              | Some (prev, _prev_ts) when Poly.equal prev direction ->
+              | Some (prev, _prev_ts) when (=) prev direction ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
               | Some (_opposite, _prev_ts) ->
@@ -186,7 +185,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
                   let earn =
-                    if Poly.equal direction Up then Some author_name else None
+                    if (=) direction Up then Some author_name else None
                   in
                   Ok { delta = updated.votes_up - updated.votes_down;
                        earn_upvote_for = earn;
@@ -231,7 +230,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
             let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
             let now = Time_compat.now () in
             match Hashtbl.find_opt store.vote_log vote_key with
-            | Some (prev, _prev_ts) when Poly.equal prev direction ->
+            | Some (prev, _prev_ts) when (=) prev direction ->
                 Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                   voter (vote_direction_to_string direction) comment_id))
             | Some (_opposite, _prev_ts) ->
@@ -420,7 +419,7 @@ let load_persisted_posts store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load posts failed: %s" (Exn.to_string e)
+      Log.BoardLog.error "load posts failed: %s" (Printexc.to_string e)
   end
 
 let load_persisted_comments store =
@@ -453,7 +452,7 @@ let load_persisted_comments store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load comments failed: %s" (Exn.to_string e)
+      Log.BoardLog.error "load comments failed: %s" (Printexc.to_string e)
   end
 
 (** Recalculate reply_count for all posts based on actual comments.
@@ -577,7 +576,7 @@ let load_persisted_votes store =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.BoardLog.error "load votes failed: %s" (Exn.to_string e)
+      Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
   end
 
 (** {1 Hearth (topic) operations} *)

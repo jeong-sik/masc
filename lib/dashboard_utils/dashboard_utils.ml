@@ -17,8 +17,8 @@ let string_contains ~needle haystack =
 
 let string_contains_ci ~needle haystack =
   Base.String.is_substring
-    (Base.String.lowercase haystack)
-    ~substring:(Base.String.lowercase needle)
+    (String.lowercase_ascii haystack)
+    ~substring:(String.lowercase_ascii needle)
 
 let trim_to_option text =
   let trimmed = String.trim text in

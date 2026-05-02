@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_shard — Dynamic tool sharding for MASC agents.
 

@@ -1,4 +1,3 @@
-open Base
 
 (** Per-tool timing metrics
 

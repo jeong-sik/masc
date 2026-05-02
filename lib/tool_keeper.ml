@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -1425,7 +1424,7 @@ let handle_keeper_clear ctx args : tool_result =
               (* Keep only system-role messages *)
               List.filter
                 (fun (m : Agent_sdk.Types.message) ->
-                   Poly.equal m.role Llm_provider.Types.System)
+                   (=) m.role Llm_provider.Types.System)
                 existing_messages
             else
               []

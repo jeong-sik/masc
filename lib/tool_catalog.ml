@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -855,7 +854,7 @@ let lifecycle_to_string = function
 (** Precomputed list of deprecated tools from explicit_metadata.
     Static — computed once at module init. *)
 let deprecated_tool_entries : (string * metadata) list =
-  List.filter (fun (_name, meta) -> Poly.equal meta.lifecycle Deprecated) explicit_metadata
+  List.filter (fun (_name, meta) -> (=) meta.lifecycle Deprecated) explicit_metadata
 
 (* ================================================================ *)
 (* JSON metadata helpers                                            *)

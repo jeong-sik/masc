@@ -27,9 +27,10 @@ let tool_requirement_to_string = function
   | No_tools -> "none"
 
 let tool_requirement_of_string = function
-  | "required" -> Required
-  | "optional" -> Optional
-  | _ -> No_tools
+  | "required" -> Some Required
+  | "optional" -> Some Optional
+  | "none" -> Some No_tools
+  | _ -> None
 
 let tool_requirement_to_yojson = function
   | Required -> `String "required"

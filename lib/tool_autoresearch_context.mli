@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_autoresearch_context — shared environment record passed
     into autoresearch tool handlers.

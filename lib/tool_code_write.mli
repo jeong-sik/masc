@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_code_write — File write / edit / delete / shell / git
     MCP tools for keeper agents.

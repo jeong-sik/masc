@@ -1,4 +1,3 @@
-open Base
 
 (** Coord_types — Shared types for coordination modules.
 

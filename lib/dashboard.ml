@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -141,7 +140,7 @@ let split_tasks (tasks : Types.task list) =
       | Types.Todo | Types.Done _ | Types.Cancelled _ -> false
     ) tasks
   in
-  let pending = List.filter (fun task -> Poly.equal task.Types.task_status Types.Todo) tasks in
+  let pending = List.filter (fun task -> (=) task.Types.task_status Types.Todo) tasks in
   (active, pending)
 
 let task_lines (tasks : Types.task list) =
@@ -381,25 +380,25 @@ let agents_grouped_section now (agents : Types.agent list) : section =
   let working =
     List.filter
       (fun a ->
-        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
+        (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
       agents
   in
   let stuck =
     List.filter
       (fun a ->
-        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
+        (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
       agents
   in
   let idle =
     List.filter
       (fun a ->
-        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
+        (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
       agents
   in
   let offline =
     List.filter
       (fun a ->
-        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Offline)
+        (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Offline)
       agents
   in
   let content =
@@ -533,19 +532,19 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let working_count =
     List.length
       (List.filter
-         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
+         (fun a -> (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
          all_agents)
   in
   let stuck_count =
     List.length
       (List.filter
-         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
+         (fun a -> (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
          all_agents)
   in
   let idle_count =
     List.length
       (List.filter
-         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
+         (fun a -> (=) (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
          all_agents)
   in
   let offline_count =
@@ -555,7 +554,7 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let keeper_entries = Keeper_registry.all () in
   let keeper_by_phase phase =
     List_util.count_if
-      (fun (e : Keeper_registry.registry_entry) -> Poly.equal e.phase phase)
+      (fun (e : Keeper_registry.registry_entry) -> (=) e.phase phase)
       keeper_entries
   in
   let k_running = keeper_by_phase Running in

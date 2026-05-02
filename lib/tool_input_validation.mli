@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 

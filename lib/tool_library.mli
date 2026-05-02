@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_library — Agent knowledge-library MCP tools.
 

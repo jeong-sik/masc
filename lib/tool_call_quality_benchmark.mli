@@ -1,4 +1,3 @@
-open Base
 
 include module type of Tool_call_quality_benchmark_types
 

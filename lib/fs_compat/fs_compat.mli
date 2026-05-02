@@ -1,4 +1,3 @@
-open Base
 (** Filesystem Compatibility Layer - Eio-native I/O with fallback
 
     @since 2026-02 - Keeper Emergent Identity v2.0

@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -149,7 +148,7 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
     System_post
   else if (match meta_source meta_json with Some "keeper_board_post" -> true | _ -> false) then
     Automation_post
-  else if Poly.equal visibility Internal && Stdlib.Float.compare expires_at 0.0 > 0 && not (String.equal hearth "")
+  else if (=) visibility Internal && Stdlib.Float.compare expires_at 0.0 > 0 && not (String.equal hearth "")
           && (String.starts_with ~prefix:"mdal" hearth
               || contains_substring hearth "harness")
   then
@@ -204,8 +203,8 @@ let post_classification_reason (p : post) =
 
 let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
   let kind = p.post_kind in
-  (not exclude_system || not (Poly.equal kind System_post))
-  && (not exclude_automation || not (Poly.equal kind Automation_post))
+  (not exclude_system || not ((=) kind System_post))
+  && (not exclude_automation || not ((=) kind Automation_post))
 
 type reclassify_report = {
   backend : string;

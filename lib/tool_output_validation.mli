@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_output_validation — Memory-protection cap.
 

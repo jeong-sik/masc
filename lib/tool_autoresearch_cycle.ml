@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -285,7 +284,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
           match Hashtbl.find_opt active_loops id with
           | None -> Error (Printf.sprintf "Loop %s not found" id)
           | Some state ->
-            if not (Poly.equal state.status Autoresearch.Running) then
+            if not ((=) state.status Autoresearch.Running) then
               Error "Loop is not running"
             else if not (Autoresearch.should_continue state) then begin
               let reason =

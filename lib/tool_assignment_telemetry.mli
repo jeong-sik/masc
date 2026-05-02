@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_assignment_telemetry — Unified tool assignment lifecycle events
 

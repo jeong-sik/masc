@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_board — MCP tool family for the internal board.
 

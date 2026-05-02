@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -552,7 +551,7 @@ let handle_batch_add_tasks ctx args =
 let handle_claim ?agent_tool_names ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
     result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else if not (Poly.equal (args |> member "agent_role") `Null) then
+  else if not ((=) (args |> member "agent_role") `Null) then
     (false, "agent_role is no longer supported")
   else
   let task_id = get_string args "task_id" "" in
@@ -816,13 +815,13 @@ and handle_transition ?agent_tool_names ctx args =
   match handoff_context with
   | Error error -> (false, error)
   | Ok handoff_context ->
-  if Poly.equal action Types.Release && strict_release_requires_handoff task_opt
+  if (=) action Types.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
     (false, "Strict task release requires handoff_context.summary")
   else
   let completion_state_error =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
     else
       None
@@ -836,7 +835,7 @@ and handle_transition ?agent_tool_names ctx args =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
   let persisted_gate_rejection =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -851,7 +850,7 @@ and handle_transition ?agent_tool_names ctx args =
     (false, reason)
   | None ->
   let review_gate_rejection =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -881,7 +880,7 @@ and handle_transition ?agent_tool_names ctx args =
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
   let action =
-    if Poly.equal action Types.Done_action
+    if (=) action Types.Done_action
        && Env_config_runtime.Verification.fsm_enabled ()
        && completion_owned_by_caller
     then

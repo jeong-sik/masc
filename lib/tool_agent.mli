@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 

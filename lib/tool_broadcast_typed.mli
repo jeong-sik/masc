@@ -1,4 +1,3 @@
-open Base
 
 (** Typed broadcast tool — Phase 1 PoC for compile-time tool safety.
     Schema and parse derived from {!Agent_sdk.Tool_schema_gen} combinators.

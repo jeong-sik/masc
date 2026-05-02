@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_code — Code navigation MCP tools (search, symbols, read).
 

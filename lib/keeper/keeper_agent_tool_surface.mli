@@ -20,7 +20,7 @@ type tool_requirement =
   | No_tools
 
 val tool_requirement_to_string : tool_requirement -> string
-val tool_requirement_of_string : string -> tool_requirement
+val tool_requirement_of_string : string -> tool_requirement option
 val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
 
 (** Diagnostic surface metrics emitted into trajectory entries. *)

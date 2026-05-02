@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -660,7 +659,7 @@ let handle_vote args =
 
   match Board_dispatch.vote ~voter ~post_id ~direction with
   | Ok new_score ->
-      let arrow = if Poly.equal direction Board.Up then "↑" else "↓" in
+      let arrow = if (=) direction Board.Up then "↑" else "↓" in
       (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
       let evolution_msg =
         match Atomic.get evolution_hook with
@@ -675,7 +674,7 @@ let handle_vote args =
                     | Some pv -> pv
                     | None -> "Creativity"
                   in
-                  let is_positive = (Poly.equal direction Board.Up) in
+                  let is_positive = ((=) direction Board.Up) in
                   cb.record_feedback ~name:author ~dimension ~is_positive;
                   Printf.sprintf " [🧬 %s evolved: %s %s]"
                     author dimension (if is_positive then "+0.01" else "-0.01")
@@ -691,7 +690,7 @@ let handle_vote args =
       (match Board_dispatch.get_post ~post_id with
        | Ok post ->
            let score = post.votes_up - post.votes_down in
-           let arrow = if Poly.equal direction Board.Up then "↑" else "↓" in
+           let arrow = if (=) direction Board.Up then "↑" else "↓" in
            (true, Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
        | Error _ ->
            (true, "Already voted (idempotent). Score unchanged."))

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime_verify — Runtime contract verification for
     local LLM runtime pools (llama.cpp / Ollama).

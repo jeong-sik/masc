@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_args — tool-convention argument extraction wrappers over
     {!Safe_ops} plus canonical error/OK response helpers.

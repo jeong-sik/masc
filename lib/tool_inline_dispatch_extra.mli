@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_inline_dispatch_extra — fallback inline-tool dispatch
     branch (board / mention handlers extracted from

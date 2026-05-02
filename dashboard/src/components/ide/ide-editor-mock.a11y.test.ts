@@ -18,7 +18,7 @@ describe('IdeEditorMock a11y', () => {
     document.body.removeChild(container)
   })
 
-  it('renders the ownership-backed editor mock accessibly', async () => {
+  it('renders the code document and ownership-backed editor mock accessibly', async () => {
     render(html`<${IdeEditorMock} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })

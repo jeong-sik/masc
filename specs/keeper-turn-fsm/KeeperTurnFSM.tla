@@ -113,7 +113,8 @@ StartTurn ==
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
 \* Phase gate skip — pre-dispatch terminal observation, outcome = skipped.
-\* Maps to keeper_unified_turn.ml:1062 (PR #11154 wired keeper_turn_id).
+\* Maps to keeper_unified_turn.ml:99-126 (non-executable phase early exit;
+\* PR #11154 wired keeper_turn_id; action label added to emit_transition).
 PhaseGateSkip ==
     /\ turn_state = "phase_gating"
     /\ ~stop_signaled

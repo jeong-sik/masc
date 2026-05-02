@@ -59,11 +59,11 @@ body.focus-mode .vp-banner { display: none !important; }
   background: rgb(var(--color-accent-glow) / .12);
 }
 .focus-toggle .focus-icon {
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1;
 }
 .focus-toggle .focus-label {
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -100,11 +100,11 @@ body.widget-solo-mode .focus-cluster { display: none; }
   box-shadow: 0 4px 20px rgba(0,0,0,.6);
   padding: 4px 0;
   min-width: 200px;
-  font: 11px/1 var(--font-mono);
+  font: var(--fs-11)/1 var(--font-mono);
 }
 .focus-menu-h {
   padding: 6px 10px 4px;
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: .14em;
   text-transform: uppercase;
   color: var(--color-fg-muted, #6b6258);
@@ -141,7 +141,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 }
 .focus-menu-sub {
   color: var(--color-fg-muted, #6b6258);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: .12em;
   text-transform: uppercase;
 }

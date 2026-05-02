@@ -169,7 +169,7 @@ body.widget-solo-mode #root { height: 100vh; }
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-disabled);
-  font: 10px/1 var(--font-mono);
+  font: var(--fs-10)/1 var(--font-mono);
   cursor: pointer;
   border-radius: 2px;
   margin-left: 4px;

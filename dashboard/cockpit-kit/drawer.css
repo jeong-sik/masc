@@ -124,7 +124,7 @@
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-muted);
-  font: 11px var(--font-mono);
+  font: var(--fs-11) var(--font-mono);
   cursor: pointer;
   border-radius: 2px;
 }

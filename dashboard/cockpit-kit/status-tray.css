@@ -60,12 +60,12 @@
 }
 
 .st-item .st-l {
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 .st-item .st-sub {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--color-fg-disabled, #6b6258);
   font-variant-numeric: tabular-nums;
 }
@@ -81,7 +81,7 @@
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-disabled, #6b6258);
-  font: 13px/1 var(--font-mono);
+  font: var(--fs-13)/1 var(--font-mono);
   cursor: pointer;
   border-radius: 0;
 }
@@ -124,11 +124,11 @@
 .st-list {
   display: flex;
   flex-direction: column;
-  font: 11px/1.4 var(--font-mono);
+  font: var(--fs-11)/1.4 var(--font-mono);
 }
 .st-list-h {
   padding: 8px 12px 6px;
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: .12em;
   text-transform: uppercase;
   color: var(--color-fg-disabled);
@@ -146,7 +146,7 @@
 .st-list-keeper { color: var(--color-fg-primary); }
 .st-list-kind {
   color: var(--color-fg-muted);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: .04em;
   text-transform: uppercase;
 }

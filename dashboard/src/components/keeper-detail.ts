@@ -333,7 +333,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
-    : 'border-[var(--color-border-default)] bg-[var(--white-3)]'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabel = runtimeBlockerClass
     ? {
         ambiguous_post_commit_timeout: '커밋 후 응답 없음',
@@ -354,7 +354,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-          : 'bg-[var(--white-6)] text-[var(--color-fg-secondary)]'
+          : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
   const trustDispositionLabel = trustDisposition
     ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
         trustDisposition
@@ -370,14 +370,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             <${ActionButton}
               variant="ghost"
               size="sm"
-              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
+              class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개<//>`
           : html`<${ActionButton}
               variant="ghost"
               size="sm"
-              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
+              class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지<//>
@@ -617,7 +617,7 @@ function KeeperClearContextDialog({
           <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">사유</span>
           <${TextArea}
             inputRef=${reasonRef}
-            class="!bg-[var(--white-3)] !min-h-[112px] !text-sm leading-paragraph"
+            class="!bg-[var(--color-bg-surface)] !min-h-[112px] !text-sm leading-paragraph"
             placeholder="예: stale continuity replay 제거"
             ariaLabel="비우기 사유"
             disabled=${pending}
@@ -626,7 +626,7 @@ function KeeperClearContextDialog({
           />
         </label>
 
-        <label class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
+        <label class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             class="mt-0.5"
             checked=${preserveSystemPrompt}
@@ -673,7 +673,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
       <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-sm text-[var(--color-fg-muted)]">
+        <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : html`
@@ -756,7 +756,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
-                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
@@ -777,7 +777,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
                   <${MonoBadge}>${pr.branch}</${MonoBadge}>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
@@ -793,7 +793,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">워크트리 (${worktrees.length})</${SectionHeader}>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
-                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
+                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
               `)}
             </div>
           </div>
@@ -964,7 +964,7 @@ export function KeeperDetailPage() {
             <button
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+              class="flex items-center justify-center size-8 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
               aria-label="키퍼 상세 종료"
             >
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -1017,12 +1017,12 @@ export function KeeperDetailPage() {
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                     하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </span>`
                 : null}
               ${keeper.last_speech_act
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                     최근 <span class="font-mono text-[var(--color-fg-primary)]">${keeper.last_speech_act}</span>
                   </span>`
                 : null}
@@ -1046,7 +1046,7 @@ export function KeeperDetailPage() {
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview
@@ -1209,7 +1209,7 @@ export function KeeperDetailPage() {
             description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >
             <details class="mt-0">
-          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors flex items-center gap-2">
             <${StatusDot} size="xs" class="bg-[var(--color-fg-disabled)]" />
             디버그
           </summary>

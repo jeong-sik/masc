@@ -105,7 +105,7 @@ export function filterCtxCompositionEntries(
 type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
 
 const KPI_TONE: Record<KpiTone, string> = {
-  default: 'border-[var(--color-border-default)] bg-[var(--white-3)]',
+  default: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
   ok: 'border-[var(--ok-20)] bg-[var(--ok-6)]',
   warn: 'border-[var(--warn-20)] bg-[var(--warn-8)]',
   bad: 'border-[var(--bad-20)] bg-[var(--bad-6)]',
@@ -162,7 +162,7 @@ function DetailCard({ class: cx, children }: {
   children: unknown
 }) {
   return html`
-    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}">${children}</div>
+    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}">${children}</div>
   `
 }
 
@@ -186,7 +186,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
   if (!hasAny) return null
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">운영 건강도</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
@@ -275,7 +275,7 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="tabular-nums"><span class="text-[var(--color-status-warn)]">⚠️</span> ${failures.turn_failed} 실패</span>
           <span class="tabular-nums"><span class="text-[var(--color-status-err)]">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
-        <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-[var(--r-0)] overflow-hidden flex" aria-label="성공/실패 비율 바">
+        <div class="mt-2 w-full h-1.5 bg-[var(--color-bg-hover)] rounded-[var(--r-0)] overflow-hidden flex" aria-label="성공/실패 비율 바">
           <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${pctSuccess.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${pctFail.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--color-status-err)]" style="width:${pctReject}%" title=${`거절 ${pctReject.toFixed(0)}%`}></div>
@@ -307,7 +307,7 @@ function OutcomesLedger({ keeper, outcomes }: {
             <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">
               <span class="text-[var(--color-fg-disabled)]">주요 실패 원인:</span>
               ${verdicts.top_failure_reasons.map(reason => html`
-                <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] font-mono text-[var(--color-fg-primary)]">${reason}</span>
+                <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] font-mono text-[var(--color-fg-primary)]">${reason}</span>
               `)}
             </div>
           ` : null}
@@ -334,9 +334,9 @@ function OutcomesLedger({ keeper, outcomes }: {
           <${MutedSpan}>supervisor 이력</${MutedSpan}>
         </div>
         <div class="flex flex-wrap gap-1.5 text-2xs">
-          <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
-          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
-          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
+          <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
+          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
+          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`
             <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
           ` : null}
@@ -366,7 +366,7 @@ function KpiSection({ title, question, children }: {
   children: unknown
 }) {
   return html`
-    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" aria-label=${title}>
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label=${title}>
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-2xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">${title}</h3>
         <span class="text-3xs text-[var(--color-fg-disabled)] truncate">${question}</span>
@@ -698,7 +698,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <${MutedSpan}>${promptPoints.length}개 스냅샷</${MutedSpan}>
         ${latest?.prompt_fingerprint
           ? html`<span class="inline-flex items-center gap-1">
-              <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
+              <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
               <${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${10} />
             </span>`
           : null}
@@ -759,11 +759,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>
                 </div>
@@ -831,7 +831,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>latest turn input</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(latestTotal)}</span>
           </div>
-          <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--color-border-default)] bg-[var(--white-2)] flex">
+          <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex">
             ${latestEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`<div
@@ -1004,7 +1004,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추론 텔레메트리</span>
         <${MutedSpan}>${telemetryPoints.length}개 지점</${MutedSpan}>
-        ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
+        ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
       </div>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         ${wallTokPerSec.length > 0 ? html`
@@ -1218,14 +1218,14 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
       />
       <div class="flex flex-col">
         ${filtered.map((f, i) => html`
-          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${i % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''}">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="font-mono text-[var(--cyan)] text-2xs truncate">${f.key}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate">${f.value}</span>
           </div>
         `)}
         ${extras.map((f, i) => html`
-          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''}">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate ${f.mono ? 'font-mono' : ''}">${f.value}</span>
           </div>
@@ -1243,7 +1243,7 @@ export function EquipmentList({ items }: { items: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map((item, i) => html`
-        <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
           <span class="text-xs text-[var(--color-fg-primary)]">${item}</span>
           <span class="text-3xs text-[var(--cyan)] font-mono">#${i + 1}</span>
         </div>
@@ -1259,7 +1259,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   return html`
     <div class="max-h-55 overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
-        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-[var(--r-1)]">
+        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--color-bg-surface)] rounded-[var(--r-1)]">
           <${StatusChip} tone="info" uppercase=${false} class="text-2xs font-medium">${name}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] font-mono">${relation}</span>
         </div>

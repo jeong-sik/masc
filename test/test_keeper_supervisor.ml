@@ -1061,6 +1061,55 @@ let test_initial_auto_resume_capped_at_max () =
 
 (* ── Test runner ────────────────────────────────────────── *)
 
+let test_persisted_blocker_survives_unregister () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "auto-pause-blocker-keeper" in
+      let meta = make_meta name in
+      let meta = { meta with runtime = { meta.runtime with last_blocker = "test-blocker"; last_blocker_class = Some KT.Turn_timeout } } in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ KT.context =
+        { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
+      in
+      Sup.sweep_and_recover ctx;
+      
+      (* Check if blocker is persisted *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check string "meta.runtime.last_blocker" "test-blocker" m.runtime.last_blocker;
+           check bool "meta.runtime.last_blocker_class" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+       | Ok None -> fail "meta missing after storm pause"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      
+      (* Unregister the keeper *)
+      Reg.unregister ~base_path:config.base_path name;
+      
+      (* Read again and verify *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check string "meta.runtime.last_blocker after unregister" "test-blocker" m.runtime.last_blocker;
+           check bool "meta.runtime.last_blocker_class after unregister" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+       | Ok None -> fail "meta missing after unregister"
+       | Error err -> fail ("read_meta failed: " ^ err)))
+
 let () =
   run "keeper_supervisor" [
     "backoff", [
@@ -1134,5 +1183,7 @@ let () =
         test_operator_pause_not_auto_resumed;
       test_case "initial delay capped at max_sec when initial > max (regression)" `Quick
         test_initial_auto_resume_capped_at_max;
+      test_case "persisted blocker survives unregister" `Quick
+        test_persisted_blocker_survives_unregister;
     ];
   ]

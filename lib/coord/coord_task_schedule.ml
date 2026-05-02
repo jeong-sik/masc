@@ -726,7 +726,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("type", `String "stale_claim_released");
                   ("task_id", `String task.id);
                   ("assignee", `String assignee);
-                  ("age_s", `Float (now_f -. ts));
+                  ("age_s", `Int (int_of_float (Float.round (now_f -. ts))));
                   ("ts", `String now_str);
                 ]);
                 { task with task_status = Todo }
@@ -739,7 +739,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("type", `String "stale_inprogress_released");
                   ("task_id", `String task.id);
                   ("assignee", `String assignee);
-                  ("age_s", `Float (now_f -. ts));
+                  ("age_s", `Int (int_of_float (Float.round (now_f -. ts))));
                   ("ts", `String now_str);
                 ]);
                 { task with task_status = Todo }

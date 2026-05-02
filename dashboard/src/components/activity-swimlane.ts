@@ -116,7 +116,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       id: agent,
       content: agent.length > 16 ? agent.slice(0, 15) + '..' : agent,
       title: agent,
-      className: 'agent-swimlane-group text-2xs font-system text-[var(--slate-400)]',
+      className: 'agent-swimlane-group text-2xs font-system text-[var(--color-fg-muted)]',
       order: i
     })))
 

@@ -387,6 +387,24 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"
                  meta.name reason_desc meta.cascade_name window_count;
                if window_count >= escalation_threshold then begin
+                 let cascade_recovered () =
+                   match ctx.net with
+                   | None -> false
+                   | Some net ->
+                       (match Cascade_catalog_runtime.resolve_named_providers_strict
+                                ~sw:ctx.sw ~net ~cascade_name:meta.cascade_name () with
+                        | Error _ -> false
+                        | Ok candidates ->
+                            (match Cascade_health_filter.filter_healthy_strict ~sw:ctx.sw ~net candidates with
+                             | Error _ -> false
+                             | Ok healthy ->
+                                 List.exists (fun (p : Llm_provider.Provider_config.t) ->
+                                   Result.is_ok (Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:p.model_id)
+                                 ) healthy))
+                 in
+                 if cascade_recovered () then
+                   Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name meta.cascade_name
+                 else begin
                  Prometheus.inc_counter
                    "masc_keeper_stale_termination_threshold_breached_total"
                    ~labels:[ ("keeper", meta.name) ]
@@ -412,6 +430,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     See issue #10765."
                    meta.name window_count termination_window_sec
                    escalation_threshold
+               end
                end;
                (* #10765 phase 2: fleet batch detection.  See module-level
                   comment on [batch_terminations] for rationale. *)

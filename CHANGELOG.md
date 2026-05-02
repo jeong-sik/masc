@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [0.19.3] - 2026-05-02
+
+### Added
+- Health-Aware Provider Circuit Breaker to prevent cascade stagnation with a 30-second cooldown.
+- Adaptive Pheromone Evaporation with Max-Min Conductivity Bounds.
+- 3-Layer Context Auto-Compaction (Working, Episodic, Semantic).
+- TLA+ Runtime Invariant verification (`ZombiePhaseInvariant`).
+- 4-Tier Operator Nudge System (`HINT` -> `SUGGEST` -> `APPROVE/REJECT` -> `REDIRECT`) and BDI Inspector in Dashboard.
+
+### Fixed
+- SafeAuto source path recovery to prevent backtrace loss in Effect Handler.
+- Fiber Yield Starvation with `Eio_context.fair_yield ()`.
+- Flaky `test_cascade_retry` test using deterministic structured concurrency.
+
 ## [0.19.2] - 2026-05-01
 
 Release-build recovery patch after the `v0.19.1` tag landed before the latest main build-break repair PRs. No breaking API changes.

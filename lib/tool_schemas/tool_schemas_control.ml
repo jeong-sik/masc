@@ -15,6 +15,7 @@ let schemas : tool_schema list = [
           ("default", `String "Manual pause");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -23,6 +24,7 @@ let schemas : tool_schema list = [
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

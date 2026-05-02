@@ -49,4 +49,5 @@ let object_schema ?(required = []) properties =
       ("type", `String "object");
       ("properties", `Assoc properties);
       ("required", `List (List.map (fun k -> `String k) required));
+      ("additionalProperties", `Bool false);
     ]

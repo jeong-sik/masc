@@ -26,6 +26,7 @@ Call after masc_join to orient yourself. Pair with masc_tasks for detailed backl
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -43,6 +44,7 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
           ("default", `Bool false);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -53,6 +55,7 @@ Pair with masc_check to assert specific prerequisites before acting.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -62,6 +65,7 @@ Use to detect inconsistent cross-axis state such as terminal goals with open tas
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -84,6 +88,7 @@ Pair with masc_workflow_guide for next-step recommendations.";
         ]);
       ]);
       ("required", `List [`String "assertions"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -94,6 +99,7 @@ Call every few minutes during long tasks; agents silent for 5+ min become zombie
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

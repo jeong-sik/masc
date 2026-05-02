@@ -18,8 +18,35 @@
 <script src="cockpit-kit/data.js"></script>
 <script src="cockpit-kit/data-p2.js"></script>
 <script src="cockpit-kit/data-crew.js"></script>
-<script src="cockpit-kit/cockpit-ext.js"></script>
+<script src="cockpit-kit/cockpit-ext.js">
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'MASC_HYDRATION') {
+      const live = event.data.data;
+      if (!window.MASC_DATA) return;
+      
+      // Update local MASC_DATA structure with live telemetry mapped properties
+      window.MASC_DATA.keepers = live.keepers.map(k => ({
+        id: k.name,
+        role: k.role || 'Keeper',
+        color: 'var(--color-accent-fg)',
+        status: k.status || 'running',
+        task: k.task_id || '-',
+        tool: k.last_tool || '-'
+      }));
+      window.MASC_DATA.goals = live.goals.map(g => ({
+        id: g.id,
+        title: g.title,
+        priority: g.priority || 3,
+        status: g.status,
+        progress: 0
+      }));
+      // trigger rerender event
+      window.dispatchEvent(new Event('masc_data_updated'));
+    }
+  });
+</script>
 </head>
+
 <body class="masc-ds">
 <div id="root"></div>
 <script type="text/babel" src="cockpit-kit/cb-shared.jsx"></script>

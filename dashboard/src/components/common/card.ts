@@ -10,7 +10,7 @@ import { statusDotColor } from './status-badge'
 const CARD_BASE = 'card'
 export const CARD_STANDARD = `${CARD_BASE}`
 const CARD_LIGHT = `${CARD_BASE} !bg-transparent !backdrop-blur-none`
-const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-sm`
+const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[var(--shadow-1)]`
 
 type CardVariant = 'standard' | 'light' | 'compact'
 

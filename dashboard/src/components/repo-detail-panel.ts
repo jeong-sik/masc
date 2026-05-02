@@ -147,7 +147,7 @@ function InfoRow({
         ? (value ? 'ON' : 'OFF')
         : String(value)
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <div class="flex items-center gap-2">
         ${icon ? html`<span class="text-[var(--color-fg-muted)]">${icon}</span>` : null}
         <span class="text-xs font-medium text-text-muted">${label}</span>

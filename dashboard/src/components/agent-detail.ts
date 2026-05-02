@@ -119,7 +119,7 @@ export function filterTaskHistories(
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)] shadow-sm">
+    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)] shadow-[var(--shadow-1)]">
       <${IdPill}>${task.id}<//>
       <span class="flex-1 text-sm text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
@@ -129,7 +129,7 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
+    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-[var(--shadow-1)] hover:border-accent/30 transition-colors group">
       <div class="mb-3">
         <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
       </div>
@@ -247,7 +247,7 @@ export function AgentDetailOverlay() {
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--dialog-overlay-bg)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
-      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-[var(--r-1)] border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-sm shadow-black/50 ring-1 ring-white/5"
+      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-[var(--r-1)] border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-[var(--elev-6-shadow)] ring-1 ring-white/5"
     >
       <div class="p-6 flex flex-col gap-5">
         <div class="flex justify-between items-start gap-4">
@@ -362,7 +362,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded-[var(--r-1)] shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded-[var(--r-1)] shadow-[var(--shadow-1)] hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 

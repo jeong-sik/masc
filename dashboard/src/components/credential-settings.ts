@@ -308,7 +308,7 @@ export function CredentialSettings() {
       </div>
 
       ${isAdding ? html`
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-[var(--shadow-1)]">
           <${SectionHeader} title="새 크리덴셜" />
           <div class="flex flex-col gap-3">
             <div>
@@ -460,7 +460,7 @@ export function CredentialSettings() {
           등록된 크리덴셜이 없습니다.
         </div>
       ` : html`
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)]">
           <table class="w-full text-left">
             <thead>
               <tr class="border-b border-card-border/30 bg-card/40">

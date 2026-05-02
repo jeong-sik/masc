@@ -95,7 +95,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
+      <div class="mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-[var(--shadow-1)]">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           All open cases are older than ${formatAgeSummary(oldestAge)}.
@@ -369,7 +369,7 @@ function KeeperApprovalAlertBanner() {
 
   return html`
     <div
-      class="mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
+      class="mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-[var(--shadow-1)] ring-2 ${ringTone}"
       data-testid="keeper-hitl-alert-banner"
       role="status"
       aria-live="polite"
@@ -538,7 +538,7 @@ function KeeperApprovalQueueSection() {
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
-                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
@@ -629,7 +629,7 @@ function ApprovalRulesSection() {
               ${rules.map((rule: KeeperApprovalRule) => {
                 const deleting = actingId === `rule:${rule.id}`
                 return html`
-                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}

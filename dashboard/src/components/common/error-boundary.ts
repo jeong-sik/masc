@@ -60,7 +60,7 @@ export class ErrorBoundary extends Component<Props, State> {
       if (severity === 'recoverable') {
         return html`
           <div
-            class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/10 p-5 shadow-sm"
+            class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/10 p-5 shadow-[var(--shadow-1)]"
             style="border-left: 3px solid var(--color-status-warn);"
             role="alert"
           >
@@ -88,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
       // severity === 'fatal' — original tone + an explicit reload button
       return html`
         <div
-          class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--color-bg-elevated)] p-5 shadow-sm"
+          class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--color-bg-elevated)] p-5 shadow-[var(--shadow-1)]"
           style="border-left: 3px solid var(--color-status-err);"
           role="alert"
         >

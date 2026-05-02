@@ -635,7 +635,7 @@ function ShortcutsOverlay({
       labelledBy="shortcuts-title"
       onClose=${onClose}
       overlayClass="fixed inset-0 z-50 flex items-center justify-center"
-      panelClass="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-sm"
+      panelClass="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-[var(--shadow-1)]"
     >
       <div class="flex items-center justify-between mb-3">
         <h2 id="shortcuts-title" class="m-0 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">

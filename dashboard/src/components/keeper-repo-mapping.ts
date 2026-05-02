@@ -443,7 +443,7 @@ export function KeeperRepoMapping() {
             return html`
               <div
                 key=${keeperId}
-                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm"
+                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)]"
               >
                 <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3">
                   <div class="flex items-center gap-2 min-w-0">

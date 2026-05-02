@@ -85,7 +85,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
         style="border-color: ${color}; background: ${color}33"
       />
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 shadow-sm text-2xs whitespace-nowrap">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 shadow-[var(--shadow-1)] text-2xs whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--color-fg-muted)] mt-0.5">${t.event_type ?? eventLabel(t.selected_event)}</div>
           ${signal ? html`

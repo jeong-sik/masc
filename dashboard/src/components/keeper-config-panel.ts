@@ -321,7 +321,7 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <span class="text-xs font-semibold text-text-strong">${value}</span>
     </div>
@@ -375,7 +375,7 @@ function Callout({
       ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
-    <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-sm ${toneClass}">
+    <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-[var(--shadow-1)] ${toneClass}">
       <div class="text-2xs font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
       <div class="text-xs leading-relaxed">${body}</div>
     </div>
@@ -451,7 +451,7 @@ const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm 
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
@@ -470,7 +470,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   min?: number; max?: number; step?: number; suffix?: string
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <div class="flex items-center gap-1.5">
         <input type="number"
@@ -503,7 +503,7 @@ function InlineSelectRow({
   onChange: (v: string) => void
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5 gap-3">
+    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5 gap-3">
       <${MutedLabel}>${label}</${MutedLabel}>
       <select
         aria-label=${label}

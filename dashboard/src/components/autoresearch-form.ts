@@ -127,7 +127,7 @@ export function StartAutoresearchForm() {
       labelledBy="start-autoresearch-title"
       onClose=${closeStartForm}
       overlayClass="fixed inset-0 z-50 flex items-center justify-center bg-[var(--white-5)]/60 backdrop-blur-sm"
-      panelClass="w-full max-w-lg mx-4 rounded-[var(--r-1)] border border-card-border bg-[var(--card-bg)] shadow-sm p-6"
+      panelClass="w-full max-w-lg mx-4 rounded-[var(--r-1)] border border-card-border bg-[var(--card-bg)] shadow-[var(--shadow-1)] p-6"
     >
       <h2 id="start-autoresearch-title" class="text-sm font-semibold text-[var(--color-fg-secondary)] mb-4">
         새 오토리서치 루프

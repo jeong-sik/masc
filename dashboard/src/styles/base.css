@@ -15,9 +15,9 @@ html {
 
 body {
   font-family: var(--font-sans);
-  color: var(--fg-2);
+  color: var(--color-fg-secondary);
   line-height: var(--lh-body);
-  background-color: var(--bg-0);
+  background-color: var(--color-bg-page);
   background-image:
     radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / 0.05), transparent 20%);
   background-attachment: fixed;

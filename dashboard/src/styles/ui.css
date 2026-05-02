@@ -9,13 +9,13 @@
 /* ── Markdown Rendered Content (marked GFM output) ────────── */
 @utility markdown-content {
   line-height: 1.55;
-  color: var(--fg-2);
+  color: var(--color-fg-secondary);
 
   & p { margin: 6px 0; }
 
-  & h1 { font-size: 16px; font-weight: 700; margin: 16px 0 8px; color: var(--fg-1); }
-  & h2 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--fg-1); }
-  & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--fg-2); }
+  & h1 { font-size: 16px; font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
     background: rgb(255 255 255 / .08);
@@ -29,7 +29,7 @@
     background: rgb(255 255 255 / .03);
     padding: 12px 14px;
     border-radius: 8px;
-    border: 1px solid var(--line-1);
+    border: 1px solid var(--color-border-default);
     overflow-x: auto;
     font-size: var(--fs-sm);
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -57,7 +57,7 @@
   & li { margin: 2px 0; }
   & li > ul, & li > ol { margin: 2px 0; }
 
-  & hr { border: none; border-top: 1px solid var(--line-1); margin: 12px 0; }
+  & hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
 
   & a { color: var(--brass-1); &:hover { text-decoration: underline; } }
   & strong { font-weight: 600; }
@@ -74,7 +74,7 @@
   padding: 16px;
   margin: 8px 0;
   background: rgb(255 255 255 / .03);
-  border: 1px solid var(--line-1);
+  border: 1px solid var(--color-border-default);
   overflow-x: auto;
 }
 
@@ -98,7 +98,7 @@ button.agent-card {
 button.monitor-alert,
 button.monitor-row {
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
-  &:hover { transform: translateY(-1px); border-color: var(--line-2); background: rgb(255 255 255 / .06); }
+  &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: rgb(255 255 255 / .06); }
   &.ok { border-color: rgb(var(--ok-glow) / .18); }
   &.warn { border-color: rgb(var(--warn-glow) / .28); }
   &.bad { border-color: rgb(var(--err-glow) / .34); }
@@ -115,8 +115,8 @@ button.monitor-row {
 @utility agent-runtime-strip {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--bg-0) 85%, black) 0%,
-    color-mix(in srgb, var(--bg-1) 70%, black) 100%
+    color-mix(in srgb, var(--color-bg-page) 85%, black) 0%,
+    color-mix(in srgb, var(--color-bg-surface) 70%, black) 100%
   );
 }
 
@@ -136,7 +136,7 @@ button.monitor-row {
 @utility agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--color-purple); }
 @utility agent-event-badge--task { background: rgb(var(--warn-glow) / .12); color: var(--warn); }
 @utility agent-event-badge--board { background: rgba(34, 211, 238, 0.12); color: var(--color-cyan); }
-@utility agent-event-badge--default { background: var(--line-1); color: var(--color-fg-muted); }
+@utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-muted); }
 
 /* ── Micro-Interactions (Task 289) ── */
 @utility pressable {

@@ -135,9 +135,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =
-      if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
+      if not !resolved && Keeper_registry.try_resolve_done reg value then begin
         resolved := true;
-        Eio.Promise.resolve reg.done_r value;
         true
       end else
         false
@@ -866,6 +865,66 @@ let sweep_and_recover (ctx : _ context) =
   let to_unregister = ref [] in
   let to_mark_dead = ref [] in
   let to_cleanup_dead = ref [] in
+  let queue_crashed_entry (entry : Keeper_registry.registry_entry) msg =
+    match entry.last_failure_reason with
+    | Some (Keeper_registry.Stale_termination_storm { count }) ->
+        (* #10765 Phase 2: skip [to_restart] AND in-memory unregister.
+           The watchdog detected a termination storm (>= escalation_
+           threshold within the 6h window).  [handle_stale_storm_pause]
+           persists [meta.paused = true] so reconcile + future sweeps
+           honor the pause across server restarts; we then add the
+           entry to [to_unregister] so the in-memory registry slot is
+           cleared and subsequent sweep ticks within the same server
+           do NOT re-fire the storm-pause path (counter must increment
+           once per storm, not once per sweep tick). *)
+        handle_stale_storm_pause ctx entry ~count;
+        to_unregister := entry :: !to_unregister
+    | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+        (* Repeated OAS budget exhaustion means the active
+           cascade/model is not producing within the turn budget.
+           Restarting the same keeper preserves that bad routing and
+           burns another multi-minute budget, so pause instead. *)
+        handle_oas_timeout_budget_pause ctx entry ~count;
+        to_unregister := entry :: !to_unregister
+    | _ ->
+        if entry.restart_count >= max_restarts then
+          to_mark_dead := (entry, msg) :: !to_mark_dead
+        else begin
+          let delay = backoff_delay entry.restart_count in
+          if now -. entry.last_restart_ts >= delay then
+            to_restart := (entry, msg) :: !to_restart
+        end
+  in
+  let watchdog_stop_pending (entry : Keeper_registry.registry_entry) =
+    Atomic.get entry.fiber_stop
+    &&
+    match entry.last_failure_reason with
+    | Some (Keeper_registry.Stale_turn_timeout _)
+    | Some (Keeper_registry.Stale_termination_storm _)
+    | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
+    | _ -> false
+  in
+  let force_unresolved_watchdog_crash (entry : Keeper_registry.registry_entry) =
+    let msg =
+      entry.last_failure_reason
+      |> Option.map Keeper_registry.failure_reason_to_string
+      |> Option.value ~default:"watchdog_stop_pending"
+    in
+    Log.Keeper.warn
+      "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
+      entry.name msg;
+    ignore (Keeper_registry.try_resolve_done entry (`Crashed msg));
+    ignore
+      (Keeper_registry.dispatch_event_and_log
+         ~base_path entry.name
+         (Keeper_state_machine.Fiber_terminated { outcome = msg }));
+    let ts = Time_compat.now () in
+    Keeper_registry.record_crash ~base_path entry.name ts msg;
+    Keeper_registry.record_error ~base_path entry.name msg;
+    match Keeper_registry.get ~base_path entry.name with
+    | Some updated -> queue_crashed_entry updated msg
+    | None -> ()
+  in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match entry.phase with
     | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
@@ -884,38 +943,13 @@ let sweep_and_recover (ctx : _ context) =
       (match Eio.Promise.peek entry.done_p with
       | None when entry.phase = Keeper_state_machine.Stopped ->
           to_unregister := entry :: !to_unregister
+      | None when watchdog_stop_pending entry ->
+          force_unresolved_watchdog_crash entry
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
       | Some (`Crashed msg) ->
-          (match entry.last_failure_reason with
-           | Some (Keeper_registry.Stale_termination_storm { count }) ->
-               (* #10765 Phase 2: skip [to_restart] AND in-memory unregister.
-                  The watchdog detected a termination storm (>= escalation_
-                  threshold within the 6h window).  [handle_stale_storm_pause]
-                  persists [meta.paused = true] so reconcile + future sweeps
-                  honor the pause across server restarts; we then add the
-                  entry to [to_unregister] so the in-memory registry slot is
-                  cleared and subsequent sweep ticks within the same server
-                  do NOT re-fire the storm-pause path (counter must increment
-                  once per storm, not once per sweep tick). *)
-               handle_stale_storm_pause ctx entry ~count;
-               to_unregister := entry :: !to_unregister
-           | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
-               (* Repeated OAS budget exhaustion means the active
-                  cascade/model is not producing within the turn budget.
-                  Restarting the same keeper preserves that bad routing and
-                  burns another multi-minute budget, so pause instead. *)
-               handle_oas_timeout_budget_pause ctx entry ~count;
-               to_unregister := entry :: !to_unregister
-           | _ ->
-               if entry.restart_count >= max_restarts then
-                 to_mark_dead := (entry, msg) :: !to_mark_dead
-               else begin
-                 let delay = backoff_delay entry.restart_count in
-                 if now -. entry.last_restart_ts >= delay then
-                   to_restart := (entry, msg) :: !to_restart
-               end))
+          queue_crashed_entry entry msg)
   ) entries;
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name;

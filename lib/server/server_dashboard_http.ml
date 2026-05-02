@@ -655,6 +655,73 @@ let composite_execution_blocked execution =
       | `Assoc _ as error -> string_opt_present (json_string "kind" error)
       | _ -> false)
 
+type composite_runtime_attention = {
+  cra_is_live : bool;
+  cra_stale_long_enough : bool;
+  cra_idle_attention : bool;
+  cra_blocked : bool;
+  cra_stale_without_live_turn : bool;
+  cra_needs_attention : bool;
+  cra_reason : string option;
+  cra_state : string;
+}
+
+let composite_runtime_attention ~snapshot ~execution =
+  let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
+  let latest = composite_latest_activity_epoch snapshot execution in
+  let now = Unix.gettimeofday () in
+  let stale_long_enough =
+    match latest with
+    | Some ts -> now -. ts >= 600.0
+    | None -> not is_live
+  in
+  let idle_attention =
+    is_live && composite_snapshot_is_idle snapshot && stale_long_enough
+  in
+  let blocked = composite_execution_blocked execution in
+  let stale_without_live_turn = (not is_live) && stale_long_enough in
+  let needs_attention = blocked || stale_without_live_turn || idle_attention in
+  let reason =
+    match json_string "operator_disposition_reason" execution with
+    | Some value when String.trim value <> "" -> Some value
+    | _ -> (
+        match json_string "terminal_reason_code" execution with
+        | Some value when String.trim value <> "" -> Some value
+        | _ when idle_attention -> Some "idle_composite"
+        | _ when stale_without_live_turn -> Some "not_live"
+        | _ when blocked -> Some "runtime_blocked"
+        | _ -> None )
+  in
+  let state =
+    if blocked then "blocked"
+    else if idle_attention then "idle_stale"
+    else if stale_without_live_turn then "stale"
+    else "ok"
+  in
+  {
+    cra_is_live = is_live;
+    cra_stale_long_enough = stale_long_enough;
+    cra_idle_attention = idle_attention;
+    cra_blocked = blocked;
+    cra_stale_without_live_turn = stale_without_live_turn;
+    cra_needs_attention = needs_attention;
+    cra_reason = reason;
+    cra_state = state;
+  }
+
+let composite_runtime_attention_json attention ~snapshot =
+  `Assoc
+    [ "state", `String attention.cra_state
+    ; "needs_attention", `Bool attention.cra_needs_attention
+    ; "blocked", `Bool attention.cra_blocked
+    ; "reason", Json_util.string_opt_to_json attention.cra_reason
+    ; "raw_phase", Json_util.string_opt_to_json (json_string "phase" snapshot)
+    ; "is_live", `Bool attention.cra_is_live
+    ; ( "source",
+        `String
+          (if attention.cra_blocked then "execution_receipt" else "composite_snapshot") )
+    ]
+
 let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
   `Assoc
     [
@@ -683,31 +750,10 @@ let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
            ])
   | other -> other
 
-let composite_recommended_actions_json ~keeper_name ~snapshot ~execution =
-  let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
-  let latest = composite_latest_activity_epoch snapshot execution in
-  let now = Unix.gettimeofday () in
-  let stale_long_enough =
-    match latest with
-    | Some ts -> now -. ts >= 600.0
-    | None -> not is_live
-  in
-  let idle_attention =
-    is_live && composite_snapshot_is_idle snapshot && stale_long_enough
-  in
-  let blocked = composite_execution_blocked execution in
-  let stale_without_live_turn = (not is_live) && stale_long_enough in
-  let needs_attention = blocked || stale_without_live_turn || idle_attention in
-  let reason =
-    match json_string "operator_disposition_reason" execution with
-    | Some value when String.trim value <> "" -> value
-    | _ -> (
-        match json_string "terminal_reason_code" execution with
-        | Some value when String.trim value <> "" -> value
-        | _ when idle_attention -> "idle_composite"
-        | _ when stale_without_live_turn -> "not_live"
-        | _ -> "runtime_attention" )
-  in
+let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attention =
+  let stale_long_enough = attention.cra_stale_long_enough in
+  let idle_attention = attention.cra_idle_attention in
+  let reason = Option.value ~default:"runtime_attention" attention.cra_reason in
   let make action_type severity reason suggested_payload =
     let action : Operator_digest_types.recommended_action =
       {
@@ -735,7 +781,7 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution =
          ~snapshot ~execution)
   in
   let actions =
-    if not needs_attention then []
+    if not attention.cra_needs_attention then []
     else if composite_execution_tool_required execution then
       [
         probe ("Inspect tool-contract blocker: " ^ reason);
@@ -773,18 +819,25 @@ let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
             not
               (String.equal name "keeper"
                || String.equal name "execution"
+               || String.equal name "runtime_attention"
                || String.equal name "recommended_actions"))
           fields
       in
       let execution = composite_execution_receipt_json ~config ~keeper_name in
+      let attention = composite_runtime_attention ~snapshot:json ~execution in
       let recommended_actions =
         composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution
+          ~attention
+      in
+      let runtime_attention =
+        composite_runtime_attention_json attention ~snapshot:json
       in
       `Assoc
         (fields
          @ [
              ("keeper", `String keeper_name);
              ("execution", execution);
+             ("runtime_attention", runtime_attention);
              ("recommended_actions", recommended_actions);
            ])
   | other -> other

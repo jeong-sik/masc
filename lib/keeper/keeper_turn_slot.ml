@@ -8,19 +8,39 @@ open Keeper_types
 
 exception Semaphore_wait_timeout of float
 
+let int_of_env_default_with_deprecated
+    ~primary
+    ~deprecated
+    ~default
+    ~min_v
+    ~max_v
+  =
+  match Env_config_core.resolve_deprecated ~primary ~deprecated with
+  | None -> default
+  | Some raw ->
+      let v =
+        Option.value ~default (int_of_string_opt (String.trim raw))
+      in
+      Keeper_config.clamp_int v ~min_v ~max_v
+;;
+
 (* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
    + reactive). Default 12 = headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
-  Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTOBOT_MAX" ~default:12 ~min_v:1 ~max_v:20
+  int_of_env_default_with_deprecated
+    ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
+    ~deprecated:"MASC_KEEPER_AUTOBOT_MAX"
+    ~default:12
+    ~min_v:1
+    ~max_v:20
 ;;
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
 (* Autonomous turn concurrency cap. Prevents thundering-herd when all
    keepers fire scheduled turns simultaneously on a shared LLM server.
-   Reactive turns (explicit mentions, board events) bypass this gate
-   so they are never starved by slow autonomous turns.
+   Reactive turns (explicit mentions, board events) use a separate gate
+   so they can stay responsive without consuming the full global pool.
    Default 3 = a conservative parallelism level for shared remote providers.
    Lower to 1 for single-slot local servers. For 8-slot servers,
    MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4 is a reasonable range. *)
@@ -37,11 +57,27 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+let reactive_turn_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_REACTIVE_CONCURRENCY" ~default:4 ~min_v:1 ~max_v:12
+;;
+
+let () =
+  Log.Keeper.info "reactive_turn_concurrency=%d (env=%s)"
+    reactive_turn_limit
+    (Option.value ~default:"<unset>"
+       (Env_config_core.raw_value_opt "MASC_KEEPER_REACTIVE_CONCURRENCY"))
+
+let reactive_turn_semaphore = Eio.Semaphore.make reactive_turn_limit
+
 let turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value turn_semaphore
 
 let autonomous_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value autonomous_turn_semaphore
+
+let reactive_turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value reactive_turn_semaphore
 
 type autonomous_waiter =
   {
@@ -176,6 +212,7 @@ let record_autonomous_completion ~(keeper_name : string) : unit =
 
 type keeper_turn_slot_state = {
   acquired_autonomous : bool ref;
+  acquired_reactive : bool ref;
   acquired_turn : bool ref;
   autonomous_ticket : int option ref;
 }
@@ -184,8 +221,9 @@ let release_keeper_turn_slot ~keeper_name state =
   Option.iter
     (fun ticket -> drop_autonomous_waiter ~ticket)
     !(state.autonomous_ticket);
-  (* Release exactly what we acquired. Order does not matter because
-     these two semaphores do not contend with each other. *)
+  (* Release exactly what we acquired. The turn, autonomous, and reactive
+     semaphores account for separate quotas, so release order does not affect
+     permit ownership. *)
   if !(state.acquired_turn) then Eio.Semaphore.release turn_semaphore;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
@@ -193,7 +231,9 @@ let release_keeper_turn_slot ~keeper_name state =
        when this keeper's heartbeat loops back immediately. *)
     record_autonomous_completion ~keeper_name;
     Eio.Semaphore.release autonomous_turn_semaphore
-  end
+  end;
+  if !(state.acquired_reactive) then
+    Eio.Semaphore.release reactive_turn_semaphore
 
 let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
@@ -384,6 +424,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
   let slot_state =
     {
       acquired_autonomous = ref false;
+      acquired_reactive = ref false;
       acquired_turn = ref false;
       autonomous_ticket = ref None;
     }
@@ -454,6 +495,18 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       match autonomous_result with
       | Error _ as e -> e
       | Ok () ->
+        let reactive_result =
+          if is_autonomous then Ok ()
+          else
+            match acquire_bounded ~label:"reactive" reactive_turn_semaphore with
+            | Error _ as e -> e
+            | Ok () ->
+              slot_state.acquired_reactive := true;
+              Ok ()
+        in
+        match reactive_result with
+        | Error _ as e -> e
+        | Ok () ->
         match acquire_bounded ~label:"turn" turn_semaphore with
         | Error _ as e -> e
         | Ok () ->

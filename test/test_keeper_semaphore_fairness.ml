@@ -125,6 +125,7 @@ let test_delay_decreases_with_elapsed_time () =
 
 let test_reactive_slot_released_when_body_raises () =
   let before = KK.turn_semaphore_value_for_test () in
+  let before_reactive = KK.reactive_turn_semaphore_value_for_test () in
   let completed =
     try
       Some
@@ -136,7 +137,9 @@ let test_reactive_slot_released_when_body_raises () =
   Alcotest.(check bool) "body exception propagated" true
     (Option.is_none completed);
   Alcotest.(check int) "turn semaphore restored" before
-    (KK.turn_semaphore_value_for_test ())
+    (KK.turn_semaphore_value_for_test ());
+  Alcotest.(check int) "reactive semaphore restored" before_reactive
+    (KK.reactive_turn_semaphore_value_for_test ())
 
 let test_autonomous_slot_released_when_body_raises () =
   let before_turn = KK.turn_semaphore_value_for_test () in

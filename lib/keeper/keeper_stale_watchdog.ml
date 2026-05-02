@@ -212,6 +212,12 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
     Env_config_keeper.KeeperWatchdog.grace_period_sec
   in
   let last_broadcast_ts = ref 0.0 in
+  let request_watchdog_stop () =
+    (* tla-lint: allow-mutation: fiber signal — stale watchdog asks the
+       heartbeat fiber to exit and wakes it if it is in interruptible sleep. *)
+    Atomic.set reg.fiber_stop true;
+    Atomic.set reg.fiber_wakeup true
+  in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let rec watchdog_loop () =
       if Atomic.get reg.fiber_stop then ()
@@ -295,7 +301,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  (* tla-lint: allow-mutation: fiber signal — stop the keeper
                     through the provider-timeout path, preserving the typed
                     root cause for supervisor auto-pause. *)
-                 Atomic.set reg.fiber_stop true;
+                 request_watchdog_stop ();
                  Prometheus.inc_counter
                    "masc_keeper_oas_timeout_budget_watchdog_termination_total"
                    ~labels:[ ("keeper", meta.name) ]
@@ -364,7 +370,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  (Keeper_registry.stale_watchdog_failure_reason
                     ~prior:prior_failure_reason ~kill_class);
                (* tla-lint: allow-mutation: fiber signal — stop the wedged keeper after stale-turn classification *)
-               Atomic.set reg.fiber_stop true;
+               request_watchdog_stop ();
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter
                  "masc_keeper_stale_termination_total"

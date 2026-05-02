@@ -1652,6 +1652,39 @@ typo_field = 42
       [ "keeper.legacy_scope"; "keeper.typo_field" ]
       defaults.KTP.unknown_toml_keys
 
+let test_unknown_toml_warning_key_normalizes_unknown_order () =
+  let path =
+    Printf.sprintf "/tmp/keeper-warning-order-%06x.toml" (Random.bits ())
+  in
+  check bool "first ordered warning emits" true
+    (KTP.warn_unknown_keeper_toml_keys_once ~path
+       [ "keeper.zeta"; "keeper.alpha" ]);
+  check bool "same set in different order is deduped" false
+    (KTP.warn_unknown_keeper_toml_keys_once ~path
+       [ "keeper.alpha"; "keeper.zeta" ])
+
+let string_starts_with ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.sub value 0 prefix_len = prefix
+
+let test_unknown_toml_warning_key_cache_is_bounded () =
+  let prefix =
+    Printf.sprintf "keeper-warning-bound-%06x-" (Random.bits ())
+  in
+  for idx = 0 to KTP.unknown_keeper_toml_warning_key_limit + 3 do
+    ignore
+      (KTP.warn_unknown_keeper_toml_keys_once
+         ~path:("/tmp/" ^ prefix ^ string_of_int idx ^ ".toml")
+         [ "keeper.typo_field" ])
+  done;
+  let matching =
+    Atomic.get KTP.unknown_keeper_toml_warning_keys
+    |> List.filter (string_starts_with ~prefix)
+  in
+  check bool "warning cache stays bounded for this prefix" true
+    (List.length matching <= KTP.unknown_keeper_toml_warning_key_limit)
+
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -1761,6 +1794,10 @@ let () =
             test_oas_env_not_flagged_as_unknown;
           test_case "load_keeper_toml captures unknown keys on profile" `Quick
             test_load_keeper_toml_captures_unknown_keys_on_profile;
+          test_case "unknown TOML warning key normalizes order" `Quick
+            test_unknown_toml_warning_key_normalizes_unknown_order;
+          test_case "unknown TOML warning key cache is bounded" `Quick
+            test_unknown_toml_warning_key_cache_is_bounded;
         ] );
       ( "oas_env",
         [

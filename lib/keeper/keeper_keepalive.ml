@@ -484,11 +484,7 @@ let resolve_registry_done
       (value : [ `Stopped | `Crashed of string ])
   : bool
   =
-  if Option.is_none (Eio.Promise.peek entry.done_p)
-  then (
-    Eio.Promise.resolve entry.done_r value;
-    true)
-  else false
+  Keeper_registry.try_resolve_done entry value
 ;;
 
 let record_keeper_stopped

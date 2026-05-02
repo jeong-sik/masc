@@ -1065,19 +1065,18 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
     (Printf.sprintf
        {|
       {
-        "default_models": ["%s"],
+        "routes": {"keeper_turn": "good"},
         "good_models": ["%s"],
         "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
       }
     |}
-       valid_model
        valid_model)
   @@ fun config_root ->
   with_config_dir config_root @@ fun () ->
   check
     (list string)
     "assignable cascades exclude invalid presets"
-    [ "default"; "good" ]
+    [ "good" ]
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid preset is surfaced separately" true
@@ -1090,12 +1089,11 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     (Printf.sprintf
        {|
       {
-        "default_models": ["%s"],
+        "routes": {"keeper_turn": "good"},
         "good_models": ["%s"],
         "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
       }
     |}
-       valid_model
        valid_model)
   @@ fun config_root ->
   with_seeded_server
@@ -1132,7 +1130,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
     (Printf.sprintf
-       {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
+       {|{"routes":{"keeper_turn":"big_three"},"big_three_models":["%s"],"keeper_diverse_models":["%s"]}|}
        valid_model
        valid_model)
   @@ fun config_root ->
@@ -1158,7 +1156,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"keeper_unified"}|}
+           {|{"keeper":"%s","cascade_name":"keeper_diverse"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1175,12 +1173,12 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   in
   require_status "cascade config GET after assignment returns 200" 200 after;
   check string "dashboard projection reflects assigned cascade"
-    "keeper_unified"
+    "keeper_diverse"
     (keeper_profile_cascade_name after.body keeper_name);
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok (Some meta) ->
        check string "persistent meta cascade updated"
-         "keeper_unified" meta.cascade_name
+         "keeper_diverse" meta.cascade_name
    | Ok None -> fail "keeper meta missing after cascade assignment"
    | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
 ;;
@@ -1218,7 +1216,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   check bool "route surfaces trust outcome" true
     (List.mem
        (row |> member "trust" |> member "last_outcome" |> to_string)
-       [ "ok"; "not_run" ]);
+       [ "receipt_done"; "ok"; "not_run"; "completed" ]);
   check string "route surfaces trust sandbox kind" "local"
     (row |> member "trust" |> member "sandbox" |> member "kind"
      |> to_string);
@@ -1304,6 +1302,20 @@ let test_composite_routes_surface_runtime_recommended_actions () =
   require_status "per-keeper composite GET returns 200" 200 result;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
+  let runtime_attention = json |> member "runtime_attention" in
+  (match runtime_attention with
+   | `Assoc _ -> ()
+   | other ->
+       Alcotest.failf
+         "expected runtime_attention object, got %s in body %s"
+         (Yojson.Safe.to_string other)
+         result.body);
+  check string "composite surfaces blocked runtime attention" "blocked"
+    (runtime_attention |> member "state" |> to_string);
+  check bool "composite runtime attention needs action" true
+    (runtime_attention |> member "needs_attention" |> to_bool);
+  check string "composite runtime attention reason" "tool_required_unsatisfied"
+    (runtime_attention |> member "reason" |> to_string);
   let actions = json |> member "recommended_actions" |> to_list in
   check bool "composite recommends keeper_probe" true
     (List.exists

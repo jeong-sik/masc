@@ -247,6 +247,11 @@ and completed_turn_observation = {
   ct_selected_model : string option;
 }
 
+(** Resolve a keeper run completion promise at most once.
+    Returns [false] if another fiber won the resolve race. *)
+val try_resolve_done :
+  registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
 (** Register a keeper with an already-live fiber. Primarily used by tests and
     direct fixtures that want a keeper to begin in [Running]. *)
 val register : base_path:string -> string -> keeper_meta -> registry_entry

@@ -201,6 +201,23 @@ let test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap () =
     selected;
   check int "dropped generic wakeups" 1 dropped
 
+let test_board_wakeup_selection_caps_total_non_explicit () =
+  let selected, dropped =
+    KKS.select_board_wakeup_candidates
+      ~generic_limit:4
+      ~total_limit:2
+      [
+        "a", Some "board_activity";
+        "b", Some "thread_reply_after_self_comment";
+        "c", Some "board_activity";
+        "d", Some "thread_reply_after_self_comment";
+      ]
+  in
+  check (list (pair string string)) "selected total wakeups"
+    [ "a", "board_activity"; "b", "thread_reply_after_self_comment" ]
+    selected;
+  check int "dropped total wakeups" 2 dropped
+
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
   check bool "Skip_idle + Woken -> cycle resumes" true
@@ -332,6 +349,8 @@ let () =
         `Quick test_board_wakeup_selection_keeps_explicit_mentions;
       test_case "specific reasons survive generic cap"
         `Quick test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap;
+      test_case "total non-explicit fanout is capped"
+        `Quick test_board_wakeup_selection_caps_total_non_explicit;
     ];
     "missed_wakeup_gap", [
       test_case "Skip_idle + Woken -> resumes (MissedWakeup spec gap)"

@@ -555,6 +555,7 @@ let test_keeper_sandbox_stop_targets_turn_containers_with_kind () =
         (contains_substring log "rm -f turn-1"))
 
 let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let keeper_name = "sandbox-docker-cache" in
   Fun.protect

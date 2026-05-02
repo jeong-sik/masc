@@ -156,12 +156,50 @@ let wakeup_all_keepers ?base_path () =
 
 let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
+let board_reactive_generic_wakeup_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT"
+    ~default:3
+    ~min_v:0
+    ~max_v:20
+;;
+
 let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
   Keeper_registry.board_wakeup_allowed
     ~base_path
     keeper_name
     ~post_id
     ~debounce_sec:board_reactive_debounce_sec
+;;
+
+let select_board_wakeup_candidates ?(generic_limit = board_reactive_generic_wakeup_limit)
+    candidates =
+  let explicit =
+    candidates
+    |> List.filter_map (fun (item, reason) ->
+      match reason with
+      | Some "explicit_mention" -> Some (item, "explicit_mention")
+      | _ -> None)
+  in
+  match explicit with
+  | _ :: _ -> explicit, 0
+  | [] ->
+    let selected_rev, generic_seen, generic_dropped =
+      List.fold_left
+        (fun (selected, generic_seen, generic_dropped) (item, reason) ->
+          match reason with
+          | None -> selected, generic_seen, generic_dropped
+          | Some "board_activity" ->
+            let next_seen = generic_seen + 1 in
+            if generic_seen < generic_limit then
+              (item, "board_activity") :: selected, next_seen, generic_dropped
+            else
+              selected, next_seen, generic_dropped + 1
+          | Some reason -> (item, reason) :: selected, generic_seen, generic_dropped)
+        ([], 0, 0)
+        candidates
+    in
+    List.rev selected_rev, generic_dropped
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -187,11 +225,6 @@ let wakeup_relevant_keeper_for_board_signal
         Some (meta, wake_reason)
       | _ -> None)
   in
-  let explicit =
-    candidates
-    |> List.filter
-         (fun (_meta, wake_reason) -> wake_reason = Some "explicit_mention")
-  in
   let wake_meta (meta : keeper_meta) reason =
     if
       board_reactive_wakeup_allowed
@@ -206,15 +239,14 @@ let wakeup_relevant_keeper_for_board_signal
         reason
         signal.post_id)
   in
-  match explicit with
-  | _ :: _ ->
-    explicit |> List.iter (fun (meta, _wake_reason) -> wake_meta meta "explicit_mention")
-  | [] ->
-    candidates
-    |> List.iter (fun (meta, wake_reason) ->
-         match wake_reason with
-         | Some reason -> wake_meta meta reason
-         | None -> ())
+  let selected, generic_dropped = select_board_wakeup_candidates candidates in
+  selected |> List.iter (fun (meta, reason) -> wake_meta meta reason);
+  if generic_dropped > 0 then
+    Log.Keeper.info
+      "board signal wakeup capped: dropped_generic=%d post=%s limit=%d"
+      generic_dropped
+      signal.post_id
+      board_reactive_generic_wakeup_limit
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

@@ -147,7 +147,7 @@ body.has-vp-banner { padding-top: 32px; }
 .tb-repo-pop .repo-row.on { background: rgb(var(--color-accent-glow) / .14); border-color: var(--brass-3, #6b5022); }
 .tb-repo-pop .repo-row .glyph { color: var(--brass-2, #c9a04a); }
 .tb-repo-pop .repo-row .nm { color: var(--color-fg-primary); font-weight: var(--fw-semi); }
-.tb-repo-pop .repo-row .nm .ow { color: var(--color-fg-muted); font-weight: 400; }
+.tb-repo-pop .repo-row .nm .ow { color: var(--color-fg-muted); font-weight: var(--fw-reg); }
 .tb-repo-pop .repo-row .desc {
   grid-column: 2 / 3;
   color: var(--color-fg-muted);
@@ -353,7 +353,7 @@ body.has-vp-banner.compact-vp .cockpit-fs-fab { display: inline-block; }
 .side-sect-h.sx .count,
 .rail-sect-h.sx .count {
   color: var(--color-fg-disabled);
-  font-weight: 400;
+  font-weight: var(--fw-reg);
   letter-spacing: 0;
   text-transform: none;
   font-size: var(--fs-10);

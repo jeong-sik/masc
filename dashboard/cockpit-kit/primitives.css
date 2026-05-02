@@ -39,7 +39,7 @@
   display: inline-flex; align-items: center; gap: 4px;
   height: 16px; padding: 0 8px;
   font-size: var(--fs-10);
-  font-weight: 500;
+  font-weight: var(--fw-med);
   letter-spacing: .04em;
   color: var(--color-fg-secondary);
   background: var(--color-bg-elevated);
@@ -60,7 +60,7 @@
   display: inline-block;
   height: 4px; width: 100%;
   background: var(--color-bg-elevated);
-  border-radius: 2px;
+  border-radius: var(--r-0);
   overflow: hidden;
   vertical-align: middle;
 }
@@ -76,7 +76,7 @@
 /* bar with segments (a/b/c split — e.g. passing/failing/skipped) */
 .bar-seg {
   display: flex; height: 4px; width: 100%;
-  background: var(--color-bg-elevated); border-radius: 2px; overflow: hidden;
+  background: var(--color-bg-elevated); border-radius: var(--r-0); overflow: hidden;
 }
 .bar-seg > span { display: block; height: 100%; }
 .bar-seg .seg-ok { background: var(--ok); }
@@ -112,13 +112,13 @@
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-surface);
   font-size: var(--fs-11);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--color-fg-muted);
   flex-shrink: 0;
 }
-.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: 500; }
+.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: var(--fw-med); }
 .section-head > .tail  { margin-left: auto; display: flex; gap: 4px; align-items: center; }
 
 /* ════════ KV ROW ════════
@@ -147,7 +147,7 @@
   background: var(--brass-2);
   color: var(--color-bg-page);
   border-color: var(--color-accent-fg-dim);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
 }
 .btn.primary:hover { background: var(--color-accent-fg); color: var(--color-bg-page); }
 
@@ -180,7 +180,7 @@
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-strong);
   border-bottom-width: 2px;
-  border-radius: 3px;
+  border-radius: var(--r-1);
 }
 
 /* ════════ STATUS BAND ════════
@@ -205,7 +205,7 @@
   font-family: var(--font-mono);
   font-size: .92em;
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: var(--r-0);
   background: var(--color-bg-elevated);
   color: var(--color-fg-primary);
 }

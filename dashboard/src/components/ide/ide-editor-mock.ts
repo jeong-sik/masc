@@ -8,9 +8,17 @@ import {
 import { CodeLineText, useHighlightedCodeLines } from './ide-code-renderer'
 import {
   createKeeperLineOwnershipStore,
-  type KeeperEdit,
   type LineOwnership,
 } from './keeper-line-ownership-store'
+import {
+  IDE_LAYER_ORDER,
+  IDE_MOCK_FILE_PATH,
+  IDE_MOCK_OWNERSHIP_EVENTS,
+  IDE_MOCK_SOURCE,
+  ideMockAnnotationsForLayer,
+  ideMockAnnotationsForLine,
+  type IdeLayerKind,
+} from './ide-mock-data'
 
 // PR-5 precursor: the editor remains a read-only fixture, but source document,
 // blame-by-keeper ownership, view state, and layer affordances now flow through
@@ -45,9 +53,7 @@ interface SplitDiffRow {
   readonly after: SplitDiffCell | null
 }
 
-const EDITOR_FILE = 'runtime/cascade/router.ts'
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
-const LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'explode'] as const
 
 const VIEW_LABEL: Record<IdeEditorView, string> = {
   source: 'SOURCE',
@@ -56,7 +62,7 @@ const VIEW_LABEL: Record<IdeEditorView, string> = {
   blame: 'BLAME',
 }
 
-const LAYER_LABEL: Record<(typeof LAYER_ORDER)[number], string> = {
+const LAYER_LABEL: Record<IdeLayerKind, string> = {
   time: 'Time',
   parallel: 'Parallel',
   tools: 'Tools',
@@ -64,32 +70,6 @@ const LAYER_LABEL: Record<(typeof LAYER_ORDER)[number], string> = {
   notes: 'Notes',
   explode: 'EXPLODE',
 }
-
-const MOCK_SOURCE = [
-  "import { Provider, ProviderKind } from './provider'",
-  "import { Turn, TurnId } from './turn'",
-  "import { FsmEvent } from '../fsm/state'",
-  "import { log } from '../log'",
-  "import type { ToolSpec } from './tools'",
-  "import { TokenRegistry } from '../tokens/registry'",
-  '',
-  'export type CascadeReq = {',
-  '  model: string',
-  '  messages: Array<{ role: string; content: string }>',
-  '  tools?: ToolSpec[]',
-  "  tool_choice?: 'auto' | 'none'",
-  '  max_tokens?: number',
-  '}',
-  '',
-  'export function normalizeTools(req: CascadeReq): CascadeReq {',
-  '  // strip empty tools array',
-  '  if (req.tools && req.tools.length === 0) {',
-  '    const { tools, tool_choice, ...rest } = req',
-  '    return rest as CascadeReq',
-  '  }',
-  '  return req',
-  '}',
-].join('\n')
 
 const UNIFIED_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = [
   { kind: 'context', oldLine: 16, newLine: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
@@ -140,46 +120,21 @@ const SPLIT_DIFF_ROWS: ReadonlyArray<SplitDiffRow> = [
   },
 ]
 
-const MOCK_OWNERSHIP_EVENTS: ReadonlyArray<KeeperEdit> = [
-  {
-    file_path: EDITOR_FILE,
-    line_start: 1,
-    line_end: 6,
-    keeper_id: 'nick0cave',
-    timestamp_ms: 1_774_960_000_000,
-    kind: 'create',
-  },
-  {
-    file_path: EDITOR_FILE,
-    line_start: 8,
-    line_end: 14,
-    keeper_id: 'sangsu',
-    timestamp_ms: 1_774_960_180_000,
-    kind: 'edit',
-  },
-  {
-    file_path: EDITOR_FILE,
-    line_start: 16,
-    line_end: 23,
-    keeper_id: 'masc-improver',
-    timestamp_ms: 1_774_960_420_000,
-    kind: 'refactor',
-  },
-]
-
 export function IdeEditorMock({
   activeView = 'source',
   activeLayers = EMPTY_ACTIVE_LAYERS,
 }: IdeEditorMockProps) {
-  const documentStore = useMemo(() =>
-    createCodeDocumentStore({
-      file_path: EDITOR_FILE,
+  const documentStore = useMemo(
+    () => createCodeDocumentStore({
+      file_path: IDE_MOCK_FILE_PATH,
       language: 'typescript',
-      content: MOCK_SOURCE,
-    }), [])
+      content: IDE_MOCK_SOURCE,
+    }),
+    [],
+  )
   const ownershipStore = useMemo(() => {
-    const store = createKeeperLineOwnershipStore(EDITOR_FILE)
-    for (const event of MOCK_OWNERSHIP_EVENTS) store.ingest(event)
+    const store = createKeeperLineOwnershipStore(IDE_MOCK_FILE_PATH)
+    for (const event of IDE_MOCK_OWNERSHIP_EVENTS) store.ingest(event)
     return store
   }, [])
   const document = documentStore.document()
@@ -231,7 +186,7 @@ function EditorViewport(
   lines: ReadonlyArray<CodeDocumentLine>,
   ownership: ReadonlyMap<number, LineOwnership>,
   highlightedLines: ReadonlyArray<string>,
-  activeLayerKinds: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   keepers: ReadonlyArray<string>,
 ) {
   if (activeView === 'split-diff') return SplitDiffView()
@@ -251,7 +206,7 @@ function SourceRows(
   lines: ReadonlyArray<CodeDocumentLine>,
   ownership: ReadonlyMap<number, LineOwnership>,
   highlightedLines: ReadonlyArray<string>,
-  activeLayerKinds: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   ariaLabel: string,
 ) {
   return html`
@@ -428,7 +383,7 @@ function MockEditorRow(
   line: CodeDocumentLine,
   owner: LineOwnership | undefined,
   highlightedHtml: string | undefined,
-  activeLayerKinds: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<IdeLayerKind>,
 ) {
   const color = keeperColor(owner)
   const dot = owner
@@ -501,12 +456,12 @@ function diffMarkerColor(kind: DiffTone): string {
   return 'var(--color-fg-disabled)'
 }
 
-function activeLayersInDisplayOrder(activeLayers: ReadonlySet<string>): ReadonlyArray<string> {
-  return LAYER_ORDER.filter(kind => activeLayers.has(kind))
+function activeLayersInDisplayOrder(activeLayers: ReadonlySet<string>): ReadonlyArray<IdeLayerKind> {
+  return IDE_LAYER_ORDER.filter(kind => activeLayers.has(kind))
 }
 
 function LayerOverlaySummary(
-  activeLayerKinds: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
 ) {
@@ -553,18 +508,24 @@ function LayerOverlaySummary(
 function rowLayerChips(
   line: CodeDocumentLine,
   owner: LineOwnership | undefined,
-  activeLayerKinds: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<IdeLayerKind>,
 ): ReadonlyArray<string> {
   const chips: string[] = []
   for (const kind of activeLayerKinds) {
-    if (kind === 'time' && owner) chips.push(formatTime(owner.last_edit_ms))
-    if (kind === 'parallel' && owner) chips.push(owner.last_edit_kind)
-    if (kind === 'tools' && /\btools?\b|tool_choice/.test(line.text)) chips.push('tool')
-    if (kind === 'approve' && owner?.last_edit_kind === 'refactor') chips.push('approve')
-    if (kind === 'notes' && line.text.trim().startsWith('//')) chips.push('note')
-    if (kind === 'explode' && owner) chips.push('ghost')
+    if (kind === 'time' && owner) pushUnique(chips, formatTime(owner.last_edit_ms))
+    else if (kind === 'parallel' && owner) pushUnique(chips, owner.last_edit_kind)
+    else if (kind === 'explode' && owner) pushUnique(chips, 'ghost')
+    else {
+      for (const annotation of ideMockAnnotationsForLine(line.num)) {
+        if (annotation.layers.includes(kind)) pushUnique(chips, annotation.chip)
+      }
+    }
   }
   return chips
+}
+
+function pushUnique(items: string[], item: string): void {
+  if (!items.includes(item)) items.push(item)
 }
 
 function latestEditMs(ownership: ReadonlyMap<number, LineOwnership>): number | null {
@@ -575,18 +536,16 @@ function latestEditMs(ownership: ReadonlyMap<number, LineOwnership>): number | n
   return latest
 }
 
-function layerLabel(kind: string): string {
-  return kind in LAYER_LABEL
-    ? LAYER_LABEL[kind as keyof typeof LAYER_LABEL]
-    : kind
+function layerLabel(kind: IdeLayerKind): string {
+  return LAYER_LABEL[kind]
 }
 
-function layerSummary(kind: string, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
+function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
   if (kind === 'time') return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
   if (kind === 'parallel') return `${keepers.length} keepers`
-  if (kind === 'tools') return 'tool-call lines'
-  if (kind === 'approve') return 'refactor approvals'
-  if (kind === 'notes') return 'comment notes'
+  if (kind === 'tools') return `${ideMockAnnotationsForLayer(kind).length} anchored`
+  if (kind === 'approve') return `${ideMockAnnotationsForLayer(kind).length} approval`
+  if (kind === 'notes') return `${ideMockAnnotationsForLayer(kind).length} note`
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
 }

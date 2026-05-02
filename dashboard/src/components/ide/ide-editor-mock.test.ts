@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { IdeEditorMock } from './ide-editor-mock'
+import { IDE_MOCK_RELATED_LINE } from './ide-mock-data'
 
 describe('IdeEditorMock', () => {
   it('renders the code document and RFC 0019 ownership-backed editor mock', () => {
@@ -23,18 +24,33 @@ describe('IdeEditorMock', () => {
     const container = document.createElement('div')
     render(h(IdeEditorMock, {
       activeView: 'blame',
-      activeLayers: new Set(['time', 'parallel', 'tools', 'approve']),
+      activeLayers: new Set(['time', 'parallel', 'tools', 'approve', 'notes']),
     }), container)
 
     expect(container.textContent).toContain('BLAME')
-    expect(container.textContent).toContain('4 layers')
+    expect(container.textContent).toContain('5 layers')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Parallel')
     expect(container.textContent).toContain('Tools')
     expect(container.textContent).toContain('Approve')
+    expect(container.textContent).toContain('Notes')
     expect(container.textContent).toContain('tool')
     expect(container.textContent).toContain('approve')
+    expect(container.textContent).toContain('note')
+  })
+
+  it('renders line overlay chips from shared anchored annotation seed data', () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, {
+      activeLayers: new Set(['tools', 'approve', 'notes']),
+    }), container)
+
+    const overlayLabels = Array.from(container.querySelectorAll('[aria-label]'))
+      .map(node => node.getAttribute('aria-label'))
+    expect(overlayLabels).toContain(`line ${IDE_MOCK_RELATED_LINE} active overlays: tool`)
+    expect(overlayLabels).toContain('line 17 active overlays: note')
+    expect(overlayLabels).toContain('line 20 active overlays: approve')
   })
 
   it('renders a split diff body for the split-diff view', () => {

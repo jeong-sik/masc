@@ -815,7 +815,7 @@ let test_storm_pause_sets_auto_resume_after_sec () =
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
-           (match Masc_mcp.Coord_resilience.Time.parse_iso8601_opt m.updated_at with
+           (match Coord_resilience.Time.parse_iso8601_opt m.updated_at with
             | None ->
                 fail (Printf.sprintf "updated_at not parseable as ISO-8601: %s"
                         m.updated_at)

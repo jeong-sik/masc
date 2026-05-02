@@ -52,6 +52,7 @@ describe('IdeShell', () => {
     }
 
     render(h(IdeShell, {}), container)
+    expect(container.querySelector('[aria-label="Split diff preview"]')).not.toBeNull()
     fireEvent.click(buttonByText(container, 'Tools'))
 
     expect(route.value.params.view).toBe('split-diff')

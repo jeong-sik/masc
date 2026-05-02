@@ -79,6 +79,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/ide-shell.ts` now passes active view/layer route state into the editor pane instead of leaving LAYERS as toolbar-only state.
   - `src/components/ide/ide-editor-mock.ts` renders read-only active-overlay summaries and line-level affordance chips from the code document and RFC 0019 ownership snapshots.
 
+- **IDE view-mode rendering**
+  - `src/components/ide/ide-editor-mock.ts` now renders distinct source, split diff, unified diff, and blame bodies instead of changing only the toolbar label.
+  - The split/unified views preview the `normalizeTools` tool-call cleanup diff, while blame view adds a keeper timeline strip over the ownership-backed source rows.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

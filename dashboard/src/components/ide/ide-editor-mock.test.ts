@@ -37,6 +37,38 @@ describe('IdeEditorMock', () => {
     expect(container.textContent).toContain('approve')
   })
 
+  it('renders a split diff body for the split-diff view', () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, { activeView: 'split-diff' }), container)
+
+    expect(container.querySelector('[aria-label="Split diff preview"]')).not.toBeNull()
+    expect(container.textContent).toContain('BEFORE')
+    expect(container.textContent).toContain('AFTER')
+    expect(container.textContent).toContain('if (req.tools === undefined)')
+    expect(container.textContent).toContain('strip empty tools array')
+    expect(container.textContent).toContain('return rest as CascadeReq')
+  })
+
+  it('renders a unified diff body for the unified view', () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, { activeView: 'unified' }), container)
+
+    expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
+    expect(container.textContent).toContain('UNIFIED')
+    expect(container.textContent).toContain('if (req.tools === undefined)')
+    expect(container.textContent).toContain('const { tools, tool_choice, ...rest } = req')
+  })
+
+  it('renders blame timeline metadata for the blame view', () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, { activeView: 'blame' }), container)
+
+    expect(container.querySelector('[aria-label="Blame timeline"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Blame editor view"]')).not.toBeNull()
+    expect(container.textContent).toContain('Blame timeline')
+    expect(container.textContent).toContain('latest 12:33')
+  })
+
   it('leaves blank lines unowned', () => {
     const container = document.createElement('div')
     render(h(IdeEditorMock, {}), container)

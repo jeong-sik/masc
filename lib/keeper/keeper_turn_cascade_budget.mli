@@ -64,6 +64,7 @@ val oas_timeout_budget_resolution_to_yojson :
   oas_timeout_budget_resolution -> Yojson.Safe.t
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  is_retry:bool ->
   reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
@@ -82,6 +83,7 @@ val bounded_oas_timeout_for_turn_budget :
   float option
 
 val oas_retry_budget_available_for_turn :
+  is_retry:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
@@ -99,6 +101,7 @@ type degraded_retry_budget_decision =
 
 val next_fail_open_cascade_for_turn_with_budget :
   ?rotation_cascades:string list ->
+  is_retry:bool ->
   base_cascade:string ->
   effective_cascade:string ->
   tool_requirement:string ->

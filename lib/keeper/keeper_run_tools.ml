@@ -563,30 +563,34 @@ let prepare_agent_setup
                Keeper_config.keeper_llm_rerank_cascade ()
              in
              (match
-                Cascade_catalog_runtime.resolve_named_providers
+                Cascade_catalog_runtime.resolve_named_providers_strict
                   ~sw ~net
                   ~cascade_name:rerank_cascade
                   ()
               with
               | Error detail ->
                   Log.Keeper.warn
-                    "keeper:%s TopK_llm: invalid rerank cascade '%s' (%s), falling back to core+prefilter+discovered"
+                    "keeper:%s TopK_llm: strict cascade resolution failed for '%s' (%s), falling back to core+prefilter+discovered"
                     meta.name
                     rerank_cascade
                     detail;
                   []
               | Ok providers ->
-                  let healthy =
-                    Cascade_config.filter_healthy ~sw ~net providers
-                  in
-                  (match healthy with
-                   | [] ->
+                  (match Cascade_config.filter_healthy_strict ~sw ~net providers with
+                   | Error rejection ->
+                       Log.Keeper.warn
+                         "keeper:%s TopK_llm: strict health filter rejected cascade '%s' (%s), falling back to core+prefilter+discovered"
+                         meta.name
+                         rerank_cascade
+                         (Cascade_config.health_filter_rejection_to_string rejection);
+                       []
+                   | Ok [] ->
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: no healthy provider for cascade '%s', falling back to core+prefilter+discovered"
                          meta.name
                          rerank_cascade;
                        []
-                   | first_provider :: _ ->
+                   | Ok (first_provider :: _) ->
                        let rerank_fn =
                          Agent_sdk.Tool_selector.default_rerank_fn
                            ~sw

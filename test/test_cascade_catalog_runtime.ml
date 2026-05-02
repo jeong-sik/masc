@@ -923,6 +923,83 @@ let test_config_doctor_live_warns_on_partial_catalog_validation () =
         (contains_substring (Yojson.Safe.to_string json)
            "__nonexistent_provider_sentinel__:fake")
 
+(* #12686: strict variant tests *)
+
+let test_strict_resolve_rejects_nonmatching_provider_filter () =
+  with_temp_dir "cascade-strict-filter" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": [
+    "anthropic:claude-sonnet-4-20250514",
+    "openrouter:auto"
+  ]
+}|});
+  match
+    Cascade_catalog_runtime.resolve_named_providers_strict
+      ~provider_filter:[ "ollama"; "codex_cli" ]
+      ~cascade_name:Keeper_config.default_cascade_name
+      ()
+  with
+  | Ok providers ->
+      failf "strict should reject when no provider matches filter, got %d providers"
+        (List.length providers)
+  | Error detail ->
+      check bool "error mentions filter mismatch" true
+        (contains_substring detail "provider_filter matched no providers")
+
+let test_strict_resolve_ok_when_filter_matches () =
+  with_temp_dir "cascade-strict-match" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": [
+    "anthropic:claude-sonnet-4-20250514",
+    "openrouter:auto"
+  ]
+}|});
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers_strict
+         ~provider_filter:[ "anthropic" ]
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check int "only anthropic providers survive" 1 (List.length providers);
+  check bool "provider kind is anthropic" true
+    (List.mem "anthropic" (provider_kinds providers))
+
+let test_non_strict_resolve_tolerates_nonmatching_filter () =
+  with_temp_dir "cascade-nonstrict-filter" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": [
+    "anthropic:claude-sonnet-4-20250514",
+    "openrouter:auto"
+  ]
+}|});
+  (* Non-strict resolve should NOT error on non-matching filter.
+     It returns whatever the catalog provides (silently ignores filter). *)
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers
+         ~provider_filter:[ "nonexistent_provider_xyz" ]
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check int "non-strict returns all providers despite bad filter" 2
+    (List.length providers)
+
 let () =
   run "cascade_catalog_runtime"
     [
@@ -992,5 +1069,17 @@ let () =
             "config doctor live warns on partial catalog validation"
             `Quick
             test_config_doctor_live_warns_on_partial_catalog_validation;
+          test_case
+            "strict resolve rejects non-matching provider filter (#12686)"
+            `Quick
+            test_strict_resolve_rejects_nonmatching_provider_filter;
+          test_case
+            "strict resolve ok when filter matches (#12686)"
+            `Quick
+            test_strict_resolve_ok_when_filter_matches;
+          test_case
+            "non-strict resolve tolerates non-matching filter (#12686)"
+            `Quick
+            test_non_strict_resolve_tolerates_nonmatching_filter;
         ] );
     ]

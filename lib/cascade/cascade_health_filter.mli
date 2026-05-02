@@ -11,6 +11,16 @@
     helpers ([has_required_api_key], [filter_healthy_internal]) stay
     hidden. *)
 
+(* ── Strict-mode rejection ──────────────────────────────── *)
+
+type health_filter_rejection =
+  | All_missing_api_key of int
+      (** All N providers lack required API key credentials. *)
+  | All_local_unhealthy of { local_count : int; cloud_count : int }
+      (** All local endpoints unhealthy; strict mode disallows cloud fallback. *)
+
+val health_filter_rejection_to_string : health_filter_rejection -> string
+
 (** Mirror of [Oas_compat.Http_client.cascade_failure_class] so callers
     can pattern-match without having to depend on the OAS surface. *)
 type cascade_failure_class =
@@ -67,3 +77,20 @@ val filter_healthy :
          (logged at info via [Diag]).}}
 
     The function is invoked at startup and on each cascade reload. *)
+
+val filter_healthy_strict :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  Llm_provider.Provider_config.t list ->
+  (Llm_provider.Provider_config.t list, health_filter_rejection) result
+(** Strict variant of {!filter_healthy} for execution paths.
+
+    Returns [Error] when:
+    {ul
+      {- all providers lack required API keys ([All_missing_api_key]);}
+      {- all local endpoints are unhealthy and strict mode disallows
+         automatic cloud fallback ([All_local_unhealthy]).}}
+
+    Use this for keeper execution paths where provider drift must be
+    surfaced as a typed blocker. Use {!filter_healthy} for diagnostic
+    and startup contexts where fail-open is acceptable. *)

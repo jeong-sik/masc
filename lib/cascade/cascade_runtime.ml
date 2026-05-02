@@ -326,6 +326,28 @@ let resolve_named_providers_result ?provider_filter
            ~require_tool_choice_support
            ~require_tool_support ~label providers)
 
+let resolve_named_providers_result_strict ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?runtime_mcp_policy
+    ~cascade_name ()
+    : (Llm_provider.Provider_config.t list, string) result =
+  let cascade_name_string = cascade_name_to_string cascade_name in
+  let label =
+    Keeper_cascade_profile.normalize_declared_name cascade_name_string
+  in
+  match
+    Cascade_catalog_runtime.resolve_named_providers_strict ?provider_filter
+      ?runtime_mcp_policy ~require_tool_choice_support:false
+      ~cascade_name:cascade_name_string ()
+  with
+  | Error _ as e -> e
+  | Ok providers ->
+      Ok
+        (apply_required_tool_choice_filter ?runtime_mcp_policy
+           ~require_tool_choice_support
+           ~require_tool_support ~label providers)
+
 let resolve_named_providers ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)

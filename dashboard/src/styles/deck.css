@@ -297,7 +297,7 @@
 }
 .cascade-step .cs-arrow {
   position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
-  color: var(--line-3); font-size: 10px; z-index: 1;
+  color: var(--color-border-strong); font-size: 10px; z-index: 1;
   background: var(--color-bg-page); padding: 0 1px;
 }
 .cascade-step:last-child .cs-arrow { display: none; }

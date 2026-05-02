@@ -3,7 +3,7 @@
 /* WCAG 2.4.7 Focus Visible — global keyboard focus ring for all interactive elements.
    Uses box-shadow so it follows border-radius and never clips. */
 :focus-visible {
-  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline: 2px solid var(--accent-45, rgb(var(--brass-glow) / .45));
   outline-offset: 2px;
 }
 
@@ -62,11 +62,11 @@
   border-width: 1px;
   background: var(--color-bg-page, #0a0f1a);
   color: var(--color-fg-primary, #e2e8f0);
-  border-color: var(--accent-45, rgba(71, 184, 255, 0.7));
+  border-color: var(--accent-45, rgb(var(--brass-glow) / .45));
   border-radius: 6px;
   font-size: 14px;
   text-decoration: none;
-  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline: 2px solid var(--accent-45, rgb(var(--brass-glow) / .45));
   outline-offset: 2px;
 }
 

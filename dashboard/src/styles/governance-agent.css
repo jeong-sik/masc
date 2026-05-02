@@ -5,7 +5,7 @@
     linear-gradient(
       135deg,
       var(--backdrop-modal) 0%,
-      rgba(16, 28, 52, 0.88) 100%
+      var(--color-bg-page) 100%
     );
   box-shadow:
     0 0 20px rgb(var(--brass-glow) / .04),

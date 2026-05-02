@@ -131,6 +131,8 @@ if [ -n "$BASELINE_REF" ]; then
     BASELINE_TMP="$(mktemp)"
     printf '%s\n' "$ref_content" > "$BASELINE_TMP"
     BASELINE_FILE="$BASELINE_TMP"
+  else
+    echo "WARN: could not read baseline from ref '${BASELINE_REF}:${BASELINE_FILE}'; falling back to --baseline-file" >&2
   fi
 fi
 

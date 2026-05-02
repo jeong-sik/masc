@@ -237,7 +237,8 @@ esac
 
 base_policy_json="$(mktemp)"
 base_policy_cmd=(
-  bash scripts/base-policy-audit.sh
+  bash
+  scripts/base-policy-audit.sh
   --json-out "$base_policy_json"
   --baseline-file "$BASELINE_FILE"
 )

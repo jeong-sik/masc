@@ -76,7 +76,7 @@ export function WorldVisualizer() {
     try {
       provider = new WebsocketProvider(url, 'masc-telemetry', ydoc)
     } catch (err) {
-      console.warn('[world-visualizer] WebSocket init failed:', err instanceof Error ? err.message : err)
+      console.warn('[world-visualizer] WebSocket init failed:', err)
       ydoc.destroy()
       return
     }

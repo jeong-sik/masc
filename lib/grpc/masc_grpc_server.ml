@@ -245,7 +245,7 @@ module Reflection_bridge = struct
         services
     in
     let list_response =
-      List.fold_left (fun acc msg -> acc ^ encode_length_delimited Wire.list_service_service msg) "" service_msgs
+      String.concat "" (List.map (encode_length_delimited Wire.list_service_service) service_msgs)
     in
     encode_length_delimited Wire.resp_list_services_response list_response
 
@@ -264,7 +264,7 @@ module Reflection_bridge = struct
     let payload =
       descriptors
       |> List.map (encode_length_delimited Wire.file_descriptor_proto)
-      |> fun lst -> List.fold_left (fun acc s -> acc ^ s) "" lst
+      |> fun lst -> String.concat "" lst
     in
     encode_length_delimited Wire.resp_file_descriptor_response payload
 

@@ -334,7 +334,7 @@ let autoresearch_loops_csv ~(base_path : string) : string =
       ] ^ "\n"
     ) sorted
   in
-  List.fold_left (fun acc r -> acc ^ r) headers rows
+  headers ^ String.concat "" rows
 
 (** Build the loop detail JSON for GET /api/v1/autoresearch/loops/:loopId.
     Includes full cycle history. *)

@@ -44,7 +44,7 @@ let with_loops_ro f = Eio.Mutex.use_ro loops_mu (fun () -> f ())
 
 let generate_loop_id () =
   let rnd = Mirage_crypto_rng.generate 4 in
-  let hex = List.fold_left (fun acc s -> acc ^ s) "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i)))) in
+  let hex = String.concat "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i)))) in
   "ar-" ^ hex
 
 let option_first_some left right =

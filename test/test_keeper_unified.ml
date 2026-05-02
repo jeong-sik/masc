@@ -1124,7 +1124,7 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
 (* Phase 1 — Bootstrap bypass *)
 
 let test_bootstrap_turn_fires_when_never_started () =
-  (* A keeper with last_ts = 0.0 (never started) should always run a turn
+  (* A keeper with last_ts <= 0.0 (never started) should always run a turn
      even when there are no work signals, no tasks, and the idle gate has
      not elapsed.  This breaks the bootstrap deadlock. *)
   let meta =

@@ -45,8 +45,8 @@ body.focus-mode .vp-banner { display: none !important; }
   cursor: pointer;
   border-radius: 0;
   user-select: none;
-  transition: color .12s ease, border-color .12s ease, background .12s ease;
-  box-shadow: 0 2px 12px rgba(0,0,0,.5);
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+  box-shadow: var(--shadow-card);
 }
 .focus-toggle:hover {
   color: var(--brass-1, #f0c674);
@@ -97,7 +97,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 .focus-menu {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default, #2c2823);
-  box-shadow: 0 4px 20px rgba(0,0,0,.6);
+  box-shadow: var(--shadow-panel);
   padding: 4px 0;
   min-width: 200px;
   font: var(--fs-11)/1 var(--font-mono);

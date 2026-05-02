@@ -33,7 +33,7 @@
   }
   &:hover {
     background: var(--color-bg-tab-sticky-hover);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
   }
 }
 

@@ -263,7 +263,7 @@
 .cb-composer .hint .kbd { font-family: var(--font-mono); background: var(--color-bg-elevated); border:1px solid var(--color-border-strong); border-bottom-width:2px; border-radius:3px; padding: 0 4px; height:14px; display:inline-flex; align-items:center; font-size: var(--fs-9); color: var(--color-fg-muted); margin-right:4px; }
 
 /* suggest dropdown */
-.cb-composer .sug { position:absolute; bottom:100%; left:0; right:0; background: var(--color-bg-panel-alt); border:1px solid var(--color-border-strong); border-radius: var(--r-1) var(--r-1) 0 0; box-shadow: 0 -4px 12px rgb(0 0 0 / .4); max-height: 160px; overflow:auto; }
+.cb-composer .sug { position:absolute; bottom:100%; left:0; right:0; background: var(--color-bg-panel-alt); border:1px solid var(--color-border-strong); border-radius: var(--r-1) var(--r-1) 0 0; box-shadow: 0 -4px 12px var(--shadow-card); max-height: 160px; overflow:auto; }
 .cb-composer .sug .item { padding: 4px 10px; display:flex; gap:8px; font-size: var(--fs-11); font-family: var(--font-mono); color: var(--color-fg-secondary); cursor:pointer; }
 .cb-composer .sug .item.on { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 .cb-composer .sug .item .kind { color: var(--color-fg-disabled); }
@@ -447,7 +447,7 @@
 .ac-mtx th { font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; color: var(--color-fg-muted); background: var(--color-bg-surface); font-weight: 600; }
 .ac-mtx th.col-h { writing-mode: vertical-rl; transform: rotate(180deg); padding: 6px 2px; height: 80px; vertical-align: bottom; }
 .ac-mtx th.row-h { text-align: left; color: var(--color-fg-secondary); font-family: var(--font-mono); font-weight: 400; }
-.ac-mtx td { color: var(--color-fg-muted); font-variant-numeric: tabular-nums; background: var(--color-bg-page); transition: background .15s; cursor: default; }
+.ac-mtx td { color: var(--color-fg-muted); font-variant-numeric: tabular-nums; background: var(--color-bg-page); transition: background var(--t-fast); cursor: default; }
 .ac-mtx td.z0 { color: var(--color-fg-disabled); opacity: .3; }
 .ac-mtx td.z1 { color: var(--color-fg-secondary); background: rgb(var(--color-accent-glow)/.05); }
 .ac-mtx td.z2 { color: var(--color-fg-primary); background: rgb(var(--color-accent-glow)/.12); }

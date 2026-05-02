@@ -256,7 +256,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   </div>
                 </div>
                 ${expanded ? html`
-                  <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
+                  <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
                     ${group.rawEvents.map(event => html`
                       <div class="flex items-start gap-3 rounded border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
                         <span class="inline-flex min-w-18 items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
@@ -304,7 +304,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
         const score = nodeScore(node)
         const pct = maxScore > 0 ? (score / maxScore) * 100 : 0
         return html`
-          <div class="flex items-center gap-2.5 py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
+          <div class="flex items-center gap-2.5 py-2 px-3 rounded-[10px] bg-[var(--color-bg-surface)] border border-solid border-[var(--color-border-default)]" key=${node.id}>
             <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <div class="flex items-center gap-2">

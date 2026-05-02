@@ -113,7 +113,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
           : null}
         ${success
-          ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]">ok</span>`
+          ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
           : html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}

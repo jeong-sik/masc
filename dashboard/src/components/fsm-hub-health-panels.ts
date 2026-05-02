@@ -74,7 +74,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
   const offCls = 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
   const onCls =
     tone === 'warn'
-      ? 'text-[var(--amber-bright)] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
+      ? 'text-[var(--warn-fg)] border-[var(--warn-border)] bg-[var(--warn-soft)]'
       : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
   return html`
     <span
@@ -126,7 +126,7 @@ export function InvariantsPanel({
           class=${`rounded-sm border px-2 py-0.5 text-3xs font-mono tabular-nums ${
             allOk
               ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
-              : 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
+              : 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]'
           }`}
           title=${allOk
             ? `All ${total} keeper composite invariants hold.`

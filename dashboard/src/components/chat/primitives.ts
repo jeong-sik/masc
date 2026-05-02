@@ -228,7 +228,7 @@ function ChatMessageBubble({
       </div>
       ${entry.error
         ? html`
-            <div class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
+            <div class="rounded border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -251,11 +251,11 @@ function ChatMessageBubble({
                 : null}
               ${entry.details.skillPrimary
                 ? html`
-                    <div class="chat-detail-callout rounded border border-[rgba(76,181,137,0.18)] px-3 py-3">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[#8fdcb3]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-semibold text-[#d8f7e6]">${entry.details.skillPrimary}</div>
+                    <div class="chat-detail-callout rounded border border-[var(--ok-border)] px-3 py-3">
+                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--ok-fg)]">스킬 경로</div>
+                      <div class="mt-1 text-sm font-semibold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-xs leading-loose text-[#bfe8cf]">${entry.details.skillReason}</div>`
+                        ? html`<div class="mt-1 text-xs leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -333,7 +333,7 @@ export function ChatTranscript({
     >
       ${entries.length === 0
         ? html`
-            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
+            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] px-6 text-center">
               <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--text-secondary)]">${emptyText}</div>
             </div>

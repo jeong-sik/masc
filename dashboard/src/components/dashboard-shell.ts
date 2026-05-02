@@ -115,10 +115,10 @@ export function ConnectionStatus() {
 
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
+      class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
       title=${titleAttr || undefined}
     >
-      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
+      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}
@@ -251,7 +251,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-xl grid gap-1.5">
               <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
@@ -385,7 +385,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
   const titleText = composeHealthIndicatorTitle(label, attentionLines)
 
-  const dot = html`<span class="block size-2 shrink-0 rounded-sm ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
+  const dot = html`<span class="block size-2 shrink-0 rounded-sm ${dotClass} shadow-sm"></span>`
 
   if (collapsed) {
     return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`

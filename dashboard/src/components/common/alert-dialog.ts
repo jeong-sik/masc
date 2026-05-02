@@ -112,7 +112,7 @@ export function AlertDialog({
         class=${
           'relative w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-md ' +
           'border border-[var(--dialog-panel-border)] ' +
-          'shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden ' +
+          'shadow-2xl overflow-hidden ' +
           'transition-[opacity,transform] duration-[var(--enter-duration)] ease-[var(--enter-easing)] ' +
           'data-[state=closed]:opacity-0 data-[state=closed]:scale-95 ' +
           'data-[state=open]:opacity-100 data-[state=open]:scale-100'

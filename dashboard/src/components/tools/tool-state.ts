@@ -71,9 +71,9 @@ export function toolMatchesQuery(item: DashboardToolInventoryItem, rawQuery: str
 
 export function toolBadge(label: string, tone: 'default' | 'ok' | 'warn' | 'surface' = 'default') {
   const toneClass =
-    tone === 'ok' ? 'text-[#7dd3fc] bg-[rgba(14,165,233,0.18)]'
-      : tone === 'warn' ? 'text-[var(--color-status-warn)] bg-[var(--warn-12)]'
-      : tone === 'surface' ? 'text-[#c4b5fd] bg-[rgba(139,92,246,0.18)]'
+    tone === 'ok' ? 'text-[var(--color-status-info)] bg-[var(--info-soft)]'
+      : tone === 'warn' ? 'text-[var(--color-status-warn)] bg-[var(--warn-soft)]'
+      : tone === 'surface' ? 'text-[var(--color-status-stalled)] bg-[var(--stalled-soft)]'
       : 'text-[var(--color-fg-muted)] bg-[var(--white-8)]'
   return html`
     <span class="text-2xs rounded-sm px-2 py-0.5 ${toneClass}">

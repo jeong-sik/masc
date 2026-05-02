@@ -33,20 +33,20 @@ function registryStateBadge(state: string | null) {
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[var(--emerald-12)]', text: 'text-[var(--color-status-ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--color-status-err)]' },
-    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[var(--slate-400)]' },
-    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--color-status-warn)]' },
-    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
+    Dead: { bg: 'bg-[var(--white-8)]', text: 'text-[var(--color-fg-muted)]' },
+    Stopped: { bg: 'bg-[var(--warn-soft)]', text: 'text-[var(--color-status-warn)]' },
+    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--stalled-fg)]' },
   }
-  const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
+  const c = colors[state] ?? { bg: 'bg-[var(--white-4)]', text: 'text-[var(--color-fg-muted)]' }
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
 const COHORT_COLORS: Record<CrashCategory, string> = {
   heartbeat: 'var(--amber-bright)',
   turn: 'var(--color-status-err)',
-  fiber: '#8b5cf6',
-  exception: '#ec4899',
-  other: '#6b7280',
+  fiber: 'var(--stalled-fg)',
+  exception: 'var(--err-fg)',
+  other: 'var(--color-fg-muted)',
 }
 
 function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntry[] }) {
@@ -93,9 +93,9 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
       <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
+          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--purple-12)]">
             <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
+            <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
         `)}
       </div>

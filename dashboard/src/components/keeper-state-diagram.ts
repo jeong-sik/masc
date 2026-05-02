@@ -103,7 +103,7 @@ export function signalTone(severity: string | null | undefined): string {
     case 'warn':
       return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
     case 'ok':
-      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
+      return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
     default:
       // Client-side observability: record unexpected severities so future
       // backend additions are noticed before they regress to silent-OK.
@@ -116,8 +116,8 @@ export function signalTone(severity: string | null | undefined): string {
 
 export function badgeTone(ok: boolean): string {
   return ok
-    ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
-    : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
+    ? 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+    : 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
 }
 
 function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {

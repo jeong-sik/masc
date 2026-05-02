@@ -159,7 +159,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           <span class="text-[var(--color-fg-muted)]">${filtered.length} events</span>
           <button type="button"
             class="px-2 py-0.5 rounded text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
-              ? 'border-[rgba(34,197,94,0.4)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
+              ? 'border-[var(--ok-border)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
               : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}

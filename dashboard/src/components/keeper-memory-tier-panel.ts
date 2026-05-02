@@ -195,10 +195,10 @@ export function KeeperMemoryTierPanel({
           const pct = row.cap > 0 ? Math.min(100, Math.round((row.used / row.cap) * 100)) : 0
           const saturated = row.used >= row.cap
           const barColor = saturated
-            ? 'bg-[rgba(251,191,36,0.7)]'
+            ? 'bg-[var(--warn-fg)]'
             : pct >= 75
-              ? 'bg-[rgba(34,197,94,0.7)]'
-              : 'bg-[rgba(99,102,241,0.6)]'
+              ? 'bg-[var(--ok-20)]'
+              : 'bg-[var(--info-fg)]'
           return html`
             <div class="flex items-center gap-2 text-2xs">
               <div class="w-24 truncate text-[var(--color-fg-primary)] font-mono" title=${row.kind}>

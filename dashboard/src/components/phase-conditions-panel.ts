@@ -62,7 +62,7 @@ function rowClass(row: PhaseConditionRow): string {
     return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-fg-primary)]'
   }
   if (row.value) {
-    return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-fg-primary)]'
+    return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-fg-primary)]'
   }
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
 }

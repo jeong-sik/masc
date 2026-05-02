@@ -48,20 +48,20 @@ export interface TopologyGraph {
 /** Map an agent/task status to a vis-network compatible color string. */
 export function topologyNodeColor(kind: 'agent' | 'keeper' | 'task', status: string): string {
   if (status === 'offline' || status === 'inactive') {
-    return 'rgba(100, 116, 139, 0.45)'
+    return 'var(--color-fg-disabled)'
   }
   switch (kind) {
     case 'keeper':
       return 'var(--color-status-ok)'
     case 'agent':
       if (status === 'active' || status === 'busy') return 'var(--cyan)'
-      return 'rgba(71, 184, 255, 0.5)'
+      return 'var(--info-border)'
     case 'task':
       if (status === 'awaiting_verification') return 'var(--color-status-warn)'
-      if (status === 'done') return 'rgba(74, 222, 128, 0.35)'
-      return 'rgba(251, 191, 36, 0.75)'
+      if (status === 'done') return 'var(--ok-border)'
+      return 'var(--warn-fg)'
     default:
-      return 'rgba(148, 163, 184, 0.5)'
+      return 'var(--color-fg-muted)'
   }
 }
 
@@ -207,11 +207,11 @@ function toVisEdges(graph: TopologyGraph): VisTopologyEdge[] {
     to: e.to,
     color: {
       color: e.kind === 'supervised_by'
-        ? 'rgba(74, 222, 128, 0.35)'
-        : 'rgba(251, 191, 36, 0.45)',
+        ? 'var(--ok-border)'
+        : 'var(--warn-border)',
       highlight: e.kind === 'supervised_by'
-        ? 'rgba(74, 222, 128, 0.7)'
-        : 'rgba(251, 191, 36, 0.8)',
+        ? 'var(--ok-fg)'
+        : 'var(--warn-fg)',
     },
     arrows: { to: { enabled: true, scaleFactor: 0.45 } },
     dashes: e.kind === 'assigned_to',
@@ -329,7 +329,7 @@ export function LiveTopologyMap() {
       <div class="absolute bottom-2 right-2 flex flex-wrap gap-2.5 text-3xs text-[var(--color-fg-muted)]">
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)]"></span>Keeper</span>
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--cyan)]"></span>에이전트</span>
-        <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-sm bg-[rgba(251,191,36,0.75)]"></span>작업</span>
+        <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-sm bg-[var(--warn-fg)]"></span>작업</span>
       </div>
     </div>
   `

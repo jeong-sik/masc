@@ -59,13 +59,13 @@ function authBadgeSummary(): {
 
   if (validated) {
     return {
-      dotColor: 'bg-[var(--color-status-ok)] shadow-[0_0_6px_rgba(74,222,128,0.6)]',
+      dotColor: 'bg-[var(--color-status-ok)] shadow-[0_0_6px_rgb(var(--ok-glow)/0.6)]',
       label: `Verified @${actor} · ${role}`,
     }
   }
   if (hasError) {
     return {
-      dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgba(244,63,94,0.45)]',
+      dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
       label: 'Auth error',
     }
   }
@@ -219,7 +219,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
       role="dialog"
       aria-labelledby=${labelId}
       data-state="open"
-      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[0_10px_24px_rgba(0,0,0,0.22)] p-3 z-50"
+      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-xl p-3 z-50"
     >
       <h2 id=${labelId} class="sr-only">Auth status panel</h2>
       <div class="flex flex-col gap-3">

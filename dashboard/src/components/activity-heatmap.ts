@@ -162,8 +162,8 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
               style=${{
                 left: `${Math.min(tooltip.x + 12, canvasWidth() - 140)}px`,
                 top: `${Math.max(tooltip.y - 32, 4)}px`,
-                background: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid rgba(100, 116, 139, 0.3)',
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border-default)',
                 color: 'var(--frost-100)',
               }}
             >

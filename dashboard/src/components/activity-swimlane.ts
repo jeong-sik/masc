@@ -81,7 +81,7 @@ const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
   task:      { bg: 'var(--color-status-warn)', text: 'var(--panel-dark)' },
   operation: { bg: 'var(--color-status-ok)', text: 'var(--panel-dark)' },
   autonomy:  { bg: 'var(--cyan)', text: 'var(--panel-dark)' },
-  presence:  { bg: 'rgba(148, 163, 184, 0.25)', text: 'var(--frost-100)' },
+  presence:  { bg: 'var(--white-12)', text: 'var(--frost-100)' },
 }
 const SPAN_DEFAULT = { bg: 'var(--slate-400)', text: 'var(--panel-dark)' } as const
 
@@ -249,7 +249,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--color-status-warn)] inline-block"></span>작업</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--color-status-ok)] inline-block"></span>운영</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--cyan)] inline-block"></span>자율</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[rgba(148,163,184,0.5)] inline-block"></span>접속</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--white-25)] inline-block"></span>접속</span>
       </div>
     <//>
   `

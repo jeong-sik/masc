@@ -180,7 +180,7 @@ export function resetCredentials(): void {
 function SectionHeader({ title }: { title: string }) {
   return html`
     <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]" aria-hidden="true"></span>
+      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" aria-hidden="true"></span>
       ${title}
     </div>
   `

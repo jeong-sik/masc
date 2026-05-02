@@ -165,7 +165,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
   if (hydrating) {
     return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-fg-secondary)]'
   }
-  return 'border-[rgba(148,163,184,0.18)] bg-[var(--slate-gray-8)] text-[var(--color-fg-primary)]'
+  return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -208,7 +208,7 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[rgba(5,14,31,0.55)]">
+    <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
@@ -315,7 +315,7 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
           <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
@@ -336,7 +336,7 @@ export function KeeperConversationPanel({
             <${GhostButton}
               onClick=${toggleInternal}
               ariaExpanded=${showInternal}
-              class=${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}
+              class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </${GhostButton}>
@@ -417,9 +417,9 @@ export function KeeperRuntimeActions({
 
   const btnBase = 'py-1.5 px-4 rounded text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]`
-  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
-  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
-  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
+  const activeGhostBtn = `${btnBase} border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
+  const secondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
+  const activeSecondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
 
   return html`
     <div class="flex flex-wrap gap-2">

@@ -522,7 +522,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--color-status-ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -603,7 +603,7 @@ function KeeperClearContextDialog({
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
       overlayClass="fixed inset-0 z-[80] bg-[var(--dialog-overlay-bg)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-2xl"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
@@ -653,7 +653,7 @@ function KeeperClearContextDialog({
           >취소<//>
           <button
             type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[var(--bad-50)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>
@@ -673,7 +673,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
       <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded border border-[var(--color-border-default)] bg-[rgba(90,100,120,0.08)] text-sm text-[var(--color-fg-muted)]">
+        <div class="px-4 py-3 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] text-sm text-[var(--color-fg-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : html`
@@ -940,7 +940,7 @@ export function KeeperDetailPage() {
 
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl backdrop-blur-xl">
         <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
@@ -964,7 +964,7 @@ export function KeeperDetailPage() {
             <button
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              class="flex items-center justify-center size-8 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
               aria-label="키퍼 상세 종료"
             >
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -1041,8 +1041,8 @@ export function KeeperDetailPage() {
                   </span>`
                 : null}
               ${(keeper.k2k_count ?? 0) > 0
-                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--color-fg-muted)]">
-                    K2K <span class="font-mono font-medium text-[var(--purple)]">${keeper.k2k_count}</span>
+                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded bg-[var(--info-soft)] border border-[var(--info-border)] text-[var(--color-fg-muted)]">
+                    K2K <span class="font-mono font-medium text-[var(--info-fg)]">${keeper.k2k_count}</span>
                   </span>`
                 : null}
               ${keeper.memory_recent_note

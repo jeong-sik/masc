@@ -480,7 +480,7 @@ export function AgentProfile({ name }: { name: string }) {
       ${isKeeper ? html`
         <${KeeperChatPanel} name=${keeperChatName} />
       ` : html`
-        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded">
+        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[var(--color-bg-elevated)] border border-[var(--ff-gold-15)] rounded">
           <span class="text-sm font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
           <${TextInput}
             placeholder="메시지 입력..."

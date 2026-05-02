@@ -144,7 +144,7 @@ export function KeeperDetailMissingState({
     : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
-      <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
+      <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-2xl">
         <${SectionLabel}>키퍼 상세</${SectionLabel}>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
@@ -262,7 +262,7 @@ function KeeperDetailQuickFact({
   children: ComponentChildren
 }) {
   return html`
-    <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
+    <div class="rounded-2xl border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
       <${SectionLabel}>${label}</${SectionLabel}>
       <div class="mt-1 text-sm font-medium leading-snug text-[var(--color-fg-primary)]">${children}</div>
     </div>
@@ -294,7 +294,7 @@ export function KeeperDetailOverviewSidebar({
 }) {
   return html`
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
-      <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
+      <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
         <div>
           <${SectionLabel}>개요</${SectionLabel}>
           <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
@@ -311,7 +311,7 @@ export function KeeperDetailOverviewSidebar({
           <//>
         </div>
 
-        <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] p-3.5">
+        <div class="rounded-2xl border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] p-3.5">
           <${SectionLabel}>빠른 이동</${SectionLabel}>
           <div class="mt-3 flex flex-col gap-2">
             ${KEEPER_DETAIL_SECTIONS.map((section) => html`
@@ -347,7 +347,7 @@ export function KeeperDetailSection({
   return html`
     <section
       id=${id}
-      class="scroll-mt-24 rounded-[28px] border border-[var(--color-border-default)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
+      class="scroll-mt-24 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl"
       aria-label=${title}
     >
       <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">

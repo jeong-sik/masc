@@ -18,7 +18,7 @@ const INPUT_CLS =
   'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
   'text-[var(--color-fg-primary)] px-3 py-2 text-sm transition-colors ' +
   'hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] ' +
-  'focus-visible:border-[rgba(71,184,255,0.6)] outline-none'
+  'focus-visible:border-[var(--info-border)] outline-none'
 
 export const Search: FunctionComponent<SearchProps> = ({
   value: controlled,

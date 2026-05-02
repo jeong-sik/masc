@@ -129,7 +129,7 @@ export function MermaidGraph({
         </div>
       ` : html`
         <div
-          class=${`overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] ${diagramClass}`.trim()}
+          class=${`overflow-auto rounded-[10px] p-3 bg-[var(--color-bg-surface)] ${diagramClass}`.trim()}
           ref=${hostRef}
           role="img"
           aria-label=${fallbackText ?? '다이어그램'}

@@ -88,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
       // severity === 'fatal' — original tone + an explicit reload button
       return html`
         <div
-          class="error-card my-3 flex items-start gap-4 rounded border border-[var(--color-status-err)]/30 bg-[rgba(10,22,40,0.92)] p-5 shadow-sm"
+          class="error-card my-3 flex items-start gap-4 rounded border border-[var(--err-border)] bg-[var(--color-bg-elevated)] p-5 shadow-sm"
           style="border-left: 3px solid var(--color-status-err);"
           role="alert"
         >

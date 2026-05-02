@@ -201,7 +201,7 @@ export function CascadeInspector() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="Cascade 검사기">
+      <section class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Cascade 검사기</div>

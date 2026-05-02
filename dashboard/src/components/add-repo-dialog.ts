@@ -159,7 +159,7 @@ export function AddRepoDialog() {
         if (e.target === e.currentTarget) closeAddRepoDialog()
       }}
     >
-      <div class="w-full max-w-lg rounded-xl border border-[var(--white-10)] bg-[var(--color-bg-surface)] shadow-[0_20px_50px_rgba(0,0,0,0.4)] mx-4">
+      <div class="w-full max-w-lg rounded-xl border border-[var(--white-10)] bg-[var(--color-bg-surface)] shadow-2xl mx-4">
         <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--white-10)]">
           <h2 id="add-repo-title" class="text-sm font-semibold text-[var(--color-fg-secondary)]">
             저장소 추가

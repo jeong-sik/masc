@@ -167,7 +167,7 @@ function executionReceiptClass(execution: KeeperCompositeExecution | undefined):
     case 'ok':
       return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
     case 'bad':
-      return 'border-[rgba(248,113,113,0.36)] text-[var(--bad-light)] bg-[rgba(248,113,113,0.08)]'
+      return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
     case 'warn':
       return 'border-[var(--warn-20)] text-[var(--color-status-warn)] bg-[var(--warn-10)]'
     case 'muted':
@@ -729,7 +729,7 @@ function StatusBar({
 
   const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
+    <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-lg ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
@@ -840,13 +840,13 @@ function StatusBar({
           <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--color-fg-primary)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
-          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[var(--indigo)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
+          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[var(--info-border)] text-[var(--info-fg)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
             ${transitionCount} 전환
           </span>
           <span
             class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
               observationCount >= MAX_OBSERVATIONS
-                ? 'border-[rgba(245,158,11,0.4)] text-[var(--amber-bright)]'
+                ? 'border-[var(--warn-border)] text-[var(--warn-fg)]'
                 : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'
             }`}
             title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}
@@ -854,7 +854,7 @@ function StatusBar({
             <span
               class=${`absolute inset-0 ${
                 observationCount >= MAX_OBSERVATIONS
-                  ? 'bg-[rgba(245,158,11,0.08)]'
+                  ? 'bg-[var(--warn-soft)]'
                   : 'bg-[var(--white-3)]'
               }`}
               style=${`width: ${Math.round((observationCount / MAX_OBSERVATIONS) * 100)}%`}

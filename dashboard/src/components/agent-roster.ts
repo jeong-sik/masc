@@ -54,17 +54,17 @@ import {
 type StatusFilter = 'all' | RuntimeBand
 
 export function runtimeBadgeClass(band: RuntimeBand): string {
-  if (band === 'active') return 'border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.12)] text-[var(--color-status-ok)]'
-  if (band === 'attention') return 'border-[var(--warn-20)] bg-[rgba(251,191,36,0.12)] text-[var(--color-status-warn)]'
-  if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[var(--purple-12)] text-[var(--purple)]'
+  if (band === 'active') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+  if (band === 'attention') return 'border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)]'
+  if (band === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
 }
 
 export function stageBadgeClass(stageKey: string): string {
-  if (stageKey === 'tool_use') return 'border-[rgba(71,184,255,0.24)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
-  if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[rgba(52,211,153,0.22)] bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]'
-  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[#c4b5fd]'
-  if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
+  if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
+  if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
+  if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
 }
@@ -632,7 +632,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           ${showExecutionFallbackState
             ? html`
-                <div class="rounded border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+                <div class="rounded border ${executionError.value ? 'border-[var(--warn-border)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-lg">
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-xs font-semibold text-[var(--color-fg-secondary)]">${fallbackStateTitle}</strong>

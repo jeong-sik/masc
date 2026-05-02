@@ -540,7 +540,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <div class="rounded bg-[rgba(0,0,0,0.3)] p-2">
+          <div class="rounded bg-[var(--color-bg-surface)] p-2">
             <div class="mb-1.5 flex items-center justify-between gap-2">
               <span class="text-3xs font-medium text-[var(--color-fg-disabled)]">원본 JSON</span>
               <${CopyIdButton}
@@ -569,7 +569,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class="border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] hover:bg-[var(--color-bg-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">

@@ -52,8 +52,8 @@ export function filterObservedLanes(
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
   ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]',
   info: 'text-[var(--color-accent-fg)] border-[var(--accent-30)] bg-[var(--accent-10)]',
-  warn: 'text-[var(--amber-bright)] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
-  error: 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
+  warn: 'text-[var(--warn-fg)] border-[var(--warn-border)] bg-[var(--warn-soft)]',
+  error: 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]',
 }
 
 /** Panel-level accent -- border + subtle tinted overlay -- so that the
@@ -62,8 +62,8 @@ const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
 const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
   ok: 'border-[var(--white-8)] bg-[var(--white-2)]',
   info: 'border-[var(--white-8)] bg-[var(--white-2)]',
-  warn: 'border-[var(--amber-bright-45)] bg-[rgba(245,158,11,0.04)] shadow-[0_0_0_1px_rgba(245,158,11,0.15)_inset]',
-  error: 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
+  warn: 'border-[var(--warn-border)] bg-[var(--warn-soft)] shadow-[0_0_0_1px_var(--warn-border)_inset]',
+  error: 'border-[var(--err-border)] bg-[var(--bad-6)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
 }
 
 export function OperationalMeaningPanel({
@@ -373,9 +373,9 @@ export function PipelineStep({
 
   const isActive = value !== 'idle' && value !== 'undecided' && value !== 'accumulating'
   const borderCls = flash
-    ? 'border-[var(--color-accent-fg)] shadow-[0_0_8px_rgba(71,184,255,0.35)]'
+    ? 'border-[var(--color-accent-fg)] shadow-[0_0_8px_rgb(var(--info-glow)/0.35)]'
     : isActive
-      ? 'border-[var(--indigo-50)] shadow-[0_0_6px_rgba(129,140,248,0.15)]'
+      ? 'border-[var(--info-border)] shadow-[0_0_6px_rgb(var(--info-glow)/0.15)]'
       : 'border-[var(--white-8)]'
   const bgCls = isActive && !flash
     ? 'bg-[var(--indigo-4)]'

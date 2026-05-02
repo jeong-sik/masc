@@ -220,10 +220,10 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
 
   return html`
     <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <div class="relative min-h-[420px] overflow-hidden rounded border border-[var(--color-border-default)] bg-[rgba(6,11,22,0.72)]">
+      <div class="relative min-h-[420px] overflow-hidden rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div ref=${containerRef} class="h-[420px] w-full" data-testid="git-graph-canvas"></div>
         ${loading ? html`
-          <div class="absolute inset-0 grid place-items-center bg-[rgba(6,11,22,0.48)] text-sm text-[var(--color-fg-muted)]">
+          <div class="absolute inset-0 grid place-items-center bg-[var(--panel-dark-60)] text-sm text-[var(--color-fg-muted)]">
             <span class="inline-flex items-center gap-2"><${InlineSpinner} />그래프 렌더링 중...</span>
           </div>
         ` : null}

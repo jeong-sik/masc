@@ -28,22 +28,22 @@ export function nodeColor(kind: string, status: string): string {
 }
 
 export function edgeColor(kind: string, active: boolean): string {
-  if (!active) return 'rgba(100, 116, 139, 0.15)'
+  if (!active) return 'var(--white-10)'
   switch (kind) {
-    case 'works_on': return 'rgba(251, 191, 36, 0.5)'
-    case 'creates': return 'rgba(74, 222, 128, 0.4)'
-    case 'broadcasts': return 'rgba(34, 211, 238, 0.35)'
-    case 'mentions': return 'rgba(34, 211, 238, 0.55)'
+    case 'works_on': return 'var(--warn-border)'
+    case 'creates': return 'var(--ok-border)'
+    case 'broadcasts': return 'var(--info-border)'
+    case 'mentions': return 'var(--info-fg)'
     case 'hands_off_to': return 'var(--purple-50)'
-    case 'posts': return 'rgba(244, 114, 182, 0.4)'
-    case 'comments_on': return 'rgba(244, 114, 182, 0.3)'
-    case 'votes_on': return 'rgba(167, 139, 250, 0.35)'
-    case 'opens': return 'rgba(167, 139, 250, 0.4)'
-    case 'governs': return 'rgba(251, 146, 60, 0.4)'
-    case 'operates_on': return 'rgba(74, 222, 128, 0.45)'
-    case 'participates_in': return 'rgba(251, 191, 36, 0.35)'
+    case 'posts': return 'var(--stalled-border)'
+    case 'comments_on': return 'var(--stalled-fg)'
+    case 'votes_on': return 'var(--purple-50)'
+    case 'opens': return 'var(--purple-50)'
+    case 'governs': return 'var(--warn-fg)'
+    case 'operates_on': return 'var(--ok-border)'
+    case 'participates_in': return 'var(--warn-soft)'
     case 'belongs_to': return 'var(--slate-gray-12)'
-    default: return 'rgba(148, 163, 184, 0.25)'
+    default: return 'var(--color-border-default)'
   }
 }
 
@@ -290,7 +290,7 @@ export function GraphView({ data }: GraphViewProps) {
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
-                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
+                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[var(--color-bg-surface)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
                   <span class="text-2xs text-[var(--color-fg-muted)]">${edgeKindLabel(edge.kind)}</span>
                   ${edge.active ? html`<${StatusDot} size="xs" class="bg-[var(--color-status-ok)]" />` : null}

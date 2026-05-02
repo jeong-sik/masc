@@ -40,7 +40,7 @@ export function FilterChips<T extends string>({
     : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
   const idleToneClass = tone === 'accent'
     ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
-    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
+    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--accent-30)]'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">
@@ -61,7 +61,7 @@ export function FilterChips<T extends string>({
           ${chip.label}
           ${chip.count != null ? html`
             <${CountBadge} class=${activeKey === chip.key
-              ? 'bg-[rgba(255,255,255,0.12)] text-current'
+              ? 'bg-[var(--white-10)] text-current'
               : ''}>${chip.count}<//>
           ` : null}
         </button>

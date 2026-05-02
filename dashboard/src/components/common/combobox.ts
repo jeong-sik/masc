@@ -25,12 +25,12 @@ const INPUT_CLS =
   'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
   'text-[var(--color-fg-primary)] px-3 py-2 text-sm transition-colors ' +
   'hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] ' +
-  'focus-visible:border-[rgba(71,184,255,0.6)] outline-none'
+  'focus-visible:border-[var(--info-border)] outline-none'
 
 const LISTBOX_CLS =
   'absolute z-50 top-full mt-1 left-0 w-full max-h-60 overflow-auto ' +
   'bg-[var(--dialog-panel-bg)] rounded-md border border-[var(--dialog-panel-border)] ' +
-  'shadow-[0_8px_24px_rgba(0,0,0,0.4)] py-1'
+  shadow-xl py-1'
 
 const OPTION_BASE = 'px-3 py-2 text-sm cursor-pointer '
 

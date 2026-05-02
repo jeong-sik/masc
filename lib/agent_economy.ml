@@ -161,11 +161,7 @@ let transaction_of_json (json : Yojson.Safe.t) : transaction option =
 
 (** {1 ID Generation} *)
 
-let generate_txn_id () =
-  let rnd = Mirage_crypto_rng.generate 8 in
-  let hex = String.concat "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i))))
-  in
-  Printf.sprintf "txn-%s" hex
+let generate_txn_id () = Random_id.prefixed ~prefix:"txn-" ~bytes:8
 
 (** {1 Ledger Storage} *)
 

@@ -39,6 +39,9 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Tools').getAttribute('aria-pressed')).toBe('false')
+    expect(container.textContent).toContain('Active overlays')
+    expect(container.textContent).toContain('Time')
+    expect(container.textContent).toContain('Approve')
   })
 
   it('persists layer toggles back to the route', () => {

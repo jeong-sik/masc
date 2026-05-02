@@ -19,6 +19,24 @@ describe('IdeEditorMock', () => {
     expect(container.textContent).toContain('masc-improver')
   })
 
+  it('renders active view and layer affordances from shell state', () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, {
+      activeView: 'blame',
+      activeLayers: new Set(['time', 'parallel', 'tools', 'approve']),
+    }), container)
+
+    expect(container.textContent).toContain('BLAME')
+    expect(container.textContent).toContain('4 layers')
+    expect(container.textContent).toContain('Active overlays')
+    expect(container.textContent).toContain('Time')
+    expect(container.textContent).toContain('Parallel')
+    expect(container.textContent).toContain('Tools')
+    expect(container.textContent).toContain('Approve')
+    expect(container.textContent).toContain('tool')
+    expect(container.textContent).toContain('approve')
+  })
+
   it('leaves blank lines unowned', () => {
     const container = document.createElement('div')
     render(h(IdeEditorMock, {}), container)

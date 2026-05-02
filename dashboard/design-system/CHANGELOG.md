@@ -75,6 +75,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `design-system/headless-core/layered-overlay.ts` now accepts external active-layer snapshots for URL hydration while preserving RFC 0020 exclusive-layer semantics.
   - `src/components/ide/ide-shell.ts` persists the LAYERS bar to the route `layers=` param, so editor overlay state survives deep links and view-tab changes.
 
+- **IDE overlay rendering affordances**
+  - `src/components/ide/ide-shell.ts` now passes active view/layer route state into the editor pane instead of leaving LAYERS as toolbar-only state.
+  - `src/components/ide/ide-editor-mock.ts` renders read-only active-overlay summaries and line-level affordance chips from the code document and RFC 0019 ownership snapshots.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

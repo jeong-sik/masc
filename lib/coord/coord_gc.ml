@@ -425,7 +425,6 @@ let gc config ?(days=7) () =
   else
     results := "✅ No board artifacts" :: !results;
 
-  let cp_json = "null" in
   (* 9. Coord archival removed — rooms are flattened (#4638).
      Startup migration (migrate_room_to_flat) moves active room to root. *)
   results := "✅ Rooms flattened (no room archival needed)" :: !results;
@@ -440,7 +439,7 @@ let gc config ?(days=7) () =
     ("sessions_archived", `Int !session_archive_count);
     ("board_artifacts", `Int board_artifact_count);
     ("rooms_archived", `Int 0);
-    ("cp_cleanup", `String cp_json);
+    ("cp_cleanup", `Null);
     ("days", `Int days);
     ("ts", `String (now_iso ()));
   ]);

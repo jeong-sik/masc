@@ -13,9 +13,9 @@
 
   & p { margin: 6px 0; }
 
-  & h1 { font-size: 16px; font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
-  & h2 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
-  & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
+  & h1 { font-size: var(--fs-16); font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: var(--fs-14); font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: var(--fs-13); font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
     background: var(--color-bg-elevated);

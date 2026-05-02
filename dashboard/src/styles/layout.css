@@ -94,7 +94,7 @@
 .pane-head .label { color: var(--color-fg-secondary); }
 .pane-head .pane-meta {
   margin-left: auto; color: var(--color-fg-muted);
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--fs-10);
 }
 .pane-body { flex: 1; min-height: 0; overflow: auto; background: var(--color-bg-page); }
 

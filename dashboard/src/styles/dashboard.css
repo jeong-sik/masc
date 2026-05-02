@@ -165,12 +165,12 @@
 
 .swimlane-vis-container .vis-time-axis .vis-text {
   color: var(--color-fg-disabled);
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label {
   color: var(--color-fg-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   border-bottom: 1px solid var(--color-border-default);
 }
 
@@ -200,7 +200,7 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
   color: var(--color-fg-primary);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 6px 8px;
   box-shadow: var(--elev-3-shadow);
   white-space: pre-wrap;

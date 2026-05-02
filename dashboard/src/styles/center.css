@@ -2,7 +2,7 @@
 .wf { position: relative; padding: var(--sp-3); min-height: 100%; }
 .wf-scale {
   display: flex; justify-content: space-between;
-  font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted);
+  font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-muted);
   padding: 0 2px 4px; border-bottom: 1px solid var(--color-border-default); margin-bottom: 6px;
 }
 .wf-track {
@@ -31,7 +31,7 @@
 .wf-scale-ctrl { display: flex; gap: 2px; margin-left: auto; }
 .wf-scale-ctrl button {
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
-  color: var(--color-fg-muted); font: 10px/1 var(--font-mono);
+  color: var(--color-fg-muted); font: var(--fs-10)/1 var(--font-mono);
   padding: 3px 7px; cursor: pointer; border-radius: 2px; letter-spacing: .03em;
 }
 .wf-scale-ctrl button:hover { color: var(--color-fg-primary); }
@@ -49,7 +49,7 @@
 .feed-row:hover { background: var(--color-bg-elevated); }
 .feed-row.is-active { background: var(--color-bg-hover); border-bottom-color: var(--color-border-strong); }
 .feed-ts { color: var(--color-fg-muted); }
-.feed-kind { font-size: 10px; color: var(--color-fg-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.feed-kind { font-size: var(--fs-10); color: var(--color-fg-secondary); text-transform: uppercase; letter-spacing: .04em; }
 .feed-kind.k-tool { color: var(--brass-1); }
 .feed-kind.k-error { color: var(--err); }
 .feed-kind.k-noop { color: var(--idle); }

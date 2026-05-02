@@ -225,7 +225,7 @@ body[data-explode="1"] .lyr::before {
   pointer-events: auto;
 }
 .tool-mark .tool-icon {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--brass-1);
   text-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
   line-height: 1;

@@ -8,7 +8,7 @@
 }
 .ops-head:hover { background: var(--color-bg-elevated); }
 .ops-head .label { flex: 1; color: var(--color-fg-secondary); }
-.ops-head .chev { color: var(--color-fg-muted); font-size: 10px; transition: transform var(--t-fast) var(--ease); }
+.ops-head .chev { color: var(--color-fg-muted); font-size: var(--fs-10); transition: transform var(--t-fast) var(--ease); }
 .ops-card.is-collapsed .chev { transform: rotate(-90deg); }
 .ops-card.is-collapsed .ops-body { display: none; }
 .ops-body { padding: var(--sp-3) var(--sp-3) var(--sp-4); font-size: var(--fs-12); line-height: 1.4; color: var(--color-fg-secondary); }
@@ -71,7 +71,7 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 10px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--color-fg-secondary);
   line-height: 1.4;
 }
@@ -81,7 +81,7 @@
   background: rgb(var(--brass-glow) / 0.08);
 }
 .tool-count {
-  font-size: 9px; color: var(--color-fg-muted);
+  font-size: var(--fs-9); color: var(--color-fg-muted);
   padding: 0 3px; background: var(--color-bg-hover);
   border-radius: 6px; margin-left: 2px;
 }
@@ -111,7 +111,7 @@
 }
 .tl-tick span {
   position: absolute; top: 2px; left: 4px;
-  font-family: var(--font-mono); font-size: 9px;
+  font-family: var(--font-mono); font-size: var(--fs-9);
   color: var(--color-fg-muted);
 }
 .tl-dots {
@@ -138,7 +138,7 @@
 .tl-legend-row {
   display: flex; align-items: center; gap: 6px;
   padding: 3px 2px;
-  font-size: 11px;
+  font-size: var(--fs-11);
   border-bottom: 1px dotted var(--color-border-strong);
 }
 .tl-legend-row:last-child { border-bottom: none; }

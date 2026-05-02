@@ -51,14 +51,14 @@
 .tk-dot { display: inline-flex; }
 
 .tk-sym {
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 600;
   letter-spacing: .06em;
   color: var(--color-fg-primary);
   min-width: 36px;
 }
 .tk-price {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--color-fg-secondary);
   min-width: 34px;
   text-align: right;
@@ -70,7 +70,7 @@
 }
 
 .tk-delta {
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: .02em;
   min-width: 42px;
   text-align: right;

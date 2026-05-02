@@ -338,3 +338,6 @@ val recent_outcome_count :
     Deprecated: use per-pool health trackers via {!Cascade_pool} instead.
     @deprecated Since Phase 1 — per-pool isolation replaces the global singleton. *)
 val global : t
+
+val check_circuit_breaker : t -> provider_key:string -> (unit, string) result
+(** Check whether the provider cooldown gate allows a request. *)

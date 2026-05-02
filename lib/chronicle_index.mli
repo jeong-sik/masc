@@ -33,3 +33,6 @@ val active_epochs : index -> epoch_summary list
 
 val add_or_replace_epoch : index -> epoch_summary -> index
 (** Add or replace an epoch summary, returning a new index. *)
+
+val local_sight : index -> max_neighbors:int -> current_epoch_id:string -> epoch_summary list
+(** Return up to [max_neighbors] nearest epochs (chronologically or by relation) for Local Sight. *)

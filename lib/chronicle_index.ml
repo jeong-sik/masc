@@ -43,3 +43,16 @@ let add_or_replace_epoch (idx : index) (summary : epoch_summary) =
     List.filter (fun (s : epoch_summary) -> not (String.equal s.id summary.id)) idx.epochs
   in
   { idx with epochs = summary :: filtered }
+
+let local_sight (idx : index) ~(max_neighbors:int) ~(current_epoch_id:string) : epoch_summary list =
+  (* Naive chronological nearest neighbors for Local Sight *)
+  let sorted = List.sort (fun a b -> String.compare b.start_date a.start_date) idx.epochs in
+  let rec filter_nearest acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | _ when List.length acc >= max_neighbors -> List.rev acc
+    | e :: rest -> 
+        if String.equal e.id current_epoch_id then filter_nearest acc rest
+        else filter_nearest (e :: acc) rest
+  in
+  filter_nearest [] sorted

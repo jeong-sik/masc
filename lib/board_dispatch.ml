@@ -128,7 +128,7 @@ let set_keeper_board_signal_hook hook =
 
 let emit_keeper_board_signal signal =
   match Atomic.get keeper_board_signal_hook with
-  | Some hook -> hook signal
+  | Some hook -> Safe_ops.protect ~default:() (fun () -> hook signal)
   | None -> ()
 
 let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None
@@ -161,7 +161,9 @@ let init_jsonl () =
 
 let reset_for_test () =
   Atomic.set backend_state Uninitialized;
-  Atomic.set flusher_started false
+  Atomic.set flusher_started false;
+  Atomic.set keeper_board_signal_hook None;
+  Atomic.set board_sse_hook None
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with

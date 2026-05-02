@@ -193,6 +193,14 @@ val board_signal_wake_reason :
   signal:Board_dispatch.keeper_board_signal ->
   string option
 
+(** Convert a queued Event Layer stimulus back into structured board activity
+    for the next keeper prompt. Returns [None] for non-board stimuli. *)
+val pending_board_event_of_stimulus :
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  Keeper_event_queue.stimulus ->
+  pending_board_event option
+
 (** Read the best available continuity summary for a keeper.
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
 val read_continuity_summary :

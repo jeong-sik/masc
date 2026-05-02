@@ -6,8 +6,11 @@ import {
   type AnchoredThread,
   type ThreadKind,
 } from './anchored-thread-rail-store'
-
-const EDITOR_FILE = 'runtime/cascade/router.ts'
+import {
+  IDE_MOCK_FILE_PATH,
+  IDE_MOCK_RELATED_LINE,
+  IDE_MOCK_THREADS,
+} from './ide-mock-data'
 
 const KIND_LABEL: Record<ThreadKind, string> = {
   flag: 'FLAG',
@@ -25,63 +28,10 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   suggest: 'var(--color-status-warn, var(--warn))',
 }
 
-const MOCK_THREADS: ReadonlyArray<AnchoredThread> = [
-  {
-    id: 'thread-schema-tools',
-    kind: 'flag',
-    author_keeper_id: 'nick0cave',
-    anchor: { file_path: EDITOR_FILE, line_start: 34, line_end: 35, symbol_hint: 'if:moonshot-tool-choice' },
-    created_ms: Date.UTC(2026, 4, 2, 1, 41, 18),
-    body: "This is exactly the schema error we're seeing in prod — confirmed 3× on kimi_cli with non-empty tools[].",
-    reply_count: 2,
-    resolved: false,
-  },
-  {
-    id: 'thread-normalize-tool-choice',
-    kind: 'question',
-    author_keeper_id: 'operator',
-    anchor: { file_path: EDITOR_FILE, line_start: 26, line_end: 26, symbol_hint: 'fn:resolveCascade' },
-    created_ms: Date.UTC(2026, 4, 2, 1, 39, 2),
-    body: 'Should normalizeTools also handle tool_choice=none? feels like an edge case.',
-    reply_count: 1,
-    resolved: false,
-  },
-  {
-    id: 'thread-budget-approve',
-    kind: 'approve',
-    author_keeper_id: 'operator',
-    anchor: { file_path: EDITOR_FILE, line_start: 60, line_end: 60, symbol_hint: 'fn:nextStep' },
-    created_ms: Date.UTC(2026, 4, 2, 1, 22, 41),
-    body: 'Budget guard reads well. Ship it when tests pass.',
-    reply_count: 0,
-    resolved: false,
-  },
-  {
-    id: 'thread-telemetry-token',
-    kind: 'note',
-    author_keeper_id: 'operator',
-    anchor: { file_path: EDITOR_FILE, line_start: 35, line_end: 35, symbol_hint: 'token:log.warn' },
-    created_ms: Date.UTC(2026, 4, 2, 1, 18, 4),
-    body: 'telemetry event name needs to match the lifeline schema — will rename later.',
-    reply_count: 0,
-    resolved: false,
-  },
-  {
-    id: 'thread-rest-helper',
-    kind: 'suggest',
-    author_keeper_id: 'masc-improver',
-    anchor: { file_path: EDITOR_FILE, line_start: 16, line_end: 16, symbol_hint: 'fn:normalizeTools' },
-    created_ms: Date.UTC(2026, 4, 2, 1, 14, 52),
-    body: 'Could you collapse the rest-spread into a small helper? Same pattern appears in provider.ts.',
-    reply_count: 3,
-    resolved: false,
-  },
-]
-
 export function IdeConversationRailMock() {
   const railStore = useMemo(() => {
-    const store = createAnchoredThreadRailStore(EDITOR_FILE)
-    store.seed(MOCK_THREADS)
+    const store = createAnchoredThreadRailStore(IDE_MOCK_FILE_PATH)
+    store.seed(IDE_MOCK_THREADS)
     return store
   }, [])
   const [, forceRender] = useState(0)
@@ -90,7 +40,8 @@ export function IdeConversationRailMock() {
 
   const threads = railStore.visibleThreads()
   const focusedId = railStore.focusedThreadId()
-  const relatedLine35 = railStore.threadsForLine(35)
+  const relatedThreads = railStore.threadsForLine(IDE_MOCK_RELATED_LINE)
+  const relatedFile = IDE_MOCK_FILE_PATH.split('/').at(-1) ?? IDE_MOCK_FILE_PATH
 
   return html`
     <div
@@ -126,9 +77,9 @@ export function IdeConversationRailMock() {
           fontSize: 'var(--fs-11)',
         }}
       >
-        <span>router.ts:35</span>
+        <span>${relatedFile}:${IDE_MOCK_RELATED_LINE}</span>
         <span>·</span>
-        <span>${relatedLine35.length} related</span>
+        <span>${relatedThreads.length} related</span>
       </div>
       <ol
         style=${{

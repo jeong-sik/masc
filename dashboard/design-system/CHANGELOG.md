@@ -83,6 +83,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/ide-editor-mock.ts` now renders distinct source, split diff, unified diff, and blame bodies instead of changing only the toolbar label.
   - The split/unified views preview the `normalizeTools` tool-call cleanup diff, while blame view adds a keeper timeline strip over the ownership-backed source rows.
 
+- **IDE shared annotation seed**
+  - `src/components/ide/ide-mock-data.ts` centralizes the mock source document, keeper ownership events, anchored rail threads, and layer annotations.
+  - The editor overlay chips and CONVERSATION rail now resolve against the same line anchors, replacing divergent regex/comment/refactor heuristics in the editor fixture.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

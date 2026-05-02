@@ -202,7 +202,7 @@
   color: var(--color-fg-primary);
   font-size: 11px;
   padding: 6px 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--elev-3-shadow);
   white-space: pre-wrap;
 }
 

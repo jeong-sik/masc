@@ -78,7 +78,7 @@ let count_substring haystack needle =
     | 4j   | retry_loop exhaustion [Streaming -> Failed]           | 1     |
     | 4d   | stop_reason [Streaming -> Completing]                 | 1     |
     | 4c   | success exit [Completing -> Done]                     | 1     |
-    | Cycle 1b-iv | Eio.Cancel HonorStopSignal [Streaming -> Cancelled] | 1 |
+    | Cycle 1b-iv | Eio.Cancel HonorStopSignal [Streaming -> Cancelled supervisor_stop] | 1 |
     *)
 let documented_floor = 15
 

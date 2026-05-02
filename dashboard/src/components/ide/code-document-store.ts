@@ -83,14 +83,25 @@ function normalizeSource(source: unknown, maxLines: number): CodeDocumentSnapsho
 
 function parseLines(content: string, maxLines: number): ReadonlyArray<CodeDocumentLine> {
   if (content === '') return []
-  const rawLines = content.endsWith('\n')
-    ? content.slice(0, -1).split('\n')
-    : content.split('\n')
-  return rawLines.slice(0, maxLines).map((text, index) => ({
-    num: index + 1,
-    text,
-    is_blank: text.trim() === '',
-  }))
+  const end = content.endsWith('\n') ? content.length - 1 : content.length
+  const lines: CodeDocumentLine[] = []
+  let start = 0
+
+  while (lines.length < maxLines && start <= end) {
+    const newlineIndex = content.indexOf('\n', start)
+    const lineEnd = newlineIndex === -1 || newlineIndex > end ? end : newlineIndex
+    const text = content.slice(start, lineEnd)
+    lines.push({
+      num: lines.length + 1,
+      text,
+      is_blank: text.trim() === '',
+    })
+
+    if (newlineIndex === -1 || newlineIndex >= end) break
+    start = newlineIndex + 1
+  }
+
+  return lines
 }
 
 function normalizeMaxLines(value: number | undefined): number {

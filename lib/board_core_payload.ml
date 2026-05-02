@@ -104,8 +104,11 @@ let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
   let normalized_body = String.trim stripped_body in
   let normalized_title =
     match title with
-    | Some value when not (String.equal (String.trim value) "") -> String.trim value
-    | _ -> derive_post_title normalized_body
+    | Some value ->
+        let trimmed = String.trim value in
+        if not (String.equal trimmed "") then trimmed
+        else derive_post_title normalized_body
+    | None -> derive_post_title normalized_body
   in
   let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in
   normalized_title, normalized_body, post_kind, merged_meta

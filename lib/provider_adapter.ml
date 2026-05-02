@@ -179,8 +179,10 @@ let display_provider_name label =
 
 let env_url_or ~env ~default =
   match Sys.getenv_opt env with
-  | Some url when String.trim url <> "" -> String.trim url
-  | _ -> default
+  | Some url ->
+      let trimmed = String.trim url in
+      if trimmed <> "" then trimmed else default
+  | None -> default
 
 (** Query OAS Provider_registry for a provider's default base_url.
     Returns empty string if the provider is not known to OAS.

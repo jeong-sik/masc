@@ -227,8 +227,10 @@ let activity_stats_by_keeper
 
 let bench_recommendation_path () =
   match Env_config_core.raw_value_opt "MASC_KEEPER_BENCH_CANARY_PATH" with
-  | Some path when String.trim path <> "" -> String.trim path
-  | _ -> Keeper_benchmark_canary.default_manifest_path ()
+  | Some path ->
+      let trimmed = String.trim path in
+      if trimmed <> "" then trimmed else Keeper_benchmark_canary.default_manifest_path ()
+  | None -> Keeper_benchmark_canary.default_manifest_path ()
 
 let candidate_keeper_profiles keeper_name =
   let trimmed = String.trim keeper_name in

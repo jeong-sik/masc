@@ -53,8 +53,10 @@ let first_nonempty_env keys =
   List.find_map
     (fun key ->
       match Sys.getenv_opt key with
-      | Some v when String.trim v <> "" -> Some (String.trim v, key)
-      | _ -> None)
+      | Some v ->
+          let trimmed = String.trim v in
+          if trimmed <> "" then Some (trimmed, key) else None
+      | None -> None)
     keys
 
 let internal_keeper_token_hash_file ~base_path =

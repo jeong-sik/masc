@@ -72,8 +72,10 @@ type tool_audit_snapshot = {
 
 let json_string_option value =
   match value with
-  | Some text when String.trim text <> "" -> `String (String.trim text)
-  | _ -> `Null
+  | Some text ->
+      let trimmed = String.trim text in
+      if trimmed <> "" then `String trimmed else `Null
+  | None -> `Null
 
 let option_or_else fallback = function
   | Some _ as value -> value
@@ -95,7 +97,9 @@ let string_field ?(default = "") key json =
 
 let string_field_opt key json =
   match member_assoc key json with
-  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then Some trimmed else None
   | _ -> None
 
 let take n lst = List.filteri (fun i _ -> i < n) lst
@@ -235,8 +239,10 @@ let dashboard_fixture_name ?fixture () =
   if not fixtures_enabled then None
   else
     match fixture with
-    | Some value when String.trim value <> "" -> Some (String.trim value)
-    | _ -> Env_config.Dashboard_config.fixture_opt ()
+    | Some value ->
+        let trimmed = String.trim value in
+        if trimmed <> "" then Some trimmed else Env_config.Dashboard_config.fixture_opt ()
+    | None -> Env_config.Dashboard_config.fixture_opt ()
 
 (** Agent profile enriched from persona profile.json or Neo4j cache. *)
 type agent_profile = {

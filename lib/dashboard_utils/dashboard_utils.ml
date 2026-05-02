@@ -44,8 +44,10 @@ let string_list_of_json json =
 
 let json_string_option value =
   match value with
-  | Some text when String.trim text <> "" -> `String (String.trim text)
-  | _ -> `Null
+  | Some text ->
+      let trimmed = String.trim text in
+      if trimmed <> "" then `String trimmed else `Null
+  | None -> `Null
 
 let option_to_json f = function
   | Some value -> f value

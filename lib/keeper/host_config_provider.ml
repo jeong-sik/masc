@@ -288,8 +288,10 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
   | Ok kb ->
       let ssh_key_path =
         match cred.ssh_key_path with
-        | Some path when String.trim path <> "" -> Some (String.trim path)
-        | _ -> None
+        | Some path ->
+            let trimmed = String.trim path in
+            if trimmed <> "" then Some trimmed else None
+        | None -> None
       in
       (match ssh_key_path with
       | Some path when not (Sys.file_exists path) ->

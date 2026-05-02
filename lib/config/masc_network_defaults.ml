@@ -10,8 +10,10 @@
 
 let nonempty_env name =
   match Sys.getenv_opt name with
-  | Some value when String.trim value <> "" -> Some (String.trim value)
-  | _ -> None
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then Some trimmed else None
+  | None -> None
 
 (** Default port for Ollama (OpenAI-compatible at /v1). *)
 let ollama_default_port = 11434

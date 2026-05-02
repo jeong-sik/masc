@@ -181,8 +181,10 @@ let json_string_list key json =
   | _ -> []
 
 let option_string_field key = function
-  | Some value when String.trim value <> "" -> [ (key, `String (String.trim value)) ]
-  | _ -> []
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then [ (key, `String trimmed) ] else []
+  | None -> []
 
 let option_int_field key = function
   | Some value -> [ (key, `Int value) ]
@@ -611,8 +613,11 @@ let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
     | Types.Release | Types.Cancel ->
         let reason =
           match json_string_opt "reason" details with
-          | Some value when String.trim value <> "" -> Some (String.trim value)
-          | _ -> Some (Types.task_action_to_string transition)
+          | Some value ->
+              let trimmed = String.trim value in
+              if trimmed <> "" then Some trimmed
+              else Some (Types.task_action_to_string transition)
+          | None -> Some (Types.task_action_to_string transition)
         in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Partial ~reason

@@ -23,17 +23,20 @@ let ensure_dir_exists path = mkdir_p (Filename.dirname path)
 
 let read_jsonl_file path =
   let ic = open_in path in
-  let entries = ref [] in
-  (try
-     while true do
-       let line = input_line ic in
-       if String.length line > 0 then
-         match Yojson.Safe.from_string line |> Envelope.of_json with
-         | Ok env -> entries := env :: !entries
-         | Error _ -> ()  (* Skip malformed lines silently. *)
-     done
-   with End_of_file -> close_in ic);
-  List.rev !entries
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let entries = ref [] in
+      (try
+         while true do
+           let line = input_line ic in
+           if String.length line > 0 then
+             match Yojson.Safe.from_string line |> Envelope.of_json with
+             | Ok env -> entries := env :: !entries
+             | Error _ -> ()
+         done
+       with End_of_file -> ());
+      List.rev !entries)
 
 let load_latest_hash ~base_dir =
   if not (Sys.file_exists base_dir) then None

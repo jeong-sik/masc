@@ -321,13 +321,17 @@ let dashboard_verification_resolve_http_json
   let ( let* ) = bind in
   let* task_id =
     match Safe_ops.json_string_opt "task_id" args with
-    | Some s when String.trim s <> "" -> Ok (String.trim s)
-    | _ -> Error "task_id is required"
+    | Some s ->
+        let trimmed = String.trim s in
+        if trimmed <> "" then Ok trimmed else Error "task_id is required"
+    | None -> Error "task_id is required"
   in
   let* verification_id =
     match Safe_ops.json_string_opt "verification_id" args with
-    | Some s when String.trim s <> "" -> Ok (String.trim s)
-    | _ -> Error "verification_id is required"
+    | Some s ->
+        let trimmed = String.trim s in
+        if trimmed <> "" then Ok trimmed else Error "verification_id is required"
+    | None -> Error "verification_id is required"
   in
   let decision_name =
     Safe_ops.json_string_opt "decision" args

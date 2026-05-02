@@ -45,8 +45,11 @@ let judgment_write_json (ctx : 'a context) args =
     let confidence = get_float args "confidence" 0.5 in
     let keeper_name =
       match get_string_opt args "keeper_name" with
-      | Some raw when String.trim raw <> "" -> String.trim raw
-      | _ -> normalized_actor ~context_actor:ctx.agent_name None
+      | Some raw ->
+          let trimmed = String.trim raw in
+          if trimmed <> "" then trimmed
+          else normalized_actor ~context_actor:ctx.agent_name None
+      | None -> normalized_actor ~context_actor:ctx.agent_name None
     in
     let evidence_refs =
       match U.member "evidence_refs" args with

@@ -49,8 +49,10 @@ let add_agent_api_routes router =
        with_public_read (fun state req reqd ->
          let agent_name =
            match Server_utils.query_param req "agent_name" with
-           | Some n when String.trim n <> "" -> String.trim n
-           | _ -> ""
+           | Some n ->
+               let trimmed = String.trim n in
+               if trimmed <> "" then trimmed else ""
+           | None -> ""
          in
          if agent_name = "" then
            Http.Response.json ~status:`Bad_request
@@ -82,8 +84,10 @@ let add_agent_api_routes router =
        with_public_read (fun _state req reqd ->
          let agent_name =
            match Server_utils.query_param req "agent_name" with
-           | Some n when String.trim n <> "" -> String.trim n
-           | _ -> ""
+           | Some n ->
+               let trimmed = String.trim n in
+               if trimmed <> "" then trimmed else ""
+           | None -> ""
          in
          if agent_name = "" then
            Http.Response.json ~status:`Bad_request

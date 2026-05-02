@@ -352,7 +352,9 @@ let read_int_field json key =
 let read_string_field json key =
   let open Yojson.Safe.Util in
   match json |> member key with
-  | `String s when String.trim s <> "" -> Some (String.trim s)
+  | `String s ->
+      let trimmed = String.trim s in
+      if trimmed <> "" then Some trimmed else None
   | _ -> None
 
 let read_bool_field json key =
@@ -424,12 +426,17 @@ let resolve_inference_params ~config_path ~name =
 let read_api_key_env_field json key =
   let open Yojson.Safe.Util in
   match json |> member key with
-  | `String s when String.trim s <> "" -> [("*", String.trim s)]
+  | `String s ->
+      let trimmed = String.trim s in
+      if trimmed <> "" then [("*", trimmed)] else []
   | `Assoc pairs ->
     List.filter_map (fun (k, v) ->
       match v with
-      | `String s when String.trim s <> "" ->
-        Some (String.lowercase_ascii (String.trim k), String.trim s)
+      | `String s ->
+          let trimmed_s = String.trim s in
+          if trimmed_s <> "" then
+            Some (String.lowercase_ascii (String.trim k), trimmed_s)
+          else None
       | _ -> None
     ) pairs
   | _ -> []
@@ -457,12 +464,6 @@ type strategy_config = {
   tiers : string list list option;
   sticky_ttl_ms : int option;
 }
-
-let read_string_field json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String s when String.trim s <> "" -> Some (String.trim s)
-  | _ -> None
 
 (* Read a [string list list] from a JSON [list of list of string].
    Returns [None] when the key is missing or any element has the

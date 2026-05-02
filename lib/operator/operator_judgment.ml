@@ -51,8 +51,10 @@ let generate_id () =
 let key_of ~surface ~target_type ~target_id =
   let target =
     match target_id with
-    | Some value when String.trim value <> "" -> String.trim value
-    | _ -> "__room__"
+    | Some value ->
+        let trimmed = String.trim value in
+        if trimmed <> "" then trimmed else "__room__"
+    | None -> "__room__"
   in
   String.concat ":" [ surface; target_type_to_string target_type; target ]
 

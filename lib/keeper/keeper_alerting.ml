@@ -327,8 +327,10 @@ let post_keeper_alert_slack
 let slack_alert_token () : string option =
   let pick name =
     match Sys.getenv_opt name with
-    | Some v when String.trim v <> "" -> Some (String.trim v)
-    | _ -> None
+    | Some v ->
+        let trimmed = String.trim v in
+        if trimmed <> "" then Some trimmed else None
+    | None -> None
   in
   match pick "SLACK_BOT_TOKEN" with
   | Some _ as tok -> tok

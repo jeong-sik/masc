@@ -130,8 +130,10 @@ let ok_result fields = (true, ok_response fields)
 (** Required non-empty string. Trims whitespace. *)
 let get_string_required args key =
   match Safe_ops.json_string_opt key args with
-  | Some s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
-  | Some _ -> Error (error_response (Printf.sprintf "%s must not be empty" key))
+  | Some s ->
+      let trimmed = String.trim s in
+      if not (String.equal trimmed "") then Ok trimmed
+      else Error (error_response (Printf.sprintf "%s must not be empty" key))
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
 (** Required integer. *)
@@ -218,12 +220,14 @@ let validation_error_result errors = (false, validation_error_response errors)
 (** Validate that a string field is present and non-empty. *)
 let validate_string_required args field : (string, field_error) Result.t =
   match Safe_ops.json_string_opt field args with
-  | Some s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
   | Some s ->
-    Error { field; constraint_violated = Non_empty;
-            message = Printf.sprintf "%s must not be empty" field;
-            expected = Some "non-empty string";
-            received = Some (Printf.sprintf "%S" s) }
+      let trimmed = String.trim s in
+      if not (String.equal trimmed "") then Ok trimmed
+      else
+        Error { field; constraint_violated = Non_empty;
+                message = Printf.sprintf "%s must not be empty" field;
+                expected = Some "non-empty string";
+                received = Some (Printf.sprintf "%S" s) }
   | None ->
     Error { field; constraint_violated = Required;
             message = Printf.sprintf "%s is required" field;

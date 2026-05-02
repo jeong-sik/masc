@@ -372,9 +372,6 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
-let metric_keeper_turn_queue_depth =
-  "masc_keeper_turn_queue_depth"
-
 let metric_timeout_policy_overshoot =
   "masc_timeout_policy_overshoot_total"
 

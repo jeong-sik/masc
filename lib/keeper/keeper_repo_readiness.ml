@@ -94,8 +94,10 @@ let inspect
   let project_root = Keeper_alerting_path.project_root_of_config config in
   let derived_repo_name =
     match repo_name with
-    | Some name when String.trim name <> "" -> String.trim name
-    | _ -> repo_name_of_repo_arg ~project_root repo
+    | Some name ->
+        let trimmed = String.trim name in
+        if trimmed <> "" then trimmed else repo_name_of_repo_arg ~project_root repo
+    | None -> repo_name_of_repo_arg ~project_root repo
   in
   let clone_path = clone_path ~config ~meta ~repo_name:derived_repo_name in
   let common_fields state ok next_action extra =

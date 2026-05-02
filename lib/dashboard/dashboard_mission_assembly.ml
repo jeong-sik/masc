@@ -11,7 +11,9 @@ include Dashboard_mission_agents
 let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
-    | `String n when String.trim n <> "" -> String.trim n
+    | `String n ->
+        let trimmed = String.trim n in
+        if trimmed <> "" then trimmed else agent_name
     | _ -> agent_name
   in
   let fallback_allowed =

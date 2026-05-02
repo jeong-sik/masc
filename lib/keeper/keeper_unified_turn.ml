@@ -901,6 +901,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               in
               match
                 resolve_bounded_oas_timeout_budget_with_turn_budget
+                  ~is_retry
                   ~reserve_degraded_retry_budget
                   ~max_turns
                   ~estimated_input_tokens:prompt_timeout_estimate_tokens
@@ -1056,6 +1057,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   mark_terminal_error err;
                   Error err
                 end else
+                  (* Budget gate: check whether there is enough wall-clock
+                     remaining to schedule a degraded cascade retry.  The
+                     gate always uses per-attempt semantics (fresh floor) for
+                     the candidate because, by definition, every degraded
+                     retry is itself a retry — even when the failing attempt
+                     was the first attempt (is_retry=false here). *)
                   match
                     next_fail_open_cascade_for_turn_with_budget
                       ?rotation_cascades:fail_open_rotation_cascades

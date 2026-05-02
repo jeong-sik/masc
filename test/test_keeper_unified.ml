@@ -5152,15 +5152,16 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
 let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
-      ~reserve_degraded_retry_budget:true ~estimated_input_tokens:2_000
-      ~max_turns:4 ~remaining_turn_budget_s:1200.0
+      ~is_retry:false ~reserve_degraded_retry_budget:true
+      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~remaining_turn_budget_s:500.0
   with
   | Some budget ->
       check (float 0.01)
         "first attempt keeps half the usable turn budget for fallback"
-        592.5 budget.effective_timeout_sec;
-      check (float 0.01) "remaining budget records post-guard usable budget"
-        1185.0 budget.remaining_turn_budget_sec;
+        242.5 budget.effective_timeout_sec;
+      check (float 0.01) "remaining budget records raw wall-clock remaining"
+        500.0 budget.remaining_turn_budget_sec;
       check string "source records retry reserve"
         "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
@@ -5178,8 +5179,8 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
   in
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
-      ~reserve_degraded_retry_budget:false ~estimated_input_tokens:2_000
-      ~max_turns:4
+      ~is_retry:false ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:1200.0
   with
   | None -> fail "expected timeout budget"
@@ -5254,7 +5255,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
-      ~remaining_turn_budget_s:20.0
+      ~remaining_turn_budget_s:0.0
       (oas_timeout_budget_error ())
   with
   | UT.Degraded_retry_budget_exhausted retry ->
@@ -5264,6 +5265,103 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
         retry.fallback_reason
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+
+(* Regression: GitHub #12675 — per-attempt retry budget.
+   When is_retry=true, the budget resolution must provide a fresh
+   minimum execution budget even when wall-clock remaining is very
+   small (simulating a retry after a long first-attempt timeout).
+   Without the fix, near-zero remaining_turn_budget_s caused the
+   retry OAS call to time out before the model began processing. *)
+let test_per_attempt_retry_budget_with_near_zero_remaining () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:3.0
+  with
+  | None -> fail "is_retry=true must provide budget even with tiny remaining"
+  | Some budget ->
+      check bool "effective >= min_oas_timeout_budget_sec" true
+        (budget.effective_timeout_sec >= 15.0);
+      check string "source indicates per-attempt retry"
+        "ok"
+        (if String.equal budget.source "adaptive_per_attempt_retry"
+            || String.equal budget.source "override_per_attempt_retry"
+         then "ok" else budget.source)
+
+let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:1200.0
+  with
+  | None -> fail "is_retry=true should resolve with healthy remaining"
+  | Some budget ->
+      check bool "effective capped by min(adaptive, remaining)" true
+        (budget.effective_timeout_sec <= 1200.0)
+
+let test_non_retry_still_refuses_tiny_budget () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:false
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:20.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "is_retry=false should refuse budget when remaining < guard + min"
+
+let test_per_attempt_retry_refuses_zero_remaining () =
+  (* Wall-clock gate: a retry with 0.0s remaining would be immediately
+     cancelled by the outer turn timeout — resolver must return None. *)
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:0.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "is_retry=true with 0.0s remaining should return None"
+
+let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
+  (* Regression: GitHub #12675 — this simulates the real call-site scenario:
+     a *first-attempt* failure (is_retry=false at the call site) triggers
+     degraded-retry scheduling when wall-clock remaining is very small (3s).
+
+     Before the fix, the gate received the current attempt's is_retry=false
+     and evaluated budget using the non-retry guard+reserve path, which
+     rejected the degraded retry because remaining (3s) < guard+min (30s).
+     The fix removes the is_retry parameter from the gate and always evaluates
+     the *candidate* (which is always a retry) with per-attempt semantics. *)
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~tool_requirement:"optional"
+      ~attempted_cascades:[ "underdog" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:3.0
+      (oas_timeout_budget_error ())
+  with
+  | UT.Degraded_retry_allowed retry ->
+      check string "retry cascade" KC.local_recovery_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "oas_timeout_budget"
+        retry.fallback_reason
+  | UT.Degraded_retry_budget_exhausted _ ->
+      fail "degraded retry should be allowed even with tiny remaining"
+  | UT.No_degraded_retry -> fail "expected degraded retry"
 
 let test_pure_local_labels_detection () =
   check bool "ollama-only cascade is pure local" true
@@ -7197,6 +7295,16 @@ let () =
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick
             test_degraded_retry_budget_gate_blocks_exhausted_budget;
+          test_case "per-attempt retry budget with near-zero remaining (#12675)" `Quick
+            test_per_attempt_retry_budget_with_near_zero_remaining;
+          test_case "per-attempt retry budget capped by healthy remaining" `Quick
+            test_per_attempt_retry_budget_capped_by_remaining_when_healthy;
+          test_case "non-retry still refuses tiny budget" `Quick
+            test_non_retry_still_refuses_tiny_budget;
+          test_case "per-attempt retry refuses zero remaining (#12675)" `Quick
+            test_per_attempt_retry_refuses_zero_remaining;
+          test_case "degraded retry gate allows retry with tiny remaining (#12675)" `Quick
+            test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining;
           test_case "pure local label detection" `Quick
             test_pure_local_labels_detection;
           test_case "pure local context clamp" `Quick

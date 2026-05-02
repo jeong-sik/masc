@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
+import { runningUnderVitest } from '../lib/test-env'
 
 interface KeeperState {
   id: string
@@ -18,8 +19,9 @@ interface Trace {
 }
 
 function yjsWebsocketUrl(): string | null {
-  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL
-  if (configured && configured.trim() !== '') return configured
+  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL?.trim()
+  if (configured) return configured
+  if (runningUnderVitest()) return null
   if (typeof window === 'undefined' || !window.location?.host) return null
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}/yjs`

@@ -17,36 +17,48 @@ interface Trace {
   position: number
 }
 
-// Global Yjs setup for the telemetry
-const ydoc = new Y.Doc()
-// In production, this would use a dynamic host, but for now we hardcode localhost:1234
-// @ts-ignore
-const wsProvider = new WebsocketProvider('ws://localhost:1234', 'masc-telemetry', ydoc)
-const yKeepers = ydoc.getMap('keepers')
-const yTraces = ydoc.getArray('traces')
+function yjsWebsocketUrl(): string | null {
+  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL
+  if (configured && configured.trim() !== '') return configured
+  if (typeof window === 'undefined' || !window.location?.host) return null
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/yjs`
+}
 
 export function WorldVisualizer() {
   const [keepers, setKeepers] = useState<KeeperState[]>([])
   const [traces, setTraces] = useState<Trace[]>([])
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const providerRef = useRef<WebsocketProvider | null>(null)
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return
+    const url = yjsWebsocketUrl()
+    if (!url) return
+
+    const ydoc = new Y.Doc()
+    const provider = new WebsocketProvider(url, 'masc-telemetry', ydoc)
+    const yKeepers = ydoc.getMap<KeeperState>('keepers')
+    const yTraces = ydoc.getArray<Trace>('traces')
+    providerRef.current = provider
+
     const observer = () => {
-      const parsedKeepers = Array.from(yKeepers.values()) as KeeperState[]
-      const parsedTraces = yTraces.toArray() as Trace[]
-      setKeepers(parsedKeepers)
-      setTraces(parsedTraces)
+      setKeepers(Array.from(yKeepers.values()))
+      setTraces(yTraces.toArray())
     }
 
     yKeepers.observe(observer)
     yTraces.observe(observer)
-    
+
     // Initial sync
     observer()
 
     return () => {
       yKeepers.unobserve(observer)
       yTraces.unobserve(observer)
+      if (providerRef.current === provider) providerRef.current = null
+      provider.destroy()
+      ydoc.destroy()
     }
   }, [])
 

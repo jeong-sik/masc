@@ -286,7 +286,7 @@ export function App() {
 
         <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
           <div class="h-full overflow-y-auto p-4">
-            <div style={{ flex: "0 0 auto", borderBottom: "1px solid var(--color-border-default)" }}><${WorldVisualizer} /></div><${DashboardMain} />
+            <div style=${{ flex: '0 0 auto', borderBottom: '1px solid var(--color-border-default)' }}><${WorldVisualizer} /></div><${DashboardMain} />
           </div>
         </main>
       </div>

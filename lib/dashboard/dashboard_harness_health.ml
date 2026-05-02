@@ -597,6 +597,9 @@ let record_wake_payload_at ~timestamp ~keeper_name ~trace_id ~turn_index
     ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes
     ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count
     ~has_compact_happened =
+  (* Project World Building: Broadcast live Yjs telemetry *)
+  Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id;
+
   let event =
     {
       timestamp;

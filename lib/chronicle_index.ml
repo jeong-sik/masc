@@ -39,6 +39,8 @@ let active_epochs (idx : index) =
     idx.epochs
 
 let add_or_replace_epoch (idx : index) (summary : epoch_summary) =
+  Dashboard_yjs.broadcast_trace_telemetry ~author:summary.id ~position:100;
+
   let filtered =
     List.filter (fun (s : epoch_summary) -> not (String.equal s.id summary.id)) idx.epochs
   in

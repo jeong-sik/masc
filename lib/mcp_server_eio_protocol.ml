@@ -699,8 +699,7 @@ type transport_mode =
 
 let detect_mode first_line =
   let lower = String.lowercase_ascii first_line in
-  if String.length lower >= 14 &&
-     String.sub lower 0 14 = "content-length" then
+  if Base.String.is_prefix lower ~prefix:"content-length" then
     Framed
   else
     LineDelimited

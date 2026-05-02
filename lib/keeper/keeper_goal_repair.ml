@@ -115,7 +115,7 @@ let run (config : Coord.config) : repair_result =
     match repair_keeper config name with
     | Ok action -> { acc with actions = action :: acc.actions }
     | Error e ->
-        if String.length e >= 18 && String.sub e 0 18 = "already has active_" then
+        if Base.String.is_prefix e ~prefix:"already has active_" then
           { acc with skipped = (name, e) :: acc.skipped }
         else
           { acc with errors = (name, e) :: acc.errors }

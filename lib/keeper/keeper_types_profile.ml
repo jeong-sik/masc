@@ -616,7 +616,7 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
   List.filter_map
     (fun (k, v) ->
       if String.length k > prefix_len
-         && String.sub k 0 prefix_len = oas_env_key_prefix
+         && Base.String.is_prefix k ~prefix:oas_env_key_prefix
       then
         let suffix = String.sub k prefix_len (String.length k - prefix_len) in
         if oas_env_key_is_allowed suffix then
@@ -1055,7 +1055,7 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let oas_env_prefix_len = String.length oas_env_prefix in
   let starts_with_oas_env k =
     String.length k > oas_env_prefix_len
-    && String.sub k 0 oas_env_prefix_len = oas_env_prefix
+    && Base.String.is_prefix k ~prefix:oas_env_prefix
   in
   doc
   |> List.map fst

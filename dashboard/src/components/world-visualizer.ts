@@ -20,6 +20,7 @@ interface Trace {
 // Global Yjs setup for the telemetry
 const ydoc = new Y.Doc()
 // In production, this would use a dynamic host, but for now we hardcode localhost:1234
+// @ts-ignore
 const wsProvider = new WebsocketProvider('ws://localhost:1234', 'masc-telemetry', ydoc)
 const yKeepers = ydoc.getMap('keepers')
 const yTraces = ydoc.getArray('traces')

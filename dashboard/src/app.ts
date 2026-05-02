@@ -2,6 +2,7 @@
 // Sticky app shell with tab routing and live status rail
 
 import { html } from 'htm/preact'
+import { WorldVisualizer } from './components/world-visualizer'
 import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'

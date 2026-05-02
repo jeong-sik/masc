@@ -128,7 +128,13 @@ let set_keeper_board_signal_hook hook =
 
 let emit_keeper_board_signal signal =
   match Atomic.get keeper_board_signal_hook with
-  | Some hook -> Safe_ops.protect ~default:() (fun () -> hook signal)
+  | Some hook ->
+      (try hook signal
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.BoardLog.error "Keeper board signal hook failed: %s"
+             (Exn.to_string exn))
   | None -> ()
 
 let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None

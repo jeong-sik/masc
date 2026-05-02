@@ -70,6 +70,15 @@ interface DashboardSectionNavItem {
 
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
+    id: 'cockpit',
+    label: 'MASC Cockpit',
+    icon: 'workspace',
+    description: 'High-Fidelity MASC Cockpit (Dream IDE)',
+    defaultTab: 'cockpit',
+    tabs: ['cockpit'],
+  },
+
+  {
     id: 'overview',
     label: 'Overview',
     icon: 'overview',
@@ -150,6 +159,7 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 }))
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
+  cockpit: [],
   monitoring: [
     {
       id: 'journey',

@@ -50,6 +50,7 @@ const LazyConnectors = lazy(async () => ({ default: (await import('./connector-s
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
+const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>Loading ${label}...<//>`
@@ -538,6 +539,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('Lab')}>
           <${LazyLabSurface} />
+        <//>
+      `
+    case 'cockpit':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Cockpit')}>
+          <${LazyCockpit} />
         <//>
       `
     case 'code':

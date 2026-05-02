@@ -185,6 +185,21 @@ print(node[field])
 PY
 }
 
+# Read a top-level integer field from a JSON file (no section nesting).
+extract_json_top_int() {
+  local json_file="$1"
+  local key="$2"
+  python3 - "$json_file" "$key" <<'PY'
+import json
+import sys
+
+path, key = sys.argv[1], sys.argv[2]
+with open(path) as handle:
+    data = json.load(handle)
+print(int(data[key]))
+PY
+}
+
 echo "=== Health Snapshot ==="
 if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "Running scripts/dune-local.sh build @check"
@@ -219,6 +234,24 @@ case "$anti_fake_status" in
     exit "$anti_fake_status"
     ;;
 esac
+
+base_policy_json="$(mktemp)"
+base_policy_cmd=(
+  bash
+  scripts/base-policy-audit.sh
+  --json-out "$base_policy_json"
+  --baseline-file "$BASELINE_FILE"
+)
+if [ -n "$BASELINE_REF" ]; then
+  base_policy_cmd+=(--baseline-ref "$BASELINE_REF")
+fi
+"${base_policy_cmd[@]}"
+
+mli_open_base="$(extract_json_top_int "$base_policy_json" "mli_open_base")"
+ml_base_stdlib_shadow="$(extract_json_top_int "$base_policy_json" "ml_base_stdlib_shadow")"
+baseline_mli_open_base="$(extract_json_field "$base_policy_json" baseline mli_open_base)"
+baseline_ml_base_stdlib_shadow="$(extract_json_field "$base_policy_json" baseline ml_base_stdlib_shadow)"
+rm -f "$base_policy_json"
 
 lib_failwith="$(count_pattern lib 'failwith')"
 lib_list_hd="$(count_pattern lib 'List\.hd')"
@@ -293,6 +326,8 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
   [ "$lib_list_tl" -gt "$baseline_lib_list_tl" ] && regressions+=("lib_list_tl ${baseline_lib_list_tl}->${lib_list_tl}")
   [ "$lib_option_get" -gt "$baseline_lib_option_get" ] && regressions+=("lib_option_get ${baseline_lib_option_get}->${lib_option_get}")
   [ "$lib_obj_magic" -gt "$baseline_lib_obj_magic" ] && regressions+=("lib_obj_magic ${baseline_lib_obj_magic}->${lib_obj_magic}")
+  [ "$mli_open_base" -gt "$baseline_mli_open_base" ] && regressions+=("mli_open_base ${baseline_mli_open_base}->${mli_open_base}")
+  [ "$ml_base_stdlib_shadow" -gt "$baseline_ml_base_stdlib_shadow" ] && regressions+=("ml_base_stdlib_shadow ${baseline_ml_base_stdlib_shadow}->${ml_base_stdlib_shadow}")
 
   if [ "${#regressions[@]}" -eq 0 ]; then
     ratchet_status="pass"
@@ -334,6 +369,7 @@ echo "Baseline: ${baseline_label}"
 echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti_fake_suspect} fake=${anti_fake_fake} total=${anti_fake_total}"
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
+echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow}"
 echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500} examples=${examples_ml_over_500}"
 echo "ML line cap changed: ${ml_line_cap_changed_status} (${ml_line_cap_changed_message})"
 echo "ML line cap ratchet: ${ml_line_cap_status} (${ml_line_cap_message})"
@@ -371,7 +407,9 @@ json_payload="$(cat <<EOF
     "lib_ml_over_500": ${lib_ml_over_500},
     "bin_ml_over_500": ${bin_ml_over_500},
     "test_ml_over_500": ${test_ml_over_500},
-    "examples_ml_over_500": ${examples_ml_over_500}
+    "examples_ml_over_500": ${examples_ml_over_500},
+    "mli_open_base": ${mli_open_base},
+    "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow}
   },
   "ml_line_cap": {
     "status": "${ml_line_cap_status}",
@@ -388,7 +426,9 @@ json_payload="$(cat <<EOF
       "lib_list_hd": ${baseline_lib_list_hd},
       "lib_list_tl": ${baseline_lib_list_tl},
       "lib_option_get": ${baseline_lib_option_get},
-      "lib_obj_magic": ${baseline_lib_obj_magic}
+      "lib_obj_magic": ${baseline_lib_obj_magic},
+      "mli_open_base": ${baseline_mli_open_base},
+      "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow}
     }
   },
   "ratchet": {
@@ -431,6 +471,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| examples | $examples_ml_over_500 | n/a |"
     echo ""
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
+    echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\`"
     echo "- ML line cap changed: \`$ml_line_cap_changed_status\` ($ml_line_cap_changed_message)"
     echo "- ML line cap ratchet: \`$ml_line_cap_status\` ($ml_line_cap_message)"
     echo "- Ratchet: \`$ratchet_status\` ($ratchet_message)"

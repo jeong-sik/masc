@@ -211,11 +211,11 @@ jobs:
             dashboard=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health_snapshot=true
           fi
 
@@ -430,7 +430,7 @@ jobs:
           GITHUB_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh
+          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh scripts/base-policy-audit.sh
           zero_sha="0000000000000000000000000000000000000000"
           baseline_ref=""
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then

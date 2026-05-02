@@ -113,6 +113,29 @@ describe('createLayeredOverlay', () => {
     expect(count).toBe(0)
   })
 
+  it('sets active layers from external state in registration order', () => {
+    const c = createLayeredOverlay(LAYERS)
+    c.setActive(new Set(['approve', 'bogus', 'time']))
+    expect([...c.active()]).toEqual(['time', 'approve'])
+  })
+
+  it('normalizes exclusive layer conflicts when setting external state', () => {
+    const c = createLayeredOverlay(LAYERS)
+    c.setActive(new Set(['time', 'explode', 'notes']))
+    expect([...c.active()]).toEqual(['explode'])
+  })
+
+  it('setActive is a no-op when the normalized active set is unchanged', () => {
+    const c = createLayeredOverlay(LAYERS)
+    let count = 0
+    c.setActive(new Set(['time']))
+    c.subscribe(() => {
+      count += 1
+    })
+    c.setActive(new Set(['time']))
+    expect(count).toBe(0)
+  })
+
   it('active() snapshots are isolated from internal state', () => {
     const c = createLayeredOverlay(LAYERS)
     c.toggle('time')

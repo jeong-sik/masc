@@ -283,7 +283,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
-    Buffer.add_string ubuf "\n");
+    Buffer.add_char ubuf '\n');
   (* 3. Context health — stable resource framing *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
@@ -311,7 +311,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   if autonomous_trigger <> [] then (
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
-    Buffer.add_string ubuf "\n");
+    Buffer.add_char ubuf '\n');
   (* 5. Continuity — usually large and moderately stable, so keep it
      before highly volatile reactive sections for better prefix reuse.
      Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
@@ -333,7 +333,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       "- If this turn was still scheduled or backlog/worktree signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
-    Buffer.add_string ubuf "\n");
+    Buffer.add_char ubuf '\n');
   (* 6. Pending mentions — reactive trigger *)
   if observation.pending_mentions <> [] then (
     Buffer.add_string ubuf
@@ -372,7 +372,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
    | Some summary when String.trim summary <> "" ->
        Buffer.add_string ubuf "\n### Live Worktree Delta\n";
        Buffer.add_string ubuf summary;
-       Buffer.add_string ubuf "\n"
+       Buffer.add_char ubuf '\n'
    | _ -> ());
   let user_message =
     Buffer.contents ubuf

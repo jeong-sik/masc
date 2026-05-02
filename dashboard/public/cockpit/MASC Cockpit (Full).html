@@ -40,6 +40,22 @@
         status: g.status,
         progress: 0
       }));
+      // Phase 19: Deep Data Hydration
+      window.MASC_DATA.tasks = live.tasks.map(t => ({
+        id: t.task_id,
+        keeper: t.assignee || '-',
+        title: t.title,
+        status: t.status,
+        goal: t.goal_id || '-',
+        t: 'now'
+      }));
+      window.MASC_DATA.events = live.events.map(e => ({
+        t: new Date(e.timestamp).toLocaleTimeString(),
+        keeper: e.agent,
+        kind: e.kind || 'note',
+        text: e.text
+      }));
+      
       // trigger rerender event
       window.dispatchEvent(new Event('masc_data_updated'));
     }

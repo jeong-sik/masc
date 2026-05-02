@@ -7,12 +7,6 @@ type t = {
   uptime_seconds : int;
 } [@@deriving yojson { strict = false }]
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
 let trim_to_option raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
@@ -98,7 +92,7 @@ let resolve_commit ~env_value ~probe =
   | None -> probe ()
 
 let started_at_unix = Unix.gettimeofday ()
-let started_at_iso = iso8601_of_unix started_at_unix
+let started_at_iso = Types.iso8601_of_unix_seconds started_at_unix
 
 (** Commit hash — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.

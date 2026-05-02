@@ -63,13 +63,6 @@ let get_store (config : Coord.config) : Dated_jsonl.t =
         Hashtbl.replace store_cache base_path store;
         store)
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
 let event_date_string ts =
   let tm = Unix.gmtime ts in
   Printf.sprintf "%04d-%02d-%02d"
@@ -92,7 +85,7 @@ let tool_outcome_to_json (e : tool_outcome_event) : Yojson.Safe.t =
     ; ("tool_name", `String e.tool_name)
     ; ("success", `Bool e.success)
     ; ("ts", `Float e.timestamp)
-    ; ("ts_iso", `String (iso8601_of_unix e.timestamp))
+    ; ("ts_iso", `String (Types.iso8601_of_unix_seconds e.timestamp))
     ]
     @ opt_string_field "error_kind"
         (Option.map error_kind_to_string e.error_kind)
@@ -107,7 +100,7 @@ let goal_completion_to_json (e : goal_completion_event) : Yojson.Safe.t =
     ; ("completed_within_budget", `Bool e.completed_within_budget)
     ; ("on_topic", `Bool e.on_topic)
     ; ("ts", `Float e.timestamp)
-    ; ("ts_iso", `String (iso8601_of_unix e.timestamp))
+    ; ("ts_iso", `String (Types.iso8601_of_unix_seconds e.timestamp))
     ]
     @ opt_string_field "raw_trace_run_id" e.raw_trace_run_id)
 
@@ -117,7 +110,7 @@ let safety_violation_to_json (e : safety_violation_event) : Yojson.Safe.t =
     ; ("agent_id", `String e.agent_id)
     ; ("violation_kind", `String e.violation_kind)
     ; ("ts", `Float e.timestamp)
-    ; ("ts_iso", `String (iso8601_of_unix e.timestamp))
+    ; ("ts_iso", `String (Types.iso8601_of_unix_seconds e.timestamp))
     ]
     @ opt_string_field "tool_name" e.tool_name
     @ opt_string_field "raw_trace_run_id" e.raw_trace_run_id)

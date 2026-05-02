@@ -31,9 +31,13 @@ let read_jsonl_file path =
          while true do
            let line = input_line ic in
            if String.length line > 0 then
-             match Yojson.Safe.from_string line |> Envelope.of_json with
-             | Ok env -> entries := env :: !entries
-             | Error _ -> ()
+             match Yojson.Safe.from_string line with
+             | json -> (
+                 match Envelope.of_json json with
+                 | Ok env -> entries := env :: !entries
+                 | Error _ -> () )
+             | exception Yojson.Json_error _ -> ()
+             | exception Yojson.Safe.Util.Type_error (_, _) -> ()
          done
        with End_of_file -> ());
       List.rev !entries)

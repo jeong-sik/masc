@@ -246,8 +246,8 @@ body[data-mode="split"] .zone-deck { display: none; }
 .code-line.is-heatmap-1 { background: rgb(var(--brass-glow) / .02); }
 .code-line.is-heatmap-2 { background: rgb(var(--brass-glow) / .05); }
 .code-line.is-heatmap-3 { background: rgb(var(--brass-glow) / .10); }
-.code-line.is-diff-add { background: rgb(107 158 107 / .08); }
-.code-line.is-diff-del { background: rgb(196 106 90 / .08); }
+.code-line.is-diff-add { background: rgb(var(--ok-glow) / .08); }
+.code-line.is-diff-del { background: rgb(var(--err-glow) / .08); }
 
 .cl-gutter {
   grid-area: gutter;
@@ -291,9 +291,9 @@ body[data-mode="split"] .zone-deck { display: none; }
   width: 5px; height: 5px; border-radius: 50%;
   background: var(--brass-1); box-shadow: 0 0 5px rgb(var(--brass-glow) / .7);
 }
-.cl-cursor-dot.is-green { background: var(--ok); box-shadow: 0 0 5px rgb(107 158 107 / .7); }
-.cl-cursor-dot.is-blue  { background: var(--info); box-shadow: 0 0 5px rgb(106 142 176 / .7); }
-.cl-cursor-dot.is-purple { background: var(--stalled); box-shadow: 0 0 5px rgb(138 106 160 / .7); }
+.cl-cursor-dot.is-green { background: var(--ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .7); }
+.cl-cursor-dot.is-blue  { background: var(--info); box-shadow: 0 0 5px rgb(var(--info-glow) / .7); }
+.cl-cursor-dot.is-purple { background: var(--stalled); box-shadow: 0 0 5px rgb(var(--stalled-glow) / .7); }
 .cl-diff-mark {
   grid-area: markers;
   display: flex; align-items: center; justify-content: center;
@@ -357,8 +357,8 @@ body[data-mode="split"] .zone-deck { display: none; }
   position: sticky; top: 0; z-index: 2;
   margin: 6px 12px;
   padding: 6px 10px;
-  background: rgb(196 106 90 / .1);
-  border: 1px solid rgb(196 106 90 / .3);
+  background: rgb(var(--err-glow) / .1);
+  border: 1px solid rgb(var(--err-glow) / .3);
   border-radius: var(--r-1);
   font-size: 11px; color: var(--err);
   display: flex; align-items: center; gap: 8px;
@@ -453,10 +453,10 @@ body[data-mode="split"] .zone-deck { display: none; }
   letter-spacing: .08em; text-transform: uppercase;
   font-family: var(--font-mono); font-weight: 600;
 }
-.thread-kind.k-question { background: rgb(106 142 176 / .15); color: var(--info); }
-.thread-kind.k-flag     { background: rgb(196 106 90 / .15); color: var(--err); }
+.thread-kind.k-question { background: rgb(var(--info-glow) / .15); color: var(--info); }
+.thread-kind.k-flag     { background: rgb(var(--err-glow) / .15); color: var(--err); }
 .thread-kind.k-note     { background: var(--color-bg-hover); color: var(--color-fg-secondary); }
-.thread-kind.k-approve  { background: rgb(107 158 107 / .15); color: var(--ok); }
+.thread-kind.k-approve  { background: rgb(var(--ok-glow) / .15); color: var(--ok); }
 .thread-kind.k-suggest  { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
 .thread-anchor {
   font-family: var(--font-mono); font-size: 10px;
@@ -589,8 +589,8 @@ body[data-mode="split"] .zone-deck { display: none; }
 .conflict-warn {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 10px; padding: 1px 5px;
-  background: rgb(196 106 90 / .1);
-  color: var(--err); border: 1px solid rgb(196 106 90 / .3);
+  background: rgb(var(--err-glow) / .1);
+  color: var(--err); border: 1px solid rgb(var(--err-glow) / .3);
   border-radius: 2px; font-family: var(--font-mono);
 }
 
@@ -684,9 +684,9 @@ body[data-mode="split"] .zone-rail {
   background: var(--color-bg-elevated); color: var(--color-fg-muted); font-family: var(--font-mono);
 }
 .cmd-row .cmd-kind-tag.k-file { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
-.cmd-row .cmd-kind-tag.k-cmd  { background: rgb(106 142 176 / .12); color: var(--info); }
-.cmd-row .cmd-kind-tag.k-sym  { background: rgb(138 106 160 / .12); color: var(--stalled); }
-.cmd-row .cmd-kind-tag.k-thr  { background: rgb(196 106 90 / .12); color: var(--err); }
+.cmd-row .cmd-kind-tag.k-cmd  { background: rgb(var(--info-glow) / .12); color: var(--info); }
+.cmd-row .cmd-kind-tag.k-sym  { background: rgb(var(--stalled-glow) / .12); color: var(--stalled); }
+.cmd-row .cmd-kind-tag.k-thr  { background: rgb(var(--err-glow) / .12); color: var(--err); }
 .cmd-empty {
   padding: 24px 14px; text-align: center;
   color: var(--color-fg-disabled); font-size: 11px;
@@ -745,7 +745,7 @@ body:not(.term-open) .code-term { display: none; }
 .term-tab .t-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--ok);
-  box-shadow: 0 0 4px rgb(107 158 107 / .6);
+  box-shadow: 0 0 4px rgb(var(--ok-glow) / .6);
 }
 .term-tab .t-dot.is-running { background: var(--brass-1); box-shadow: 0 0 4px rgb(var(--brass-glow) / .7); animation: term-pulse 1.6s infinite; }
 .term-tab .t-dot.is-error   { background: var(--err); }

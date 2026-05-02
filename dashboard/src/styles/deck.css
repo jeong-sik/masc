@@ -136,11 +136,11 @@
   font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .06em;
 }
 .pill.active, .pill.running { color: var(--brass-1); border-color: var(--brass-3); }
-.pill.blocked, .pill.err, .pill.error { color: var(--err); border-color: rgb(196 106 90 / .4); }
-.pill.done, .pill.ok, .pill.verified { color: var(--ok); border-color: rgb(107 158 107 / .4); }
-.pill.stalled { color: var(--stalled); border-color: rgb(138 106 160 / .4); }
-.pill.warn, .pill.atrisk { color: var(--warn); border-color: rgb(201 162 74 / .4); }
-.pill.idle, .pill.pending { color: var(--info); border-color: rgb(106 142 176 / .4); }
+.pill.blocked, .pill.err, .pill.error { color: var(--err); border-color: var(--err-border); }
+.pill.done, .pill.ok, .pill.verified { color: var(--ok); border-color: rgb(var(--ok-glow) / .4); }
+.pill.stalled { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .4); }
+.pill.warn, .pill.atrisk { color: var(--warn); border-color: rgb(var(--warn-glow) / .4); }
+.pill.idle, .pill.pending { color: var(--info); border-color: rgb(var(--info-glow) / .4); }
 
 .deck-bar {
   display: inline-block; width: 80px; height: 4px;
@@ -281,7 +281,7 @@
 }
 .cascade-step:last-child { border-right: none; }
 .cascade-step.is-skipped { opacity: 0.4; }
-.cascade-step.is-failed { background: rgb(196 106 90 / .06); }
+.cascade-step.is-failed { background: rgb(var(--err-glow) / .06); }
 .cascade-step.is-hit { box-shadow: inset 0 -2px 0 var(--brass-1); }
 .cascade-step .cs-num {
   font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled);

@@ -166,16 +166,16 @@
   cursor: pointer;
   transition: background var(--t-fast);
 }
-.sl-row:hover { background: rgb(255 255 255 / .02); }
+.sl-row:hover { background: var(--hover-overlay); }
 .sl-row.is-active { background: var(--color-bg-elevated); }
 .sl-row.is-active .sl-name { color: var(--brass-1); }
 .sl-row.is-active .sl-status.dot-running { box-shadow: 0 0 6px rgb(var(--brass-glow) / .8); }
 
 /* status tinted backgrounds — very subtle */
-.sl-row.st-error     { background: rgb(196 106 90 / .04); }
-.sl-row.st-error.is-active { background: rgb(196 106 90 / .10); }
-.sl-row.st-blocker   { background: rgb(201 162 74 / .04); }
-.sl-row.st-blocker.is-active { background: rgb(201 162 74 / .09); }
+.sl-row.st-error     { background: rgb(var(--err-glow) / .04); }
+.sl-row.st-error.is-active { background: rgb(var(--err-glow) / .10); }
+.sl-row.st-blocker   { background: rgb(var(--warn-glow) / .04); }
+.sl-row.st-blocker.is-active { background: rgb(var(--warn-glow) / .09); }
 .sl-row.st-running   { background: rgb(var(--brass-glow) / .02); }
 
 /* collapsed empty lane — smaller, muted */

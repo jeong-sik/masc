@@ -17,6 +17,9 @@ openai_compat = "big_three"
 persona_generation = "big_three"
 provider_benchmark = "big_three"
 llm_rerank = "tool_rerank"
+simple_task = "tier_small"
+moderate_task = "tier_medium"
+complex_task = "big_three"
 
 [big_three]
 comment = "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names."
@@ -55,3 +58,25 @@ models = [
 temperature = 0.0
 max_tokens = 200
 keeper_assignable = false
+
+[tier_small]
+comment = "4B-class local models for simple tasks (classification, format, short summary). Operator opt-in: uncomment models when Ollama is running locally."
+# models = [
+#   "ollama:llama3.2:3b",
+#   "ollama:phi-3-mini",
+# ]
+models = []
+temperature = 0.3
+max_tokens = 1000
+keeper_assignable = false
+fallback_cascade = "tier_medium"
+
+[tier_medium]
+comment = "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion."
+models = [
+  "glm-coding:glm-4.7-flashx",
+]
+temperature = 0.2
+max_tokens = 4096
+keeper_assignable = false
+fallback_cascade = "big_three"

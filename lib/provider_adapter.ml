@@ -160,17 +160,21 @@ let cn_claude_api = "claude-api"
 let cn_codex_api = "codex-api"
 let cn_gemini_api = "gemini-api"
 let cn_kimi_api = "kimi-api"
+let cn_kimi_coding = "kimi-coding"
 let cn_glm = "glm-api"
 let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
 
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 
+let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
+
 let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
   | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
   | "kimi-api" -> cn_kimi
+  | "kimi-coding" | "kimi_coding" -> cn_kimi_coding
   | _ -> String.trim label
 
 (** Default API base URLs — overridable via env var for proxying/testing.
@@ -218,6 +222,11 @@ let moonshot_compat_base_url = "https://api.moonshot.ai/v1"
 
 let kimi_api_url () =
   env_url_or ~env:"KIMI_BASE_URL" ~default:moonshot_compat_base_url
+
+let kimi_coding_base_url = "https://api.kimi.com/coding/v1"
+
+let kimi_coding_api_url () =
+  env_url_or ~env:"KIMI_CODING_BASE_URL" ~default:kimi_coding_base_url
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -524,6 +533,27 @@ let direct_adapters =
         {
           default_model_env = Some "KIMI_DEFAULT_MODEL";
           default_model_fallback = Some "kimi-k2.5";
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Kimi_api_family;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
+    };
+    {
+      canonical_name = cn_kimi_coding;
+      runtime_kind = Direct_api;
+      auth_mode = Api_key "KIMI_CODING_API_KEY";
+      aliases = [ cn_kimi_coding; "kimi_coding" ];
+      spawn_key = None;
+      cascade_prefix = "kimi_coding";
+      default_voice = None;
+      endpoint_url = Some (kimi_coding_api_url ());
+      default_model_id = Some "auto";
+      model_policy =
+        {
+          default_model_env = Some "KIMI_CODING_DEFAULT_MODEL";
+          default_model_fallback = Some "kimi-coding-auto";
           auto_models = No_auto_models;
           expand_auto = false;
           family = Kimi_api_family;
@@ -1104,6 +1134,8 @@ let provider_auth_available label =
            env_present env_name
            || (adapter.canonical_name = cn_kimi_api
                && List.exists env_present kimi_api_key_envs)
+           || (adapter.canonical_name = cn_kimi_coding
+               && List.exists env_present kimi_coding_key_envs)
        | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 
@@ -1114,6 +1146,8 @@ let auth_kind_for_canonical_name name =
   | Some adapter ->
       if adapter.canonical_name = cn_kimi_api then
         "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
+      else if adapter.canonical_name = cn_kimi_coding then
+        "api_key:KIMI_CODING_API_KEY|KIMI_API_KEY_SB"
       else
         string_of_auth_mode adapter.auth_mode
   | None -> "unknown"

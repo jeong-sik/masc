@@ -47,6 +47,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `dashboard/src/components/common/pagination.ts` promotes the preview-only G4 pagination pattern into a reusable production primitive.
   - Supports numbered page windows and cursor pagination, both covered by unit and jest-axe tests.
 
+- **Keeper line ownership substrate**
+  - `design-system/headless-core/keeper-line-ownership.ts` implements RFC 0019's line-range accumulator and deterministic keeper hue mapping.
+  - `src/components/ide/keeper-line-ownership-store.ts` publishes dashboard snapshots for the IDE blame gutter; the editor mock now consumes the store instead of hardcoded row ownership.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

@@ -837,6 +837,6 @@ body:not(.term-open) .code-term { display: none; }
 }
 .term-toggle .t-glyph::before {
   content: ">"; position: absolute; left: 1px; top: -3px;
-  font-size: 8px; line-height: 1;
+  font-size: var(--fs-8); line-height: 1;
 }
 body[data-mode="cockpit"] .term-toggle { display: none; }

@@ -35,7 +35,7 @@
   }
 
   .header-title-wrap h1 {
-    font-size: 22px;
+    font-size: var(--fs-22);
   }
 
   /* Stack all common grids */
@@ -65,7 +65,7 @@
   }
 
   .header-title-wrap h1 {
-    font-size: 18px;
+    font-size: var(--fs-18);
   }
 
   .header-subtitle {

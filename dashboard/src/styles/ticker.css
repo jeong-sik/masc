@@ -76,7 +76,7 @@
   text-align: right;
   color: var(--color-fg-muted);
 }
-.tk-arrow { display: inline-block; margin-right: 2px; font-size: 8px; }
+.tk-arrow { display: inline-block; margin-right: 2px; font-size: var(--fs-8); }
 
 .tk-item.tk-up   .tk-delta { color: var(--ok); }
 .tk-item.tk-down .tk-delta { color: var(--err); }

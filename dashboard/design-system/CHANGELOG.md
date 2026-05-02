@@ -67,6 +67,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/code-document-store.ts` adds a typed read-only source document store with file/language metadata, CRLF normalization, line lookup, and bounded line parsing.
   - `src/components/ide/ide-editor-mock.ts` now consumes the code document store alongside RFC 0019 ownership data instead of embedding pre-numbered editor rows directly in the renderer.
 
+- **IDE syntax renderer substrate**
+  - `src/components/common/shiki-highlighter.ts` promotes the markdown Shiki loader/sanitizer into a shared dashboard boundary with block and line-level highlighting APIs.
+  - `src/components/ide/ide-code-renderer.ts` renders read-only editor rows from sanitized Shiki line HTML while preserving the code document and RFC 0019 ownership contracts.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

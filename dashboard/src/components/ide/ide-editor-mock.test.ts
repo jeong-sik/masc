@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { IdeEditorMock } from './ide-editor-mock'
 
 describe('IdeEditorMock', () => {
@@ -24,5 +25,15 @@ describe('IdeEditorMock', () => {
     const rows = container.querySelectorAll('li')
     expect(rows[6]?.textContent).toContain('—')
     expect(rows[14]?.textContent).toContain('—')
+  })
+
+  it('upgrades editor text rows through the read-only shiki renderer', async () => {
+    const container = document.createElement('div')
+    render(h(IdeEditorMock, {}), container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.ide-code-line[data-syntax="shiki"]')).not.toBeNull()
+    })
+    expect(container.textContent).toContain("import { Provider, ProviderKind } from './provider'")
   })
 })

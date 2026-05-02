@@ -51,12 +51,12 @@ body.focus-mode .vp-banner { display: none !important; }
 .focus-toggle:hover {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.08);
+  background: rgb(var(--color-accent-glow) / .08);
 }
 .focus-toggle.on {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.12);
+  background: rgb(var(--color-accent-glow) / .12);
 }
 .focus-toggle .focus-icon {
   font-size: 14px;
@@ -70,7 +70,7 @@ body.focus-mode .vp-banner { display: none !important; }
 
 /* When in focus mode, give status tray (added separately) clear space */
 body.focus-mode .focus-toggle {
-  background: rgba(20,18,14,.85);
+  background: var(--scrim-strong);
   backdrop-filter: blur(4px);
 }
 
@@ -95,7 +95,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 
 /* Menu popover — sits above the toggle button */
 .focus-menu {
-  background: rgba(20,18,14,.96);
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default, #2c2823);
   box-shadow: 0 4px 20px rgba(0,0,0,.6);
   padding: 4px 0;
@@ -124,7 +124,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
   cursor: pointer;
 }
 .focus-menu-row:hover {
-  background: rgba(180,140,60,.08);
+  background: rgb(var(--color-accent-glow) / .08);
   color: var(--brass-1, #f0c674);
 }
 .focus-menu-row.on .focus-menu-k {
@@ -149,5 +149,5 @@ body.widget-solo-mode .focus-cluster { display: none; }
 .focus-toggle.menu-open {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.12);
+  background: rgb(var(--color-accent-glow) / .12);
 }

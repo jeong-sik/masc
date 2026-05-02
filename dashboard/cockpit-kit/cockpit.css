@@ -245,7 +245,7 @@ button { font: inherit; }
 .keeper-row .d.info    { color: var(--info-fg); }
 .keeper-row .d.err     { color: var(--err-fg); }
 .keeper-row .d.stalled { color: var(--stalled-fg); }
-.keeper-row .d.idle    { color: #6a6a6a; }
+.keeper-row .d.idle    { color: var(--idle); }
 @keyframes hb {
   0%, 70%, 100% { transform: scale(1); }
   14% { transform: scale(1.35); }
@@ -448,8 +448,8 @@ button { font: inherit; }
 .chip.info    { color: var(--info-fg); background: rgb(106 142 176 / .1); border-color: rgb(106 142 176 / .3); }
 .chip.pending { color: var(--info-fg); background: rgb(106 142 176 / .1); border-color: rgb(106 142 176 / .3); }
 .chip.stalled { color: var(--stalled-fg); background: rgb(138 106 160 / .1); border-color: rgb(138 106 160 / .3); }
-.chip.queued  { color: #a0a0a0; background: rgb(106 106 106 / .1); border-color: rgb(106 106 106 / .3); }
-.chip.idle    { color: #a0a0a0; background: rgb(106 106 106 / .1); border-color: rgb(106 106 106 / .3); }
+.chip.queued  { color: var(--idle-fg); background: var(--idle-soft); border-color: var(--idle-border); }
+.chip.idle    { color: var(--idle-fg); background: var(--idle-soft); border-color: var(--idle-border); }
 .chip.done    { color: var(--ok-fg); background: rgb(107 158 107 / .1); border-color: rgb(107 158 107 / .3); }
 .chip.active  { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.1); border-color: rgb(var(--color-accent-glow)/.3); }
 
@@ -598,7 +598,7 @@ button { font: inherit; }
 .status .prov .d { width: 5px; height: 5px; border-radius: 50%; }
 .status .prov .d.ok { background: var(--ok-fg); }
 .status .prov .d.warn { background: var(--warn-fg); }
-.status .prov .d.idle { background: #6a6a6a; }
+.status .prov .d.idle { background: var(--idle); }
 
 /* ══════════════════════════════════════════════════════════════════
    PHASE 2 ADDITIONS — IDE backbone integration into the cockpit

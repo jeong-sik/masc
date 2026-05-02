@@ -33,7 +33,7 @@
   border-bottom: 1px solid var(--color-border-default);
   user-select: none;
 }
-.dr-grip:hover { background: rgba(180,140,60,.08); }
+.dr-grip:hover { background: rgb(var(--color-accent-glow) / .08); }
 .dr-grip-bar {
   width: 36px; height: 2px;
   background: var(--color-fg-disabled);

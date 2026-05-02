@@ -33,12 +33,12 @@
 }
 .st-item:hover {
   color: var(--color-fg-primary, #e8e4d8);
-  background: rgba(180,140,60,.06);
+  background: rgb(var(--color-accent-glow) / .06);
 }
 .st-item.open {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.12);
+  background: rgb(var(--color-accent-glow) / .12);
 }
 
 .st-dot {
@@ -88,7 +88,7 @@
 .st-close:hover {
   color: var(--err-fg, #c87474);
   border-color: var(--color-border-default);
-  background: rgba(200,116,116,.06);
+  background: var(--err-soft);
 }
 
 /* ── Popover ───────────────────────────────────────────── */

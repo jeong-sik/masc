@@ -20,11 +20,12 @@ import {
 
 // ── Sub-view types ────────────────────────────────────────────
 
-type CapView = 'providers' | 'matrix' | 'wiring' | 'anti-patterns'
+type CapView = 'providers' | 'matrix' | 'benchmarks' | 'wiring' | 'anti-patterns'
 
 const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
   { key: 'providers', label: 'OAS 프로바이더' },
   { key: 'matrix', label: '기능 매트릭스' },
+  { key: 'benchmarks', label: 'BFCL 벤치마크' },
   { key: 'wiring', label: 'OAS 배선 갭' },
   { key: 'anti-patterns', label: '안티패턴' },
 ]
@@ -41,50 +42,53 @@ interface FeatureDef {
   providers: Record<string, FeatureSupport>
 }
 
+// Source: sec04 Table 4.2.1 — verified against official API docs + BFCL v3/v4
+// ● = native support, ◐ = partial/conditional, ○ = not supported, — = N/A
+
 const FEATURES: FeatureDef[] = [
   {
     id: 'tool-calling',
     label: 'Native Tool Calling',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '○', kimi: '●',
-      ollama: '●', llamacpp: '○', glm: '●', gemini_cli: '○', codex_cli: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
+      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      ollama: '◐', llamacpp: '●', glm: '●', gemini_cli: '◐', codex_cli: '◐',
     },
   },
   {
     id: 'parallel-tools',
     label: 'Parallel Tool Calls',
     providers: {
-      openai: '●', claude: '●', gemini: '◐', deepseek: '●',
-      qwen35: '●', mistral: '○', nemotron: '○', kimi: '◐',
-      ollama: '○', llamacpp: '○', glm: '◐', gemini_cli: '○', codex_cli: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '●',
+      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '○',
     },
   },
   {
     id: 'tool-choice',
     label: 'tool_choice',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '○', kimi: '●',
-      ollama: '◐', llamacpp: '○', glm: '◐', gemini_cli: '○', codex_cli: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
+      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      ollama: '◐', llamacpp: '●', glm: '◐', gemini_cli: '◐', codex_cli: '○',
     },
   },
   {
     id: 'structured-output',
     label: 'Structured Output',
     providers: {
-      openai: '●', claude: '◐', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '○', kimi: '○',
-      ollama: '◐', llamacpp: '○', glm: '◐', gemini_cli: '○', codex_cli: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
+      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      ollama: '◐', llamacpp: '◐', glm: '◐', gemini_cli: '◐', codex_cli: '◐',
     },
   },
   {
     id: 'constrained-decoding',
     label: 'Constrained Decoding',
     providers: {
-      openai: '○', claude: '○', gemini: '○', deepseek: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
       qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
-      ollama: '●', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '○',
+      ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '◐',
     },
   },
   {
@@ -92,8 +96,8 @@ const FEATURES: FeatureDef[] = [
     label: 'Thinking / Reasoning',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '○', nemotron: '○', kimi: '●',
-      ollama: '○', llamacpp: '○', glm: '●', gemini_cli: '●', codex_cli: '●',
+      qwen35: '●', mistral: '◐', nemotron: '◐', kimi: '◐',
+      ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '○', codex_cli: '●',
     },
   },
   {
@@ -109,9 +113,9 @@ const FEATURES: FeatureDef[] = [
     id: 'streaming-tools',
     label: 'Streaming Tool Calls',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '◐', mistral: '○', nemotron: '○', kimi: '◐',
-      ollama: '○', llamacpp: '○', glm: '◐', gemini_cli: '○', codex_cli: '○',
+      openai: '●', claude: '●', gemini: '●', deepseek: '●',
+      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
   {
@@ -119,8 +123,8 @@ const FEATURES: FeatureDef[] = [
     label: 'Prompt Caching',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '●', nemotron: '○', kimi: '○',
-      ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
+      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
+      ollama: '◐', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
   {
@@ -128,7 +132,7 @@ const FEATURES: FeatureDef[] = [
     label: 'seed (reproducible)',
     providers: {
       openai: '●', claude: '○', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen35: '○', mistral: '●', nemotron: '○', kimi: '○',
       ollama: '●', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -137,8 +141,8 @@ const FEATURES: FeatureDef[] = [
     label: 'Multimodal',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '○', kimi: '●',
-      ollama: '◐', llamacpp: '○', glm: '●', gemini_cli: '●', codex_cli: '○',
+      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '◐', codex_cli: '◐',
     },
   },
   {
@@ -146,7 +150,7 @@ const FEATURES: FeatureDef[] = [
     label: 'MCP Protocol',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -154,16 +158,16 @@ const FEATURES: FeatureDef[] = [
     id: 'code-execution',
     label: 'Code Execution',
     providers: {
-      openai: '●', claude: '○', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
-      ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '●', codex_cli: '●',
+      openai: '○', claude: '●', gemini: '○', deepseek: '○',
+      qwen35: '○', mistral: '○', nemotron: '●', kimi: '●',
+      ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
   {
     id: 'computer-use',
     label: 'Computer Use',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '○',
+      openai: '○', claude: '●', gemini: '○', deepseek: '○',
       qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
@@ -173,8 +177,8 @@ const FEATURES: FeatureDef[] = [
     label: 'Max Context ≥128K',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '○', kimi: '●',
-      ollama: '○', llamacpp: '○', glm: '●', gemini_cli: '●', codex_cli: '●',
+      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
 ]
@@ -200,6 +204,34 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini_cli: 'Gemini CLI',
   codex_cli: 'Codex CLI',
 }
+
+// ── Static data: BFCL Function Calling Benchmarks ───────────────
+// Source: sec04 Table 4.2.2 — BFCL V3/V4 rankings
+// BFCL measures schema compliance; MCPMark measures task completion.
+
+type BfclScore = string
+
+interface BfclEntry {
+  rank: number
+  model: string
+  bfclV3: BfclScore
+  bfclV4: BfclScore
+  feature: string
+  license: string
+}
+
+const BFCL_RANKINGS: BfclEntry[] = [
+  { rank: 1,  model: 'GLM-4.5 (FC)',           bfclV3: '70.85%', bfclV4: '—',       feature: '복잡한 스키마 강점, Zhipu AI',           license: '상업적' },
+  { rank: 2,  model: 'Claude Opus 4.1',         bfclV3: '70.36%', bfclV4: '—',       feature: 'Anthropic 최상위, Interleaved Thinking', license: '상업적' },
+  { rank: 3,  model: 'Claude Sonnet 4',         bfclV3: '70.29%', bfclV4: '—',       feature: '성능/비용 효율 균형',                    license: '상업적' },
+  { rank: 4,  model: 'Qwen3.5-397B-A17B',       bfclV3: '—',      bfclV4: '72.9%',   feature: 'BFCL V4 1위, 397B MoE 오픈웨이트',      license: '오픈웨이트' },
+  { rank: 5,  model: 'GPT-5',                   bfclV3: '59.22%', bfclV4: '—',       feature: 'MCPMark 52.6% 선두 (BFCL≠MCPMark)',      license: '상업적' },
+  { rank: 6,  model: 'Claude Haiku 4.5',        bfclV3: '80.6%',  bfclV4: '—',       feature: '소형 모델 최고 효율 (Inspect 벤치마크)', license: '상업적' },
+  { rank: 7,  model: 'Qwen 3-Coder',            bfclV3: '경쟁력', bfclV4: '—',       feature: 'MCPMark $36.46/런 최저비용',             license: '오픈웨이트' },
+  { rank: 8,  model: 'DeepSeek V3.1',           bfclV3: '개선됨', bfclV4: '—',       feature: 'Strict Function Calling (Beta)',         license: '오픈웨이트' },
+  { rank: 9,  model: 'Gemma 4 27B/31B',         bfclV3: '76.9%',  bfclV4: '—',       feature: 'Apache 2.0 멀티모달 오픈웨이트',         license: 'Apache 2.0' },
+  { rank: 10, model: 'Kimi K2.6',               bfclV3: '—',      bfclV4: '경쟁력',  feature: 'SWE-Bench Pro 58.6%, 256K 컨텍스트',    license: 'Modified MIT' },
+]
 
 // ── Static data: OAS Provider Capabilities (sec02 Table 1) ──────
 // Runtime provider kind definitions with capability flags and limits.
@@ -253,57 +285,107 @@ interface WiringGap {
   capability: string
   oasDeclares: string
   actualBehavior: string
-  impact: 'high' | 'medium' | 'low'
+  impact: 'high' | 'medium' | 'low' | 'correct'
 }
 
 const WIRING_GAPS: WiringGap[] = [
+  // 과소선언 (under-declaration) — OAS가 실제 기능을 비활성화
   {
     id: 'W01',
     provider: 'Gemini CLI',
     capability: 'tools',
-    oasDeclares: 'tools=false',
-    actualBehavior: 'MCP 지원하지만 OAS는 tool calling 비활성화로 라우팅',
+    oasDeclares: 'supports_tools=false',
+    actualBehavior: '빌트인 도구 + MCP + cross-tool context 지원, OAS가 원천 차단',
     impact: 'high',
   },
   {
     id: 'W02',
     provider: 'Codex CLI',
     capability: 'tools vs MCP',
-    oasDeclares: 'tools=false',
-    actualBehavior: 'MCP 네이티브 지원, tool calling declaration 불일치',
+    oasDeclares: 'supports_tools=false',
+    actualBehavior: 'inline tool calling은 없으나 runtime_mcp_tools=true로 MCP 네이티브 지원',
     impact: 'high',
   },
   {
     id: 'W03',
     provider: 'GLM',
     capability: 'tool_choice',
-    oasDeclares: 'none → auto 강제 변환',
-    actualBehavior: 'auto만 지원, none/required 미지원. 강제 변환으로 의도 무시',
+    oasDeclares: 'supports_tool_choice=false',
+    actualBehavior: 'auto만 지원. Any/Tool/None은 Auto로 coerce → 사용자 의도 무시 (Fake Fallback)',
     impact: 'medium',
   },
   {
     id: 'W04',
     provider: 'GLM',
     capability: 'structured_output',
-    oasDeclares: 'response_format 전송',
-    actualBehavior: 'JSON mode만 지원, schema 강제 불가. 타입 안정성 낮음',
-    impact: 'medium',
+    oasDeclares: 'supports_structured_output=false',
+    actualBehavior: 'JSON Schema 지정 가능하나 JSON Mode에 가까움, Constrained Decoding 불가',
+    impact: 'low',
   },
   {
     id: 'W05',
     provider: 'Ollama',
     capability: 'tool_choice',
-    oasDeclares: 'auto/none/required 전송',
-    actualBehavior: '모델 의존적. 일부 모델은 tool_choice 무시',
-    impact: 'low',
+    oasDeclares: 'supports_tool_choice=false',
+    actualBehavior: '모델 의존적. Qwen3.5+Jinja에서는 tool_choice 정상 작동, 일반 모델은 Auto만',
+    impact: 'medium',
   },
   {
     id: 'W06',
     provider: 'Kimi CLI',
     capability: 'tool_choice',
-    oasDeclares: 'Anthropic 호환 라우팅',
-    actualBehavior: 'CLI 래퍼가 tool_choice를 처리하지 않고 무시',
+    oasDeclares: 'supports_tool_choice=false',
+    actualBehavior: 'Kimi API는 auto/forced/none 모두 지원. CLI --print 모드에서 req.tools 무시',
     impact: 'medium',
+  },
+  // 정확한 선언 (correct) — OAS가 실제 한계를 정확히 반영
+  {
+    id: 'W07',
+    provider: 'Kimi CLI',
+    capability: 'usage tokens',
+    oasDeclares: 'emits_usage_tokens=false (strip)',
+    actualBehavior: 'CLI subprocess에서 usage 정보 미포함, 정확한 선언',
+    impact: 'correct',
+  },
+  {
+    id: 'W08',
+    provider: 'Gemini CLI',
+    capability: 'usage tokens',
+    oasDeclares: 'emits_usage_tokens=false (strip)',
+    actualBehavior: 'CLI subprocess 특성상 usage 불안정, 정확한 선언',
+    impact: 'correct',
+  },
+  {
+    id: 'W09',
+    provider: 'Codex CLI',
+    capability: 'usage tokens',
+    oasDeclares: 'emits_usage_tokens=false (strip)',
+    actualBehavior: 'JSONL envelope에서 usage 미제공, 정확한 선언',
+    impact: 'correct',
+  },
+  {
+    id: 'W10',
+    provider: 'Anthropic Claude',
+    capability: 'tools',
+    oasDeclares: 'supports_tools=true',
+    actualBehavior: 'tool_use/tool_result 블록 구조, 공식 문서와 일치',
+    impact: 'correct',
+  },
+  {
+    id: 'W11',
+    provider: 'Anthropic Claude',
+    capability: 'extended thinking',
+    oasDeclares: 'supports_extended_thinking=true',
+    actualBehavior: 'budget_tokens + Interleaved Thinking (Claude 4+), 정확한 선언',
+    impact: 'correct',
+  },
+  {
+    id: 'W12',
+    provider: 'Ollama',
+    capability: 'is_ollama flag',
+    oasDeclares: 'is_ollama=true',
+    actualBehavior: 'tool_calls를 raw JSON 객체로 직렬화, 정확한 선언',
+    impact: 'correct',
   },
 ]
 
@@ -392,11 +474,12 @@ function riskLabel(risk: RiskLevel): string {
   }
 }
 
-function impactTone(impact: 'high' | 'medium' | 'low'): 'bad' | 'warn' | 'neutral' {
+function impactTone(impact: 'high' | 'medium' | 'low' | 'correct'): 'bad' | 'warn' | 'neutral' | 'info' {
   switch (impact) {
     case 'high': return 'bad'
     case 'medium': return 'warn'
     case 'low': return 'neutral'
+    case 'correct': return 'info'
   }
 }
 
@@ -505,34 +588,48 @@ function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProvi
 }
 
 function WiringGaps() {
+  const gaps = WIRING_GAPS.filter(g => g.impact !== 'correct')
+  const correct = WIRING_GAPS.filter(g => g.impact === 'correct')
+
   return html`
-    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-      <table class="w-full text-xs border-collapse">
-        <thead>
-          <tr class="bg-[var(--white-4)]">
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">ID</th>
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">프로바이더</th>
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">기능</th>
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">OAS 선언</th>
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">실제 동작</th>
-            <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">영향도</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${WIRING_GAPS.map((gap, i) => html`
-            <tr key=${gap.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.id}</td>
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-medium text-[var(--color-fg-primary)]">${gap.provider}</td>
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.capability}</td>
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.oasDeclares}</td>
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.actualBehavior}</td>
-              <td class="border-b border-[var(--color-border-default)] px-3 py-2">
-                <${StatusChip} tone=${impactTone(gap.impact)}>${gap.impact.toUpperCase()}<//>
-              </td>
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-3 text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
+        <span>과소선언: ${gaps.length}건</span>
+        <span class="text-[var(--color-border-default)]">|</span>
+        <span>정확한 선언: ${correct.length}건</span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--white-4)]">
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">ID</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">프로바이더</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">기능</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">OAS 선언</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">실제 동작</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">영향도</th>
             </tr>
-          `)}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${WIRING_GAPS.map((gap, i) => {
+              const isCorrect = gap.impact === 'correct'
+              return html`
+                <tr key=${gap.id} class="${isCorrect ? 'opacity-60' : i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.id}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-medium text-[var(--color-fg-primary)]">${gap.provider}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.capability}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.oasDeclares}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.actualBehavior}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2">
+                    <${StatusChip} tone=${impactTone(gap.impact)}>${isCorrect ? 'OK' : gap.impact.toUpperCase()}<//>
+                  </td>
+                </tr>
+              `
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   `
 }
@@ -705,6 +802,74 @@ function OasProviderTable() {
   `
 }
 
+// ── BFCL Benchmark Ranking (sec04 Table 4.2.2) ──────────────────
+
+function BfclRankings() {
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-3 text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
+        <span>BFCL = 스키마 준수율 측정</span>
+        <span class="text-[var(--color-border-default)]">|</span>
+        <span>MCPMark = 작업 완료율 측정</span>
+        <span class="text-[var(--color-border-default)]">|</span>
+        <span>GPT-5: BFCL 7위(59.22%) vs MCPMark 1위(52.6%)</span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--white-4)]">
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] w-[40px]">#</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[160px]">모델</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[90px]">BFCL V3</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[90px]">BFCL V4</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">특징</th>
+              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] w-[90px]">라이선스</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${BFCL_RANKINGS.map((entry, i) => {
+              const hasV3 = entry.bfclV3 !== '—' && entry.bfclV3 !== '경쟁력' && entry.bfclV3 !== '개선됨'
+              const hasV4 = entry.bfclV4 !== '—' && entry.bfclV4 !== '경쟁력'
+              return html`
+                <tr key=${entry.model} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-center font-mono text-[var(--color-fg-muted)]">${entry.rank}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-medium text-[var(--color-fg-primary)]">${entry.model}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-right font-mono ${
+                    hasV3 ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-muted)]'
+                  }">
+                    ${hasV3 ? html`<span class="font-bold">${entry.bfclV3}</span>` : entry.bfclV3}
+                  </td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-right font-mono ${
+                    hasV4 ? 'text-[#22c55e] font-bold' : 'text-[var(--color-fg-muted)]'
+                  }">
+                    ${hasV4 ? html`<span class="font-bold">${entry.bfclV4}</span>` : entry.bfclV4}
+                  </td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${entry.feature}</td>
+                  <td class="border-b border-[var(--color-border-default)] px-3 py-2">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${
+                      entry.license === '오픈웨이트' || entry.license === 'Apache 2.0' || entry.license === 'Modified MIT'
+                        ? 'bg-[rgba(34,197,94,0.12)] text-[#22c55e]'
+                        : 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+                    }">
+                      ${entry.license}
+                    </span>
+                  </td>
+                </tr>
+              `
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="text-[10px] text-[var(--color-fg-muted)] px-1">
+        출처: BFCL V3/V4 (UC Berkeley), MCPMark pass@1 (Sam Chon), SWE-Bench Pro (K2.6).
+        Harness 패턴: Qwen 3.5 6.75%→100% (Typia 기반 검증-피드백-수정 루프).
+      </div>
+    </div>
+  `
+}
+
 // ── Legend ─────────────────────────────────────────────────────
 
 function MatrixLegend() {
@@ -771,6 +936,15 @@ export function ProviderCapabilityMatrix() {
           <${MatrixLegend} />
           <${FeatureMatrix} liveProviders=${liveProviders.value} />
         </div>
+      ` : activeView.value === 'benchmarks' ? html`
+        <${Card}>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">BFCL Function Calling 순위</h3>
+          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+            sec04 Table 4.2.2 — 2026년 4월 기준 BFCL V3/V4 성능 순위.
+            GLM-4.5(70.85%)과 Claude 계열(70%대)이 스키마 준수에서 상위.
+          </p>
+          <${BfclRankings} />
+        <//>
       ` : activeView.value === 'wiring' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS 배선 vs 공식 API 지원</h3>

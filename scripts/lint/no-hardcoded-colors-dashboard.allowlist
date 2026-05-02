@@ -24,13 +24,5 @@ dashboard/src/components/git-graph-view.ts:144
 dashboard/src/components/git-graph-view.ts:145
 dashboard/src/components/git-graph-view.ts:151
 dashboard/src/components/git-graph-view.ts:152
-# ── cytoscape-fsm.ts — border-color fallback (1 violation) ────────────────
-dashboard/src/components/common/cytoscape-fsm.ts:195
-# ── world-visualizer.ts — prototype Canvas rendering (5 violations) ───────
-dashboard/src/components/world-visualizer.ts:106
-dashboard/src/components/world-visualizer.ts:119
-dashboard/src/components/world-visualizer.ts:121
-dashboard/src/components/world-visualizer.ts:126
-dashboard/src/components/world-visualizer.ts:137
 # ── activity-heatmap-draw.ts — Canvas background fill (1 violation) ───────
 dashboard/src/components/activity-heatmap-draw.ts:56

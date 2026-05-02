@@ -9,4 +9,4 @@
 
 
 let count_if pred xs =
-  Base.List.fold xs ~init:0 ~f:(fun n x -> if pred x then n + 1 else n)
+  List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs

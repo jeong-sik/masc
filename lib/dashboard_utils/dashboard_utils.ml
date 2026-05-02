@@ -9,29 +9,39 @@ let parse_iso_opt = function
       try Some (Types.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
-(* Delegate to Base — qualified access, no `open Base` *)
-let first_some = Base.Option.first_some
+let first_some a b = match a with Some _ as v -> v | None -> b
 
 let string_contains ~needle haystack =
-  Base.String.is_substring haystack ~substring:needle
+  let n = String.length needle in
+  let h = String.length haystack in
+  if n = 0 then true
+  else if n > h then false
+  else
+    let rec loop i =
+      if i > h - n then false
+      else String.sub haystack i n = needle || loop (i + 1)
+    in
+    loop 0
 
 let string_contains_ci ~needle haystack =
-  Base.String.is_substring
+  string_contains
+    ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
-    ~substring:(String.lowercase_ascii needle)
 
 let trim_to_option text =
   let trimmed = String.trim text in
   if trimmed = "" then None else Some trimmed
 
+module String_set = Set.Make(String)
+
 let dedup_strings (xs : string list) : string list =
   let rec go seen acc = function
     | [] -> List.rev acc
     | x :: rest ->
-      if Base.Set.mem seen x then go seen acc rest
-      else go (Base.Set.add seen x) (x :: acc) rest
+      if String_set.mem x seen then go seen acc rest
+      else go (String_set.add x seen) (x :: acc) rest
   in
-  go (Base.Set.empty (module Base.String)) [] xs
+  go String_set.empty [] xs
 
 let string_list_of_json json =
   match json with

@@ -52,7 +52,7 @@ let normalize_path path =
 let is_masc_write_allowed path =
   let path = normalize_path path in
   List.exists (fun prefix ->
-    Base.String.is_prefix path ~prefix
+    String.starts_with path ~prefix
   ) keeper_writable_prefixes
 
 (* -- Config-driven preset resolution -------------------------------- *)

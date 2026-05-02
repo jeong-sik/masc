@@ -178,7 +178,7 @@ let project_prefix config =
     For filesystem: returns relative path without prefix. *)
 let key_of_path_from_root config ~root path =
   let prefix = root ^ "/" in
-  if Base.String.is_prefix path ~prefix then
+  if String.starts_with path ~prefix then
     let rel =
       String.sub path (String.length prefix) (String.length path - String.length prefix)
     in

@@ -248,7 +248,7 @@ let extract_nickname (response_text : string) : string option =
     | [] -> None
     | line :: rest ->
         let trimmed = String.trim line in
-        if Base.String.is_prefix trimmed ~prefix
+        if String.starts_with trimmed ~prefix
         then
           Some
             (String.trim

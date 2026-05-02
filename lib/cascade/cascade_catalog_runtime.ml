@@ -151,7 +151,7 @@ let discover_profiles = function
       fields
       |> List.filter_map (fun (key, value) ->
              match value with
-             | `List _ when Base.String.is_suffix ~suffix:"_models" key ->
+             | `List _ when String.ends_with ~suffix:"_models" key ->
                  let suffix_len = String.length "_models" in
                  let profile =
                    String.sub key 0 (String.length key - suffix_len)

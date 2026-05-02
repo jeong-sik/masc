@@ -123,7 +123,7 @@ let strip_keeper_prefix (s : string) : string option =
   let prefix = "keeper-" in
   let plen = String.length prefix in
   let slen = String.length s in
-  if slen > plen && Base.String.is_prefix s ~prefix then
+  if slen > plen && String.starts_with s ~prefix then
     Some (String.sub s plen (slen - plen))
   else None
 

@@ -73,7 +73,7 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name
 
 
 let is_ephemeral_agent_name name =
-  Base.String.is_prefix name ~prefix:"agent-"
+  String.starts_with name ~prefix:"agent-"
 
 let is_transient_agent_name name =
   is_ephemeral_agent_name name

@@ -49,7 +49,7 @@ let next_jsonrpc_id () =
 
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in
-  if Base.String.is_prefix name ~prefix
+  if String.starts_with name ~prefix
   then
     String.sub name (String.length prefix) (String.length name - String.length prefix)
   else
@@ -109,7 +109,7 @@ let normalize_mcp_body ~request_id body =
     List.filter_map
       (fun line ->
         let prefix = "data: " in
-        if Base.String.is_prefix line ~prefix
+        if String.starts_with line ~prefix
         then
           Some (String.sub line (String.length prefix) (String.length line - String.length prefix))
         else

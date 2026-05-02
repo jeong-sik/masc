@@ -39,7 +39,7 @@ module Zombie = struct
     let plen = String.length prefix in
     let slen = String.length suffix in
     nlen > plen + slen
-    && Base.String.is_prefix normalized ~prefix
+    && String.starts_with normalized ~prefix
     && String.sub normalized (nlen - slen) slen = suffix
 
   (** Check if an agent is a zombie based on last_seen timestamp *)
@@ -96,8 +96,8 @@ module ZeroZombie = struct
   let is_benign_error exn =
     let msg = Printexc.to_string exn in
     String.length msg >= 20 &&
-    (Base.String.is_prefix msg ~prefix:"Invalid_argument(\"MA" ||
-     Base.String.is_prefix msg ~prefix:"Sys_error(\"No ")
+    (String.starts_with msg ~prefix:"Invalid_argument(\"MA" ||
+     String.starts_with msg ~prefix:"Sys_error(\"No ")
 
   let run_loop ?(interval=60.0) ~clock ~cleanup_fn () =
     let is_cancelled exn =

@@ -102,14 +102,8 @@ function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
     >
       <span
         aria-hidden="true"
-        style=${{
-          width: '6px',
-          height: '6px',
-          borderRadius: '50%',
-          background: keeperColor,
-          opacity: entry.status === 'active' ? 0.95 : 0.45,
-          flex: '0 0 auto',
-        }}
+        class="size-[6px] shrink-0 rounded-full"
+        style=${{ background: keeperColor, opacity: entry.status === 'active' ? 0.95 : 0.45 }}
       />
       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ${entry.keeper_id}@${entry.workspace_label}

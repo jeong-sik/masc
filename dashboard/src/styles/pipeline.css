@@ -92,6 +92,6 @@
   &.stage-draining { color: rgba(251, 146, 60, 0.85); background: rgba(251, 146, 60, 0.12); border-color: rgba(251, 146, 60, 0.2); }
   &.stage-restarting { color: rgba(56, 189, 248, 0.85); background: rgba(56, 189, 248, 0.12); border-color: rgba(56, 189, 248, 0.2); }
   &.stage-scheduled_autonomous { color: rgba(74, 222, 128, 0.85); background: rgba(74, 222, 128, 0.12); border-color: var(--ok-20); }
-  &.stage-paused { color: rgba(167, 139, 250, 0.85); background: var(--purple-12); border-color: rgba(167, 139, 250, 0.2); }
+  &.stage-paused { color: rgba(167, 139, 250, 0.85); background: rgba(167, 139, 250, 0.12); border-color: rgba(167, 139, 250, 0.2); }
 }
 

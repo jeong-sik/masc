@@ -222,4 +222,4 @@ tbody tr:hover {
 /* Tone border utilities — applied via toneClass() helper */
 @utility ok { border-color: var(--ok-22); }
 @utility warn { border-color: var(--warn-soft); }
-@utility bad { border-color: var(--bad-soft); }
+@utility bad { border-color: rgb(var(--err-glow) / .15); }

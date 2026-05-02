@@ -38,7 +38,7 @@
 }
 
 @keyframes warnBlink {
-  0%, 100% { border-color: var(--warn-28); }
+  0%, 100% { border-color: rgb(var(--warn-glow) / .28); }
   50% { border-color: rgba(251, 191, 36, 0.50); }
 }
 
@@ -70,7 +70,7 @@
 
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
-  50% { box-shadow: 0 0 6px 1px var(--ok-12); }
+  50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .12); }
 }
 
 @keyframes activityFadeIn {

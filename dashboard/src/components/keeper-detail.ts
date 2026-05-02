@@ -221,6 +221,11 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || keeper.trust?.disposition_reason?.trim()
     || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
+  const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
+  const latestTerminalCode = latestTerminalReason?.code?.trim() || null
+  const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
+  const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
+  const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
   const executionSummary = keeper.trust?.execution_summary ?? null
   const runtimeProofStatus =
     executionSummary?.runtime_proof_status?.trim()
@@ -436,6 +441,20 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          : null}
+        ${latestTerminalCode
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
+          : null}
+        ${latestNextAction
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
+          : null}
+        ${/* Show operator_disposition_reason only when trustSummary is absent to avoid
+             repeating the same root-cause text twice. trustSummary coalesces
+             attention_reason, disposition_reason, and mutation_guard_summary — any of
+             those already convey the stopped-reaction context that operator_disposition_reason
+             would otherwise supply. */
+          operatorDispositionReason && !trustSummary
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
           : null}
         ${trustDisposition
           ? html`

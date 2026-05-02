@@ -397,8 +397,10 @@ export interface OperatorKeeperSnapshot {
   diagnostic?: Record<string, unknown>
   runtime_trust?: KeeperTrustSummary | null
   recent_activity?: Record<string, unknown>[]
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
 }
-
 
 
 export interface OperatorAttentionItem {

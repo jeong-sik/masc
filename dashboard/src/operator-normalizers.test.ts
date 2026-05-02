@@ -303,6 +303,85 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toEqual([])
   })
 
+  it('preserves keeper runtime_trust and stopped-reaction attention fields', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'blocked-keeper',
+          status: 'active',
+          needs_attention: true,
+          attention_reason: 'timeout_budget_exhausted',
+          next_human_action: 'inspect_timeout_budget',
+          runtime_trust: {
+            disposition: 'Alert',
+            operator_disposition: 'pause_runtime',
+            operator_disposition_reason: 'timeout_budget_exhausted',
+            needs_attention: true,
+            attention_reason: 'timeout_budget_exhausted',
+            latest_terminal_reason: {
+              code: 'timeout_budget_exhausted',
+              source: 'execution_receipt',
+              severity: 'bad',
+              summary: 'Turn budget exhausted after 15 turns',
+              next_action: 'inspect_timeout_budget',
+            },
+            latest_next_action: 'inspect_timeout_budget',
+          },
+        },
+      ],
+    })
+    expect(result.keepers).toHaveLength(1)
+    const keeper = result.keepers[0]!
+    expect(keeper.needs_attention).toBe(true)
+    expect(keeper.attention_reason).toBe('timeout_budget_exhausted')
+    expect(keeper.next_human_action).toBe('inspect_timeout_budget')
+    expect(keeper.runtime_trust).toMatchObject({
+      disposition: 'Alert',
+      operator_disposition: 'pause_runtime',
+      operator_disposition_reason: 'timeout_budget_exhausted',
+      needs_attention: true,
+      latest_terminal_reason: {
+        code: 'timeout_budget_exhausted',
+        severity: 'bad',
+        summary: 'Turn budget exhausted after 15 turns',
+        next_action: 'inspect_timeout_budget',
+      },
+      latest_next_action: 'inspect_timeout_budget',
+    })
+  })
+
+  it('returns null runtime_trust when runtime_trust is absent', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        { name: 'plain-keeper', status: 'active' },
+      ],
+    })
+    expect(result.keepers[0]!.runtime_trust).toBeNull()
+  })
+
+  it('returns null needs_attention / attention_reason when absent', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        { name: 'quiet-keeper', status: 'active' },
+      ],
+    })
+    expect(result.keepers[0]!.needs_attention).toBeNull()
+    expect(result.keepers[0]!.attention_reason).toBeNull()
+    expect(result.keepers[0]!.next_human_action).toBeNull()
+  })
+
+  it('drops terminal_reason in runtime_trust when code is missing', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'incomplete-trust-keeper',
+          runtime_trust: { latest_terminal_reason: { source: 'execution_receipt' } },
+        },
+      ],
+    })
+    expect(result.keepers[0]!.runtime_trust?.latest_terminal_reason).toBeNull()
+  })
+
   it('extracts recent_messages', () => {
     const result = normalizeOperatorSnapshot({
       recent_messages: [
@@ -387,5 +466,33 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.pending_confirms).toHaveLength(1)
     expect(result.pending_confirms[0]!.confirm_token).toBe('tok-raw')
+  })
+
+  it('extracts top-level needs_attention, attention_reason and next_human_action from keeper payload', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'blocked-keeper',
+          status: 'paused',
+          needs_attention: true,
+          attention_reason: 'tool_required_unsatisfied',
+          next_human_action: 'inspect_provider_tool_contract',
+        },
+      ],
+    })
+    const k = result.keepers[0]
+    expect(k?.needs_attention).toBe(true)
+    expect(k?.attention_reason).toBe('tool_required_unsatisfied')
+    expect(k?.next_human_action).toBe('inspect_provider_tool_contract')
+  })
+
+  it('defaults top-level attention fields to null when absent', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [{ name: 'quiet-keeper' }],
+    })
+    const k = result.keepers[0]
+    expect(k?.needs_attention).toBeNull()
+    expect(k?.attention_reason).toBeNull()
+    expect(k?.next_human_action).toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import type {
   KeeperMetricPoint,
   KeeperPhase,
   KeeperTrustLatestEvent,
+  KeeperTrustTerminalReason,
   PipelineStage,
   PromptTelemetry,
 } from './types'
@@ -167,10 +168,12 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
   }
 }
 
-function normalizeKeeperTrustTerminalReason(raw: unknown): NonNullable<Keeper['trust']>['latest_terminal_reason'] {
+export function normalizeKeeperTrustTerminalReason(raw: unknown): KeeperTrustTerminalReason | null {
   if (!isRecord(raw)) return null
+  const code = asString(raw.code)
+  if (!code) return null
   return {
-    code: asString(raw.code) ?? null,
+    code,
     source: asString(raw.source) ?? null,
     severity: asString(raw.severity) ?? null,
     summary: asString(raw.summary) ?? null,
@@ -191,6 +194,8 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
       typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
     attention_reason: asString(raw.attention_reason) ?? null,
     next_human_action: asString(raw.next_human_action) ?? null,
+    latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
+    latest_next_action: asString(raw.latest_next_action) ?? null,
     approval_state: isRecord(approvalRaw)
       ? {
           state: asString(approvalRaw.state) ?? null,
@@ -224,8 +229,6 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
           latest_receipt_at: asString(executionRaw.latest_receipt_at) ?? null,
         }
       : null,
-    latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
-    latest_next_action: asString(raw.latest_next_action) ?? null,
     latest_causal_event: normalizeKeeperTrustLatestEvent(raw.latest_causal_event),
   }
 }

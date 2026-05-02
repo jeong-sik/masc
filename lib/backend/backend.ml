@@ -108,7 +108,7 @@ module FileSystem = struct
       Error (InvalidKey "Slash not allowed (use ':' as separator)")
     else if key.[0] = ':' then
       Error (InvalidKey "Key cannot start with ':'")
-    else if key.[String.length key - 1] = ':' then
+    else if String.ends_with ~suffix:":" key then
       Error (InvalidKey "Key cannot end with ':'")
     else
       (* Check segments *)
@@ -330,7 +330,7 @@ module FileSystem = struct
     | Ok () ->
         let segments = String.split_on_char ':' prefix in
         let complete_segments =
-          if prefix <> "" && prefix.[String.length prefix - 1] = ':' then
+          if prefix <> "" && String.ends_with ~suffix:":" prefix then
             List.filter (fun segment -> segment <> "") segments
           else
             match List.rev segments with

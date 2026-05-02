@@ -830,7 +830,7 @@ let trim_opt = function
 
 let normalize_base_url value =
   let trimmed = String.trim value in
-  if String.length trimmed > 1 && trimmed.[String.length trimmed - 1] = '/' then
+  if String.length trimmed > 1 && String.ends_with ~suffix:"/" trimmed then
     String.sub trimmed 0 (String.length trimmed - 1)
   else
     trimmed

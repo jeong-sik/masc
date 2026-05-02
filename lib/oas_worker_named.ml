@@ -473,6 +473,11 @@ let run_named
       Error
         terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
+      match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_cfg.model_id with
+      | Error msg ->
+          Log.Misc.debug "cascade %s: skipping %s (circuit breaker open: %s)" cascade_name provider_cfg.model_id msg;
+          try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
+      | Ok () ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
       let pp_timeout =

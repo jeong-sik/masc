@@ -246,13 +246,26 @@ BugSilentStimulusDrop ==
 
 NextBuggy == Next \/ BugSilentStimulusDrop
 
-\* FairnessBuggy: the silent-drop bug fires reliably (WF) whenever the
-\* keeper is in_turn; IssueReceipt and IssueTerminalReason are NOT
-\* guaranteed — the drop pre-empts them.  Verification, escalation, and
-\* goal-failed are still fair: their liveness is independent of the
-\* stimulus receipt path.
+\* FairnessBuggy: mirrors the clean Fairness obligations for every
+\* progress-driving action, with two differences that introduce the bug:
+\*
+\*   1. WF_vars(BugSilentStimulusDrop) is added: the silent-drop action
+\*      fires reliably whenever the keeper is in_turn.
+\*
+\*   2. WF_vars(IssueReceipt) and WF_vars(IssueTerminalReason) are
+\*      omitted: a receipt or terminal reason is no longer guaranteed.
+\*      In a WF-fair execution, BugSilentStimulusDrop will fire whenever
+\*      it is continuously enabled (stimulus_state = "in_turn"), so a
+\*      receipt or terminal reason may not be reached before the drop
+\*      occurs -- demonstrating the silent-drop failure mode.
+\*
+\* WF_vars(StartTurn) and WF_vars(RequestVerification) are kept so the
+\* counterexample exercises the intended none -> queued -> in_turn -> none
+\* cycle rather than a degenerate stutter in stimulus_state = "queued".
 FairnessBuggy ==
+    /\ WF_vars(StartTurn)
     /\ WF_vars(BugSilentStimulusDrop)
+    /\ WF_vars(RequestVerification)
     /\ WF_vars(VerifierReaction)
     /\ WF_vars(TimeoutEscalation)
     /\ WF_vars(GoalFailed)

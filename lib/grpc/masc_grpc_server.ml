@@ -239,14 +239,13 @@ module Reflection_bridge = struct
       !result
 
   let encode_list_services_response (services : string list) : string =
-    let service_msgs =
-      List.map
-        (fun name -> encode_string_field Wire.service_name name)
-        services
-    in
-    let list_response =
-      List.fold_left (fun acc msg -> acc ^ encode_length_delimited Wire.list_service_service msg) "" service_msgs
-    in
+    let buf = Buffer.create 256 in
+    List.iter
+      (fun name ->
+        let msg = encode_string_field Wire.service_name name in
+        Buffer.add_string buf (encode_length_delimited Wire.list_service_service msg))
+      services;
+    let list_response = Buffer.contents buf in
     encode_length_delimited Wire.resp_list_services_response list_response
 
   let with_original_request ~(request : string) (payload : string) : string =
@@ -261,12 +260,11 @@ module Reflection_bridge = struct
     encode_length_delimited Wire.resp_error_response error_msg
 
   let encode_file_descriptor_response (descriptors : string list) : string =
-    let payload =
-      descriptors
-      |> List.map (encode_length_delimited Wire.file_descriptor_proto)
-      |> fun lst -> List.fold_left (fun acc s -> acc ^ s) "" lst
-    in
-    encode_length_delimited Wire.resp_file_descriptor_response payload
+    let buf = Buffer.create 4096 in
+    List.iter
+      (fun d -> Buffer.add_string buf (encode_length_delimited Wire.file_descriptor_proto d))
+      descriptors;
+    encode_length_delimited Wire.resp_file_descriptor_response (Buffer.contents buf)
 
   let health_descriptor_response () =
     encode_file_descriptor_response [ grpc_health_descriptor ]

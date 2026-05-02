@@ -312,7 +312,7 @@ let save_stats () =
   let path = stats_path () in
   try
     (* Serialise the table under the lock so a concurrent [record_*]
-       cannot [Hashtbl.replace] mid-[Hashtbl.fold] and corrupt the
+       cannot [Hashtbl.replace] mid-iteration and corrupt the
        iteration. *)
     let content, count =
       with_ts_ro (fun () ->

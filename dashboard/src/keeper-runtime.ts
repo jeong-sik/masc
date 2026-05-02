@@ -17,6 +17,7 @@ export {
 export { abortKeeperThreadMessage } from './keeper-stream'
 export {
   selectKeeper,
+  dispatchKeeperInterjectAction,
   hydrateKeeperStatus,
   loadFullKeeperHistory,
   sendKeeperThreadMessage,

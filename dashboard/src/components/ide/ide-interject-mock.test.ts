@@ -1,0 +1,56 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { h } from 'preact'
+import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { activeKeeperName } from '../../keeper-state'
+import { IdeInterjectMock } from './ide-interject-mock'
+
+describe('IdeInterjectMock', () => {
+  beforeEach(() => {
+    activeKeeperName.value = 'nick0cave'
+  })
+
+  afterEach(() => {
+    activeKeeperName.value = ''
+  })
+
+  it('renders the interject store backed active keeper controls', async () => {
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterjectMock, {}), container)
+    })
+
+    const region = container.querySelector('[role="region"]')
+    expect(region?.getAttribute('aria-label')).toBe('INTERJECT (interject store active keeper wiring)')
+    expect(container.textContent).toContain('INTERJECT')
+    expect(container.textContent).toContain('nick0cave')
+
+    const input = container.querySelector('input')
+    expect(input?.readOnly).toBe(false)
+    expect(input?.getAttribute('aria-label')).toBe('Interject input')
+
+    const buttons = [...container.querySelectorAll('button')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Send', 'Approve', 'Pause', 'Drain'])
+    expect(buttons[0]?.disabled).toBe(true)
+    expect(buttons[1]?.disabled).toBe(true)
+    expect(buttons[2]?.getAttribute('aria-label')).toContain('Keeper-scoped pause')
+  })
+
+  it('enables Send after text is entered', async () => {
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterjectMock, {}), container)
+    })
+
+    const input = container.querySelector('input') as HTMLInputElement
+    const send = container.querySelector('button') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+
+    await act(async () => {
+      input.value = 'please inspect this change'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+
+    expect(send.disabled).toBe(false)
+  })
+})

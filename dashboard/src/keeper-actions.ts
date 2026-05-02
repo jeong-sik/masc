@@ -37,6 +37,14 @@ import {
   KEEPER_STREAM_IDLE_TIMEOUT_MS,
 } from './config/constants'
 
+export type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
+
+export interface KeeperInterjectCommand {
+  readonly kind: KeeperInterjectActionKind
+  readonly keeperName: string
+  readonly message?: string
+}
+
 async function refreshDashboardState(): Promise<void> {
   invalidateDashboardCache()
   try {
@@ -48,6 +56,22 @@ async function refreshDashboardState(): Promise<void> {
 
 export function selectKeeper(name: string): void {
   activeKeeperName.value = name.trim()
+}
+
+export async function dispatchKeeperInterjectAction(command: KeeperInterjectCommand): Promise<void> {
+  const keeperName = command.keeperName.trim()
+  if (!keeperName) throw new Error('INTERJECT requires an active keeper.')
+
+  if (command.kind === 'send') {
+    const message = command.message?.trim() ?? ''
+    if (!message) throw new Error('INTERJECT send requires a message.')
+    await sendKeeperThreadMessage(keeperName, message)
+    return
+  }
+
+  throw new Error(
+    `INTERJECT ${command.kind} requires a keeper-scoped backend operator action before dispatch.`,
+  )
 }
 
 export async function hydrateKeeperStatus(name: string, force = false): Promise<KeeperStatusDetail | null> {

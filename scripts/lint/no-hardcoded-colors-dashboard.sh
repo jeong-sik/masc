@@ -185,7 +185,7 @@ if [[ -f "$ALLOWLIST_FILE" && "${SKIP_ALLOWLIST_VERIFY:-0}" != "1" ]]; then
     [[ -z "$entry" ]] && continue
     [[ "$entry" =~ ^[[:space:]]*# ]] && continue
     # Trim trailing whitespace.
-    entry="${entry%"${entry##*[![:space:]]}"}"
+    entry=$(echo "$entry" | sed 's/[[:space:]]*$//')
     [[ -z "$entry" ]] && continue
 
     if [[ "$detected_set" != *$'\n'"$entry"$'\n'* ]]; then

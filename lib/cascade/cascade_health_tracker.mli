@@ -340,4 +340,4 @@ val recent_outcome_count :
 val global : t
 
 val check_circuit_breaker : t -> provider_key:string -> (unit, string) result
-(** Check if the provider circuit breaker allows a request. *)
+(** Check whether the provider cooldown gate allows a request. *)

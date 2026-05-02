@@ -234,7 +234,8 @@ type event = {
 
 type provider_state = {
   mutable events: event list;  (* newest first *)
-    (* 0.0 = not in cooldown *)
+  mutable consecutive_failures: int;
+  mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
   fingerprint_counts: (string, int) Hashtbl.t;
   (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
      Phase 0 observability anchor for "which error keeps recurring".
@@ -252,7 +253,6 @@ type provider_state = {
 
 type t = {
   providers: (string, provider_state) Hashtbl.t;
-  breaker: Circuit_breaker.t;
   mu: Stdlib.Mutex.t;
 }
 
@@ -265,7 +265,6 @@ let error_kind_to_string (Error_kind value) = value
 
 let create () : t = {
   providers = Hashtbl.create 8;
-  breaker = Circuit_breaker.create ~failure_threshold:cooldown_threshold ~failure_window:window_sec ~cooldown:cooldown_sec ();
   mu = Stdlib.Mutex.create ();
 }
 
@@ -301,7 +300,8 @@ let get_or_create_state t key =
   | None ->
     let s = {
       events = [];
-      
+      consecutive_failures = 0;
+      cooldown_until = 0.0;
       fingerprint_counts = Hashtbl.create 4;
       last_failure_at = 0.0;
       latency_ring = None;
@@ -386,33 +386,87 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
     in
     match outcome with
     | Success ->
-      Circuit_breaker.record_success t.breaker ~agent_id:provider_key;
+      state.consecutive_failures <- 0;
+      (* Clear cooldown on success — provider recovered *)
+      state.cooldown_until <- 0.0;
+      (* Append latency sample when caller provided one.  Non-success
+         outcomes don't contribute to the percentile — a 200ms timeout
+         and a 200ms successful response are not the same signal. *)
       (match latency_ms with
        | Some ms -> push_latency state ms
        | None -> ())
     | Failure | Rejected ->
-      Circuit_breaker.record_failure t.breaker ~agent_id:provider_key ~reason:(make_fingerprint ?error_kind ?error_reason ());
-      bump_failure_fp ()
+      (* Rejected responses indicate unusable output (gate reject, empty
+         body, schema miss).  Treat identically to Failure for cooldown
+         and consecutive-failure tracking — a provider whose responses
+         are consistently rejected is as useless as one that never
+         responds.  The outcome tag is preserved in [events] so
+         [provider_info] can count Rejected separately for dashboards. *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
+      if state.consecutive_failures >= cooldown_threshold then begin
+        let new_until = now +. cooldown_sec in
+        if new_until > state.cooldown_until then begin
+          state.cooldown_until <- new_until;
+          Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+            ~labels:[("provider", provider_key)] cooldown_sec
+        end
+      end
     | Soft_rate_limited ->
+      (* Transient HTTP 429.  Apply an immediate short cooldown so the
+         current cascade cycle skips this provider for the next selection
+         tick — without forcing the [cooldown_threshold] count-to-three
+         that [Failure] uses.  Honor caller-supplied Retry-After when
+         present; clamp positive values to [soft_rate_limit_max_clamp_sec]
+         to prevent a misclassified hard quota from silently producing
+         a multi-minute blackout.  Negative / zero / absent values fall
+         back to [soft_rate_limit_cooldown_sec].  As with the other
+         immediate-cooldown paths, never shorten an already-longer
+         cooldown (e.g. concurrent hard_quota + soft_rl events). *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
       let cooldown_dur =
         match retry_after_s with
         | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
         | _ -> soft_rate_limit_cooldown_sec
       in
-      Circuit_breaker.force_open t.breaker ~agent_id:provider_key ~reason:"Soft_rate_limited" ~duration_sec:cooldown_dur;
-      bump_failure_fp ();
-      Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
-        ~labels:[("provider", provider_key)] cooldown_dur
+      let new_until = now +. cooldown_dur in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] cooldown_dur
+      end
     | Hard_quota ->
-      Circuit_breaker.force_open t.breaker ~agent_id:provider_key ~reason:"Hard_quota" ~duration_sec:hard_quota_cooldown_sec;
+      (* Hard-quota errors (balance depleted, quota exceeded, resource
+         exhausted) don't recover on short-window retries — set a long
+         cooldown immediately regardless of [consecutive_failures].  We
+         still increment the counter for dashboard continuity.  Preserve
+         an already-longer cooldown (e.g. if two hard-quota events fire
+         concurrently and the second arrives first in wall time). *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
-      Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
-        ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
+      let new_until = now +. hard_quota_cooldown_sec in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
+      end
     | Terminal_failure ->
-      Circuit_breaker.force_open t.breaker ~agent_id:provider_key ~reason:"Terminal_failure" ~duration_sec:terminal_failure_cooldown_sec;
+      (* Terminal structural errors are not quota exhaustion, but they have the
+         same retry shape: the next cascade tick will hit the same provider
+         state and fail again.  Cool down immediately to keep fallback from
+         becoming a hidden tax on every request.  #10441: the
+         [apply_trust_failure_locked] step was removed by #10412 (Phase 1
+         revert).  Keep [bump_failure_fp] for fingerprint history but discard
+         its return value — there's no trust adjustment to feed it into. *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
-      Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
-        ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec)
+      let new_until = now +. terminal_failure_cooldown_sec in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
+      end)
 
 let record_success t ~provider_key ?latency_ms () =
   record t ~provider_key ~outcome:Success ?latency_ms
@@ -462,19 +516,42 @@ let success_rate t ~provider_key =
 
     @return [true] if in cooldown AND cooldown has not expired *)
 let is_in_cooldown t ~provider_key =
-  let st = Circuit_breaker.get_status t.breaker ~agent_id:provider_key in
-  if st.state_name = "open" then
-    match st.open_until with
-    | Some u -> u > Unix.gettimeofday ()
-    | None -> true
-  else false
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> false
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      if state.cooldown_until > now then true
+      else begin
+        (* Expired cooldown — clear it *)
+        if state.cooldown_until > 0.0 then
+          state.cooldown_until <- 0.0;
+        false
+      end)
 
 let check_circuit_breaker t ~provider_key =
-  Circuit_breaker.check t.breaker ~agent_id:provider_key
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> Ok ()
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      if state.cooldown_until > now then
+        let remaining = max 0 (int_of_float (Float.ceil (state.cooldown_until -. now))) in
+        Error (Printf.sprintf "provider cooldown active; retry in %ds" remaining)
+      else begin
+        if state.cooldown_until > 0.0 then
+          state.cooldown_until <- 0.0;
+        Ok ()
+      end)
 
+(* Compute the [pct]-th percentile (0.0-1.0) of the populated portion of
+   the latency ring.  [None] when no samples have been recorded.
 
-(* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
-   the latency ring.  [None] when no samples have been recorded. *)
+   Method: copy the populated slice into a fresh array, sort ascending,
+   pick by linear-interpolation between adjacent ranks (NIST H.7 / type
+   7; same convention numpy/pandas use).  The full distribution is only
+   needed for monitoring and bounded weighting reads, so the O(n log n)
+   sort on n <= [latency_ring_size] is intentionally simple. *)
 let percentile_locked state pct =
   match state.latency_ring with
   | None -> None
@@ -495,7 +572,7 @@ let percentile_locked state pct =
 
 (** Compute effective weight for a provider.
 
-    [effective_weight = config_weight * success_rate]
+    [effective_weight = config_weight * success_rate * latency_penalty]
 
     Providers in cooldown get weight 0 (skipped).  Unknown providers
     get their full config weight (optimistic). *)
@@ -506,21 +583,24 @@ let effective_weight t ~provider_key ~config_weight =
       match Hashtbl.find_opt t.providers provider_key with
       | None -> config_weight
       | Some state ->
-          let rate =
-            let now = Unix.gettimeofday () in
-            let recent = prune_old_events now state.events in
-            let total = List.length recent in
-            let successes = List.length (List.filter (fun e -> e.outcome = Success) recent) in
-            if total = 0 then 1.0 else float_of_int successes /. float_of_int total
-          in
-          let latency_penalty =
-            match percentile_locked state 0.95 with
-            | Some p95 when p95 > 1000.0 -> 1000.0 /. p95
-            | _ -> 1.0
-          in
-          let quota_remaining = 1.0 in
-          max 1 (int_of_float (float_of_int config_weight *. rate *. latency_penalty *. quota_remaining))
-    )
+        let now = Unix.gettimeofday () in
+        let recent = prune_old_events now state.events in
+        let total = List.length recent in
+        let successes =
+          List.length (List.filter (fun e -> e.outcome = Success) recent)
+        in
+        let rate =
+          if total = 0 then 1.0
+          else float_of_int successes /. float_of_int total
+        in
+        let latency_penalty =
+          match percentile_locked state 0.95 with
+          | Some p95 when p95 > 1000.0 -> 1000.0 /. p95
+          | _ -> 1.0
+        in
+        max 1
+          (int_of_float
+             (float_of_int config_weight *. rate *. latency_penalty)))
 
 (** Summary for debugging/telemetry. *)
 let provider_summary t ~provider_key =
@@ -533,12 +613,11 @@ let provider_summary t ~provider_key =
       let total = List.length recent in
       let successes = List.length
           (List.filter (fun e -> e.outcome = Success) recent) in
-      let st = Circuit_breaker.get_status t.breaker ~agent_id:provider_key in
-      let in_cd = (st.state_name = "open") in
+      let in_cd = state.cooldown_until > now in
       Printf.sprintf "%s: %d/%d ok (%.0f%%) consec_fail=%d cooldown=%b"
         provider_key successes total
         (if total > 0 then 100.0 *. float_of_int successes /. float_of_int total else 100.0)
-        st.recent_failures in_cd)
+        state.consecutive_failures in_cd)
 
 (** Structured provider snapshot — shared by [provider_info] and [all_providers].
     Built inside the mutex so the snapshot is consistent. *)
@@ -565,7 +644,7 @@ let take_first_n n lst =
   in
   loop n [] lst
 
-let build_info_locked t ~now ~key state =
+let build_info_locked ~now ~key state =
   let recent = prune_old_events now state.events in
   let total = List.length recent in
   let successes = List.length
@@ -576,7 +655,7 @@ let build_info_locked t ~now ~key state =
     if total = 0 then 1.0
     else float_of_int successes /. float_of_int total
   in
-  let in_cd = ((Circuit_breaker.get_status t.breaker ~agent_id:key).state_name = "open") in
+  let in_cd = state.cooldown_until > now in
   let top_fingerprints =
     Hashtbl.fold (fun fp count acc -> (fp, count) :: acc)
       state.fingerprint_counts []
@@ -591,9 +670,9 @@ let build_info_locked t ~now ~key state =
   {
     provider_key = key;
     success_rate = rate;
-    consecutive_failures = (Circuit_breaker.get_status t.breaker ~agent_id:key).recent_failures;
+    consecutive_failures = state.consecutive_failures;
     in_cooldown = in_cd;
-    cooldown_expires_at = (Circuit_breaker.get_status t.breaker ~agent_id:key).open_until;
+    cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
     events_in_window = total;
     rejected_in_window = rejected;
     top_fingerprints;
@@ -608,7 +687,7 @@ let provider_info t ~provider_key =
     match Hashtbl.find_opt t.providers provider_key with
     | None -> None
     | Some state ->
-      Some (build_info_locked t ~now:(Unix.gettimeofday ()) ~key:provider_key state))
+      Some (build_info_locked ~now:(Unix.gettimeofday ()) ~key:provider_key state))
 
 (** Evict tracker entries whose rolling window has fully aged out and
     whose cooldown has expired — they carry no information but would
@@ -623,7 +702,7 @@ let evict_idle t =
       Hashtbl.fold
         (fun key state acc ->
           let recent = prune_old_events now state.events in
-          if recent = [] && ((Circuit_breaker.get_status t.breaker ~agent_id:key).state_name <> "open") then key :: acc
+          if recent = [] && state.cooldown_until <= now then key :: acc
           else acc)
         t.providers
         []
@@ -639,7 +718,7 @@ let all_providers t =
   with_lock t (fun () ->
     let now = Unix.gettimeofday () in
     Hashtbl.fold
-      (fun key state acc -> build_info_locked t ~now ~key state :: acc)
+      (fun key state acc -> build_info_locked ~now ~key state :: acc)
       t.providers
       []
     |> List.sort (fun a b -> String.compare a.provider_key b.provider_key))

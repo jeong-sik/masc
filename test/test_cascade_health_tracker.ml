@@ -64,6 +64,17 @@ let test_effective_weight_unknown_full () =
   check int "unknown provider → full config_weight"
     100 (H.effective_weight t ~provider_key:"unseen" ~config_weight:100)
 
+let test_check_circuit_breaker_uses_cooldown () =
+  let t = H.create () in
+  check (result unit string) "unknown provider allowed"
+    (Ok ()) (H.check_circuit_breaker t ~provider_key:"p");
+  H.record_hard_quota t ~provider_key:"p" ();
+  match H.check_circuit_breaker t ~provider_key:"p" with
+  | Ok () -> fail "expected provider cooldown to block the circuit check"
+  | Error msg ->
+    check bool "error mentions cooldown" true
+      (String.starts_with ~prefix:"provider cooldown active" msg)
+
 let test_provider_info_reflects_events () =
   let t = H.create () in
   H.record_success t ~provider_key:"p" ();
@@ -725,6 +736,8 @@ let () =
         test_effective_weight_cooldown_zero;
       test_case "unknown provider full weight" `Quick
         test_effective_weight_unknown_full;
+      test_case "check_circuit_breaker follows cooldown" `Quick
+        test_check_circuit_breaker_uses_cooldown;
       test_case "provider_info reflects events" `Quick
         test_provider_info_reflects_events;
     ];

@@ -19,12 +19,9 @@ interface Trace {
 }
 
 function yjsWebsocketUrl(): string | null {
-  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL?.trim()
-  if (configured) return configured
   if (runningUnderVitest()) return null
-  if (typeof window === 'undefined' || !window.location?.host) return null
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/yjs`
+  const configured = import.meta.env?.VITE_MASC_YJS_WS_URL?.trim()
+  return configured || null
 }
 
 export function WorldVisualizer() {
@@ -39,7 +36,13 @@ export function WorldVisualizer() {
     if (!url) return
 
     const ydoc = new Y.Doc()
-    const provider = new WebsocketProvider(url, 'masc-telemetry', ydoc)
+    let provider: WebsocketProvider
+    try {
+      provider = new WebsocketProvider(url, 'masc-telemetry', ydoc)
+    } catch {
+      ydoc.destroy()
+      return
+    }
     const yKeepers = ydoc.getMap<KeeperState>('keepers')
     const yTraces = ydoc.getArray<Trace>('traces')
     providerRef.current = provider

@@ -270,7 +270,7 @@ function CharacterPlate({ name }: { name: string }) {
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-[var(--r-0)] overflow-hidden bg-[var(--white-10)]" style="flex:1">
-              <div class="h-full rounded-[var(--r-0)] transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--color-status-warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--color-status-err)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--color-accent-fg)] to-[var(--color-status-ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
+              <div class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--color-status-warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--color-status-err)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--color-accent-fg)] to-[var(--color-status-ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-sm tabular-nums text-[var(--color-fg-secondary)] min-w-9 text-right">${ctxPct}%</span>
             ${keeper?.context_tokens != null && keeper?.context_max != null

@@ -68,6 +68,6 @@ describe('KeeperDetailSection', () => {
 
     const section = container.querySelector('section')
     expect(section?.classList.contains('scroll-mt-24')).toBe(true)
-    expect(section?.classList.contains('rounded-[28px]')).toBe(true)
+    expect(section?.classList.contains('rounded-[var(--r-6)]')).toBe(true)
   })
 })

@@ -12,7 +12,7 @@
 /* State animations applied to the avatar container */
 .pixel-avatar[data-status="active"],
 .pixel-avatar[data-status="working"] {
-  animation: avatar-bounce 1.2s ease-in-out infinite;
+  animation: avatar-bounce 1.2s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="busy"] {
@@ -20,11 +20,11 @@
 }
 
 .pixel-avatar[data-status="idle"] {
-  animation: avatar-breathe 3s ease-in-out infinite;
+  animation: avatar-breathe 3s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="listening"] {
-  animation: avatar-pulse-glow 2s ease-in-out infinite;
+  animation: avatar-pulse-glow 2s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="offline"],
@@ -48,7 +48,7 @@
 
 /* Blocker pulse ring */
 @utility pixel-avatar--has-blocker {
-  animation: blocker-pulse 1.5s ease-in-out infinite;
+  animation: blocker-pulse 1.5s var(--ease-inout) infinite;
 }
 
 /* Activity dot — positioned absolute */
@@ -66,7 +66,7 @@
 @utility activity-dot--live-pulse {
   background: var(--color-agent-working);
   box-shadow: 0 0 4px rgb(var(--ok-glow) / 0.8);
-  animation: pulse 1.5s ease-in-out infinite;
+  animation: pulse 1.5s var(--ease-inout) infinite;
 }
 
 @utility activity-dot--live { background: var(--color-agent-working); }

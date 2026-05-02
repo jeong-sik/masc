@@ -149,7 +149,7 @@
   z-index: 4;
 }
 .sl-grid-wrap[data-pulse="true"] .sl-now-column {
-  animation: sl-pulse 2.6s ease-in-out infinite;
+  animation: sl-pulse 2.6s var(--ease-inout) infinite;
 }
 @keyframes sl-pulse {
   0%, 100% { opacity: .5; }

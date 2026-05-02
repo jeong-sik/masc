@@ -347,7 +347,7 @@ body[data-mode="split"] .zone-deck { display: none; }
 .anchor-bracket.k-flag { background: var(--err); opacity: 0.6; }
 .anchor-bracket.k-approve { background: var(--ok); opacity: 0.5; }
 .anchor-bracket.is-drift {
-  animation: drift-pulse 1.2s ease-out;
+  animation: drift-pulse 1.2s var(--ease-out);
 }
 @keyframes drift-pulse {
   0% { box-shadow: 0 0 0 0 rgb(var(--brass-glow) / .6); }

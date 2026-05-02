@@ -25,7 +25,7 @@
 .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot {
   background: rgb(var(--info-glow) / .7);
   border-color: rgb(var(--info-glow) / .9);
-  animation: pipeline-pulse 2.5s ease-in-out infinite;
+  animation: pipeline-pulse 2.5s var(--ease-inout) infinite;
 }
 
 .pipeline-stage-node.active.stage-tool_use .pipeline-stage-dot {

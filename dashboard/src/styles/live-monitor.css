@@ -9,7 +9,7 @@
 
 @utility pulse-working {
   border-color: var(--color-status-ok);
-  animation: livePulse 2s ease-in-out infinite;
+  animation: livePulse 2s var(--ease-inout) infinite;
 }
 
 @utility pulse-selected {
@@ -28,7 +28,7 @@
 }
 
 @utility activity-item-new {
-  animation: activityFadeIn 0.3s ease-out;
+  animation: activityFadeIn 0.3s var(--ease-out);
 }
 
 @utility focus-agent-card {

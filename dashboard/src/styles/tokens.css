@@ -240,11 +240,14 @@ body[data-density="comfortable"]  { --density: 1.15; }
      scopes cleanly. */
   --_density-scope: 1;
 
-  /* Radius — small only; this is an ops tool */
+  /* Radius — micro for controls, macro for cards/panels */
   --r-0: 2px;
   --r-1: 3px;
   --r-2: 5px;
   --r-3: 8px;
+  --r-4: 12px;
+  --r-5: 20px;
+  --r-6: 28px;
 
   /* Elevation — 7-step scale. Each level bundles shadow + bg + border.
      Use `.elev-*` helper classes in primitives.css, or reference tokens directly. */

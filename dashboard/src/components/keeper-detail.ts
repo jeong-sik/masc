@@ -940,7 +940,7 @@ export function KeeperDetailPage() {
 
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
         <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}

@@ -55,16 +55,25 @@ const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-brass-1': '#d4a14a',
 }
 
-function resolveCssVar(token: string): string {
-  // token may be the bare name "--frost-100" or a "var(--frost-100)" wrapper.
-  const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
-  const name = m ? m[1] : token.startsWith('--') ? token : null
-  if (!name) return token
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return TOKEN_FALLBACKS[name] ?? token
+function createCssVarResolver(): (token: string) => string {
+  const computedStyle =
+    typeof window === 'undefined' || typeof document === 'undefined'
+      ? null
+      : getComputedStyle(document.documentElement)
+  const cache = new Map<string, string>()
+
+  return (token: string): string => {
+    // token may be the bare name "--frost-100" or a "var(--frost-100)" wrapper.
+    const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
+    const name = m ? m[1] : token.startsWith('--') ? token : null
+    if (!name) return token
+    const cached = cache.get(name)
+    if (cached !== undefined) return cached
+    const v = computedStyle?.getPropertyValue(name).trim()
+    const resolved = v || TOKEN_FALLBACKS[name] || token
+    cache.set(name, resolved)
+    return resolved
   }
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return v || TOKEN_FALLBACKS[name] || token
 }
 
 // Color palette using Cockpit Design System tokens. Values are resolved
@@ -157,6 +166,7 @@ function nodeHeight(ele: { data: (key: string) => unknown }): number {
 }
 
 function buildStylesheet() {
+  const resolveCssVar = createCssVarResolver()
   const styles: Array<{ selector: string; style: Record<string, unknown> }> = [
     {
       selector: 'node',

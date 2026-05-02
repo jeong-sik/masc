@@ -127,23 +127,26 @@ Source-of-truth cross-reference (after Step 4 caller adoption):
 
 | Transition | File:line | PR |
 |------------|-----------|-----|
-| `Idle → Phase_gating` (entry) | `keeper_unified_turn.ml:1064` | #11288 |
-| `Phase_gating → Done` (phase skip) | `keeper_unified_turn.ml:1086` | #11269 |
-| `Phase_gating → Cascade_routing` | `keeper_unified_turn.ml:1095` | #11347 |
-| `Cascade_routing → Failed cascade_unavailable` (ollama) | `keeper_unified_turn.ml:1195` | #11269 |
-| `Cascade_routing → Failed provider_error` (cascade build) | `keeper_unified_turn.ml:1284` | #11340 (variant) + #11269 (site) |
-| `Cascade_routing → Awaiting_provider` | `keeper_unified_turn.ml:1334` | #11347 |
-| `Cascade_routing → Failed turn_livelock_blocked` | `keeper_unified_turn.ml:1323` | #11340 |
-| `Awaiting_provider → Streaming` | `keeper_unified_turn.ml:1678` (pre-`run_turn`) | #11358 |
-| `Streaming → Failed provider_error` (retry exhausted) | `keeper_unified_turn.ml:2199` | #11363 |
-| `Streaming → Completing` | `keeper_unified_turn.ml:2773` (stop_reason) | #11308 |
-| `Completing → Done` (success exit) | `keeper_unified_turn.ml:2800` | #11288 |
+| `Idle → Phase_gating` (entry) | `keeper_unified_turn.ml:96` | #11288 |
+| `Phase_gating → Phase_gating` (SupervisorRequestsStop at entry) | `keeper_unified_turn.ml:116` | fix |
+| `Phase_gating → Cancelled supervisor_stop` (HonorStopSignal at entry) | `keeper_unified_turn.ml:133` | fix |
+| `Phase_gating → Done` (phase skip) | `keeper_unified_turn.ml:161` | #11269 |
+| `Phase_gating → Cascade_routing` | `keeper_unified_turn.ml:169` | #11347 |
+| `Cascade_routing → Failed cascade_unavailable` (ollama) | `keeper_unified_turn.ml:298` | #11269 |
+| `Cascade_routing → Failed provider_error` (cascade build) | `keeper_unified_turn.ml:395` | #11340 (variant) + #11269 (site) |
+| `Cascade_routing → Awaiting_provider` | `keeper_unified_turn.ml:449` | #11347 |
+| `Cascade_routing → Failed turn_livelock_blocked` | `keeper_unified_turn.ml:441` | #11340 |
+| `Awaiting_provider → Streaming` | `keeper_unified_turn.ml:803` (pre-`run_turn`) | #11358 |
+| `Streaming → Streaming` (SupervisorRequestsStop in Eio.Cancel handler) | `keeper_unified_turn.ml:867` | fix |
+| `Streaming → Failed provider_error` (retry exhausted) | `keeper_unified_turn.ml:1446` | #11363 |
+| `Streaming → Completing` | `keeper_unified_turn.ml:2092` (stop_reason) | #11308 |
+| `Streaming → Cancelled supervisor_stop` (HonorStopSignal, Eio.Cancel) | `keeper_unified_turn.ml:884` | Cycle 1b-iv |
+| `Completing → Done` (success exit) | `keeper_unified_turn.ml:2119` | #11288 |
 
 Pending edges (require `keeper_agent_run.ml run_turn` adoption — volume risk):
 - `Streaming ⇄ Awaiting_tool_result` per tool call
 
 Pending RISKY edges (require feature-flag / dual-emit infrastructure):
-- `Streaming → Cancelled` (Step 5 — `Eio.Cancel.Cancelled` re-raise)
 - `Completing → Failed receipt_lost` (Step 3 — receipt authoritative)
 - `Streaming → Failed tool_contract_violation` (Step 6b-2 — typed classifier replacing string match)
 

@@ -133,6 +133,122 @@ let same_tla_state a b =
 let same_observable_state a b =
   String.equal (turn_state_label a) (turn_state_label b)
 
+(** Full orthogonal FSM state: the pair of [turn_state] and the
+    [stop_signaled] boolean, modelling the two independent variables
+    from [KeeperTurnFSM.tla] line 59.
+
+    [stop_signaled] is orthogonal to [turn_state]: the supervisor can
+    raise it at any point while the turn is active, and it is the only
+    variable changed by [SupervisorRequestsStop].  Tracking it here
+    lets [classify_fsm_transition] enforce the invariant that every
+    forward transition preserves [stop_signaled = false] and that
+    [HonorStopSignal] only fires when [stop_signaled = true]. *)
+type fsm_state = {
+  turn_state : turn_state;
+  stop_signaled : bool;
+}
+
+let make_fsm_state ?(stop_signaled = false) turn_state =
+  { turn_state; stop_signaled }
+
+(** [classify_fsm_transition ~from_state ~to_state] is the orthogonal
+    variant of [classify_transition]: it inspects both [turn_state] and
+    [stop_signaled], matching the TLA+ spec exactly.
+
+    Key differences from [classify_transition]:
+    - [SupervisorRequestsStop] requires [from_state.stop_signaled = false]
+      and [to_state.stop_signaled = true] with the same [turn_state].
+    - [HonorStopSignal] requires [from_state.stop_signaled = true].
+    - Every other forward transition enforces
+      [from_state.stop_signaled = false] and
+      [to_state.stop_signaled = false] ([UNCHANGED stop_signaled] in the
+      spec's [~stop_signaled] pre-condition branches). *)
+let classify_fsm_transition ~from_state ~to_state =
+  let fs = from_state.turn_state in
+  let ts = to_state.turn_state in
+  let ss_from = from_state.stop_signaled in
+  let ss_to = to_state.stop_signaled in
+  match fs, ts with
+  (* SupervisorRequestsStop: stop_signaled flips false→true,
+     turn_state is UNCHANGED and must be active.
+     The wildcard [_, _] intentionally matches any active state pair
+     where [same_tla_state fs ts] holds — the turn_state is unchanged
+     and it is the stop_signaled flip that distinguishes this action. *)
+  | _, _
+    when is_active fs
+         && same_tla_state fs ts
+         && not ss_from
+         && ss_to ->
+      Some SupervisorRequestsStop
+  (* HonorStopSignal: stop_signaled must already be true; active→cancelled.
+     stop_signaled is UNCHANGED (remains true). *)
+  | _, Cancelled _
+    when is_active fs && ss_from && ss_to ->
+      Some HonorStopSignal
+  (* TerminalStutter: terminal, same observable state, all UNCHANGED. *)
+  | _, _
+    when is_terminal fs
+         && is_terminal ts
+         && same_observable_state fs ts
+         && Bool.equal ss_from ss_to ->
+      Some TerminalStutter
+  (* All forward transitions below require ~stop_signaled precondition
+     and UNCHANGED stop_signaled postcondition per the TLA+ spec. *)
+  | Idle, Phase_gating
+    when not ss_from && not ss_to ->
+      Some StartTurn
+  | Phase_gating, Done
+    when not ss_from && not ss_to ->
+      Some PhaseGateSkip
+  | Phase_gating, Cascade_routing
+    when not ss_from && not ss_to ->
+      Some PhaseGateOk
+  | Cascade_routing, Awaiting_provider
+    when not ss_from && not ss_to ->
+      Some CascadeRouted
+  | Cascade_routing, Failed (Failure_cascade_unavailable _)
+    when not ss_from && not ss_to ->
+      Some CascadeUnavailable
+  | Awaiting_provider, Streaming
+    when not ss_from && not ss_to ->
+      Some ProviderResponded
+  | Awaiting_provider, Cancelled Cancelled_provider_timeout
+    when not ss_from && not ss_to ->
+      Some ProviderTimeout
+  | Streaming, Awaiting_tool_result
+    when not ss_from && not ss_to ->
+      Some StreamYieldsTool
+  | Awaiting_tool_result, Streaming
+    when not ss_from && not ss_to ->
+      Some ToolReturned
+  | Streaming, Completing
+    when not ss_from && not ss_to ->
+      Some StreamComplete
+  | Completing, Done
+    when not ss_from && not ss_to ->
+      Some ContractOk
+  | Completing, Failed (Failure_tool_contract_violation _)
+    when not ss_from && not ss_to ->
+      Some ContractViolation
+  | Completing, Failed (Failure_receipt_lost _)
+    when not ss_from && not ss_to ->
+      Some ReceiptLost
+  | _, Failed _
+    when is_active fs && not ss_from && not ss_to ->
+      Some GenericFail
+  | _ -> None
+
+let assert_fsm_transition_allowed ~from_state ~to_state =
+  match classify_fsm_transition ~from_state ~to_state with
+  | Some action -> Ok action
+  | None ->
+      Error
+        {
+          from_state = to_tla_symbol from_state.turn_state;
+          to_state = to_tla_symbol to_state.turn_state;
+          reason = "not_in_keeper_turn_fsm_next";
+        }
+
 let classify_transition ~from_state ~to_state =
   match from_state, to_state with
   | Idle, Phase_gating -> Some StartTurn

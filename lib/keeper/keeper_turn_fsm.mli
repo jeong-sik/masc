@@ -107,12 +107,55 @@ type transition_violation = {
   reason : string;
 }
 
+(** Full orthogonal FSM state pairing [turn_state] with the
+    [stop_signaled] boolean from [KeeperTurnFSM.tla] line 59.
+
+    [stop_signaled] is independent of [turn_state]: the supervisor can
+    raise it at any point while the turn is active.  Tracking it here
+    allows [classify_fsm_transition] to enforce that every forward
+    transition preserves [stop_signaled = false] and that
+    [HonorStopSignal] only fires when [stop_signaled = true]. *)
+type fsm_state = {
+  turn_state : turn_state;
+  stop_signaled : bool;
+}
+
+val make_fsm_state : ?stop_signaled:bool -> turn_state -> fsm_state
+(** Construct an [fsm_state].  [stop_signaled] defaults to [false],
+    matching [Init] in the TLA+ spec. *)
+
+val classify_fsm_transition :
+  from_state:fsm_state ->
+  to_state:fsm_state ->
+  transition_action option
+(** Orthogonal variant of [classify_transition]: inspects both
+    [turn_state] and [stop_signaled], matching the TLA+ spec exactly.
+
+    Key differences from [classify_transition]:
+    - [SupervisorRequestsStop] requires [from_state.stop_signaled = false]
+      and [to_state.stop_signaled = true] with the same [turn_state].
+    - [HonorStopSignal] requires [from_state.stop_signaled = true].
+    - Every other forward transition enforces
+      [from_state.stop_signaled = false] and
+      [to_state.stop_signaled = false]
+      ([UNCHANGED stop_signaled] / [~stop_signaled] precondition). *)
+
+val assert_fsm_transition_allowed :
+  from_state:fsm_state ->
+  to_state:fsm_state ->
+  (transition_action, transition_violation) result
+(** Orthogonal variant of [assert_transition_allowed] that uses the
+    full [fsm_state] (including [stop_signaled]) to validate transitions. *)
+
 val classify_transition :
   from_state:turn_state ->
   to_state:turn_state ->
   transition_action option
 (** Return the TLA+ action represented by an OCaml state edge, if the
-    edge is allowed by the keeper-turn FSM contract. *)
+    edge is allowed by the keeper-turn FSM contract.
+
+    This function inspects only [turn_state]; use
+    [classify_fsm_transition] when [stop_signaled] is also tracked. *)
 
 val assert_transition_allowed :
   from_state:turn_state ->

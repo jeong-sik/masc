@@ -174,6 +174,156 @@ let test_failure_reason_labels_documented () =
     pairs
 ;;
 
+(* ── fsm_state / classify_fsm_transition ──────────────────────── *)
+
+(** Build an [fsm_state] concisely for tests. *)
+let fsm ?(ss = false) ts = F.make_fsm_state ~stop_signaled:ss ts
+
+let check_fsm_action expected ~from_state ~to_state =
+  match F.classify_fsm_transition ~from_state ~to_state with
+  | Some actual ->
+    Alcotest.(check string)
+      ("fsm transition action " ^ F.transition_action_label expected)
+      (F.transition_action_label expected)
+      (F.transition_action_label actual)
+  | None ->
+    Alcotest.failf
+      "expected fsm transition action %s for %s(ss=%b) -> %s(ss=%b)"
+      (F.transition_action_label expected)
+      (F.turn_state_label from_state.F.turn_state)
+      from_state.F.stop_signaled
+      (F.turn_state_label to_state.F.turn_state)
+      to_state.F.stop_signaled
+;;
+
+let check_fsm_rejected ~from_state ~to_state =
+  match F.classify_fsm_transition ~from_state ~to_state with
+  | None -> ()
+  | Some action ->
+    Alcotest.failf
+      "expected fsm transition %s(ss=%b) -> %s(ss=%b) to be rejected, \
+       got %s"
+      (F.turn_state_label from_state.F.turn_state)
+      from_state.F.stop_signaled
+      (F.turn_state_label to_state.F.turn_state)
+      to_state.F.stop_signaled
+      (F.transition_action_label action)
+;;
+
+let test_fsm_forward_transitions_require_no_stop_signal () =
+  (* All forward transitions must be rejected when stop_signaled is set.
+     Per the TLA+ spec, every forward-edge action has the ~stop_signaled
+     precondition.  HonorStopSignal is the only allowed exit from an
+     active state once stop_signaled = true. *)
+  let active_cancelled =
+    F.Cancelled F.Cancelled_supervisor_stop
+  in
+  (* StartTurn blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Idle)
+    ~to_state:(fsm ~ss:true F.Phase_gating);
+  (* PhaseGateOk blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Phase_gating)
+    ~to_state:(fsm ~ss:true F.Cascade_routing);
+  (* CascadeRouted blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Cascade_routing)
+    ~to_state:(fsm ~ss:true F.Awaiting_provider);
+  (* ProviderResponded blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Awaiting_provider)
+    ~to_state:(fsm ~ss:true F.Streaming);
+  (* StreamComplete blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Streaming)
+    ~to_state:(fsm ~ss:true F.Completing);
+  (* ContractOk blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Completing)
+    ~to_state:(fsm ~ss:true F.Done);
+  (* GenericFail blocked when stop_signaled *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Streaming)
+    ~to_state:(fsm ~ss:true (F.Failed (F.Failure_runtime_error "x")));
+  (* HonorStopSignal IS allowed when stop_signaled *)
+  check_fsm_action F.HonorStopSignal
+    ~from_state:(fsm ~ss:true F.Streaming)
+    ~to_state:(fsm ~ss:true active_cancelled)
+;;
+
+let test_fsm_supervisor_requests_stop_orthogonal () =
+  (* SupervisorRequestsStop must flip stop_signaled false→true while
+     keeping turn_state UNCHANGED (any active state). *)
+  check_fsm_action F.SupervisorRequestsStop
+    ~from_state:(fsm ~ss:false F.Streaming)
+    ~to_state:(fsm ~ss:true F.Streaming);
+  check_fsm_action F.SupervisorRequestsStop
+    ~from_state:(fsm ~ss:false F.Awaiting_tool_result)
+    ~to_state:(fsm ~ss:true F.Awaiting_tool_result);
+  (* Flip without an active state: rejected *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:false F.Idle)
+    ~to_state:(fsm ~ss:true F.Idle);
+  (* stop_signaled already true: not a new SupervisorRequestsStop *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:true F.Streaming)
+    ~to_state:(fsm ~ss:true F.Streaming)
+;;
+
+let test_fsm_honor_stop_signal_requires_signaled () =
+  (* HonorStopSignal requires stop_signaled = true in from_state.
+     Without it, a Cancelled transition from an active state is invalid. *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:false F.Streaming)
+    ~to_state:
+      (fsm ~ss:false (F.Cancelled F.Cancelled_supervisor_stop));
+  (* With stop_signaled = true, HonorStopSignal is allowed *)
+  check_fsm_action F.HonorStopSignal
+    ~from_state:(fsm ~ss:true F.Phase_gating)
+    ~to_state:
+      (fsm ~ss:true (F.Cancelled F.Cancelled_phase_gate_close));
+  check_fsm_action F.HonorStopSignal
+    ~from_state:(fsm ~ss:true F.Completing)
+    ~to_state:
+      (fsm ~ss:true (F.Cancelled F.Cancelled_fleet_shutdown))
+;;
+
+let test_fsm_stop_signaled_orthogonal_to_turn_state () =
+  (* Happy-path: stop_signaled must be UNCHANGED (false→false) for all
+     forward edges. Changing stop_signaled on a forward-edge transition
+     is only legal as SupervisorRequestsStop (same turn_state). *)
+  (* stop_signaled must not change on a forward turn-state edge *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:false F.Idle)
+    ~to_state:(fsm ~ss:true F.Phase_gating);  (* StartTurn + spurious ss flip *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:false F.Streaming)
+    ~to_state:(fsm ~ss:true F.Completing);  (* StreamComplete + spurious ss flip *)
+  (* Normal forward edges accepted with ss=false on both sides *)
+  check_fsm_action F.StartTurn
+    ~from_state:(fsm ~ss:false F.Idle)
+    ~to_state:(fsm ~ss:false F.Phase_gating);
+  check_fsm_action F.StreamComplete
+    ~from_state:(fsm ~ss:false F.Streaming)
+    ~to_state:(fsm ~ss:false F.Completing)
+;;
+
+let test_fsm_terminal_stutter_preserves_stop_signaled () =
+  (* TerminalStutter keeps all vars UNCHANGED, so stop_signaled must not
+     change either. *)
+  check_fsm_action F.TerminalStutter
+    ~from_state:(fsm ~ss:false F.Done)
+    ~to_state:(fsm ~ss:false F.Done);
+  check_fsm_action F.TerminalStutter
+    ~from_state:(fsm ~ss:true (F.Cancelled F.Cancelled_supervisor_stop))
+    ~to_state:(fsm ~ss:true (F.Cancelled F.Cancelled_supervisor_stop));
+  (* Changing stop_signaled during terminal stutter is rejected *)
+  check_fsm_rejected
+    ~from_state:(fsm ~ss:false F.Done)
+    ~to_state:(fsm ~ss:true F.Done)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_fsm_emit"
@@ -204,6 +354,28 @@ let () =
             "failure_reason labels match docs"
             `Quick
             test_failure_reason_labels_documented
+        ] )
+    ; ( "fsm_state_orthogonality"
+      , [ Alcotest.test_case
+            "forward transitions require stop_signaled=false"
+            `Quick
+            test_fsm_forward_transitions_require_no_stop_signal
+        ; Alcotest.test_case
+            "SupervisorRequestsStop flips stop_signaled false->true"
+            `Quick
+            test_fsm_supervisor_requests_stop_orthogonal
+        ; Alcotest.test_case
+            "HonorStopSignal requires stop_signaled=true"
+            `Quick
+            test_fsm_honor_stop_signal_requires_signaled
+        ; Alcotest.test_case
+            "stop_signaled orthogonal to turn_state on forward edges"
+            `Quick
+            test_fsm_stop_signaled_orthogonal_to_turn_state
+        ; Alcotest.test_case
+            "TerminalStutter preserves stop_signaled"
+            `Quick
+            test_fsm_terminal_stutter_preserves_stop_signaled
         ] )
     ]
 ;;

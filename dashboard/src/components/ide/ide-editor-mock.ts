@@ -1,48 +1,47 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import {
+  createCodeDocumentStore,
+  type CodeDocumentLine,
+} from './code-document-store'
+import {
   createKeeperLineOwnershipStore,
   type KeeperEdit,
   type LineOwnership,
 } from './keeper-line-ownership-store'
 
-// PR-5 precursor: the editor remains a read-only mock fixture, but its
-// blame-by-keeper gutter now consumes RFC 0019's ownership store instead of
-// hardcoding keeper labels per row. Replacing the text renderer with Shiki can
-// keep the same LineOwnership contract.
-
-interface MockLine {
-  readonly num: number
-  readonly text: string
-}
+// PR-5 precursor: the editor remains a read-only fixture, but both source
+// document rows and blame-by-keeper ownership now flow through typed stores.
+// Replacing the row text renderer with Shiki/CodeMirror can keep these same
+// CodeDocumentLine + LineOwnership contracts.
 
 const EDITOR_FILE = 'runtime/cascade/router.ts'
 
-const MOCK_LINES: ReadonlyArray<MockLine> = [
-  { num: 1, text: "import { Provider, ProviderKind } from './provider'" },
-  { num: 2, text: "import { Turn, TurnId } from './turn'" },
-  { num: 3, text: "import { FsmEvent } from '../fsm/state'" },
-  { num: 4, text: "import { log } from '../log'" },
-  { num: 5, text: "import type { ToolSpec } from './tools'" },
-  { num: 6, text: "import { TokenRegistry } from '../tokens/registry'" },
-  { num: 7, text: '' },
-  { num: 8, text: 'export type CascadeReq = {' },
-  { num: 9, text: '  model: string' },
-  { num: 10, text: '  messages: Array<{ role: string; content: string }>' },
-  { num: 11, text: '  tools?: ToolSpec[]' },
-  { num: 12, text: "  tool_choice?: 'auto' | 'none'" },
-  { num: 13, text: '  max_tokens?: number' },
-  { num: 14, text: '}' },
-  { num: 15, text: '' },
-  { num: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-  { num: 17, text: '  // strip empty tools array' },
-  { num: 18, text: '  if (req.tools && req.tools.length === 0) {' },
-  { num: 19, text: '    const { tools, tool_choice, ...rest } = req' },
-  { num: 20, text: '    return rest as CascadeReq' },
-  { num: 21, text: '  }' },
-  { num: 22, text: '  return req' },
-  { num: 23, text: '}' },
-]
+const MOCK_SOURCE = [
+  "import { Provider, ProviderKind } from './provider'",
+  "import { Turn, TurnId } from './turn'",
+  "import { FsmEvent } from '../fsm/state'",
+  "import { log } from '../log'",
+  "import type { ToolSpec } from './tools'",
+  "import { TokenRegistry } from '../tokens/registry'",
+  '',
+  'export type CascadeReq = {',
+  '  model: string',
+  '  messages: Array<{ role: string; content: string }>',
+  '  tools?: ToolSpec[]',
+  "  tool_choice?: 'auto' | 'none'",
+  '  max_tokens?: number',
+  '}',
+  '',
+  'export function normalizeTools(req: CascadeReq): CascadeReq {',
+  '  // strip empty tools array',
+  '  if (req.tools && req.tools.length === 0) {',
+  '    const { tools, tool_choice, ...rest } = req',
+  '    return rest as CascadeReq',
+  '  }',
+  '  return req',
+  '}',
+].join('\n')
 
 const MOCK_OWNERSHIP_EVENTS: ReadonlyArray<KeeperEdit> = [
   {
@@ -74,18 +73,26 @@ const MOCK_OWNERSHIP_EVENTS: ReadonlyArray<KeeperEdit> = [
 export function IdeEditorMock() {
   // View tabs and LAYERS toggle moved to IdeToolbar (PR-3); the editor
   // mock now only shows the breadcrumb header for the open file.
+  const documentStore = useMemo(() =>
+    createCodeDocumentStore({
+      file_path: EDITOR_FILE,
+      language: 'typescript',
+      content: MOCK_SOURCE,
+    }), [])
   const ownershipStore = useMemo(() => {
     const store = createKeeperLineOwnershipStore(EDITOR_FILE)
     for (const event of MOCK_OWNERSHIP_EVENTS) store.ingest(event)
     return store
   }, [])
+  const document = documentStore.document()
+  const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
 
   return html`
     <div
       role="region"
-      aria-label="에디터 (RFC 0019 line ownership mock)"
+      aria-label="에디터 (code document store + RFC 0019 ownership mock)"
       style=${{
         display: 'grid',
         gridTemplateRows: 'auto 1fr',
@@ -104,8 +111,9 @@ export function IdeEditorMock() {
           font: 'var(--type-eyebrow)',
         }}
       >
-        <span>runtime / cascade / router.ts</span>
-        <span style=${{ marginLeft: 'auto' }}>ownership · ${keepers.length} keepers</span>
+        <span>${document.file_path}</span>
+        <span style=${{ color: 'var(--color-fg-disabled)' }}>${document.language}</span>
+        <span style=${{ marginLeft: 'auto' }}>${lines.length} lines · ownership · ${keepers.length} keepers</span>
       </div>
       <ol
         style=${{
@@ -118,7 +126,7 @@ export function IdeEditorMock() {
           lineHeight: 1.6,
         }}
       >
-        ${MOCK_LINES.map(line => MockEditorRow(line, ownership.get(line.num)))}
+        ${lines.map(line => MockEditorRow(line, ownership.get(line.num)))}
       </ol>
     </div>
   `
@@ -130,7 +138,7 @@ function keeperColor(owner: LineOwnership | undefined): string {
     : 'var(--color-fg-disabled)'
 }
 
-function MockEditorRow(line: MockLine, owner: LineOwnership | undefined) {
+function MockEditorRow(line: CodeDocumentLine, owner: LineOwnership | undefined) {
   const color = keeperColor(owner)
   const dot = owner
     ? color

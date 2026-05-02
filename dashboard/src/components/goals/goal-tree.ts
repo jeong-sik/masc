@@ -172,7 +172,7 @@ function badgeClass(badge: string): string {
     case 'activity_unobserved':
       return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-muted'
     case 'sandbox':
-      return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+      return 'border-accent/30 bg-[var(--accent-10)] text-accent-fg'
     case 'linkage_warning':
       return 'border-bad/30 bg-bad/10 text-bad'
     default:
@@ -616,7 +616,7 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
         ${task.linkage_source === 'explicit' ? 'goal_id' : 'title tag'}
       </span>
       ${task.assignee ? html`
-        <span class="rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent">${task.assignee}</span>
+        <span class="rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent-fg">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
     </div>
@@ -681,7 +681,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
-                <span class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent" title="verifier keeper의 독립 실측을 기다리는 task">
+                <span class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg" title="verifier keeper의 독립 실측을 기다리는 task">
                   Task 검증 대기 ${awaiting}
                 </span>
               ` : null
@@ -755,7 +755,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             <${TimeAgo} timestamp=${node.last_activity_at} />
           </span>
           ${isSelected ? html`
-            <span class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold text-accent">selected</span>
+            <span class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold text-accent-fg">selected</span>
           ` : null}
         </div>
       </button>
@@ -812,7 +812,7 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
           key=${tab}
           type="button"
           class="rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
-            ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
+            ? 'border-accent/35 bg-[var(--accent-10)] text-accent-fg'
             : 'border-card-border/60 bg-[var(--color-bg-surface)] text-text-body hover:border-card-border/90'}"
           onClick=${() => { detailTab.value = tab }}
         >

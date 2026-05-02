@@ -13,7 +13,7 @@ describe('isSemanticTone (pure)', () => {
 
   it('rejects raw Tailwind class strings (they pass through as extras)', () => {
     expect(isSemanticTone('bg-[var(--color-status-ok)]')).toBe(false)
-    expect(isSemanticTone('text-accent')).toBe(false)
+    expect(isSemanticTone('text-accent-fg')).toBe(false)
   })
 })
 

@@ -108,7 +108,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
               fill="none"
               stroke="currentColor"
               stroke-width="1.5"
-              class="text-accent"
+              class="text-accent-fg"
               vector-effect="non-scaling-stroke"
             />
             ${anomalyResults.map((r) => {
@@ -120,7 +120,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   cy="${y.toFixed(1)}"
                   r=${r.isAnomaly ? '3' : '1.5'}
                   fill="currentColor"
-                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-warn)]') : 'text-accent'}
+                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-warn)]') : 'text-accent-fg'}
                   stroke=${r.isAnomaly ? 'currentColor' : 'none'}
                   stroke-width=${r.isAnomaly ? '0.5' : '0'}
                 >

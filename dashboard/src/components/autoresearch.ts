@@ -584,7 +584,7 @@ export function Autoresearch() {
         </${Eyebrow}>
         <div class="flex items-center gap-2">
           <${StartFormButton}
-            class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
+            class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs text-accent-fg border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
           />
           <a href="/api/v1/autoresearch/loops/csv" download="autoresearch_loops.csv"
             class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] border border-card-border hover:text-[var(--color-fg-secondary)] hover:border-accent/40 transition-colors no-underline"

@@ -48,7 +48,7 @@ function kindIcon(kind: TraceEventKind) {
 
 function kindColor(kind: TraceEventKind): string {
   switch (kind) {
-    case 'tool_call': return 'text-accent'
+    case 'tool_call': return 'text-accent-fg'
     case 'broadcast': return 'text-[var(--cyan)]'
     case 'task': return 'text-ok'
     case 'heartbeat': return 'text-text-dim'

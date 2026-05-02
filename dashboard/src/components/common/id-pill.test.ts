@@ -20,7 +20,7 @@ describe('idPillClasses (pure)', () => {
       'border',
       'border-accent/20',
       'bg-[var(--accent-10)]',
-      'text-accent',
+      'text-accent-fg',
     ]) {
       expect(cls).toContain(token)
     }
@@ -50,7 +50,7 @@ describe('idPillClasses (pure)', () => {
   it('shape tokens present regardless of mono flag (regression guard)', () => {
     for (const mono of [true, false]) {
       const cls = idPillClasses(mono)
-      for (const token of ['rounded-[var(--r-1)]', 'text-3xs', 'px-2.5', 'py-1', 'text-accent']) {
+      for (const token of ['rounded-[var(--r-1)]', 'text-3xs', 'px-2.5', 'py-1', 'text-accent-fg']) {
         expect(cls).toContain(token)
       }
     }

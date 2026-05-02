@@ -47,13 +47,13 @@ function SectionTitle({ children }: { children: unknown }) {
 function eventBadge(label: string): { icon: any; color: string } {
   switch (label) {
     case 'claim':
-    case 'claimed': return { icon: html`<${UserPlus} size=${14} />`, color: 'text-accent' }
+    case 'claimed': return { icon: html`<${UserPlus} size=${14} />`, color: 'text-accent-fg' }
     case 'done':
     case 'completed': return { icon: html`<${Check} size=${14} />`, color: 'text-ok' }
     case 'cancel':
     case 'cancelled': return { icon: html`<${X} size=${14} />`, color: 'text-bad' }
     case 'submit_for_verification':
-    case 'awaiting_verification': return { icon: html`<${ArrowRight} size=${14} />`, color: 'text-accent' }
+    case 'awaiting_verification': return { icon: html`<${ArrowRight} size=${14} />`, color: 'text-accent-fg' }
     case 'approve':
     case 'approved': return { icon: html`<${Check} size=${14} />`, color: 'text-ok' }
     case 'reject':
@@ -108,7 +108,7 @@ function TaskEventsSection() {
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-medium text-text-strong">${evt.label}</span>
-                ${evt.agent ? html`<span class="text-3xs text-accent">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
+                ${evt.agent ? html`<span class="text-3xs text-accent-fg">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
               </div>
               ${evt.notes ? html`<div class="mt-1 text-2xs text-text-muted"><${RichContent} text=${evt.notes} previewLimit=${1} /></div>` : null}
             </div>
@@ -151,7 +151,7 @@ function verdictToneClass(label: string): string {
     case 'approved': return 'border-ok/30 bg-ok/10 text-ok'
     case 'reject':
     case 'rejected': return 'border-warn/30 bg-warn/10 text-warn'
-    default: return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+    default: return 'border-accent/30 bg-[var(--accent-10)] text-accent-fg'
   }
 }
 
@@ -181,7 +181,7 @@ function VerdictLineageSection() {
                 <span class=${`shrink-0 rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}`}>${stage}</span>
                 <div class="flex-1 min-w-0 text-2xs">
                   <div class="flex flex-wrap items-center gap-2 text-text-body">
-                    ${evt.agent ? html`<span class="font-mono text-accent">@${evt.agent}</span>` : html`<span class="text-text-muted">(unknown)</span>`}
+                    ${evt.agent ? html`<span class="font-mono text-accent-fg">@${evt.agent}</span>` : html`<span class="text-text-muted">(unknown)</span>`}
                     ${evt.actorKind ? html`<span class="text-text-muted">· ${evt.actorKind}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} class="text-3xs text-text-dim" />` : null}
                   </div>
@@ -246,9 +246,9 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent-fg border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
-          <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent">
+          <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">
             검증 대기
           </span>
         ` : null}
@@ -257,10 +257,10 @@ function ContractSection({ task }: { task: Task }) {
       ${isAwaitingVerification ? html`
         <div class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
           <div class="flex items-center justify-between gap-3 flex-wrap">
-            <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
+            <div class="text-xs font-medium text-accent-fg">Verifier Keeper 검증 중</div>
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
-              class="rounded-[var(--r-1)] border border-accent/50 bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent hover:bg-[var(--accent-20)]"
+              class="rounded-[var(--r-1)] border border-accent/50 bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
               title="검증 패널에서 이 태스크를 직접 승인/반려"
             >검증에 개입 →</a>
           </div>
@@ -431,7 +431,7 @@ export function TaskDetailOverlay() {
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${task.status ?? 'todo'} />
             <span class="rounded-[var(--r-1)] border border-current/20 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-2xs font-semibold text-text-body">${priorityLabel(p)}</span>
-            ${task.assignee ? html`<span class="text-2xs text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
+            ${task.assignee ? html`<span class="text-2xs text-accent-fg">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
         <button

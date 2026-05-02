@@ -93,7 +93,7 @@ export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props
   return html`
     <div class="rounded-[var(--r-1)] border border-accent/20 bg-accent/5 px-3 py-2 shadow-[var(--shadow-1)]" role="status" aria-live="polite" aria-label="커서 위치 메트릭 요약">
       <div class="mb-1.5 flex items-center justify-between">
-        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent font-semibold">cursor</span>
+        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent-fg font-semibold">cursor</span>
         <span class="text-2xs font-mono text-text-strong">
           ${new Date(cursor.ts).toLocaleTimeString()}
         </span>

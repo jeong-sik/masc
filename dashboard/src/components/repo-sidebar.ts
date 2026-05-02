@@ -217,7 +217,7 @@ export function RepoSidebar() {
               <div class="mt-1">
                 <button
                   type="button"
-                  class="text-accent hover:underline cursor-pointer"
+                  class="text-accent-fg hover:underline cursor-pointer"
                   onClick=${() => { showAddRepoDialog.value = true }}
                 >
                   저장소 추가하기

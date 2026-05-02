@@ -428,7 +428,7 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
       case 'z0': return 'bg-[var(--color-bg-surface)] text-text-disabled'
       case 'z1': return 'bg-[var(--accent-5)]/30 text-text-muted'
       case 'z2': return 'bg-[var(--accent-10)]/40 text-text-strong'
-      case 'z3': return 'bg-[var(--accent-15)]/50 text-accent'
+      case 'z3': return 'bg-[var(--accent-15)]/50 text-accent-fg'
       case 'z4': return 'bg-[var(--color-accent-fg)] text-white'
       default: return ''
     }
@@ -842,7 +842,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                 role="radio"
                 aria-checked=${viewMode.value === 'model'}
                 class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'model'
-                  ? 'bg-[var(--accent-15)] text-accent'
+                  ? 'bg-[var(--accent-15)] text-accent-fg'
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { viewMode.value = 'model'; void loadModelMetrics(windowMinutes.value) }}
               >
@@ -853,7 +853,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                 role="radio"
                 aria-checked=${viewMode.value === 'keeper'}
                 class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'keeper'
-                  ? 'bg-[var(--accent-15)] text-accent'
+                  ? 'bg-[var(--accent-15)] text-accent-fg'
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { viewMode.value = 'keeper'; void loadKeeperMetrics(windowMinutes.value) }}
               >
@@ -868,7 +868,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   role="radio"
                   aria-checked=${windowMinutes.value === o.key}
                   class="rounded-[var(--r-1)] border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
-                    ? 'border-accent/50 bg-[var(--accent-15)] text-accent'
+                    ? 'border-accent/50 bg-[var(--accent-15)] text-accent-fg'
                   : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
                   onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key, view) }}
                 >

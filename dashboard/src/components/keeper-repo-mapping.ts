@@ -285,7 +285,7 @@ export function resetKeeperRepoMappings(): void {
 
 function RepoBadge({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">
+    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-accent/20 shadow-sm">
       ${name}
     </span>
   `
@@ -454,7 +454,7 @@ export function KeeperRepoMapping() {
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     ${changed ? html`
-                      <span class="text-3xs text-accent font-semibold">변경됨</span>
+                      <span class="text-3xs text-accent-fg font-semibold">변경됨</span>
                     ` : null}
                     <button
                       type="button"

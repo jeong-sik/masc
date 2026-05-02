@@ -62,7 +62,7 @@ function severityToneClass(severity: string | undefined): string {
     case 'warn':
       return 'border-warn/35 bg-warn/10 text-warn'
     default:
-      return 'border-accent/25 bg-[var(--accent-10)] text-accent'
+      return 'border-accent/25 bg-[var(--accent-10)] text-accent-fg'
   }
 }
 

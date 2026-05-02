@@ -34,7 +34,7 @@ function viewButton(view: RepositoryView, label: string, icon: unknown) {
     <button
       type="button"
       class="inline-flex h-8 items-center gap-2 rounded-[var(--r-1)] border px-3 text-xs font-semibold transition-colors cursor-pointer ${active
-        ? 'border-accent/40 bg-accent/15 text-accent'
+        ? 'border-accent/40 bg-accent/15 text-accent-fg'
         : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-body'}"
       aria-pressed=${active}
       onClick=${() => { updateViewParam(view) }}

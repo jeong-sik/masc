@@ -43,7 +43,7 @@ import type { ComponentChildren } from 'preact'
 const BASE =
   'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-sm border'
 const TONE_ACCENT =
-  'border-accent/20 bg-[var(--accent-10)] text-accent'
+  'border-accent/20 bg-[var(--accent-10)] text-accent-fg'
 const MONO_CLASS = 'font-mono'
 
 /** Pure: class string for an IdPill, with optional monospace and

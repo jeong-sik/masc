@@ -284,7 +284,7 @@ export function AgentDetailOverlay() {
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
                           <button
                             type="button"
-                            class=${`text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded-[var(--r-1)]`}
+                            class=${`text-text-strong font-semibold hover:text-accent-fg underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded-[var(--r-1)]`}
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
                             title="키퍼 상세 페이지 열기"
                             aria-label="${keeper.name} 키퍼 상세 보기"
@@ -294,7 +294,7 @@ export function AgentDetailOverlay() {
                         </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--color-bg-elevated)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-accent/10">${continuitySummary}</span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent-fg/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}

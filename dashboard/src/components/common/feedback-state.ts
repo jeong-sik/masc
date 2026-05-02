@@ -50,7 +50,7 @@ interface LoadingStateProps {
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   return html`
     <div class="loading-state flex flex-col items-center py-8 text-sm ${cx ?? ''}" role="status" aria-live="polite">
-      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent" aria-hidden="true" />
+      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent-fg" aria-hidden="true" />
       <span>${children ?? '불러오는 중...'}</span>
     </div>
   `

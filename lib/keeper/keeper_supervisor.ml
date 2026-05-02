@@ -810,23 +810,19 @@ let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
     (continuous restart loop). *)
 let handle_crash_auto_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~reason_tag ~metric_name
-    ~lifecycle_detail ~log_message =
+    ~lifecycle_detail ~log_message ~blocker_class =
   (match read_meta ctx.config entry.name with
    | Ok (Some meta) ->
-       (* Self-healing circuit breaker: compute the next auto-resume delay
-          using exponential back-off.  The first auto-pause sets the initial
-          delay (env-tunable, default 1 h); each subsequent auto-pause
-          doubles it up to the configured maximum (default 24 h).  The
-          keeper will be re-launched by [sweep_and_recover] once the delay
-          has elapsed since the [updated_at] timestamp written here.
-          Setting [MASC_KEEPER_AUTO_RESUME_INITIAL_SEC=0] disables the
-          circuit breaker so behaviour falls back to the manual-resume
-          baseline. *)
        let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
        let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
        let auto_resume_after_sec =
          next_auto_resume_after_sec ~initial_sec ~max_sec
            meta.auto_resume_after_sec
+       in
+       let blocker_text =
+         match blocker_class with
+         | Some cls -> blocker_class_to_string cls
+         | None -> reason_tag
        in
        (match
           write_meta_with_merge
@@ -836,6 +832,11 @@ let handle_crash_auto_pause (ctx : _ context)
               paused = true;
               auto_resume_after_sec;
               updated_at = now_iso ();
+              runtime =
+                { meta.runtime with
+                  last_blocker = blocker_text;
+                  last_blocker_class = blocker_class;
+                };
             }
         with
         | Ok () -> ()
@@ -869,6 +870,7 @@ let handle_stale_storm_pause (ctx : _ context)
     ~reason_tag:"stale_storm"
     ~metric_name:"masc_keeper_stale_storm_paused_total"
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
+    ~blocker_class:(Some Turn_timeout)
     ~log_message:
       (Printf.sprintf
          "STALE STORM AUTO-PAUSED (count=%d in 6h window). \
@@ -884,6 +886,7 @@ let handle_oas_timeout_budget_pause (ctx : _ context)
     ~reason_tag:"oas_timeout_budget_loop"
     ~metric_name:"masc_keeper_oas_timeout_budget_loop_paused_total"
     ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
+    ~blocker_class:(Some Oas_timeout_budget)
     ~log_message:
       (Printf.sprintf
          "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). \

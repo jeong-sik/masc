@@ -139,9 +139,13 @@ let cleanup_zombies
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
                    release_failed_agents := assignee :: !release_failed_agents;
-                 log_event config (Yojson.Safe.from_string (Printf.sprintf
-                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"agent\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
-                   task.id assignee (Types.masc_error_to_string e) (now_iso ()))))
+                 log_event config (`Assoc [
+                   ("type", `String "zombie_cascade_error");
+                   ("task_id", `String task.id);
+                   ("agent", `String assignee);
+                   ("error", `String (Types.masc_error_to_string e));
+                   ("ts", `String (now_iso ()));
+                 ]))
         | Types.Claimed _ | Types.InProgress _
         | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
       ) backlog.tasks;
@@ -165,12 +169,13 @@ let cleanup_zombies
           { s with active_agents =
               List.filter (fun a -> not (List.mem a !successfully_cleaned)) s.active_agents }
         ) in
-        log_event config (Yojson.Safe.from_string (Printf.sprintf
-          "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"skipped\":%d,\"ts\":\"%s\"}"
-          (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !successfully_cleaned)))
-          (List.length !released_tasks)
-          (List.length !zombie_entries - List.length !successfully_cleaned)
-          (now_iso ())))
+        log_event config (`Assoc [
+          ("type", `String "zombie_cleanup");
+          ("agents", `List (List.map (fun s -> `String s) !successfully_cleaned));
+          ("released_tasks", `Int (List.length !released_tasks));
+          ("skipped", `Int (List.length !zombie_entries - List.length !successfully_cleaned));
+          ("ts", `String (now_iso ()));
+        ])
       end;
 
       let total = List.length !zombie_entries in
@@ -420,15 +425,23 @@ let gc config ?(days=7) () =
   else
     results := "✅ No board artifacts" :: !results;
 
-  let cp_json = "null" in
   (* 9. Coord archival removed — rooms are flattened (#4638).
      Startup migration (migrate_room_to_flat) moves active room to root. *)
   results := "✅ Rooms flattened (no room archival needed)" :: !results;
 
-  log_event config (Yojson.Safe.from_string (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"rooms_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
-    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
-    board_artifact_count
-    0 cp_json days (now_iso ())));
+  log_event config (`Assoc [
+    ("type", `String "gc");
+    ("stale_tasks", `Int !stale_count);
+    ("old_messages", `Int !old_msg_count);
+    ("preserved", `Int !preserved_count);
+    ("pubsub_cleaned", `Int !pubsub_cleanup_count);
+    ("keeper_orphans", `Int !keeper_orphan_count);
+    ("sessions_archived", `Int !session_archive_count);
+    ("board_artifacts", `Int board_artifact_count);
+    ("rooms_archived", `Int 0);
+    ("cp_cleanup", `Null);
+    ("days", `Int days);
+    ("ts", `String (now_iso ()));
+  ]);
 
   String.concat "\n" (List.rev !results)

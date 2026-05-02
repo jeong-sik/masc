@@ -11,9 +11,7 @@ let parse_raw_artifact (json : Yojson.Safe.t)
     : Multimodal_keeper_bridge.raw_artifact option =
   match json with
   | `Assoc kv ->
-      let lookup k =
-        try Some (List.assoc k kv) with Not_found -> None
-      in
+      let lookup k = List.assoc_opt k kv in
       let id =
         match lookup "id" with Some (`String s) -> Some s | _ -> None
       in

@@ -733,8 +733,10 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in
   let admin_agent_name =
     match Auth.read_initial_admin base_path with
-    | Some name when String.trim name <> "" -> String.trim name
-    | _ -> "admin"
+    | Some name ->
+        let trimmed = String.trim name in
+        if trimmed <> "" then trimmed else "admin"
+    | None -> "admin"
   in
   match Env_config_core.admin_token_opt () with
   | Some raw_token ->

@@ -265,8 +265,10 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Keeper_types.canonical_keeper_name_from_agent_name owner_name;
       ]
       |> List.filter_map (function
-           | Some value when String.trim value <> "" -> Some (String.trim value)
-           | _ -> None)
+           | Some value ->
+               let trimmed = String.trim value in
+               if trimmed <> "" then Some trimmed else None
+           | None -> None)
       |> List.sort_uniq String.compare
     in
     let rec loop = function

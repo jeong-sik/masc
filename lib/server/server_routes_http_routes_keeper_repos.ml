@@ -31,8 +31,9 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
       ("allow_all", `Bool allow_all);
       ( "credential_id",
         match m.github_credential_id with
-        | Some id when String.trim id <> "" -> `String (String.trim id)
-        | Some _ -> `Null
+        | Some id ->
+            let trimmed = String.trim id in
+            if trimmed <> "" then `String trimmed else `Null
         | None -> `Null );
     ]
 

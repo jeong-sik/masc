@@ -8,8 +8,10 @@
 let server_meta () =
   let git_commit =
     match Sys.getenv_opt "MASC_BUILD_GIT_COMMIT" with
-    | Some c when String.trim c <> "" -> Some (String.trim c)
-    | _ -> None
+    | Some c ->
+        let trimmed = String.trim c in
+        if trimmed <> "" then Some trimmed else None
+    | None -> None
   in
   `Assoc
     [

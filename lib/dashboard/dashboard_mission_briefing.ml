@@ -268,8 +268,10 @@ let start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr () =
 (* ── Public entry point ─────────────────────────────────────────── *)
 
 let actor_name = function
-  | Some value when String.trim value <> "" -> String.trim value
-  | _ -> "dashboard"
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then trimmed else "dashboard"
+  | None -> "dashboard"
 
 let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in

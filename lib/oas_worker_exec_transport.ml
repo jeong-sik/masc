@@ -381,12 +381,6 @@ let trim_nonempty_string raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None else Some trimmed
 
-let trim_nonempty value =
-  Option.bind value trim_nonempty_string
-
-let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
-
 let runtime_mcp_policy_of_tool_names ?agent_name
     ?(allow_keeper_internal = false) (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =

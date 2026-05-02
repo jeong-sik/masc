@@ -34,8 +34,15 @@ let resolve_api_key endpoint =
   match Provider_adapter.voice_endpoint_auth_env_name endpoint with
   | Some env_name -> (
       match Sys.getenv_opt env_name with
-      | Some value when String.trim value <> "" -> Ok (String.trim value)
-      | _ ->
+      | Some value ->
+          let trimmed = String.trim value in
+          if trimmed <> "" then Ok trimmed
+          else
+            Error
+              (Printf.sprintf
+                 "voice provider %s (endpoint %s) expects %s to be set"
+                 adapter.canonical_name endpoint.id env_name)
+      | None ->
           Error
             (Printf.sprintf
                "voice provider %s (endpoint %s) expects %s to be set"

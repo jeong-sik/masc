@@ -480,8 +480,13 @@ let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
 
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with
-  | Some text when String.trim text <> "" -> Some (String.trim text)
-  | _ ->
+  | Some text ->
+      let trimmed = String.trim text in
+      if trimmed <> "" then Some trimmed
+      else
+        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
+        if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+  | None ->
       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
       if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
 

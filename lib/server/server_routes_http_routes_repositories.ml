@@ -160,14 +160,18 @@ let parse_repository_json body_str =
       else
         let inferred_name =
           match raw_name with
-          | Some name when String.trim name <> "" -> String.trim name
-          | _ -> repo_name_from_url url
+          | Some name ->
+              let trimmed = String.trim name in
+              if trimmed <> "" then trimmed else repo_name_from_url url
+          | None -> repo_name_from_url url
         in
         let* raw_id = get_string_field fields "id" in
         let id_source =
           match raw_id with
-          | Some id when String.trim id <> "" -> String.trim id
-          | _ -> inferred_name
+          | Some id ->
+              let trimmed = String.trim id in
+              if trimmed <> "" then trimmed else inferred_name
+          | None -> inferred_name
         in
         (match slug_of_repo_name id_source with
         | None -> Error "repository id could not be inferred"

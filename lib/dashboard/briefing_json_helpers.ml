@@ -70,8 +70,10 @@ let rec take n = function
   | x :: xs -> x :: take (n - 1) xs
 
 let option_string_json = function
-  | Some value when String.trim value <> "" -> `String (String.trim value)
-  | _ -> `Null
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then `String trimmed else `Null
+  | None -> `Null
 
 let trim_to_option = function
   | Some text -> Dashboard_utils.trim_to_option text

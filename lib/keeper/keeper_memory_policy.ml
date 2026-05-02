@@ -580,8 +580,10 @@ let progress_markdown_of_snapshot
        | Some g when g >= 0 -> Printf.sprintf "Generation: %d" g
        | _ -> "");
       (match updated_at with
-       | Some ts when String.trim ts <> "" -> "Updated: " ^ String.trim ts
-       | _ -> "");
+       | Some ts ->
+           let trimmed = String.trim ts in
+           if trimmed <> "" then "Updated: " ^ trimmed else ""
+       | None -> "");
       "This file is a filesystem-first recovery cache. Re-verify live world state before acting.";
     ]
     |> List.filter (fun line -> String.trim line <> "")

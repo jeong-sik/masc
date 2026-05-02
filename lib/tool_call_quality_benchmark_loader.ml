@@ -97,7 +97,7 @@ let parse_json_check json =
   let* path = required_string_field json "path" in
   Ok {
     path;
-    equals = (match member_opt "equals" json with Some value -> Some value | None -> None);
+    equals = member_opt "equals" json;
     contains = json |> member "contains" |> to_string_option;
     min_int = json |> member "min_int" |> to_int_option;
     present = json |> member "present" |> to_bool_option;
@@ -110,7 +110,7 @@ let parse_arg_check json =
   Ok {
     tool_name;
     path;
-    equals = (match member_opt "equals" json with Some value -> Some value | None -> None);
+    equals = member_opt "equals" json;
     contains = json |> member "contains" |> to_string_option;
     min_int = json |> member "min_int" |> to_int_option;
     present = json |> member "present" |> to_bool_option;

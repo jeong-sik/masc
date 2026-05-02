@@ -161,9 +161,7 @@ let do_flush () =
 let is_known_degenerate (json : Yojson.Safe.t) : bool =
   match json with
   | `Assoc fields ->
-      let get k =
-        match List.assoc_opt k fields with Some v -> Some v | None -> None
-      in
+      let get k = List.assoc_opt k fields in
       (match get "site", get "raw_value", get "threshold", get "triggered" with
        | Some (`String "post_tool_use_failure"),
          Some (`Float 1.0 | `Int 1),

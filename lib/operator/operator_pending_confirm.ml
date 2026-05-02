@@ -31,8 +31,13 @@ let trace_id prefix =
   prefix ^ "_" ^ String.sub digest 0 16
 
 let normalized_actor ~context_actor = function
-  | Some raw when String.trim raw <> "" -> String.trim raw
-  | _ ->
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed <> "" then trimmed
+      else
+        let trimmed = String.trim context_actor in
+        if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
+  | None ->
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 

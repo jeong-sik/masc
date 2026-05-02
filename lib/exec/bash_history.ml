@@ -151,30 +151,34 @@ let append ~base_path ~keeper_name entry =
 
 let count_lines path =
   let ic = open_in path in
-  let count = ref 0 in
-  (try while true do
-       let _ = input_line ic in
-       incr count
-     done
-   with End_of_file -> ());
-  close_in_no_err ic;
-  !count
+  Fun.protect
+    ~finally:(fun () -> close_in_no_err ic)
+    (fun () ->
+      let count = ref 0 in
+      (try while true do
+           let _ = input_line ic in
+           incr count
+         done
+       with End_of_file -> ());
+      !count)
 
 let load_entries path =
   let ic = open_in path in
-  let entries = ref [] in
-  (try while true do
-       let line = input_line ic in
-       match Yojson.Safe.from_string line with
-       | exception _ -> ()
-       | json ->
-           match entry_of_json json with
-           | Some e -> entries := e :: !entries
-           | None -> ()
-     done
-   with End_of_file -> ());
-  close_in_no_err ic;
-  List.rev !entries
+  Fun.protect
+    ~finally:(fun () -> close_in_no_err ic)
+    (fun () ->
+      let entries = ref [] in
+      (try while true do
+           let line = input_line ic in
+           match Yojson.Safe.from_string line with
+           | exception _ -> ()
+           | json ->
+               match entry_of_json json with
+               | Some e -> entries := e :: !entries
+               | None -> ()
+         done
+       with End_of_file -> ());
+      List.rev !entries)
 
 let drop n xs =
   let rec aux n = function

@@ -316,10 +316,12 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
                 }
               in
               write_json config agent_file (agent_to_yojson updated);
-              log_event config
-                (Yojson.Safe.from_string (Printf.sprintf
-                   "{\"type\":\"agent_current_task_reconciled\",\"agent\":\"%s\",\"stale_task\":\"%s\",\"ts\":\"%s\"}"
-                   agent_name task_id (now_iso ())))
+              log_event config (`Assoc [
+                   ("type", `String "agent_current_task_reconciled");
+                   ("agent", `String agent_name);
+                   ("stale_task", `String task_id);
+                   ("ts", `String (now_iso ()));
+                 ])
           | Some _ | None -> ())
       | Error msg ->
           Log.Misc.error "agent state reconcile failed: %s" msg)
@@ -385,9 +387,14 @@ let claim_next_r
                and then re-entered claim_next).  Same reason vocabulary
                the structured observation already uses. *)
             let from_status = task_status_label prev.task_status in
-            log_event config (Yojson.Safe.from_string (Printf.sprintf
-              "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"from_status\":\"%s\",\"reason\":\"prev_claim_implicit_replaced\",\"ts\":\"%s\"}"
-              agent_name prev.id from_status (now_iso ())));
+            log_event config (`Assoc [
+              ("type", `String "task_claim_next_auto_release");
+              ("agent", `String agent_name);
+              ("released_task", `String prev.id);
+              ("from_status", `String from_status);
+              ("reason", `String "prev_claim_implicit_replaced");
+              ("ts", `String (now_iso ()));
+            ]);
             (* #10421: warn-level log so dashboards see the implicit
                release at fleet scale. [InProgress → Todo] is the
                more concerning subset (mid-work churn) — from_status
@@ -451,14 +458,20 @@ let claim_next_r
       in
       if blocked_todo <> [] then
         log_event config
-          (Yojson.Safe.from_string (Printf.sprintf
-             "{\"type\":\"task_claim_next_skip_blocked\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
-             agent_name (List.length blocked_todo) (now_iso ())));
+          (`Assoc [
+             ("type", `String "task_claim_next_skip_blocked");
+             ("agent", `String agent_name);
+             ("blocked", `Int (List.length blocked_todo));
+             ("ts", `String (now_iso ()));
+           ]);
       if verification_blocked_todo <> [] then
         log_event config
-          (Yojson.Safe.from_string (Printf.sprintf
-             "{\"type\":\"task_claim_next_skip_verification\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
-             agent_name (List.length verification_blocked_todo) (now_iso ())));
+          (`Assoc [
+             ("type", `String "task_claim_next_skip_verification");
+             ("agent", `String agent_name);
+             ("blocked", `Int (List.length verification_blocked_todo));
+             ("ts", `String (now_iso ()));
+           ]);
 
       let primary_unclaimed =
         List.filter task_is_primary_claim_pool_candidate sorted
@@ -493,12 +506,13 @@ let claim_next_r
          && List.exists (fun task -> task_required_tools task <> []) unclaimed
       then
         log_event config
-          (Yojson.Safe.from_string (Printf.sprintf
-             "{\"type\":\"task_claim_next_required_tools_unknown_surface\",\"agent\":\"%s\",\"candidate_count\":%d,\"ts\":\"%s\"}"
-             agent_name
-             (List.length
-                (List.filter (fun task -> task_required_tools task <> []) unclaimed))
-             (now_iso ())));
+          (`Assoc [
+             ("type", `String "task_claim_next_required_tools_unknown_surface");
+             ("agent", `String agent_name);
+             ("candidate_count", `Int (List.length
+                (List.filter (fun task -> task_required_tools task <> []) unclaimed)));
+             ("ts", `String (now_iso ()));
+           ]);
       let required_tool_claim_allowed (task : task) =
         let required_tools = task_required_tools task in
         required_tools_allowed ?agent_tool_names required_tools
@@ -513,14 +527,14 @@ let claim_next_r
           unclaimed
       in
       if required_tool_excluded <> [] then
-        log_event config
-          (Yojson.Safe.from_string (Printf.sprintf
-             "{\"type\":\"task_claim_next_skip_required_tools\",\"agent\":\"%s\",\"blocked\":%d,\"receipt_blocked\":%b,\"agent_tool_names_known\":%b,\"ts\":\"%s\"}"
-             agent_name
-             (List.length required_tool_excluded)
-             (List.exists receipt_blocks_task required_tool_excluded)
-             (Option.is_some agent_tool_names)
-             (now_iso ())));
+        log_event config (`Assoc [
+          ("type", `String "task_claim_next_skip_required_tools");
+          ("agent", `String agent_name);
+          ("blocked", `Int (List.length required_tool_excluded));
+          ("receipt_blocked", `Bool (List.exists receipt_blocks_task required_tool_excluded));
+          ("agent_tool_names_known", `Bool (Option.is_some agent_tool_names));
+          ("ts", `String (now_iso ()));
+        ]);
       let effective_task_filter task =
         task_filter task && required_tool_claim_allowed task
       in
@@ -636,9 +650,13 @@ let claim_next_r
                   ("priority", `Int task.priority);
                 ]);
 
-          log_event config (Yojson.Safe.from_string (Printf.sprintf
-            "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
-            agent_name task.id task.priority (now_iso ())));
+          log_event config (`Assoc [
+            ("type", `String "task_claim_next");
+            ("agent", `String agent_name);
+            ("task", `String task.id);
+            ("priority", `Int task.priority);
+            ("ts", `String (now_iso ()));
+          ]);
           Coord_task.observe_task_transition config ~agent_name ~task_id:task.id
             ~transition:Types.Claim
             ~details:
@@ -704,18 +722,26 @@ let release_stale_claims config ~ttl_seconds =
               let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at in
               if now_f -. ts > ttl_seconds then begin
                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                log_event config (Yojson.Safe.from_string (Printf.sprintf
-                  "{\"type\":\"stale_claim_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
-                  task.id assignee (now_f -. ts) now_str));
+                log_event config (`Assoc [
+                  ("type", `String "stale_claim_released");
+                  ("task_id", `String task.id);
+                  ("assignee", `String assignee);
+                  ("age_s", `Float (now_f -. ts));
+                  ("ts", `String now_str);
+                ]);
                 { task with task_status = Todo }
               end else task
           | InProgress { assignee; started_at } ->
               let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at in
               if now_f -. ts > ttl_seconds then begin
                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                log_event config (Yojson.Safe.from_string (Printf.sprintf
-                  "{\"type\":\"stale_inprogress_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
-                  task.id assignee (now_f -. ts) now_str));
+                log_event config (`Assoc [
+                  ("type", `String "stale_inprogress_released");
+                  ("task_id", `String task.id);
+                  ("assignee", `String assignee);
+                  ("age_s", `Float (now_f -. ts));
+                  ("ts", `String now_str);
+                ]);
                 { task with task_status = Todo }
               end else task
           | AwaitingVerification _ -> task  (* leave alone; awaiting verifier *)

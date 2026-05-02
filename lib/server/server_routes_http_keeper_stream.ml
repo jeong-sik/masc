@@ -463,8 +463,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 ~channel_user_id:payload.channel_user_id
             else
               match agent_from_request request with
-              | Some raw when String.trim raw <> "" -> String.trim raw
-              | _ -> "unknown"
+              | Some raw ->
+                  let trimmed = String.trim raw in
+                  if trimmed <> "" then trimmed else "unknown"
+              | None -> "unknown"
           in
           (* Track whether any text deltas were streamed to the client.
              When streaming is active, the MODEL text is sent token-by-token

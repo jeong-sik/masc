@@ -34,9 +34,13 @@ let update_priority config ~task_id ~priority =
           } in
           write_backlog config new_backlog;
 
-          log_event config (Yojson.Safe.from_string (Printf.sprintf
-            "{\"type\":\"priority_change\",\"task\":\"%s\",\"old\":%d,\"new\":%d,\"ts\":\"%s\"}"
-            task_id old_priority priority (now_iso ())));
+          log_event config (`Assoc [
+            ("type", `String "priority_change");
+            ("task", `String task_id);
+            ("old", `Int old_priority);
+            ("new", `Int priority);
+            ("ts", `String (now_iso ()));
+          ]);
           (Atomic.get Coord_hooks.on_task_mutation_fn) ();
 
           Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority

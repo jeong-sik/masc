@@ -108,9 +108,14 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            broadcast config ~from_agent:nickname
              ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname)
          in
-         log_event config (Yojson.Safe.from_string (Printf.sprintf
-           "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
-           nickname agent_type new_session_id (now_iso ())));
+         log_event config (`Assoc [
+           ("type", `String "agent_join");
+           ("agent", `String nickname);
+           ("agent_type", `String agent_type);
+           ("session_id", `String new_session_id);
+           ("rejoin", `Bool true);
+           ("ts", `String (now_iso ()));
+         ]);
          (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
            ~event:Coord_hooks.Lifecycle_rejoin
            ~details:
@@ -174,13 +179,14 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   in
 
   (* Log event with metadata *)
-  log_event config (Yojson.Safe.from_string (Printf.sprintf
-    "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
-    nickname
-    agent_type
-    session_id
-    (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
-    (now_iso ())));
+  log_event config (`Assoc [
+    ("type", `String "agent_join");
+    ("agent", `String nickname);
+    ("agent_type", `String agent_type);
+    ("session_id", `String session_id);
+    ("capabilities", `List (List.map (fun s -> `String s) capabilities));
+    ("ts", `String (now_iso ()));
+  ]);
   (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
     ~event:Coord_hooks.Lifecycle_join
     ~details:
@@ -239,9 +245,11 @@ let leave config ~agent_name =
     in
 
     (* Log event *)
-    log_event config (Yojson.Safe.from_string (Printf.sprintf
-      "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
-      actual_name (now_iso ())));
+    log_event config (`Assoc [
+      ("type", `String "agent_leave");
+      ("agent", `String actual_name);
+      ("ts", `String (now_iso ()));
+    ]);
     (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
       ~event:Coord_hooks.Lifecycle_leave
       ~details:`Null;

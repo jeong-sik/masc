@@ -11,8 +11,10 @@ let actor_cache_key (config : Coord_utils.config) prefix actor_name =
     (cache_partition_segment config) actor_name
 
 let normalize_actor_name = function
-  | Some value when String.trim value <> "" -> String.trim value
-  | _ -> "dashboard"
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed <> "" then trimmed else "dashboard"
+  | None -> "dashboard"
 
 let get_or_compute_snapshot_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in

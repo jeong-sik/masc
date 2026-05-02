@@ -64,8 +64,11 @@ let resolve_governance_model_used ~raw_model ~canonical_model_id =
   if String.trim raw_model <> "" then raw_model, Response_model
   else
     match canonical_model_id with
-    | Some id when String.trim id <> "" -> String.trim id, Telemetry_resolved
-    | _ -> "unknown_provider", Unknown_sentinel
+    | Some id ->
+        let trimmed = String.trim id in
+        if trimmed <> "" then trimmed, Telemetry_resolved
+        else "unknown_provider", Unknown_sentinel
+    | None -> "unknown_provider", Unknown_sentinel
 
 let governance_dir base_path =
   Filename.concat

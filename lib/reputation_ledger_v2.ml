@@ -78,8 +78,10 @@ let event_date_string ts =
     tm.Unix.tm_mday
 
 let opt_string_field key = function
-  | Some s when String.trim s <> "" -> [ (key, `String (String.trim s)) ]
-  | _ -> []
+  | Some s ->
+      let trimmed = String.trim s in
+      if trimmed <> "" then [ (key, `String trimmed) ] else []
+  | None -> []
 
 (** {1 JSON serialization} *)
 

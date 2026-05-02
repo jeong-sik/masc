@@ -134,24 +134,26 @@ let read_token_from_hosts_yml ~gh_config_dir =
   else
     try
       let ic = open_in path in
-      let token = ref None in
-      (try
-         while !token = None do
-           let line = input_line ic in
-           let trimmed = String.trim line in
-           let prefix = "oauth_token:" in
-           let plen = String.length prefix in
-           if String.length trimmed > plen
-              && String.equal (String.sub trimmed 0 plen) prefix
-           then
-             let raw =
-               String.sub trimmed plen (String.length trimmed - plen)
-             in
-             token := Some (strip_value_decorations raw)
-         done
-       with End_of_file -> ());
-      close_in ic;
-      !token
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          let token = ref None in
+          (try
+             while !token = None do
+               let line = input_line ic in
+               let trimmed = String.trim line in
+               let prefix = "oauth_token:" in
+               let plen = String.length prefix in
+               if String.length trimmed > plen
+                  && String.equal (String.sub trimmed 0 plen) prefix
+               then
+                 let raw =
+                   String.sub trimmed plen (String.length trimmed - plen)
+                 in
+                 token := Some (strip_value_decorations raw)
+             done
+           with End_of_file -> ());
+          !token)
     with Sys_error _ -> None
 
 (** Compute the SHA-256 prefix of the [oauth_token] stored in
@@ -284,11 +286,16 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
   else
     try
       let ic = open_in path in
-      let lines = ref [] in
-      (try
-         while true do lines := input_line ic :: !lines done
-       with End_of_file -> ());
-      close_in ic;
+      let lines =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () ->
+            let lines = ref [] in
+            (try
+               while true do lines := input_line ic :: !lines done
+             with End_of_file -> ());
+            !lines)
+      in
       let rewritten =
         List.rev_map
           (fun line ->
@@ -309,7 +316,7 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
               in
               Printf.sprintf "%suser: %s" leading_ws identity_label
             else line)
-          !lines
+          lines
       in
       let oc = open_out path in
       Fun.protect

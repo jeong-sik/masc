@@ -136,7 +136,9 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
     List.find_map
       (fun json ->
         match member key json with
-        | `String s when String.trim s <> "" -> Some (String.trim s)
+        | `String s ->
+            let trimmed = String.trim s in
+            if trimmed <> "" then Some trimmed else None
         | _ -> None)
       traces
   in
@@ -147,7 +149,9 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
     |> List.find_map
          (fun json ->
            match member "tool_output_preview" json with
-           | `String s when String.trim s <> "" -> Some (String.trim s)
+           | `String s ->
+               let trimmed = String.trim s in
+               if trimmed <> "" then Some trimmed else None
            | _ -> None)
   in
   (tool_input_preview, tool_args_preview, tool_output_preview)

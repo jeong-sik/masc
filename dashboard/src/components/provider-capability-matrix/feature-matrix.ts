@@ -1,14 +1,18 @@
 // FeatureMatrix — 15 features × 13 providers with live provider overlay.
 
 import { html } from 'htm/preact'
+import { useMemo } from 'preact/hooks'
 import {
   FEATURES,
   PROVIDER_IDS,
   PROVIDER_LABELS,
+  PROVIDER_KIND,
   supportCellClass,
+  computeMatrixSummary,
   runtimeProviderToMatrixId,
 } from './data'
 import { StatusDot } from '../common/status-dot'
+import { StatTile } from '../common/stat-tile'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
 
 type LiveStatus = 'ok' | 'bad' | 'warn' | 'neutral'
@@ -53,27 +57,41 @@ export function liveStatusDot(
 }
 
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
+  const summary = useMemo(() => computeMatrixSummary(), [])
+  const liveOk = liveProviders.filter(p => liveProviderStatus(p) === 'ok').length
+
   return html`
-    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-      <table class="w-full text-xs border-collapse">
-        <thead>
-          <tr class="bg-[var(--white-4)]">
-            <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[140px]">
-              기능
-            </th>
-            ${PROVIDER_IDS.map(pid => {
-              const dot = liveStatusDot(pid, liveProviders)
-              return html`
-                <th key=${pid} class="border-b border-[var(--color-border-default)] px-1.5 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[60px]">
-                  <div class="flex flex-col items-center gap-0.5">
-                    ${dot ? html`<${StatusDot} size="xs" class=${liveStatusDotClass(dot)} />` : null}
-                    <span>${PROVIDER_LABELS[pid] ?? pid}</span>
-                  </div>
-                </th>
-              `
-            })}
-          </tr>
-        </thead>
+    <div class="flex flex-col gap-2">
+      <div class="grid grid-cols-5 gap-2">
+        <${StatTile} label="네이티브" value=${summary.native} variant="gold" hint=${`${((summary.native / summary.total) * 100).toFixed(0)}%`} />
+        <${StatTile} label="부분 지원" value=${summary.partial} hint="◐" />
+        <${StatTile} label="미지원" value=${summary.unsupported} variant="warn" hint="○" />
+        <${StatTile} label="런타임 활성" value=${liveOk} variant="accent" hint=${`${liveProviders.length} 중`} />
+        <${StatTile} label="CLI Wrapper" value=${Object.values(PROVIDER_KIND).filter(k => k === 'cli').length} hint="usage: strip" />
+      </div>
+
+      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--white-4)]">
+              <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[140px]">
+                기능
+              </th>
+              ${PROVIDER_IDS.map(pid => {
+                const dot = liveStatusDot(pid, liveProviders)
+                const kind = PROVIDER_KIND[pid]
+                return html`
+                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1.5 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[60px]">
+                    <div class="flex flex-col items-center gap-0.5">
+                      ${dot ? html`<${StatusDot} size="xs" class=${liveStatusDotClass(dot)} />` : null}
+                      <span>${PROVIDER_LABELS[pid] ?? pid}</span>
+                      ${kind === 'cli' ? html`<span class="text-[8px] font-mono text-[var(--color-fg-disabled)] uppercase">cli</span>` : null}
+                    </div>
+                  </th>
+                `
+              })}
+            </tr>
+          </thead>
         <tbody>
           ${FEATURES.map((feat, i) => html`
             <tr key=${feat.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
@@ -94,6 +112,7 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
           `)}
         </tbody>
       </table>
+      </div>
     </div>
   `
 }

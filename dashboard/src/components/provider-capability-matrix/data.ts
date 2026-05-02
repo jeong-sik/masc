@@ -174,6 +174,33 @@ export const PROVIDER_LABELS: Record<string, string> = {
   codex_cli: 'Codex CLI',
 }
 
+// Cascade tier in default OAS routing order (1 = primary).
+export const PROVIDER_CASCADE_TIER: Record<string, number> = {
+  anthropic: 1, openai: 2, moonshot: 3, google: 4,
+  deepseek: 5, xai: 6, ollama: 7,
+}
+
+export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
+  openai: 'direct', claude: 'direct', gemini: 'direct', deepseek: 'direct',
+  qwen35: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
+  ollama: 'direct', llamacpp: 'direct', glm: 'direct',
+  gemini_cli: 'cli', codex_cli: 'cli',
+}
+
+export function computeMatrixSummary() {
+  let native = 0, partial = 0, unsupported = 0, total = 0
+  for (const feat of FEATURES) {
+    for (const pid of PROVIDER_IDS) {
+      const v = feat.providers[pid]
+      if (v === '●') native++
+      else if (v === '◐') partial++
+      else if (v === '○') unsupported++
+      total++
+    }
+  }
+  return { native, partial, unsupported, total }
+}
+
 // ── BFCL Benchmarks ─────────────────────────────────────────────
 // Source: sec04 Table 4.2.2
 

@@ -172,7 +172,7 @@ export function PromptRegistryPanel() {
       </div>
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
-      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[#bae6fd]">${status}</div>` : null}
+      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[var(--sky-light)]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-65 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-2">

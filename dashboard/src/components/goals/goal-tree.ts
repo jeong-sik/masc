@@ -513,7 +513,7 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const barColor =
     clamped >= 80 ? 'var(--color-status-ok)'
     : clamped >= 50 ? 'var(--amber-bright)'
-    : clamped >= 20 ? '#fb923c'
+    : clamped >= 20 ? 'var(--color-orange-400)'
     : 'var(--color-status-err)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'

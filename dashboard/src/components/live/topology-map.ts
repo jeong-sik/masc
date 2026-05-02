@@ -317,7 +317,7 @@ export function LiveTopologyMap() {
   }, [graph])
 
   return html`
-    <div class="relative w-full rounded border border-[var(--color-border-divider)] bg-[#0c1017] overflow-hidden">
+    <div class="relative w-full rounded border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] overflow-hidden">
       <div ref=${containerRef} class="w-full h-64" role="img" aria-label="라이브 에이전트 토폴로지 맵"></div>
       ${graph.nodes.length === 0
         ? html`

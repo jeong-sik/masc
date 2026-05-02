@@ -40,6 +40,28 @@ import {
 export { resetHarnessHealthState, refreshHarnessSurface }
 
 // ── Mermaid flow helpers (live state graph) ──
+// Mermaid classDef requires literal hex values — CSS vars are not resolved.
+// These constants map to design system token values for single-source truth.
+
+const M_SOURCE_FILL = '#0f172a'     // --color-slate-900
+const M_SOURCE_STROKE = '#475569'   // --color-slate-600
+const M_SOURCE_TEXT = '#cbd5e1'     // --color-slate-300
+const M_HUB_FILL = '#111827'        // --color-bg-surface
+const M_HUB_STROKE = '#38bdf8'      // --color-sky-400
+const M_HUB_TEXT = '#e0f2fe'        // --color-sky-100
+const M_HEALTHY_FILL = '#082f1d'
+const M_HEALTHY_STROKE = '#4ade80'
+const M_HEALTHY_TEXT = '#dcfce7'
+const M_WARN_FILL = '#3b2a07'
+const M_WARN_STROKE = '#fbbf24'
+const M_WARN_TEXT = '#fde68a'
+const M_STALE_FILL = '#1f2937'
+const M_STALE_STROKE = '#94a3b8'    // --color-slate-400
+const M_STALE_TEXT = '#e2e8f0'      // --color-slate-200
+const M_IDLE_FILL = '#111827'       // --color-bg-surface
+const M_IDLE_STROKE = '#475569'     // --color-slate-600
+const M_IDLE_TEXT = '#94a3b8'       // --color-slate-400
+const M_ACTIVE_STROKE = '#7dd3fc'
 
 type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
 
@@ -135,13 +157,13 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
   const currentRail = activeRail(data)
   const source = [
     'flowchart LR',
-    '  classDef source fill:#0f172a,stroke:#475569,color:#cbd5e1;',
-    '  classDef hub fill:#111827,stroke:#38bdf8,color:#e0f2fe;',
-    '  classDef healthyRail fill:#082f1d,stroke:#4ade80,color:#dcfce7;',
-    '  classDef warningRail fill:#3b2a07,stroke:#fbbf24,color:#fde68a;',
-    '  classDef staleRail fill:#1f2937,stroke:#94a3b8,color:#e2e8f0,stroke-dasharray: 5 3;',
-    '  classDef idleRail fill:#111827,stroke:#475569,color:#94a3b8,stroke-dasharray: 3 4;',
-    '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
+    `  classDef source fill:${M_SOURCE_FILL},stroke:${M_SOURCE_STROKE},color:${M_SOURCE_TEXT};`,
+    `  classDef hub fill:${M_HUB_FILL},stroke:${M_HUB_STROKE},color:${M_HUB_TEXT};`,
+    `  classDef healthyRail fill:${M_HEALTHY_FILL},stroke:${M_HEALTHY_STROKE},color:${M_HEALTHY_TEXT};`,
+    `  classDef warningRail fill:${M_WARN_FILL},stroke:${M_WARN_STROKE},color:${M_WARN_TEXT};`,
+    `  classDef staleRail fill:${M_STALE_FILL},stroke:${M_STALE_STROKE},color:${M_STALE_TEXT},stroke-dasharray: 5 3;`,
+    `  classDef idleRail fill:${M_IDLE_FILL},stroke:${M_IDLE_STROKE},color:${M_IDLE_TEXT},stroke-dasharray: 3 4;`,
+    `  classDef activeRail stroke:${M_ACTIVE_STROKE},stroke-width:3px;`,
     '  taskDone["작업 완료<br/>판정 검증"]',
     '  keeperTurn["keeper 턴<br/>압축 압력"]',
     '  keeperRollover["keeper 교체<br/>지표 스냅샷"]',

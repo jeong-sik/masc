@@ -51,9 +51,9 @@ export const ARCHITECTURE_FLOW = `graph LR
     G1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
-    classDef store fill:#1e293b,stroke:#334155,color:#f1f5f9
-    classDef action fill:#0f766e,stroke:#14b8a6,color:#f0fdfa
-    classDef ui fill:#7c2d12,stroke:#f97316,color:#ffedd5
+    classDef store fill:#1e293b,stroke:#334155,color:var(--frost-100)
+    classDef action fill:#0f766e,stroke:#14b8a6,color:var(--frost-100)
+    classDef ui fill:#7c2d12,stroke:#f97316,color:var(--frost-100)
     class F1,G1 store
     class M1,M3,H1,H2,T2 action
     class UI ui`
@@ -97,7 +97,7 @@ const WEIGHT_RAMP: ReadonlyArray<{
   tw: string
   label: string
 }> = [
-  { floor: 0.7, svg: '#10b981', tw: 'bg-[var(--ok-10)]', label: '70%+' },
+  { floor: 0.7, svg: 'var(--color-emerald)', tw: 'bg-[var(--ok-10)]', label: '70%+' },
   { floor: 0.4, svg: 'var(--amber-bright)', tw: 'bg-[var(--warn-10)]', label: '40%+' },
   { floor: 0,   svg: 'var(--bad-light)', tw: 'bg-[var(--bad-10)]',    label: '<40%' },
 ]
@@ -200,7 +200,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
               <text
                 text-anchor="start"
                 font-size="10"
-                fill="#cbd5e1"
+                fill="var(--slate-300)"
                 font-family="monospace"
                 class="cursor-pointer hover:fill-sky-400"
                 onClick=${() => openAgentDetail(name)}
@@ -216,7 +216,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
               y=${topPad + i * cell + cell / 2 + 4}
               text-anchor="end"
               font-size="10"
-              fill="#cbd5e1"
+              fill="var(--slate-300)"
               font-family="monospace"
               class="cursor-pointer hover:fill-sky-400"
               onClick=${() => openAgentDetail(name)}
@@ -253,7 +253,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                   height=${cell - 1}
                   fill=${weightColor(s.weight)}
                   opacity=${weightOpacity(s.weight)}
-                  stroke=${active ? '#f1f5f9' : isDiag ? 'var(--slate-500)' : 'var(--panel-dark)'}
+                  stroke=${active ? 'var(--frost-100)' : isDiag ? 'var(--slate-500)' : 'var(--panel-dark)'}
                   stroke-dasharray=${isDiag ? '2 2' : ''}
                   stroke-width=${active ? '1.5' : '0.5'}
                   class="cursor-pointer hover:stroke-[var(--color-fg-muted)]"
@@ -318,7 +318,7 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
   const first = chronological[0]?.[1] ?? 0
   const last = chronological[n - 1]?.[1] ?? 0
   const trendColor =
-    last > first + TREND_DEAD_ZONE ? '#10b981' :
+    last > first + TREND_DEAD_ZONE ? 'var(--color-emerald)' :
     last < first - TREND_DEAD_ZONE ? 'var(--bad-light)' : 'var(--slate-400)'
   return html`
     <svg

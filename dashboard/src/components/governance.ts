@@ -160,7 +160,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[#f7b6b6]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
   `
 }
 

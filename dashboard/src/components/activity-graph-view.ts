@@ -21,8 +21,8 @@ export function nodeColor(kind: string, status: string): string {
     case 'task': return 'var(--color-status-warn)'
     case 'decision': return 'var(--purple)'
     case 'operation': return 'var(--color-status-ok)'
-    case 'debate': return '#fb923c'
-    case 'post': return '#f472b6'
+    case 'debate': return 'var(--color-orange-400)'
+    case 'post': return 'var(--color-pink-400)'
     default: return 'var(--slate-400)'
   }
 }
@@ -244,7 +244,7 @@ export function GraphView({ data }: GraphViewProps) {
   }
 
   return html`
-    <div class="relative w-full my-3 rounded border border-[var(--color-border-default)] bg-[#0f1117]">
+    <div class="relative w-full my-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div ref=${containerRef} class="w-full h-90" role="img" aria-label="에이전트 활동 네트워크 그래프"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
@@ -254,7 +254,7 @@ export function GraphView({ data }: GraphViewProps) {
         { label: '작업', color: 'var(--color-status-warn)' },
         { label: '결정', color: 'var(--purple)' },
         { label: '작전', color: 'var(--color-status-ok)' },
-        { label: '게시글', color: '#f472b6' },
+        { label: '게시글', color: 'var(--color-pink-400)' },
       ].map(({ label, color }) => html`
         <div class="flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]" key=${label}>
           <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>

@@ -34,7 +34,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
     } else if (typeof data === 'number') {
       valueNode = html`<span class="text-[var(--color-status-warn)]">${data}</span>`
     } else if (typeof data === 'boolean') {
-      valueNode = html`<span class="text-[#e27e8d]">${data ? 'true' : 'false'}</span>`
+      valueNode = html`<span class="text-[var(--rose-light)]">${data ? 'true' : 'false'}</span>`
     } else if (data === null) {
       valueNode = html`<span class="text-[var(--color-fg-muted)] italic">null</span>`
     } else {

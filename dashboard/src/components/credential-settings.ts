@@ -297,7 +297,7 @@ export function CredentialSettings() {
         <h2 class="text-sm font-bold text-text-strong">크리덴셜 관리</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--purple)] text-[#1e1b4b]"
+          class="${btnBase} bg-[var(--purple)] text-[var(--color-bg-0)]"
           onClick=${() => {
             showAddForm.value = !isAdding
             if (!isAdding) resetAddDraft()

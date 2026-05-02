@@ -525,11 +525,9 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
     chip border/bg tones. Returns muted token for empty/sparse
     series so a new connector doesn't leak a stale hue. */
 function deriveTrendColor(series: readonly number[]): string {
-  if (series.length === 0) return '#ffffff22'
+  if (series.length === 0) return 'var(--white-15)'
   const last = series[series.length - 1]!
-  // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
-  // the border-*-400 tones used on HeartbeatUptimeChip.
-  if (last >= 99) return '#34d399'
+  if (last >= 99) return 'var(--color-emerald)'
   if (last >= 95) return 'var(--color-status-warn)'
   return 'var(--rose-light)'
 }

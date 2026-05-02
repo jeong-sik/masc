@@ -178,7 +178,7 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
   const barColor =
     pct >= 80 ? 'var(--color-status-ok)'
     : pct >= 50 ? 'var(--amber-bright)'
-    : pct >= 20 ? '#fb923c'
+    : pct >= 20 ? 'var(--color-orange-400)'
     : 'var(--color-status-err)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'

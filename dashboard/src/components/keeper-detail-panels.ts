@@ -55,13 +55,13 @@ const CTX_SEGMENT_LABELS: Record<string, string> = {
 
 const CTX_SEGMENT_COLORS: Record<string, string> = {
   system_prompt: 'var(--amber-bright)',
-  dynamic_context: '#8b5cf6',
+  dynamic_context: 'var(--purple)',
   memory_context: 'var(--rose-light)',
-  temporal_context: '#14b8a6',
+  temporal_context: 'var(--cyan)',
   user_message: 'var(--sky-400)',
   history_user: 'var(--purple)',
   history_assistant_text: 'var(--blue-400)',
-  history_tool_use: '#84cc16',
+  history_tool_use: 'var(--color-status-ok)',
   history_tool_result: 'var(--bad-light)',
   history_other: 'var(--slate-400)',
   unattributed: 'var(--slate-600)',
@@ -560,7 +560,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
           const saved = p.compaction_saved_tokens ?? 0
           const tip = saved > 0 ? `${trigger} · ${formatTokens(saved)} saved` : trigger
           return html`
-            <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#a855f7" style="cursor:pointer">
+            <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--purple)" style="cursor:pointer">
               <title>${tip}</title>
             </circle>
           `
@@ -621,7 +621,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center gap-4 mb-1.5">
             <span class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
-              <span class="inline-block w-2.5 h-0.5 rounded bg-[#67e8f9]"></span> input
+              <span class="inline-block w-2.5 h-0.5 rounded bg-[var(--cyan)]"></span> input
               <span class="font-mono text-[var(--cyan)]">${formatTokens(lastInput)}</span>
             </span>
             <span class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
@@ -630,7 +630,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
             </span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="입출력 토큰 추이" style="background:var(--bg-deepest);">
-            ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="#67e8f9" stroke-width="1.5" opacity="0.8"/>` : null}
+            ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="var(--cyan)" stroke-width="1.5" opacity="0.8"/>` : null}
             ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5" opacity="0.8"/>` : null}
           </svg>
         <//>
@@ -1040,7 +1040,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </${DetailRow}>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
-            ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
+            ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
           </svg>
         <//>
 
@@ -1106,7 +1106,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
             const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
             return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="var(--color-status-err)" stroke-width="1.5" opacity="0.6"/>`
           })}
-          ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
+          ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
         </svg>
       <//>
 

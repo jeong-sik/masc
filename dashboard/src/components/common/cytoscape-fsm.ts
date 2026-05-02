@@ -34,6 +34,7 @@ export interface FsmGraphSpec {
 // pass literal hex/rgb values into the stylesheet.
 const TOKEN_FALLBACKS: Record<string, string> = {
   '--slate-800': '#1e293b',
+  '--slate-700': '#334155',
   '--slate-600': '#475569',
   '--slate-500': '#64748b',
   '--slate-400': '#94a3b8',
@@ -192,7 +193,7 @@ function buildStylesheet() {
       selector: ':parent',
       style: {
         'background-color': resolveCssVar('--panel-dark'),
-        'border-color': '#334155',
+        'border-color': resolveCssVar('--slate-700'),
         'border-width': 1,
         'border-style': 'dashed',
         'text-valign': 'top',

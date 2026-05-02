@@ -123,7 +123,7 @@ function actionCategoryClass(group: ActionTimelineGroup): string {
     case 'message':
       return 'border-[var(--cyan)]/35 bg-[var(--cyan)]/10 text-[var(--cyan)]'
     case 'board':
-      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
+      return 'border-[var(--purple)]/35 bg-[var(--purple)]/10 text-[var(--purple)]'
     case 'governance':
       return 'border-[var(--rose-light)]/35 bg-[var(--color-status-err)]/10 text-[var(--bad-light)]'
     case 'lifecycle':

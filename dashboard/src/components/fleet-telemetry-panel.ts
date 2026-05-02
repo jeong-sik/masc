@@ -102,7 +102,7 @@ function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
   if (direction === 'flat') return 'var(--slate-500)'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
-  return bad ? 'var(--bad-light)' : '#34d399'
+  return bad ? 'var(--bad-light)' : 'var(--color-emerald)'
 }
 
 function auditFreshnessClass(isoTimestamp: string | null): string {

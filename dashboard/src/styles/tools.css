@@ -33,7 +33,7 @@
   }
   &:hover {
     background: var(--color-bg-tab-sticky-hover);
-    color: var(--text-near-white);
+    color: var(--fg-1);
   }
 }
 

@@ -60,12 +60,12 @@
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);
   color: var(--color-fg-secondary); letter-spacing: .02em;
 }
-.chip-err { background: rgb(196 106 90 / .1); border-color: rgb(196 106 90 / .3); color: var(--err); }
+.chip-err { background: rgb(var(--err-glow) / .1); border-color: rgb(var(--err-glow) / .3); color: var(--err); }
 .chip.k-tool { color: var(--brass-1); border-color: var(--brass-3); }
-.chip.k-claim { color: var(--ok); border-color: rgb(107 158 107 / .4); }
-.chip.k-text { color: var(--info); border-color: rgb(106 142 176 / .4); }
+.chip.k-claim { color: var(--ok); border-color: rgb(var(--ok-glow) / .4); }
+.chip.k-text { color: var(--info); border-color: rgb(var(--info-glow) / .4); }
 .chip.k-noop { color: var(--color-fg-muted); }
-.chip.k-error { color: var(--err); border-color: rgb(196 106 90 / .4); }
+.chip.k-error { color: var(--err); border-color: var(--err-border); }
 
 .pre {
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
@@ -156,7 +156,7 @@
 }
 .dd-goal-row.is-active .dd-goal-tag { color: var(--brass-1); }
 
-.chip.k-active   { color: var(--ok); border-color: rgb(107 158 107 / .4); }
-.chip.k-blocked  { color: var(--warn); border-color: rgb(194 157 94 / .4); }
+.chip.k-active   { color: var(--ok); border-color: rgb(var(--ok-glow) / .4); }
+.chip.k-blocked  { color: var(--warn); border-color: rgb(var(--warn-glow) / .4); }
 .chip.k-stalled  { color: var(--idle); }
-.chip.k-done     { color: var(--info); border-color: rgb(106 142 176 / .4); }
+.chip.k-done     { color: var(--info); border-color: rgb(var(--info-glow) / .4); }

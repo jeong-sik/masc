@@ -20,9 +20,10 @@ import {
 
 // ── Sub-view types ────────────────────────────────────────────
 
-type CapView = 'matrix' | 'wiring' | 'anti-patterns'
+type CapView = 'providers' | 'matrix' | 'wiring' | 'anti-patterns'
 
 const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
+  { key: 'providers', label: 'OAS 프로바이더' },
   { key: 'matrix', label: '기능 매트릭스' },
   { key: 'wiring', label: 'OAS 배선 갭' },
   { key: 'anti-patterns', label: '안티패턴' },
@@ -199,6 +200,49 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini_cli: 'Gemini CLI',
   codex_cli: 'Codex CLI',
 }
+
+// ── Static data: OAS Provider Capabilities (sec02 Table 1) ──────
+// Runtime provider kind definitions with capability flags and limits.
+// 'usage' distinguishes Direct API (emit) from CLI wrappers (strip).
+
+type UsageBehavior = 'emit' | 'strip'
+
+interface OasProviderCap {
+  id: string
+  label: string
+  kind: string
+  maxContext: number
+  maxOutput: number
+  tools: boolean
+  toolChoice: boolean
+  reasoning: boolean
+  vision: boolean
+  topK: boolean
+  usage: UsageBehavior
+}
+
+const OAS_PROVIDER_CAPS: OasProviderCap[] = [
+  { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 200_000,  maxOutput: 8_192,  tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'kimi',           label: 'Kimi',           kind: 'Kimi',           maxContext: 262_144,  maxOutput: 32_768, tools: true,  toolChoice: true,  reasoning: true,  vision: false, topK: false, usage: 'emit' },
+  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: false, vision: true,  topK: false, usage: 'emit' },
+  { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'ollama',         label: 'Ollama',         kind: 'Ollama',         maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: false, reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'glm',            label: 'GLM',            kind: 'GLM',            maxContext: 200_000,  maxOutput: 40_960, tools: true,  toolChoice: false, reasoning: true,  vision: false, topK: false, usage: 'emit' },
+  { id: 'gemini',         label: 'Gemini',         kind: 'Gemini',         maxContext: 1_000_000, maxOutput: 65_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'claude-code',    label: 'Claude Code',    kind: 'Claude_code',    maxContext: 1_000_000, maxOutput: 64_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'gemini-cli',     label: 'Gemini CLI',     kind: 'Gemini_cli',     maxContext: 1_000_000, maxOutput: 65_000, tools: false, toolChoice: false, reasoning: false, vision: false, topK: false, usage: 'strip' },
+  { id: 'kimi-cli',       label: 'Kimi CLI',       kind: 'Kimi_cli',       maxContext: 262_144,  maxOutput: 32_768, tools: true,  toolChoice: false, reasoning: true,  vision: false, topK: false, usage: 'strip' },
+  { id: 'codex-cli',      label: 'Codex CLI',      kind: 'Codex_cli',      maxContext: 1_050_000, maxOutput: 32_000, tools: false, toolChoice: false, reasoning: false, vision: false, topK: false, usage: 'strip' },
+]
+
+const CAP_BOOLEAN_FIELDS: Array<{ key: keyof OasProviderCap; label: string }> = [
+  { key: 'tools',     label: 'Tools' },
+  { key: 'toolChoice', label: 'tool_choice' },
+  { key: 'reasoning', label: 'Reasoning' },
+  { key: 'vision',    label: 'Vision' },
+  { key: 'topK',      label: 'top_k' },
+]
 
 // ── Static data: OAS Wiring Mismatches ────────────────────────
 // Source: sec04 Table 4.2.3 — OAS Wiring vs Official API Support
@@ -572,6 +616,95 @@ function AntiPatternList() {
   `
 }
 
+// ── OAS Provider Table (sec02 Table 1) ──────────────────────────
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 2)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}K`
+  return String(n)
+}
+
+function OasProviderTable() {
+  const isDirectApi = OAS_PROVIDER_CAPS.filter(p => p.usage === 'emit').length
+  const isCliWrapper = OAS_PROVIDER_CAPS.filter(p => p.usage === 'strip').length
+
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-3 text-[10px] font-mono text-[var(--color-fg-muted)]">
+        <span class="flex items-center gap-1">
+          <span class="inline-block size-2 rounded-full bg-[#22c55e]"></span>
+          Direct API (${isDirectApi})
+        </span>
+        <span class="flex items-center gap-1">
+          <span class="inline-block size-2 rounded-full bg-[#eab308]"></span>
+          CLI Wrapper (${isCliWrapper})
+        </span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--white-4)]">
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] sticky left-0 z-10 bg-[var(--white-4)] min-w-[100px]">Provider</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[90px]">Kind</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[70px]">Max Context</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[70px]">Max Output</th>
+              ${CAP_BOOLEAN_FIELDS.map(f => html`
+                <th key=${f.key} class="border-b border-[var(--color-border-default)] px-1.5 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">${f.label}</th>
+              `)}
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[50px]">Usage</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${OAS_PROVIDER_CAPS.map((prov, i) => {
+              const isCli = prov.usage === 'strip'
+              const rowBg = isCli
+                ? 'bg-[rgba(234,179,8,0.04)]'
+                : i % 2 === 0 ? '' : 'bg-[var(--white-2)]'
+              return html`
+                <tr key=${prov.id} class="${rowBg}">
+                  <td class="sticky left-0 z-10 ${rowBg || 'bg-[var(--shell-rail-bg)]'} border-r border-[var(--color-border-default)] px-2 py-1.5 font-medium text-[var(--color-fg-primary)]">
+                    <div class="flex items-center gap-1.5">
+                      <span class="size-1.5 rounded-full ${isCli ? 'bg-[#eab308]' : 'bg-[#22c55e]'}"></span>
+                      ${prov.label}
+                    </div>
+                  </td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 font-mono text-[10px] text-[var(--color-fg-muted)]">${prov.kind}</td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 text-right font-mono text-[var(--color-fg-secondary)]">${formatTokens(prov.maxContext)}</td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 text-right font-mono text-[var(--color-fg-secondary)]">${formatTokens(prov.maxOutput)}</td>
+                  ${CAP_BOOLEAN_FIELDS.map(f => {
+                    const val = prov[f.key]
+                    return html`
+                      <td key=${String(f.key)} class="border-r border-[var(--color-border-default)] px-1 py-0.5 text-center">
+                        <span class="inline-block w-full rounded px-1 py-0.5 text-[10px] font-mono font-bold ${
+                          val
+                            ? 'bg-[rgba(34,197,94,0.15)] text-[#22c55e]'
+                            : 'bg-[rgba(239,68,68,0.1)] text-[#ef4444]'
+                        }">
+                          ${val ? 'O' : 'X'}
+                        </span>
+                      </td>
+                    `
+                  })}
+                  <td class="px-2 py-0.5 text-center">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${
+                      isCli
+                        ? 'bg-[rgba(234,179,8,0.15)] text-[#eab308]'
+                        : 'bg-[rgba(34,197,94,0.15)] text-[#22c55e]'
+                    }">
+                      ${prov.usage}
+                    </span>
+                  </td>
+                </tr>
+              `
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `
+}
+
 // ── Legend ─────────────────────────────────────────────────────
 
 function MatrixLegend() {
@@ -624,7 +757,16 @@ export function ProviderCapabilityMatrix() {
         ` : null}
       </div>
 
-      ${activeView.value === 'matrix' ? html`
+      ${activeView.value === 'providers' ? html`
+        <${Card}>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS Provider Capability 정의</h3>
+          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+            sec02 Table 1 — 12개 런타임 provider kind의 capability flag와 한계값.
+            CLI wrapper 3종은 <code class="font-mono text-[10px] bg-[var(--white-4)] px-1 rounded">usage: strip</code>으로 토큰 카운트를 노출하지 않음.
+          </p>
+          <${OasProviderTable} />
+        <//>
+      ` : activeView.value === 'matrix' ? html`
         <div class="flex flex-col gap-2">
           <${MatrixLegend} />
           <${FeatureMatrix} liveProviders=${liveProviders.value} />

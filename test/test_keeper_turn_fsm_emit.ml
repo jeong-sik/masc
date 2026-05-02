@@ -160,14 +160,29 @@ let test_stop_signaled_blocks_forward_transitions () =
        (F.transition_action_label action))
 ;;
 
-let test_same_state_without_stop_signal_is_none () =
-  (* Same-state transition without stop signal context should be None,
-     not SupervisorRequestsStop *)
-  (match F.classify_transition ~from_state:F.Streaming ~to_state:F.Streaming () with
+let test_omitted_stop_context_keeps_legacy_stop_fallback () =
+  (* Older callers did not pass the orthogonal stop context.  Keep their
+     active-state self transition fallback as SupervisorRequestsStop. *)
+  match F.classify_transition ~from_state:F.Streaming ~to_state:F.Streaming () with
+  | Some F.SupervisorRequestsStop -> ()
+  | None -> Alcotest.fail "omitted ctx should preserve SupervisorRequestsStop fallback"
+  | Some action ->
+    Alcotest.failf
+      "omitted ctx should be SupervisorRequestsStop, got %s"
+      (F.transition_action_label action)
+;;
+
+let test_same_state_with_explicit_no_stop_signal_is_none () =
+  (* Once callers pass ctx explicitly, false -> false is not a stop request. *)
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
    | None -> ()
    | Some action ->
      Alcotest.failf
-       "same-state without stop signal should be None, got %s"
+       "same-state with explicit no signal should be None, got %s"
        (F.transition_action_label action))
 ;;
 
@@ -192,8 +207,58 @@ let test_supervisor_requests_stop_requires_signal_transition () =
    | None -> ()
    | Some action ->
      Alcotest.failf
-       "same-state with signal already true should be None, got %s"
-       (F.transition_action_label action))
+      "same-state with signal already true should be None, got %s"
+      (F.transition_action_label action))
+;;
+
+let test_honor_stop_signal_requires_active_signal_context () =
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming
+            ~to_state:(F.Cancelled F.Cancelled_supervisor_stop) () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "HonorStopSignal should require active stop context, got %s"
+       (F.transition_action_label action));
+  let stop_active_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  match F.classify_transition ~ctx:stop_active_ctx
+          ~from_state:F.Streaming
+          ~to_state:(F.Cancelled F.Cancelled_supervisor_stop) () with
+  | Some F.HonorStopSignal -> ()
+  | None -> Alcotest.fail "active stop context should allow HonorStopSignal"
+  | Some action ->
+    Alcotest.failf
+      "active stop context should be HonorStopSignal, got %s"
+      (F.transition_action_label action)
+;;
+
+let test_terminal_stutter_requires_unchanged_stop_context () =
+  let stop_changed_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = true }
+  in
+  (match F.classify_transition ~ctx:stop_changed_ctx
+            ~from_state:F.Done ~to_state:F.Done () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "TerminalStutter should reject changed stop context, got %s"
+       (F.transition_action_label action));
+  let stop_unchanged_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  match F.classify_transition ~ctx:stop_unchanged_ctx
+          ~from_state:F.Done ~to_state:F.Done () with
+  | Some F.TerminalStutter -> ()
+  | None -> Alcotest.fail "unchanged terminal stop context should stutter"
+  | Some action ->
+    Alcotest.failf
+      "unchanged terminal stop context should be TerminalStutter, got %s"
+      (F.transition_action_label action)
 ;;
 
 let test_cancel_reason_labels_documented () =
@@ -263,13 +328,25 @@ let () =
             `Quick
             test_stop_signaled_blocks_forward_transitions
         ; Alcotest.test_case
-            "same-state without stop signal is None"
+            "omitted stop context keeps legacy fallback"
             `Quick
-            test_same_state_without_stop_signal_is_none
+            test_omitted_stop_context_keeps_legacy_stop_fallback
+        ; Alcotest.test_case
+            "same-state with explicit no stop signal is None"
+            `Quick
+            test_same_state_with_explicit_no_stop_signal_is_none
         ; Alcotest.test_case
             "SupervisorRequestsStop requires signal transition"
             `Quick
             test_supervisor_requests_stop_requires_signal_transition
+        ; Alcotest.test_case
+            "HonorStopSignal requires active signal context"
+            `Quick
+            test_honor_stop_signal_requires_active_signal_context
+        ; Alcotest.test_case
+            "TerminalStutter requires unchanged stop context"
+            `Quick
+            test_terminal_stutter_requires_unchanged_stop_context
         ; Alcotest.test_case
             "cancel_reason labels match docs"
             `Quick

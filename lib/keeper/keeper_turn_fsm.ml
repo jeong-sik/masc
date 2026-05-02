@@ -141,51 +141,75 @@ let same_tla_state a b =
 let same_observable_state a b =
   String.equal (turn_state_label a) (turn_state_label b)
 
-let classify_transition ?(ctx = default_transition_context) ~from_state ~to_state () =
+let classify_transition ?ctx ~from_state ~to_state () =
+  let stop_signaled_before =
+    match ctx with
+    | None -> default_transition_context.stop_signaled_before
+    | Some ctx -> ctx.stop_signaled_before
+  in
   let stop_raised =
-    (not ctx.stop_signaled_before) && ctx.stop_signaled_after
+    match ctx with
+    | None -> false
+    | Some ctx -> (not ctx.stop_signaled_before) && ctx.stop_signaled_after
+  in
+  let stop_unchanged =
+    match ctx with
+    | None -> true
+    | Some ctx -> Bool.equal ctx.stop_signaled_before ctx.stop_signaled_after
+  in
+  let honor_stop_signal_allowed =
+    match ctx with
+    | None -> true
+    | Some ctx -> ctx.stop_signaled_before
+  in
+  let supervisor_requests_stop_allowed =
+    match ctx with
+    | None -> true
+    | Some _ -> stop_raised
   in
   match from_state, to_state with
-  | Idle, Phase_gating when not ctx.stop_signaled_before ->
+  | Idle, Phase_gating when not stop_signaled_before ->
       Some StartTurn
-  | Phase_gating, Done when not ctx.stop_signaled_before ->
+  | Phase_gating, Done when not stop_signaled_before ->
       Some PhaseGateSkip
-  | Phase_gating, Cascade_routing when not ctx.stop_signaled_before ->
+  | Phase_gating, Cascade_routing when not stop_signaled_before ->
       Some PhaseGateOk
-  | Cascade_routing, Awaiting_provider when not ctx.stop_signaled_before ->
+  | Cascade_routing, Awaiting_provider when not stop_signaled_before ->
       Some CascadeRouted
   | Cascade_routing, Failed (Failure_cascade_unavailable _)
-    when not ctx.stop_signaled_before ->
+    when not stop_signaled_before ->
       Some CascadeUnavailable
-  | Awaiting_provider, Streaming when not ctx.stop_signaled_before ->
+  | Awaiting_provider, Streaming when not stop_signaled_before ->
       Some ProviderResponded
   | Awaiting_provider, Cancelled Cancelled_provider_timeout
-    when not ctx.stop_signaled_before ->
+    when not stop_signaled_before ->
       Some ProviderTimeout
-  | Streaming, Awaiting_tool_result when not ctx.stop_signaled_before ->
+  | Streaming, Awaiting_tool_result when not stop_signaled_before ->
       Some StreamYieldsTool
-  | Awaiting_tool_result, Streaming when not ctx.stop_signaled_before ->
+  | Awaiting_tool_result, Streaming when not stop_signaled_before ->
       Some ToolReturned
-  | Streaming, Completing when not ctx.stop_signaled_before ->
+  | Streaming, Completing when not stop_signaled_before ->
       Some StreamComplete
-  | Completing, Done when not ctx.stop_signaled_before ->
+  | Completing, Done when not stop_signaled_before ->
       Some ContractOk
   | Completing, Failed (Failure_tool_contract_violation _)
-    when not ctx.stop_signaled_before ->
+    when not stop_signaled_before ->
       Some ContractViolation
   | Completing, Failed (Failure_receipt_lost _)
-    when not ctx.stop_signaled_before ->
+    when not stop_signaled_before ->
       Some ReceiptLost
   | _, Failed _ when is_active from_state -> Some GenericFail
-  | _, Cancelled _ when is_active from_state -> Some HonorStopSignal
+  | _, Cancelled _ when is_active from_state && honor_stop_signal_allowed ->
+      Some HonorStopSignal
   | _, _
-    when stop_raised
+    when supervisor_requests_stop_allowed
          && is_active from_state
          && same_tla_state from_state to_state ->
       Some SupervisorRequestsStop
   | _, _
     when is_terminal from_state
          && is_terminal to_state
+         && stop_unchanged
          && same_observable_state from_state to_state ->
       Some TerminalStutter
   | _ -> None

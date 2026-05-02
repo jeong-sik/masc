@@ -42,10 +42,21 @@ function yjsWebsocketUrl(): string | null {
   )
 }
 
-/** Resolve a CSS custom property for Canvas 2D fillStyle/strokeStyle. */
+/** Cached CSS custom property resolver for Canvas 2D. Invalidated on theme change. */
+const cssVarCache = new Map<string, string>()
+
 function cssVar(prop: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback
-  return getComputedStyle(document.documentElement).getPropertyValue(prop).trim() || fallback
+  const cached = cssVarCache.get(prop)
+  if (cached !== undefined) return cached
+  const value = getComputedStyle(document.documentElement).getPropertyValue(prop).trim() || fallback
+  cssVarCache.set(prop, value)
+  return value
+}
+
+if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  new MutationObserver(() => { cssVarCache.clear() })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
 }
 
 export function WorldVisualizer() {
@@ -63,7 +74,8 @@ export function WorldVisualizer() {
     let provider: WebsocketProvider
     try {
       provider = new WebsocketProvider(url, 'masc-telemetry', ydoc)
-    } catch {
+    } catch (err) {
+      console.warn('[world-visualizer] WebSocket init failed:', err instanceof Error ? err.message : err)
       ydoc.destroy()
       return
     }

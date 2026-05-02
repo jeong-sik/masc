@@ -147,7 +147,7 @@ export function KeeperDetailMissingState({
       <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-2xl">
         <${SectionLabel}>키퍼 상세</${SectionLabel}>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
-        <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+        <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
           ${explanation}
         </p>
         <div class="mt-4">
@@ -297,7 +297,7 @@ export function KeeperDetailOverviewSidebar({
       <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
         <div>
           <${SectionLabel}>개요</${SectionLabel}>
-          <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
             긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
           </p>
         </div>
@@ -355,7 +355,7 @@ export function KeeperDetailSection({
         <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h3 class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
-            <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">${description}</p>
+            <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--color-fg-secondary)]">${description}</p>
           </div>
         </div>
       </div>

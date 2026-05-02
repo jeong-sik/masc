@@ -316,7 +316,7 @@ export function KeeperConversationPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
           <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -325,7 +325,7 @@ export function KeeperConversationPanel({
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
-            <div class="mt-1 text-sm leading-loose text-[var(--text-secondary)]">
+            <div class="mt-1 text-sm leading-loose text-[var(--color-fg-secondary)]">
               Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
@@ -378,7 +378,7 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">
+        <div class="border-t border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-4">
           <${ChatComposer}
             draft=${draft}
             placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}

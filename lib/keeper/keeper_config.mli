@@ -197,6 +197,7 @@ val keeper_bootstrap_retry_max : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_proactive_min_cooldown_sec : unit -> int
+val keeper_proactive_min_interval_sec : unit -> int
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 

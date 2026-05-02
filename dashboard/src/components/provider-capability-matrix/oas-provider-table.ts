@@ -1,0 +1,95 @@
+// OasProviderTable — Runtime provider kind definitions from sec02 Table 1.
+
+import { html } from 'htm/preact'
+import { StatusDot } from '../common/status-dot'
+import {
+  OAS_PROVIDER_CAPS,
+  CAP_BOOLEAN_FIELDS,
+} from './data'
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 2)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}K`
+  return String(n)
+}
+
+export function OasProviderTable() {
+  const isDirectApi = OAS_PROVIDER_CAPS.filter(p => p.usage === 'emit').length
+  const isCliWrapper = OAS_PROVIDER_CAPS.filter(p => p.usage === 'strip').length
+
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-3 text-[10px] font-mono text-[var(--color-fg-muted)]">
+        <span class="flex items-center gap-1">
+          <${StatusDot} size="sm" class="bg-[var(--color-status-ok)]" />
+          Direct API (${isDirectApi})
+        </span>
+        <span class="flex items-center gap-1">
+          <${StatusDot} size="sm" class="bg-[var(--color-status-warn)]" />
+          CLI Wrapper (${isCliWrapper})
+        </span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--white-4)]">
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] sticky left-0 z-10 bg-[var(--white-4)] min-w-[100px]">Provider</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[90px]">Kind</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[70px]">Max Context</th>
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-right font-medium text-[var(--color-fg-secondary)] min-w-[70px]">Max Output</th>
+              ${CAP_BOOLEAN_FIELDS.map(f => html`
+                <th key=${f.key} class="border-b border-[var(--color-border-default)] px-1.5 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">${f.label}</th>
+              `)}
+              <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[50px]">Usage</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${OAS_PROVIDER_CAPS.map((prov, i) => {
+              const isCli = prov.usage === 'strip'
+              const rowBg = isCli
+                ? 'bg-[var(--warn-10)]'
+                : i % 2 === 0 ? '' : 'bg-[var(--white-2)]'
+              return html`
+                <tr key=${prov.id} class="${rowBg}">
+                  <td class="sticky left-0 z-10 ${rowBg || 'bg-[var(--shell-rail-bg)]'} border-r border-[var(--color-border-default)] px-2 py-1.5 font-medium text-[var(--color-fg-primary)]">
+                    <div class="flex items-center gap-1.5">
+                      <${StatusDot} size="xs" class=${isCli ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'} />
+                      ${prov.label}
+                    </div>
+                  </td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 font-mono text-[10px] text-[var(--color-fg-muted)]">${prov.kind}</td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 text-right font-mono text-[var(--color-fg-secondary)]">${formatTokens(prov.maxContext)}</td>
+                  <td class="border-r border-[var(--color-border-default)] px-2 py-1.5 text-right font-mono text-[var(--color-fg-secondary)]">${formatTokens(prov.maxOutput)}</td>
+                  ${CAP_BOOLEAN_FIELDS.map(f => {
+                    const val = prov[f.key]
+                    return html`
+                      <td key=${String(f.key)} class="border-r border-[var(--color-border-default)] px-1 py-0.5 text-center">
+                        <span class="inline-block w-full rounded px-1 py-0.5 text-[10px] font-mono font-bold ${
+                          val
+                            ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+                            : 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+                        }">
+                          ${val ? 'O' : 'X'}
+                        </span>
+                      </td>
+                    `
+                  })}
+                  <td class="px-2 py-0.5 text-center">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${
+                      isCli
+                        ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+                        : 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+                    }">
+                      ${prov.usage}
+                    </span>
+                  </td>
+                </tr>
+              `
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `
+}

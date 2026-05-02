@@ -63,8 +63,8 @@ let test_turn_state_labels_cover_every_variant () =
     pairs
 ;;
 
-let check_action expected ~from_state ~to_state =
-  match F.classify_transition ~from_state ~to_state with
+let check_action ?ctx expected ~from_state ~to_state =
+  match F.classify_transition ?ctx ~from_state ~to_state () with
   | Some actual ->
     Alcotest.(check string)
       ("transition action " ^ F.transition_action_label expected)
@@ -111,7 +111,11 @@ let test_transition_actions_cover_tla_next () =
     F.GenericFail
     ~from_state:F.Streaming
     ~to_state:(F.Failed (F.Failure_runtime_error "boom"));
-  check_action F.SupervisorRequestsStop ~from_state:F.Streaming ~to_state:F.Streaming;
+  let stop_raised_ctx =
+    { F.stop_signaled_before = false; stop_signaled_after = true }
+  in
+  check_action ~ctx:stop_raised_ctx
+    F.SupervisorRequestsStop ~from_state:F.Streaming ~to_state:F.Streaming;
   check_action
     F.HonorStopSignal
     ~from_state:F.Streaming
@@ -120,7 +124,7 @@ let test_transition_actions_cover_tla_next () =
 ;;
 
 let test_invalid_transition_rejected () =
-  match F.assert_transition_allowed ~from_state:F.Idle ~to_state:F.Done with
+  match F.assert_transition_allowed ~from_state:F.Idle ~to_state:F.Done () with
   | Error violation ->
     Alcotest.(check string) "invalid edge from state" "idle" violation.from_state;
     Alcotest.(check string) "invalid edge to state" "done" violation.to_state;
@@ -132,6 +136,64 @@ let test_invalid_transition_rejected () =
     Alcotest.failf
       "Idle -> Done unexpectedly classified as %s"
       (F.transition_action_label action)
+;;
+
+let test_stop_signaled_blocks_forward_transitions () =
+  let stop_active_ctx =
+    { F.stop_signaled_before = true; stop_signaled_after = true }
+  in
+  (* StartTurn must be rejected when stop_signaled is already active *)
+  (match F.classify_transition ~ctx:stop_active_ctx
+            ~from_state:F.Idle ~to_state:F.Phase_gating () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "StartTurn should be blocked by stop_signaled, got %s"
+       (F.transition_action_label action));
+  (* PhaseGateOk must be rejected when stop_signaled is active *)
+  (match F.classify_transition ~ctx:stop_active_ctx
+            ~from_state:F.Phase_gating ~to_state:F.Cascade_routing () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "PhaseGateOk should be blocked by stop_signaled, got %s"
+       (F.transition_action_label action))
+;;
+
+let test_same_state_without_stop_signal_is_none () =
+  (* Same-state transition without stop signal context should be None,
+     not SupervisorRequestsStop *)
+  (match F.classify_transition ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "same-state without stop signal should be None, got %s"
+       (F.transition_action_label action))
+;;
+
+let test_supervisor_requests_stop_requires_signal_transition () =
+  (* stop_signaled staying false -> false should NOT be SupervisorRequestsStop *)
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "same-state with no signal change should be None, got %s"
+       (F.transition_action_label action));
+  (* stop_signaled already true and staying true should NOT be SupervisorRequestsStop *)
+  let signal_already_true_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  (match F.classify_transition ~ctx:signal_already_true_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "same-state with signal already true should be None, got %s"
+       (F.transition_action_label action))
 ;;
 
 let test_cancel_reason_labels_documented () =
@@ -196,6 +258,18 @@ let () =
             "invalid transition rejected"
             `Quick
             test_invalid_transition_rejected
+        ; Alcotest.test_case
+            "stop_signaled blocks forward transitions"
+            `Quick
+            test_stop_signaled_blocks_forward_transitions
+        ; Alcotest.test_case
+            "same-state without stop signal is None"
+            `Quick
+            test_same_state_without_stop_signal_is_none
+        ; Alcotest.test_case
+            "SupervisorRequestsStop requires signal transition"
+            `Quick
+            test_supervisor_requests_stop_requires_signal_transition
         ; Alcotest.test_case
             "cancel_reason labels match docs"
             `Quick

@@ -121,6 +121,14 @@ let transition_action_label = function
   | HonorStopSignal -> "HonorStopSignal"
   | TerminalStutter -> "TerminalStutter"
 
+type transition_context = {
+  stop_signaled_before : bool;
+  stop_signaled_after : bool;
+}
+
+let default_transition_context =
+  { stop_signaled_before = false; stop_signaled_after = false }
+
 type transition_violation = {
   from_state : string;
   to_state : string;
@@ -133,36 +141,57 @@ let same_tla_state a b =
 let same_observable_state a b =
   String.equal (turn_state_label a) (turn_state_label b)
 
-let classify_transition ~from_state ~to_state =
+let classify_transition ?(ctx = default_transition_context) ~from_state ~to_state () =
+  let stop_raised =
+    (not ctx.stop_signaled_before) && ctx.stop_signaled_after
+  in
   match from_state, to_state with
-  | Idle, Phase_gating -> Some StartTurn
-  | Phase_gating, Done -> Some PhaseGateSkip
-  | Phase_gating, Cascade_routing -> Some PhaseGateOk
-  | Cascade_routing, Awaiting_provider -> Some CascadeRouted
-  | Cascade_routing, Failed (Failure_cascade_unavailable _) ->
+  | Idle, Phase_gating when not ctx.stop_signaled_before ->
+      Some StartTurn
+  | Phase_gating, Done when not ctx.stop_signaled_before ->
+      Some PhaseGateSkip
+  | Phase_gating, Cascade_routing when not ctx.stop_signaled_before ->
+      Some PhaseGateOk
+  | Cascade_routing, Awaiting_provider when not ctx.stop_signaled_before ->
+      Some CascadeRouted
+  | Cascade_routing, Failed (Failure_cascade_unavailable _)
+    when not ctx.stop_signaled_before ->
       Some CascadeUnavailable
-  | Awaiting_provider, Streaming -> Some ProviderResponded
-  | Awaiting_provider, Cancelled Cancelled_provider_timeout ->
+  | Awaiting_provider, Streaming when not ctx.stop_signaled_before ->
+      Some ProviderResponded
+  | Awaiting_provider, Cancelled Cancelled_provider_timeout
+    when not ctx.stop_signaled_before ->
       Some ProviderTimeout
-  | Streaming, Awaiting_tool_result -> Some StreamYieldsTool
-  | Awaiting_tool_result, Streaming -> Some ToolReturned
-  | Streaming, Completing -> Some StreamComplete
-  | Completing, Done -> Some ContractOk
-  | Completing, Failed (Failure_tool_contract_violation _) ->
+  | Streaming, Awaiting_tool_result when not ctx.stop_signaled_before ->
+      Some StreamYieldsTool
+  | Awaiting_tool_result, Streaming when not ctx.stop_signaled_before ->
+      Some ToolReturned
+  | Streaming, Completing when not ctx.stop_signaled_before ->
+      Some StreamComplete
+  | Completing, Done when not ctx.stop_signaled_before ->
+      Some ContractOk
+  | Completing, Failed (Failure_tool_contract_violation _)
+    when not ctx.stop_signaled_before ->
       Some ContractViolation
-  | Completing, Failed (Failure_receipt_lost _) -> Some ReceiptLost
+  | Completing, Failed (Failure_receipt_lost _)
+    when not ctx.stop_signaled_before ->
+      Some ReceiptLost
   | _, Failed _ when is_active from_state -> Some GenericFail
   | _, Cancelled _ when is_active from_state -> Some HonorStopSignal
-  | _, _ when is_active from_state && same_tla_state from_state to_state ->
+  | _, _
+    when stop_raised
+         && is_active from_state
+         && same_tla_state from_state to_state ->
       Some SupervisorRequestsStop
   | _, _
-    when is_terminal from_state && is_terminal to_state
+    when is_terminal from_state
+         && is_terminal to_state
          && same_observable_state from_state to_state ->
       Some TerminalStutter
   | _ -> None
 
-let assert_transition_allowed ~from_state ~to_state =
-  match classify_transition ~from_state ~to_state with
+let assert_transition_allowed ?ctx ~from_state ~to_state () =
+  match classify_transition ?ctx ~from_state ~to_state () with
   | Some action -> Ok action
   | None ->
       Error
@@ -172,8 +201,8 @@ let assert_transition_allowed ~from_state ~to_state =
           reason = "not_in_keeper_turn_fsm_next";
         }
 
-let guard_transition ~keeper_name ~turn_id ~from_state ~to_state =
-  match assert_transition_allowed ~from_state ~to_state with
+let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
+  match assert_transition_allowed ?ctx ~from_state ~to_state () with
   | Ok _ -> ()
   | Error violation ->
       let stage = violation.from_state ^ "->" ^ violation.to_state in
@@ -185,7 +214,7 @@ let guard_transition ~keeper_name ~turn_id ~from_state ~to_state =
         "[fsm:transition:violation] %s -> %s (%s)"
         violation.from_state violation.to_state violation.reason
 
-let emit_transition ~keeper_name ~turn_id ?prev state =
+let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   let prev_label =
     match prev with
     | Some s -> turn_state_label s
@@ -193,12 +222,13 @@ let emit_transition ~keeper_name ~turn_id ?prev state =
   in
   let classified =
     match prev with
-    | Some from_state -> classify_transition ~from_state ~to_state:state
+    | Some from_state ->
+        classify_transition ?ctx ~from_state ~to_state:state ()
     | None -> None
   in
   (match prev with
    | Some from_state ->
-       guard_transition ~keeper_name ~turn_id ~from_state ~to_state:state
+       guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
    | None -> ());
   let state_label = turn_state_label state in
   let action_label =
@@ -206,8 +236,16 @@ let emit_transition ~keeper_name ~turn_id ?prev state =
     | Some action -> transition_action_label action
     | None -> "unknown"
   in
+  let stop_label =
+    match ctx with
+    | Some c ->
+        Printf.sprintf " stop_before=%b stop_after=%b"
+          c.stop_signaled_before c.stop_signaled_after
+    | None -> ""
+  in
   Log.Keeper.info ~keeper_name ~turn_id
-    "[fsm:transition] %s -> %s action=%s" prev_label state_label action_label;
+    "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label
+    stop_label;
   Prometheus.inc_counter Prometheus.metric_keeper_turn_fsm_transitions
     ~labels:
       [ ("from", prev_label);

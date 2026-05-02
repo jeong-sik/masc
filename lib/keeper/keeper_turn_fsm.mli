@@ -101,6 +101,21 @@ type transition_action =
 
 val transition_action_label : transition_action -> string
 
+type transition_context = {
+  stop_signaled_before : bool;
+  stop_signaled_after : bool;
+}
+(** Orthogonal stop-signal state for a transition.
+
+    Mirrors the TLA+ variable [stop_signaled] in
+    [specs/keeper-turn-fsm/KeeperTurnFSM.tla] (line 59).  Forward
+    transitions require [stop_signaled_before = false];
+    [SupervisorRequestsStop] requires [(not before) && after]. *)
+
+val default_transition_context : transition_context
+(** Both fields [false] — used when stop-signal tracking is not
+    available at the call site. *)
+
 type transition_violation = {
   from_state : string;
   to_state : string;
@@ -108,15 +123,29 @@ type transition_violation = {
 }
 
 val classify_transition :
+  ?ctx:transition_context ->
   from_state:turn_state ->
   to_state:turn_state ->
+  unit ->
   transition_action option
 (** Return the TLA+ action represented by an OCaml state edge, if the
-    edge is allowed by the keeper-turn FSM contract. *)
+    edge is allowed by the keeper-turn FSM contract.
+
+    When [?ctx] is provided, forward transitions guard on
+    [stop_signaled_before = false] (matching the TLA+ [~stop_signaled]
+    precondition on every forward action) and [SupervisorRequestsStop]
+    requires [stop_signaled] to transition from [false] to [true]
+    (matching the TLA+ [~stop_signaled /\ stop_signaled'] guard).
+
+    When [?ctx] is omitted, the behavior is backward-compatible: forward
+    transitions have no stop-signal guard, and [SupervisorRequestsStop]
+    falls back to the same-state heuristic. *)
 
 val assert_transition_allowed :
+  ?ctx:transition_context ->
   from_state:turn_state ->
   to_state:turn_state ->
+  unit ->
   (transition_action, transition_violation) result
 
 val require_active_state : turn_state -> turn_state
@@ -130,6 +159,7 @@ val require_active_state : turn_state -> turn_state
     paths assuming the turn is still in flight. *)
 
 val emit_transition :
+  ?ctx:transition_context ->
   keeper_name:string ->
   turn_id:int ->
   ?prev:turn_state ->
@@ -145,7 +175,9 @@ val emit_transition :
     can see the state the runtime *intended* without parsing
     the receipt JSON.
 
-    The line format is [\[fsm:transition\] <prev> -> <state>];
-    a missing [?prev] renders as ["-"].  Stable for operator
+    The line format is
+    [\[fsm:transition\] <prev> -> <state> action=<action> stop_before=.. stop_after=..];
+    a missing [?prev] renders as ["-"].  Stop-signal fields are
+    emitted only when [?ctx] is provided.  Stable for operator
     regex parsing and pinned by the [test_keeper_turn_fsm_emit]
     sentinel so a future signature drift fails the build. *)

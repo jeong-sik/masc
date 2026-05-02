@@ -4,8 +4,8 @@ import { COCKPIT_FRAME_SRC, shouldLoadCockpitFrame } from './cockpit-frame'
 
 export function Cockpit() {
   return html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', backgroundColor: '#000' }}>
-      <div style=${{ flex: '0 0 auto', borderBottom: '1px solid #333' }}>
+    <div class="flex h-full w-full flex-col bg-black">
+      <div class="flex-none border-b border-solid border-[#333]">
         <${WorldVisualizer} />
       </div>
 
@@ -13,7 +13,7 @@ export function Cockpit() {
         ? html`
           <iframe
             src=${COCKPIT_FRAME_SRC}
-            style=${{ flex: 1, border: 'none', width: '100%', height: 'calc(100vh - 300px)' }}
+            class="h-[calc(100vh-300px)] min-h-0 w-full flex-1 border-0"
             title="MASC Dream IDE Cockpit"
           />
         `

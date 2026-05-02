@@ -53,11 +53,7 @@ function CockpitPreview() {
     return html`
       <section
         aria-label="MASC Cockpit preview"
-        style=${{
-          minHeight: 0,
-          borderTop: '1px solid var(--color-border-divider)',
-          background: '#000',
-        }}
+        class="min-h-0 border-t border-solid border-[var(--color-border-divider)] bg-black"
       />
     `
   }
@@ -65,27 +61,16 @@ function CockpitPreview() {
   return html`
     <section
       aria-label="MASC Cockpit preview"
-      style=${{
-        display: 'grid',
-        gridTemplateRows: 'auto 1fr',
-        minHeight: 0,
-        borderTop: '1px solid var(--color-border-divider)',
-        background: '#000',
-      }}
+      class="grid min-h-0 grid-rows-[auto_1fr] border-t border-solid border-[var(--color-border-divider)] bg-black"
     >
       <div
-        style=${{
-          padding: 'var(--sp-2) var(--sp-3)',
-          borderBottom: '1px solid rgba(255,255,255,0.12)',
-          color: 'rgba(255,255,255,0.68)',
-          font: 'var(--type-eyebrow)',
-        }}
+        class="border-b border-solid border-[rgba(255,255,255,0.12)] px-[var(--sp-3)] py-[var(--sp-2)] [font:var(--type-eyebrow)] text-[rgba(255,255,255,0.68)]"
       >
         MASC Cockpit
       </div>
       <iframe
         src=${COCKPIT_FRAME_SRC}
-        style=${{ width: '100%', height: '100%', minHeight: 0, border: 'none' }}
+        class="h-full min-h-0 w-full border-0"
         title="MASC Dream IDE Cockpit"
       />
     </section>
@@ -146,7 +131,7 @@ export function IdeShell() {
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
       />
-      <div style=${{ borderBottom: '1px solid var(--color-border-divider)' }}>
+      <div class="border-b border-solid border-[var(--color-border-divider)]">
         <${WorldVisualizer} />
       </div>
       <div

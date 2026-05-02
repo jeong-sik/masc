@@ -102,16 +102,20 @@ const surfaceStyle = {
 }
 
 const labelStyle = {
-  fontSize: 'var(--font-size-3xs)',
-  color: 'var(--color-fg-disabled)',
+  fontSize: 'var(--fs-11)',
+  fontFamily: 'var(--font-sans)',
+  lineHeight: 'var(--lh-tight)',
+  color: 'var(--color-fg-muted)',
   letterSpacing: '0.08em',
   textTransform: 'uppercase' as const,
   fontWeight: 600,
 }
 
 const captionStyle = {
-  fontSize: 'var(--font-size-3xs)',
-  color: 'var(--color-fg-muted)',
+  fontSize: 'var(--fs-11)',
+  fontFamily: 'var(--font-mono)',
+  lineHeight: 'var(--lh-tight)',
+  color: 'var(--color-fg-secondary)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase' as const,
   fontWeight: 500,

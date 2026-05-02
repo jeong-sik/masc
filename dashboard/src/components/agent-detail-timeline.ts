@@ -102,7 +102,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const cat = toolCategory(toolName)
 
   return html`
-    <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
+    <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
       <div class="flex items-center gap-2 text-sm">
         <div class="flex-shrink-0 size-6 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}

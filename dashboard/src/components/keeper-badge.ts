@@ -60,7 +60,7 @@ export function kSigil(id: string): string {
 }
 
 const SANS_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-const HEARTBEAT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
+const HEARTBEAT_EASING = 'var(--ease-inout)'
 
 export type KeeperBadgeSize = 'sm' | 'md' | 'lg'
 export type KeeperBadgeVariant = 'sigil' | 'full' | 'name'

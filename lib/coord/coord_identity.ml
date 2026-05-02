@@ -47,7 +47,7 @@ let resolve_agent_name config agent_name =
       let prefix = agent_name ^ "-" in
       match Array.find_opt (fun f ->
         String.length f > String.length prefix &&
-        String.sub f 0 (String.length prefix) = prefix
+        Base.String.is_prefix f ~prefix
       ) files with
       | Some file -> String.sub file 0 (String.length file - 5)
       | None -> agent_name

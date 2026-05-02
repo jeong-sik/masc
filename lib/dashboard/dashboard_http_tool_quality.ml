@@ -65,7 +65,7 @@ let classify_failure_output (output : string) : string =
       let prefixes = ["error: "; "tool_error: "] in
       match List.find_opt (fun p ->
         String.length output > String.length p
-        && String.sub output 0 (String.length p) = p
+        && Base.String.is_prefix output ~prefix:p
       ) prefixes with
       | Some p -> String.sub output (String.length p)
                     (String.length output - String.length p)

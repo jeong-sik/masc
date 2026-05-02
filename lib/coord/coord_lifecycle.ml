@@ -60,7 +60,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
           |> List.find_opt (fun f ->
                Filename.check_suffix f ".json"
                && String.length f > String.length prefix
-               && String.sub f 0 (String.length prefix) = prefix)
+               && Base.String.is_prefix f ~prefix)
           |> Option.map (fun f -> Filename.chop_suffix f ".json")
         else None
       in

@@ -552,10 +552,8 @@ let update_field_in_content
        else if
          !in_target_table
          && (not !found)
-         && ((String.length trimmed >= String.length key_prefix
-              && String.sub trimmed 0 (String.length key_prefix) = key_prefix)
-             || (String.length trimmed >= String.length key_prefix_eq
-                 && String.sub trimmed 0 (String.length key_prefix_eq) = key_prefix_eq))
+         && ((Base.String.is_prefix trimmed ~prefix:key_prefix)
+             || (Base.String.is_prefix trimmed ~prefix:key_prefix_eq))
        then (
          result_lines := Printf.sprintf "%s = \"%s\"" key value :: !result_lines;
          found := true;

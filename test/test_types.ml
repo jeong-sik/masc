@@ -1084,7 +1084,8 @@ let () =
         witness L.Dead_cleaned;
         witness L.Self_preservation;
         witness L.Paused_pruned;
-        Alcotest.(check int) "all_custom_events count" 6
+        witness L.Auto_resumed;
+        Alcotest.(check int) "all_custom_events count" 7
           (List.length L.all_custom_events));
       Alcotest.test_case "phase-derived strings match Keeper_state_machine SSOT" `Quick (fun () ->
         let open Masc_mcp.Keeper_state_machine in
@@ -1102,11 +1103,12 @@ let () =
         List.iter (fun n ->
           Alcotest.(check bool) (Printf.sprintf "%s present" n) true
             (List.mem n names))
-          [ "reconciled"; "dead_cleaned"; "self_preservation"; "paused_pruned" ]);
-      Alcotest.test_case "all_event_names totals 10 distinct names" `Quick (fun () ->
+          [ "reconciled"; "dead_cleaned"; "self_preservation"; "paused_pruned";
+            "auto_resumed" ]);
+      Alcotest.test_case "all_event_names totals 11 distinct names" `Quick (fun () ->
         let names = Masc_mcp.Keeper_lifecycle_events.all_event_names in
         let dedup = List.sort_uniq String.compare names in
-        Alcotest.(check int) "10 distinct" 10 (List.length names);
+        Alcotest.(check int) "11 distinct" 11 (List.length names);
         Alcotest.(check int) "no duplicates" (List.length names)
           (List.length dedup));
     ];

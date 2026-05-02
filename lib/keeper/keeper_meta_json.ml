@@ -125,6 +125,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | None -> `Null )
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
+    ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; "autoboot_enabled", `Bool m.autoboot_enabled
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
@@ -243,6 +244,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_blocker_class"
   ; "last_need"
   ; "paused"
+  ; "auto_resume_after_sec"
   ; "autoboot_enabled"
   ; "current_task_id"
   ; "max_context_override"

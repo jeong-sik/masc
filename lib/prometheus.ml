@@ -702,6 +702,12 @@ let metric_keeper_supervisor_cleanup_failures =
 let metric_keeper_stale_watchdog_tick_failures =
   "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
+(* Self-healing circuit breaker: incremented each time [sweep_and_recover]
+   auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
+   means the system is self-healing; a zero rate while keepers accumulate
+   [auto_resume_after_sec] means the sweep is not firing or the meta write
+   is failing. Labels: keeper. *)
+let metric_keeper_auto_resumed_total = "masc_keeper_auto_resumed_total"
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
    that an external wakeup_keeper call cut a Skip_idle backoff sleep
@@ -1060,6 +1066,11 @@ let init () =
     "Total keeper transitions to Dead phase after the supervisor exhausts \
      max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
      actionable: the supervisor will not retry the keeper."
+    Counter;
+  add metric_keeper_auto_resumed_total
+    "Total keepers auto-resumed by the self-healing circuit breaker after \
+     the back-off timer elapsed. Labeled by keeper. A positive rate means \
+     the system is self-healing from transient provider outages."
     Counter;
   add metric_keeper_supervisor_cleanup_failures
     "Total supervisor finally-cleanup failures suppressed to avoid \

@@ -6,7 +6,7 @@
 \* persistent underlying issue (cascade dead, fd leak, provider auth
 \* expiry) caused stale kills, the supervisor's [`Crashed] branch blindly
 \* enqueued the keeper for restart.  The next turn re-stalled, the
-\* watchdog re-killed it, and the loop continued — 116 events in 24h,
+\* watchdog re-killed it, and the loop continued -- 116 events in 24h,
 \* a single keeper accumulating 13 sequential kills.
 \*
 \* Phase 2 fix (already in main): [record_stale_termination] returns a
@@ -14,41 +14,42 @@
 \* persists [meta.paused = true] instead of restarting, breaking the
 \* loop and forcing operator triage.
 \*
-\* Phase B PR-8 plan section 8 footer:
-\*   "이 패턴을 EmptyToolUniverse, ContractViolated, StaleKilled 에도
-\*    동일하게 적용 (Phase B PR-8)."
+\* Phase 3 fix (this PR): self-healing circuit breaker.
+\* [handle_crash_auto_pause] now stores [meta.auto_resume_after_sec]
+\* alongside [meta.paused = true].  [sweep_and_recover] Phase 3.5
+\* reads the timestamp and clears the pause flag once the back-off
+\* delay has elapsed -- no operator action required for transient
+\* provider outages.  The delay doubles on each successive auto-pause
+\* (exponential back-off, capped at [auto_resume_max_sec = 24h]) and
+\* is reset to [None] after a successful turn.
 \*
-\* This spec lands the StaleKilled part — proves the storm threshold
-\* is the necessary condition for terminating the restart loop.  The
-\* clean Spec includes the threshold check and converges to a stopped
-\* state; the buggy SpecBuggy omits the check and produces an unbounded
-\* restart trace.
-\*
-\* PR-6 typed [stale_kill_class] (Idle_turn / In_turn_hung /
-\* Noop_failure_loop) is orthogonal to this spec — it labels *which*
-\* kill cause fired, while this spec models *what to do* after N kills.
-\*
-\* Pattern (clean Spec + buggy SpecBuggy gated by a separate Bug action)
-\* matches KeeperTurnTerminal, KeeperEmptyToolUniverse,
-\* KeeperContractViolated, and KeeperContinueGate.
+\* PR-6 typed [stale_kill_class] is orthogonal to this spec.
 
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS
     Keepers,
-    EscalationThreshold
+    EscalationThreshold,
+    \* Maximum back-off multiplier steps (bounds the state space).
+    MaxBackoffSteps
 
 ASSUME
     /\ Keepers # {}
     /\ EscalationThreshold \in Nat
     /\ EscalationThreshold > 0
+    /\ MaxBackoffSteps \in Nat
+    /\ MaxBackoffSteps > 0
 
 VARIABLES
     keeperState,
     killCount,
-    paused
+    paused,
+    \* autoResumeBackoff[k] = 0: no auto-resume (operator pause or healthy)
+    \* autoResumeBackoff[k] = n > 0: n-th back-off step in effect
+    autoResumeBackoff,
+    successfulTurn
 
-vars == << keeperState, killCount, paused >>
+vars == << keeperState, killCount, paused, autoResumeBackoff, successfulTurn >>
 
 KeeperPhaseSet == {"Running", "Killed"}
 
@@ -56,93 +57,111 @@ TypeOK ==
     /\ keeperState \in [Keepers -> KeeperPhaseSet]
     /\ killCount \in [Keepers -> Nat]
     /\ paused \in [Keepers -> BOOLEAN]
+    /\ autoResumeBackoff \in [Keepers -> Nat]
+    /\ successfulTurn \in [Keepers -> BOOLEAN]
 
 Init ==
     /\ keeperState = [k \in Keepers |-> "Running"]
     /\ killCount = [k \in Keepers |-> 0]
     /\ paused = [k \in Keepers |-> FALSE]
+    /\ autoResumeBackoff = [k \in Keepers |-> 0]
+    /\ successfulTurn = [k \in Keepers |-> FALSE]
 
 \* Watchdog observes a stale signal and kills the keeper fiber.
-\* killCount increments; supervisor will decide what to do next.
 WatchdogKill(k) ==
     /\ keeperState[k] = "Running"
     /\ ~paused[k]
     /\ keeperState' = [keeperState EXCEPT ![k] = "Killed"]
     /\ killCount' = [killCount EXCEPT ![k] = @ + 1]
-    /\ UNCHANGED paused
+    /\ successfulTurn' = [successfulTurn EXCEPT ![k] = FALSE]
+    /\ UNCHANGED <<paused, autoResumeBackoff>>
 
-\* Supervisor sees a Killed keeper and the storm threshold is NOT
-\* breached -> restart.  This is the production-correct path when
-\* the underlying issue is transient.
+\* Supervisor restarts under-threshold killed keeper.
 SupervisorRestartUnderThreshold(k) ==
     /\ keeperState[k] = "Killed"
     /\ ~paused[k]
     /\ killCount[k] < EscalationThreshold
     /\ keeperState' = [keeperState EXCEPT ![k] = "Running"]
-    /\ UNCHANGED <<killCount, paused>>
+    /\ UNCHANGED <<killCount, paused, autoResumeBackoff, successfulTurn>>
 
-\* Supervisor sees a Killed keeper AND the storm threshold has been
-\* breached -> auto-pause instead of restarting.  This is the Phase 2
-\* (#10765) escalation that breaks the restart loop.
+\* Supervisor auto-pauses on storm threshold breach.
+\* Advances back-off step: 0->1, n->min(n+1, MaxBackoffSteps).
 SupervisorAutoPause(k) ==
     /\ keeperState[k] = "Killed"
     /\ ~paused[k]
     /\ killCount[k] >= EscalationThreshold
     /\ paused' = [paused EXCEPT ![k] = TRUE]
-    /\ UNCHANGED <<keeperState, killCount>>
+    /\ autoResumeBackoff' =
+           [autoResumeBackoff EXCEPT
+               ![k] = IF @ = 0 THEN 1
+                      ELSE IF @ < MaxBackoffSteps THEN @ + 1
+                      ELSE MaxBackoffSteps]
+    /\ UNCHANGED <<keeperState, killCount, successfulTurn>>
 
-\* THE BUG (pre-#10765 supervisor): blindly restart any Killed keeper
-\* regardless of kill count.  Combined with [WatchdogKill] this produces
-\* an unbounded restart loop because the underlying root cause persists
-\* across restarts.
+\* Phase 3 (this PR): sweep_and_recover Phase 3.5 auto-resumes the
+\* keeper once the back-off timer has elapsed.
+SweepAutoResume(k) ==
+    /\ paused[k]
+    /\ autoResumeBackoff[k] > 0
+    /\ paused' = [paused EXCEPT ![k] = FALSE]
+    /\ keeperState' = [keeperState EXCEPT ![k] = "Running"]
+    /\ UNCHANGED <<killCount, autoResumeBackoff, successfulTurn>>
+
+\* A successful keeper turn resets the back-off to the initial state.
+\* Models [auto_resume_after_sec = None] written by run_keeper_cycle on success.
+KeeperTurnSuccess(k) ==
+    /\ keeperState[k] = "Running"
+    /\ ~paused[k]
+    /\ autoResumeBackoff' = [autoResumeBackoff EXCEPT ![k] = 0]
+    /\ successfulTurn' = [successfulTurn EXCEPT ![k] = TRUE]
+    /\ UNCHANGED <<keeperState, killCount, paused>>
+
+\* THE BUG (pre-#10765): blind restart, no threshold check.
 SupervisorBlindRestart(k) ==
     /\ keeperState[k] = "Killed"
     /\ ~paused[k]
     /\ keeperState' = [keeperState EXCEPT ![k] = "Running"]
-    /\ UNCHANGED <<killCount, paused>>
+    /\ UNCHANGED <<killCount, paused, autoResumeBackoff, successfulTurn>>
 
-\* Clean Next: post-#10765 supervisor.  After threshold, the keeper
-\* lands in [paused = TRUE] and stays there until an operator resumes.
 Next == \E k \in Keepers :
     \/ WatchdogKill(k)
     \/ SupervisorRestartUnderThreshold(k)
     \/ SupervisorAutoPause(k)
+    \/ SweepAutoResume(k)
+    \/ KeeperTurnSuccess(k)
 
-\* Buggy Next: pre-#10765 supervisor.  No threshold check.  Restart
-\* loop is reachable.
 NextBuggy == \E k \in Keepers :
     \/ WatchdogKill(k)
     \/ SupervisorBlindRestart(k)
 
-Spec == Init /\ [][Next]_vars
+Spec == Init /\ [][Next]_vars /\ WF_vars(\E k \in Keepers : SweepAutoResume(k))
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
-\* Safety: if a keeper has been killed more than [EscalationThreshold]
-\* times, it must be paused (not actively running).  Clean Spec respects
-\* this because the only path past threshold is [SupervisorAutoPause].
-\* Buggy Spec violates it because [SupervisorBlindRestart] returns the
-\* keeper to Running with no upper bound on killCount.
+\* After a storm the keeper is paused OR has a back-off set OR had a
+\* successful turn that cleared the back-off (issue resolved).
 KillStormImpliesPaused ==
     \A k \in Keepers :
         killCount[k] > EscalationThreshold =>
-            (paused[k] \/ keeperState[k] = "Killed")
+            (paused[k]
+             \/ keeperState[k] = "Killed"
+             \/ autoResumeBackoff[k] > 0
+             \/ successfulTurn[k])
 
-\* Auxiliary: a paused keeper has had at least [EscalationThreshold]
-\* kills.  Holds in Clean Spec.
 PausedRequiresEscalation ==
     \A k \in Keepers :
         paused[k] => killCount[k] >= EscalationThreshold
+
+\* Liveness: every auto-paused keeper eventually resumes.
+AutoPausedEventuallyResumes ==
+    \A k \in Keepers :
+        paused[k] ~> ~paused[k]
 
 Safety ==
     /\ TypeOK
     /\ KillStormImpliesPaused
     /\ PausedRequiresEscalation
 
-\* State-space bound for the buggy spec only — the blind restart loop
-\* is otherwise infinite.  Used as CONSTRAINT in the buggy cfg; the
-\* clean cfg does not need it because SupervisorAutoPause halts every
-\* trace in finitely many steps.  The bug is detected well below this
-\* bound (typically at killCount = EscalationThreshold + 1).
+\* State-space bound for the buggy spec only.
 KillCountUnderBound ==
     \A k \in Keepers : killCount[k] <= 2 * EscalationThreshold
 

@@ -72,10 +72,13 @@ let print_summary () =
   Log.Env.info "KeeperProactive: max_attempts=%d timing_ring=%d"
     Env_config_keeper.KeeperProactive.max_attempts
     Env_config_keeper.KeeperProactive.stage_timing_ring_size;
-  Log.Env.info "SelfPreservation: ratio=%.2f min_candidates=%d dead_ttl=%.0fs"
+  Log.Env.info "SelfPreservation: ratio=%.2f min_candidates=%d dead_ttl=%.0fs \
+                auto_resume_initial=%.0fs auto_resume_max=%.0fs"
     Env_config_keeper.KeeperSupervisor.self_preservation_ratio
     Env_config_keeper.KeeperSupervisor.self_preservation_min_candidates
-    Env_config_keeper.KeeperSupervisor.dead_ttl_sec;
+    Env_config_keeper.KeeperSupervisor.dead_ttl_sec
+    Env_config_keeper.KeeperSupervisor.auto_resume_initial_sec
+    Env_config_keeper.KeeperSupervisor.auto_resume_max_sec;
   Log.Env.info "ContextCompact: drop_thr=%.2f prune_limit=%d"
     Env_config_keeper.ContextCompact.drop_importance_threshold
     Env_config_keeper.ContextCompact.tool_output_prune_limit

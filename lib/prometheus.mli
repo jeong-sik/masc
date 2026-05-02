@@ -382,6 +382,14 @@ val metric_keeper_dead_total : string
     by construction Dead means the supervisor gave up and no further
     restart will be attempted. *)
 
+val metric_keeper_auto_resumed_total : string
+(** Total keepers auto-resumed by the self-healing circuit breaker in
+    [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
+    timer elapsed.  Labeled by [keeper].  A positive rate indicates the
+    system is self-healing from transient provider outages without operator
+    intervention.  A sustained zero rate while [auto_resume_after_sec] is
+    set in meta files indicates a sweep or meta-write regression. *)
+
 val metric_keeper_skip_idle_wake_resumed : string
 
 (** RFC-0020 Rule 2 evidence — incremented every time

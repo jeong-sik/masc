@@ -38,11 +38,14 @@
     "vis-data": "^8.0.3",
     "vis-network": "^10.0.2",
     "vis-timeline": "^8.5.0",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.30",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@preact/preset-vite": "^2.10.5",
+    "@solidjs/testing-library": "^0.8.10",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/preact": "^3.2.4",
@@ -57,14 +60,13 @@
     "happy-dom": "^20.8.9",
     "jest-axe": "^9.0.0",
     "postcss": "^8.5.6",
-    "@solidjs/testing-library": "^0.8.10",
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^4.2.2",
-    "vite-plugin-solid": "^2.11.6",
     "tsx": "^4.20.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1",
     "vite": "^7.3.2",
+    "vite-plugin-solid": "^2.11.6",
     "vitest": "^4.1.4"
   },
   "pnpm": {

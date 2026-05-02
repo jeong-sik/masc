@@ -191,17 +191,28 @@ let emit_transition ~keeper_name ~turn_id ?prev state =
     | Some s -> turn_state_label s
     | None -> "-"
   in
+  let classified =
+    match prev with
+    | Some from_state -> classify_transition ~from_state ~to_state:state
+    | None -> None
+  in
   (match prev with
    | Some from_state ->
        guard_transition ~keeper_name ~turn_id ~from_state ~to_state:state
    | None -> ());
   let state_label = turn_state_label state in
+  let action_label =
+    match classified with
+    | Some action -> transition_action_label action
+    | None -> "unknown"
+  in
   Log.Keeper.info ~keeper_name ~turn_id
-    "[fsm:transition] %s -> %s" prev_label state_label;
+    "[fsm:transition] %s -> %s action=%s" prev_label state_label action_label;
   Prometheus.inc_counter Prometheus.metric_keeper_turn_fsm_transitions
     ~labels:
       [ ("from", prev_label);
         ("to", state_label);
+        ("action", action_label);
         ("keeper", keeper_name);
       ]
     ()

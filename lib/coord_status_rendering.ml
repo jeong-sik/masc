@@ -137,12 +137,12 @@ let status_summary_string
   let current_room = "default" in
 
   let buf = Buffer.create 256 in
-  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" effective_cluster_name);
+  Printf.bprintf buf "🏢 Cluster: %s\n" effective_cluster_name;
   if not (String.equal effective_cluster_name state.project) then
-    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
+    Printf.bprintf buf "📦 Project: %s\n" state.project;
   Buffer.add_string buf
     (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
-  Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
+  Printf.bprintf buf "📁 Path: %s\n" ctx.config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf
     (Printf.sprintf
@@ -190,7 +190,7 @@ let status_summary_string
     Buffer.add_string buf "\n⚠️ Attention:\n";
     List.iter
       (fun item ->
-        Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
+        Printf.bprintf buf "  - %s\n" item)
       attention_items);
   Buffer.add_string buf "📌 Players:\n";
   (match shown_agents with

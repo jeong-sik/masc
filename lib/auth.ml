@@ -10,7 +10,7 @@ open Types
 let generate_token () =
   let random_bytes = Mirage_crypto_rng.generate 32 in
   let hex = Buffer.create 64 in
-  String.iter (fun c -> Buffer.add_string hex (Printf.sprintf "%02x" (Char.code c))) random_bytes;
+  String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;
   Buffer.contents hex
 
 (** SHA256 hash of a string using Digestif *)

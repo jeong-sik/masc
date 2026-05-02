@@ -79,7 +79,7 @@ let safe_filename name =
     if valid then
       Buffer.add_char buf c_lower
     else
-      Buffer.add_string buf (Printf.sprintf "_%02x" (Char.code c))
+      Printf.bprintf buf "_%02x" (Char.code c)
   ) name;
   Buffer.contents buf
 

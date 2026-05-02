@@ -928,7 +928,7 @@ let escape_toml_string s =
     | '\r' -> Buffer.add_string buf "\\r"
     | '\t' -> Buffer.add_string buf "\\t"
     | c when Char.code c < 0x20 ->
-        Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
+        Printf.bprintf buf "\\u%04x" (Char.code c)
     | c -> Buffer.add_char buf c
   ) s;
   Buffer.contents buf

@@ -1562,12 +1562,12 @@ let to_prometheus_text () =
     match ms with
     | [] -> ()
     | m :: _ ->
-      Buffer.add_string buf (Printf.sprintf "# HELP %s %s\n" name m.help);
+      Printf.bprintf buf "# HELP %s %s\n" name m.help;
       (match m.metric_type with
        | Histogram ->
          (* No bucket distribution is tracked, so emit as summary
             (sum + count) which is the closest valid Prometheus type. *)
-         Buffer.add_string buf (Printf.sprintf "# TYPE %s summary\n" name);
+         Printf.bprintf buf "# TYPE %s summary\n" name;
          List.iter (fun (metric : metric) ->
            let ls = labels_to_string metric.labels in
            Buffer.add_string buf
@@ -1586,8 +1586,8 @@ let to_prometheus_text () =
          Buffer.add_string buf
            (Printf.sprintf "# TYPE %s %s\n" name (type_to_string m.metric_type));
          List.iter (fun (metric : metric) ->
-           Buffer.add_string buf (Printf.sprintf "%s%s %g\n"
-             metric.name (labels_to_string metric.labels) metric.value)
+           Printf.bprintf buf "%s%s %g\n"
+             metric.name (labels_to_string metric.labels) metric.value
          ) ms)
   ) by_name;
   Buffer.contents buf

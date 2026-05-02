@@ -58,7 +58,7 @@ let url_encode value =
       | ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '~') as c
         ->
           Buffer.add_char buf c
-      | c -> Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
+      | c -> Printf.bprintf buf "%%%02X" (Char.code c))
     value;
   Buffer.contents buf
 

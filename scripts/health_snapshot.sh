@@ -220,6 +220,15 @@ case "$anti_fake_status" in
     ;;
 esac
 
+base_policy_json="$(mktemp)"
+bash scripts/base-policy-audit.sh \
+  --json-out "$base_policy_json" \
+  --baseline-file "$BASELINE_FILE"
+
+mli_open_base="$(python3 -c "import json; d=json.load(open('$base_policy_json')); print(d['mli_open_base'])")"
+ml_base_stdlib_shadow="$(python3 -c "import json; d=json.load(open('$base_policy_json')); print(d['ml_base_stdlib_shadow'])")"
+rm -f "$base_policy_json"
+
 lib_failwith="$(count_pattern lib 'failwith')"
 lib_list_hd="$(count_pattern lib 'List\.hd')"
 lib_list_tl="$(count_pattern lib 'List\.tl')"
@@ -334,6 +343,7 @@ echo "Baseline: ${baseline_label}"
 echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti_fake_suspect} fake=${anti_fake_fake} total=${anti_fake_total}"
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
+echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow}"
 echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500} examples=${examples_ml_over_500}"
 echo "ML line cap changed: ${ml_line_cap_changed_status} (${ml_line_cap_changed_message})"
 echo "ML line cap ratchet: ${ml_line_cap_status} (${ml_line_cap_message})"
@@ -371,7 +381,9 @@ json_payload="$(cat <<EOF
     "lib_ml_over_500": ${lib_ml_over_500},
     "bin_ml_over_500": ${bin_ml_over_500},
     "test_ml_over_500": ${test_ml_over_500},
-    "examples_ml_over_500": ${examples_ml_over_500}
+    "examples_ml_over_500": ${examples_ml_over_500},
+    "mli_open_base": ${mli_open_base},
+    "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow}
   },
   "ml_line_cap": {
     "status": "${ml_line_cap_status}",
@@ -431,6 +443,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| examples | $examples_ml_over_500 | n/a |"
     echo ""
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
+    echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\`"
     echo "- ML line cap changed: \`$ml_line_cap_changed_status\` ($ml_line_cap_changed_message)"
     echo "- ML line cap ratchet: \`$ml_line_cap_status\` ($ml_line_cap_message)"
     echo "- Ratchet: \`$ratchet_status\` ($ratchet_message)"

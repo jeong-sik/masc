@@ -84,7 +84,7 @@ let parse_response ?(total = 1) ?now json =
 (* Build [<base_url>/api/ps], normalising the trailing slash. *)
 let probe_endpoint_of base_url =
   let stripped =
-    if String.ends_with base_url ~suffix:"/"
+    if String.ends_with ~suffix:"/" base_url
     then String.sub base_url 0 (String.length base_url - 1)
     else base_url
   in

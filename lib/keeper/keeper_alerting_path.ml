@@ -140,7 +140,7 @@ let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path :
 let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
   let parts = split_relative_components raw in
   let trailing_slash =
-    String.ends_with raw ~suffix:"/"
+    String.ends_with ~suffix:"/" raw
   in
   parent_exists candidate
   && List.length parts > 1

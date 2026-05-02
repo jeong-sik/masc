@@ -44,8 +44,8 @@
     font-family: var(--font-display); font-size: 20px; letter-spacing: 0.22em;
     color: var(--text-bright); text-transform: uppercase; margin: 0;
   }
-  .page-head .crumb { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .page-head .crumb b { color: var(--accent-brass); font-weight: 400; }
+  .page-head .crumb { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .page-head .crumb b { color: var(--accent-brass); font-weight: var(--fw-reg); }
 
   /* Toolbar */
   .tools {
@@ -54,13 +54,13 @@
   }
   .tools .group { display: inline-flex; gap: 2px; border: 1px solid var(--hair); }
   .tools button {
-    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.22em; text-transform: uppercase;
     padding: 6px 10px; background: transparent; color: var(--text-dim); border: 0; cursor: pointer;
   }
   .tools button.on { background: rgba(160,140,110,0.1); color: var(--text-bright); }
-  .tools .lbl { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .tools .stat { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
-  .tools .stat b { color: var(--text-bright); font-weight: 400; }
+  .tools .lbl { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .tools .stat { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
+  .tools .stat b { color: var(--text-bright); font-weight: var(--fw-reg); }
 
   /* Constellation frame */
   .cosmos-wrap {
@@ -112,9 +112,9 @@
     display: flex; flex-direction: column; gap: 2px;
   }
   .layers > div:last-child { border-right: 0; }
-  .layers .k { font-size: 9px; letter-spacing: 0.28em; color: var(--text-dim); }
-  .layers .v { font-size: 11px; letter-spacing: 0.18em; color: var(--text-bright); font-family: var(--font-display); }
-  .layers .c { font-family: var(--font-mono); font-size: 10px; color: var(--accent-brass); letter-spacing: 0.04em; }
+  .layers .k { font-size: var(--fs-9); letter-spacing: 0.28em; color: var(--text-dim); }
+  .layers .v { font-size: var(--fs-11); letter-spacing: 0.18em; color: var(--text-bright); font-family: var(--font-display); }
+  .layers .c { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--accent-brass); letter-spacing: 0.04em; }
 
   /* SVG canvas */
   .cosmos {
@@ -144,7 +144,7 @@
     border: 1px solid var(--hair); border-right: 0;
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.22em;
+    font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.22em;
     color: var(--text-dim); text-transform: uppercase;
     writing-mode: vertical-rl; transform: rotate(180deg);
   }
@@ -153,27 +153,27 @@
     padding: 14px 16px; border-bottom: 1px solid var(--hair);
     display: flex; align-items: baseline; justify-content: space-between;
   }
-  .hud header .eye { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .hud header .id { font-family: var(--font-mono); font-size: 10px; color: var(--accent-brass); }
+  .hud header .eye { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .hud header .id { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--accent-brass); }
   .hud .body { padding: 16px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
 
   .hud .title {
     font-family: var(--font-display); font-size: 17px; letter-spacing: 0.14em;
     color: var(--text-bright); text-transform: uppercase; line-height: 1.25;
   }
-  .hud .meta { display: grid; grid-template-columns: 70px 1fr; gap: 4px 10px; font-size: 11px; }
-  .hud .meta .k { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; align-self: center; }
+  .hud .meta { display: grid; grid-template-columns: 70px 1fr; gap: 4px 10px; font-size: var(--fs-11); }
+  .hud .meta .k { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; align-self: center; }
   .hud .meta .v { font-family: var(--font-mono); color: var(--text-bright); font-variant-numeric: tabular-nums; }
   .hud .meta .v.status {
     display: inline-flex; align-items: center; gap: 6px;
-    text-transform: uppercase; letter-spacing: 0.12em; font-family: var(--font-ui); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.12em; font-family: var(--font-ui); font-size: var(--fs-10);
   }
   .hud .meta .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 
-  .hud .desc { font-family: var(--font-body); font-style: italic; font-size: 13px; color: var(--text-primary); line-height: 1.55; }
+  .hud .desc { font-family: var(--font-body); font-style: italic; font-size: var(--fs-13); color: var(--text-primary); line-height: 1.55; }
 
   .hud .block { border-top: 1px solid var(--hair); padding-top: 12px; }
-  .hud .block-head { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; }
+  .hud .block-head { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; }
 
   .keepers { display: flex; flex-direction: column; gap: 6px; }
   .keepers .k {
@@ -183,17 +183,17 @@
   .keepers .k .av {
     width: 26px; height: 26px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-display); font-size: 10px; color: var(--text-bright);
+    font-family: var(--font-display); font-size: var(--fs-10); color: var(--text-bright);
     background: #1a130e; border: 1px solid var(--hair-strong);
     clip-path: polygon(50% 0, 100% 30%, 100% 70%, 50% 100%, 0 70%, 0 30%);
     letter-spacing: 0.04em;
   }
   .keepers .k .av.lead { background: #3a1a14; border-color: var(--accent-blood-dim); color: var(--accent-viscera); }
-  .keepers .k .name { font-family: var(--font-ui); font-size: 11px; color: var(--text-bright); letter-spacing: 0.08em; }
-  .keepers .k .role { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-left: auto; letter-spacing: 0.04em; }
+  .keepers .k .name { font-family: var(--font-ui); font-size: var(--fs-11); color: var(--text-bright); letter-spacing: 0.08em; }
+  .keepers .k .role { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); margin-left: auto; letter-spacing: 0.04em; }
 
   .deps { display: flex; flex-direction: column; gap: 4px; }
-  .deps .d { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+  .deps .d { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-primary); }
   .deps .d .arr { width: 12px; height: 1px; background: currentColor; position: relative; }
   .deps .d.block .arr { background: var(--e-block); }
   .deps .d.supp  .arr { background: var(--e-supp); }
@@ -203,7 +203,7 @@
   .deps .d.supp  .arr::after { border-left-color: var(--e-supp); }
   .deps .d.inform .arr::after { border-left-color: var(--e-inform); }
   .deps .d .nm { color: var(--text-bright); }
-  .deps .d .tp { margin-left: auto; font-size: 9px; color: var(--text-dim); letter-spacing: 0.14em; text-transform: uppercase; }
+  .deps .d .tp { margin-left: auto; font-size: var(--fs-9); color: var(--text-dim); letter-spacing: 0.14em; text-transform: uppercase; }
 
   .progbar { height: 4px; background: #1a130e; border: 1px solid var(--hair); position: relative; }
   .progbar .fg { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-brass); box-shadow: 0 0 8px var(--accent-glow); }
@@ -223,18 +223,18 @@
   .node-g.blocked .core { fill: #2a100e; }
   .node-g.done    .core { fill: #18221a; }
 
-  .node-g .glyph { fill: var(--text-bright); font-family: var(--font-display); text-anchor: middle; dominant-baseline: central; font-size: 11px; letter-spacing: 0.14em; }
+  .node-g .glyph { fill: var(--text-bright); font-family: var(--font-display); text-anchor: middle; dominant-baseline: central; font-size: var(--fs-11); letter-spacing: 0.14em; }
   .node-g.abandon .glyph { fill: var(--text-dim); }
 
   .node-g .lbl {
     fill: var(--text-primary);
-    font-family: var(--font-display); font-size: 11px;
+    font-family: var(--font-display); font-size: var(--fs-11);
     letter-spacing: 0.2em; text-transform: uppercase;
     text-anchor: middle;
   }
   .node-g .sub {
     fill: var(--text-dim);
-    font-family: var(--font-mono); font-size: 9px;
+    font-family: var(--font-mono); font-size: var(--fs-9);
     text-anchor: middle;
     letter-spacing: 0.04em;
   }
@@ -259,16 +259,16 @@
   .edge.high   { opacity: 1; stroke-width: 2; }
 
   /* tiny inline legend under chart */
-  .legend-row { display: flex; gap: 22px; padding: 10px 14px; border-top: 1px solid var(--hair); background: #0a0706; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+  .legend-row { display: flex; gap: 22px; padding: 10px 14px; border-top: 1px solid var(--hair); background: #0a0706; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
   .legend-row .i { display: inline-flex; align-items: center; gap: 6px; }
   .legend-row .i .sw { width: 10px; height: 10px; display: inline-block; border: 1px solid rgba(160,140,110,0.3); }
   .legend-row .i .ln { width: 18px; height: 2px; display: inline-block; }
-  .legend-row .i .av { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; background: #1a130e; border: 1px solid var(--hair-strong); font-family: var(--font-display); font-size: 7px; color: var(--text-bright); clip-path: polygon(50% 0, 100% 30%, 100% 70%, 50% 100%, 0 70%, 0 30%); }
+  .legend-row .i .av { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; background: #1a130e; border: 1px solid var(--hair-strong); font-family: var(--font-display); font-size: var(--fs-7); color: var(--text-bright); clip-path: polygon(50% 0, 100% 30%, 100% 70%, 50% 100%, 0 70%, 0 30%); }
 
   /* annotation lines (soft latin labels floating in space) */
   .quad-lbl {
     fill: rgba(160,140,110,0.22);
-    font-family: var(--font-display); font-size: 11px;
+    font-family: var(--font-display); font-size: var(--fs-11);
     letter-spacing: 0.32em; text-transform: uppercase;
   }
 </style>
@@ -730,7 +730,7 @@ function openHud(id) {
     <span class="k">Layer</span><span class="v">${layerName} · L${g.layer}</span>
     <span class="k">Status</span><span class="v status"><span class="dot" style="background:${STATUS_COLOR[g.status]}"></span>${STATUS_LABEL[g.status]}</span>
     <span class="k">Progress</span><span class="v">${Math.round(g.progress*100)}%</span>
-    <span class="k">Sub</span><span class="v" style="font-size:10px; letter-spacing:0.12em;">${g.sub}</span>
+    <span class="k">Sub</span><span class="v" style="font-size:var(--fs-10); letter-spacing:0.12em;">${g.sub}</span>
   `;
   hudProg.style.display = 'block';
   hudProg.querySelector('.fg').style.width = (g.progress*100) + '%';

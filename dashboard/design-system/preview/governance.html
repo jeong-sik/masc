@@ -96,7 +96,7 @@
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
     }
-    .gv-row .arr { color: var(--color-fg-muted); font-family: var(--font-mono); font-size: 10px; }
+    .gv-row .arr { color: var(--color-fg-muted); font-family: var(--font-mono); font-size: var(--fs-10); }
 
     /* ── governance layout (responsive collapse) ─────────────────── */
     /* mirrors production governance.css:L11-20
@@ -118,7 +118,7 @@
       letter-spacing: var(--track-caps);
       text-transform: uppercase;
       color: var(--color-fg-secondary);
-      font-weight: 600;
+      font-weight: var(--fw-semi);
     }
     .gv-inbox {
       max-height: 180px;
@@ -128,9 +128,9 @@
     .gv-inbox .item {
       padding: 8px 10px;
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-11);
       color: var(--color-fg-secondary);
       background: var(--color-bg-page);
     }
@@ -191,7 +191,7 @@
     .gv-ff-plate .status {
       display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
     }
@@ -199,7 +199,7 @@
       display: inline-flex; align-items: center; gap: 6px;
       padding: 3px 8px;
       border: 1px solid var(--color-border-strong);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       background: var(--color-bg-surface);
       color: var(--color-fg-secondary);
     }
@@ -223,7 +223,7 @@
       border: 1px solid var(--color-border-strong);
       border-radius: 999px;
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       color: var(--color-fg-secondary);
       letter-spacing: var(--track-wide);
       background: var(--color-bg-surface);
@@ -470,7 +470,7 @@
           </div>
           <table style="
             width: 100%; border-collapse: collapse;
-            font-family: var(--font-mono); font-size: 11px;
+            font-family: var(--font-mono); font-size: var(--fs-11);
             color: var(--color-fg-secondary);
           ">
             <thead>

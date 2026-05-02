@@ -173,7 +173,7 @@
       background: var(--color-bg-surface);
       font-family: var(--font-mono);
       font-size: var(--fs-10);
-      font-weight: 600;
+      font-weight: var(--fw-semi);
       letter-spacing: var(--track-caps);
       text-transform: uppercase;
     }
@@ -209,11 +209,11 @@
       display: inline-flex; align-items: center;
       padding: 3px 9px;
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       background: var(--color-bg-surface);
       font-family: var(--font-mono);
       font-size: var(--fs-10);
-      font-weight: 600;
+      font-weight: var(--fw-semi);
       letter-spacing: var(--track-caps);
       text-transform: uppercase;
       color: var(--color-fg-secondary);
@@ -308,7 +308,7 @@
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
     }
-    .ch-meta .name { color: var(--color-fg-secondary); font-weight: 600; }
+    .ch-meta .name { color: var(--color-fg-secondary); font-weight: var(--fw-semi); }
     .ch-meta .ts { color: var(--color-fg-disabled); }
 
     /* token annotation block reused in cards */
@@ -352,7 +352,7 @@
     .ch-cascade .step {
       padding: 4px 8px;
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       background: var(--color-bg-page);
       color: var(--color-fg-primary);
     }
@@ -375,7 +375,7 @@
       display: inline-flex; align-items: center; gap: 6px;
       padding: 2px 6px;
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       background: var(--color-bg-page);
     }
   </style>

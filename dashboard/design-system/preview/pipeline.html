@@ -108,10 +108,10 @@
       transition: color 0.3s ease;
     }
     /* mirrors production pipeline.css:L15-18
-       .pipeline-stage-node.active .pipeline-stage-label { color:var(--white-90); font-weight:600 } */
+       .pipeline-stage-node.active .pipeline-stage-label { color:var(--white-90); font-weight:var(--fw-semi) } */
     .pl-node.is-active .pl-label {
       color: var(--color-fg-primary);
-      font-weight: 600;
+      font-weight: var(--fw-semi);
     }
     .pl-conn {
       position: absolute;
@@ -203,9 +203,9 @@
       display: inline-flex; align-items: center; gap: 6px;
       padding: 3px 8px;
       border: 1px solid var(--color-border-strong);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       letter-spacing: var(--track-wide);
       background: var(--color-bg-surface);
       color: var(--color-fg-secondary);
@@ -268,7 +268,7 @@
       width: 100%;
       border-collapse: collapse;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-11);
       color: var(--color-fg-secondary);
     }
     .pl-drift-table th {
@@ -277,7 +277,7 @@
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
       border-bottom: 1px solid var(--color-border-strong);
-      font-weight: 600;
+      font-weight: var(--fw-semi);
     }
     .pl-drift-table td {
       padding: 8px 10px;
@@ -294,11 +294,11 @@
        this region by design. */
     .pl-drift-rgba {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       color: var(--color-fg-muted);
       background: var(--color-bg-page);
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       padding: 2px 5px;
       white-space: nowrap;
     }
@@ -402,7 +402,7 @@
           <!-- mirrors production @utility pipeline-stage-label (color transition 0.3s) -->
           <div style="display: flex; gap: 18px; align-items: center;">
             <span class="pl-label-utility">stage · idle</span>
-            <span class="pl-label-utility" style="color: var(--color-fg-primary); font-weight: 600;">stage · active (hover state)</span>
+            <span class="pl-label-utility" style="color: var(--color-fg-primary); font-weight: var(--fw-semi);">stage · active (hover state)</span>
           </div>
           <div class="pl-toks">
             <span class="pv-tok">var(--color-fg-muted)</span>

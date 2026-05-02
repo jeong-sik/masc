@@ -41,7 +41,7 @@
     .pv-cascade {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-11);
       color: var(--color-fg-muted);
       padding: 10px 14px;
       background: var(--color-bg-surface);
@@ -50,18 +50,18 @@
     }
     .pv-cascade .arrow { color: var(--color-fg-disabled); }
     .pv-cascade .term { color: var(--color-fg-secondary); }
-    .pv-cascade .pin { color: var(--color-accent-fg); font-weight: 600; }
+    .pv-cascade .pin { color: var(--color-accent-fg); font-weight: var(--fw-semi); }
 
     /* Source-line pointer chip (mirrors `tk` primitive shape) */
     .pv-ref {
       display: inline-block;
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       color: var(--color-fg-disabled);
       letter-spacing: var(--track-wide);
       background: var(--color-bg-page);
       border: 1px solid var(--color-border-default);
-      border-radius: 2px;
+      border-radius: var(--r-0);
       padding: 1px 5px;
       margin-left: 6px;
     }
@@ -114,13 +114,13 @@
     }
     .tile .lbl {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--fs-10);
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
     }
     .tile .name {
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-11);
       color: var(--color-fg-primary);
     }
 
@@ -222,7 +222,7 @@
     @keyframes blocker-pulse      { 0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); } 50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.5); } }
     @keyframes pulse              { 0%, 100% { opacity: 1; } 50% { opacity: 0.75; } }
 
-    .stamp { position: fixed; top: 12px; right: 16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
+    .stamp { position: fixed; top: 12px; right: 16px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled); }
   </style>
 </head>
 <body>

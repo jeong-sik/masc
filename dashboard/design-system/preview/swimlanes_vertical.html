@@ -42,7 +42,7 @@
     font-family: var(--font-display); font-size: 20px; letter-spacing: 0.22em;
     color: var(--text-bright); text-transform: uppercase; margin: 0;
   }
-  .page-head .crumb { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .page-head .crumb { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
 
   /* toolbar */
   .tools {
@@ -51,12 +51,12 @@
   }
   .tools .group { display: inline-flex; gap: 2px; border: 1px solid var(--hair); }
   .tools button {
-    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.22em; text-transform: uppercase;
     padding: 6px 10px; background: transparent; color: var(--text-dim); border: 0; cursor: pointer;
   }
   .tools button.on { background: rgba(160,140,110,0.1); color: var(--text-bright); }
-  .tools .lbl { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .tools .legend { display: inline-flex; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-left: auto; flex-wrap: wrap; }
+  .tools .lbl { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .tools .legend { display: inline-flex; gap: 10px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-left: auto; flex-wrap: wrap; }
   .tools .legend .i { display: inline-flex; align-items: center; gap: 5px; }
   .tools .legend .sw { width: 10px; height: 10px; display: inline-block; }
 
@@ -81,7 +81,7 @@
   }
   .time-axis .t-tick .lbl {
     position: absolute; right: 8px; top: -6px;
-    font-family: var(--font-mono); font-size: 10px; color: var(--axis-lbl);
+    font-family: var(--font-mono); font-size: var(--fs-10); color: var(--axis-lbl);
     background: #0c0806; padding: 0 4px;
     font-variant-numeric: tabular-nums;
   }
@@ -106,9 +106,9 @@
   .kcol .head .dot { width: 6px; height: 6px; border-radius: 50%; background: #7a9c6e; flex-shrink: 0; }
   .kcol.warn .head .dot { background: #b08a3a; }
   .kcol.bad  .head .dot { background: #a01818; }
-  .kcol .head .nm { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); letter-spacing: 0.04em; }
+  .kcol .head .nm { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-bright); letter-spacing: 0.04em; }
   .kcol.bad .head .nm { color: var(--text-dim); text-decoration: line-through; text-decoration-color: #a01818; }
-  .kcol .head .state { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; margin-top: 5px; }
+  .kcol .head .state { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; margin-top: 5px; }
   .kcol.bad .head .state { color: #a01818; }
 
   /* The lane track */
@@ -125,7 +125,7 @@
   .frame {
     position: absolute;
     left: 4px; right: 4px;
-    font-family: var(--font-mono); font-size: 10px;
+    font-family: var(--font-mono); font-size: var(--fs-10);
     color: #0a0706;
     padding: 3px 6px;
     border: 1px solid transparent;
@@ -138,7 +138,7 @@
   }
   .frame:hover { border-color: var(--text-bright); z-index: 10; }
   .frame .fn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .frame .fd { font-size: 9px; opacity: 0.6; text-align: right; font-variant-numeric: tabular-nums; }
+  .frame .fd { font-size: var(--fs-9); opacity: 0.6; text-align: right; font-variant-numeric: tabular-nums; }
   .frame.tiny .fd { display: none; }
 
   .frame.t-llm   { background: var(--t-llm); }
@@ -163,7 +163,7 @@
   }
   .xmark-h::after {
     content: "✕"; position: absolute; left: 4px; top: -8px;
-    color: #a01818; font-family: var(--font-mono); font-size: 11px;
+    color: #a01818; font-family: var(--font-mono); font-size: var(--fs-11);
     background: #0e0a08; padding: 0 4px;
   }
 
@@ -186,7 +186,7 @@
   }
   .handoff-svg .hd-label {
     fill: #d4a940;
-    font-family: var(--font-mono); font-size: 9px;
+    font-family: var(--font-mono); font-size: var(--fs-9);
     text-anchor: middle;
   }
 
@@ -200,7 +200,7 @@
   }
   .hz-cross .lbl {
     position: absolute; left: 4px; top: -14px;
-    font-family: var(--font-mono); font-size: 10px;
+    font-family: var(--font-mono); font-size: var(--fs-10);
     color: var(--text-bright);
     background: #0c0806; padding: 2px 6px;
     border: 1px solid var(--hair-strong);
@@ -210,14 +210,14 @@
   .tt {
     position: fixed; pointer-events: none; z-index: 40;
     background: #0c0806; border: 1px solid var(--hair-strong);
-    padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-bright);
+    padding: 8px 10px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-bright);
     min-width: 180px; display: none;
     box-shadow: 0 4px 18px rgba(0,0,0,0.6);
   }
-  .tt .t { color: var(--text-dim); font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; }
+  .tt .t { color: var(--text-dim); font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.22em; text-transform: uppercase; }
   .tt .row { display: flex; gap: 10px; justify-content: space-between; margin-top: 3px; }
   .tt .row .k { color: var(--text-dim); }
-  .tt b { color: var(--text-bright); font-weight: 400; }
+  .tt b { color: var(--text-bright); font-weight: var(--fw-reg); }
 
   /* Summary */
   .summary {
@@ -229,14 +229,14 @@
     padding: 12px 16px; border-right: 1px solid var(--hair);
   }
   .summary > div:last-child { border-right: 0; }
-  .summary .k { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .summary .v { font-family: var(--font-mono); font-size: 16px; color: var(--text-bright); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .summary .k { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .summary .v { font-family: var(--font-mono); font-size: var(--fs-16); color: var(--text-bright); margin-top: 4px; font-variant-numeric: tabular-nums; }
   .summary .v.warn { color: #b08a3a; }
   .summary .v.bad  { color: #a01818; }
 
   /* Small note */
   .note {
-    font-family: var(--font-body); font-style: italic; font-size: 12px;
+    font-family: var(--font-body); font-style: italic; font-size: var(--fs-12);
     color: var(--text-dim); margin: 14px 0 0;
   }
 </style>

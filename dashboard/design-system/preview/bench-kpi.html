@@ -20,8 +20,8 @@
       max-width: 1200px;
       margin: 0 auto;
     }
-    h1 { font-size: 18px; margin: 0; }
-    .muted { color: var(--color-fg-muted); font-size: 12px; }
+    h1 { font-size: var(--fs-18); margin: 0; }
+    .muted { color: var(--color-fg-muted); font-size: var(--fs-12); }
     .controls { display: flex; gap: 8px; flex-wrap: wrap; }
     .controls button {
       padding: 6px 14px;
@@ -30,7 +30,7 @@
       color: var(--color-fg-primary);
       cursor: pointer;
       font-family: inherit;
-      font-size: 12px;
+      font-size: var(--fs-12);
     }
     .controls button:hover { background: var(--color-bg-hover); }
     .controls input {
@@ -45,14 +45,14 @@
       background: var(--color-bg-elevated);
       border: 1px solid var(--color-border-default);
       padding: 12px;
-      font-size: 12px;
+      font-size: var(--fs-12);
       max-height: 400px;
       overflow: auto;
       white-space: pre-wrap;
     }
     .grids { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .col h2 {
-      font-size: 14px;
+      font-size: var(--fs-14);
       margin: 0 0 8px;
       border-bottom: 1px solid var(--color-border-default);
       padding-bottom: 4px;
@@ -99,7 +99,7 @@
       </div>
     </div>
 
-    <h2 style="font-size:14px; margin-top:24px">Sync-mount spike host (RFC 0017 §7d)</h2>
+    <h2 style="font-size:var(--fs-14); margin-top:24px">Sync-mount spike host (RFC 0017 §7d)</h2>
     <div id="sync-host"></div>
   </div>
 

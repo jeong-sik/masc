@@ -1121,7 +1121,163 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
-let test_runtime_trust_snapshot_tolerates_null_telemetry () =
+(* Phase 1 — Bootstrap bypass *)
+
+let test_bootstrap_turn_fires_when_never_started () =
+  (* A keeper with last_ts = 0.0 (never started) should always run a turn
+     even when there are no work signals, no tasks, and the idle gate has
+     not elapsed.  This breaks the bootstrap deadlock. *)
+  let meta =
+    { minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
+  check bool "bootstrap: should_run=true when never started" true decision.should_run;
+  check bool "bootstrap: Never_started reason emitted" true
+    (match decision.verdict with
+     | WO.Run { reasons = (first, rest) } ->
+         List.mem WO.Never_started (first :: rest)
+     | WO.Skip _ -> false);
+  check int "bootstrap: since_last_scheduled_autonomous = max_int" max_int
+    (Option.value ~default:(-1) decision.since_last_scheduled_autonomous)
+
+let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
+  let meta =
+    { minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 600; cooldown_sec = 900 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
+  check string "bootstrap channel is scheduled_autonomous" "scheduled_autonomous"
+    (WO.channel_to_string decision.channel)
+
+(* Phase 2 — Minimum proactive cadence *)
+
+let test_min_interval_fires_without_work_signal () =
+  (* After proactive_min_interval_sec has elapsed since the last turn,
+     the keeper should fire a housekeeping turn even when there are no
+     observable work signals. *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    with_env "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC" "60" (fun () ->
+      let meta =
+        { minimal_meta with
+          proactive =
+            { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+          runtime =
+            { minimal_meta.runtime with
+              proactive_rt =
+                { minimal_meta.runtime.proactive_rt with
+                  last_ts = Time_compat.now () -. 1000.0;
+                };
+            };
+        }
+      in
+      let obs = { base_observation with idle_seconds = 0 } in
+      let decision =
+        WO.keeper_cycle_decision
+          ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+          ~meta obs
+      in
+      check bool "min interval elapsed fires turn" true decision.should_run;
+      check bool "Min_interval_elapsed reason emitted" true
+        (match decision.verdict with
+         | WO.Run { reasons = (first, rest) } ->
+             List.mem WO.Min_interval_elapsed (first :: rest)
+         | WO.Skip _ -> false)))
+
+let test_min_interval_does_not_fire_before_elapsed () =
+  (* With since_last = 500s and min_interval = 900s, the keeper should
+     NOT get a free housekeeping turn (no work signals present either). *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    with_env "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC" "60" (fun () ->
+      let meta =
+        { minimal_meta with
+          proactive =
+            { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+          runtime =
+            { minimal_meta.runtime with
+              proactive_rt =
+                { minimal_meta.runtime.proactive_rt with
+                  last_ts = Time_compat.now () -. 500.0;
+                };
+            };
+        }
+      in
+      let obs = { base_observation with idle_seconds = 0 } in
+      let decision =
+        WO.keeper_cycle_decision
+          ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+          ~meta obs
+      in
+      check bool "min interval not yet elapsed: should_run=false" false decision.should_run;
+      check bool "No_signal reason present when interval pending" true
+        (match decision.verdict with
+         | WO.Skip { reasons = (first, rest) } ->
+             List.exists (function WO.No_signal -> true | _ -> false)
+               (first :: rest)
+         | WO.Run _ -> false)))
+
+let test_min_interval_never_fires_for_bootstrap () =
+  (* The Min_interval_elapsed path must not fire when is_bootstrap = true
+     (since_last = max_int).  The bootstrap bypass covers that case and
+     emits Never_started, not Min_interval_elapsed. *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = 0.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "bootstrap does not emit Min_interval_elapsed" false
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false);
+    check bool "bootstrap emits Never_started" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Never_started (first :: rest)
+       | WO.Skip _ -> false))
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -6495,6 +6651,16 @@ let () =
             test_task_backlog_cooldown_applies_noop_backoff_once;
           test_case "fresh backlog update bypasses cooldown" `Quick
             test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update;
+          test_case "bootstrap: fires when keeper never started" `Quick
+            test_bootstrap_turn_fires_when_never_started;
+          test_case "bootstrap: channel is scheduled_autonomous" `Quick
+            test_bootstrap_turn_emits_scheduled_autonomous_channel;
+          test_case "min interval: fires without work signal after interval" `Quick
+            test_min_interval_fires_without_work_signal;
+          test_case "min interval: does not fire before elapsed" `Quick
+            test_min_interval_does_not_fire_before_elapsed;
+          test_case "min interval: never fires for bootstrap turn" `Quick
+            test_min_interval_never_fires_for_bootstrap;
 	          test_case "runtime trust snapshot tolerates null telemetry" `Quick
 	            test_runtime_trust_snapshot_tolerates_null_telemetry;
 	          test_case "runtime trust snapshot surfaces terminal reason" `Quick

@@ -5115,6 +5115,15 @@ let test_per_attempt_retry_refuses_zero_remaining () =
       fail "is_retry=true with 0.0s remaining should return None"
 
 let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
+  (* Regression: GitHub #12675 — this simulates the real call-site scenario:
+     a *first-attempt* failure (is_retry=false at the call site) triggers
+     degraded-retry scheduling when wall-clock remaining is very small (3s).
+
+     Before the fix, the gate received the current attempt's is_retry=false
+     and evaluated budget using the non-retry guard+reserve path, which
+     rejected the degraded retry because remaining (3s) < guard+min (30s).
+     The fix removes the is_retry parameter from the gate and always evaluates
+     the *candidate* (which is always a retry) with per-attempt semantics. *)
   match
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"

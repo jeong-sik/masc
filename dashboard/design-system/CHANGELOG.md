@@ -55,6 +55,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus coordination.
   - `src/components/ide/anchored-thread-rail-store.ts` publishes dashboard snapshots for the CONVERSATION rail; the rail mock now consumes the store instead of hardcoded card fields.
 
+- **Run activity store substrate**
+  - `src/components/ide/run-activity-store.ts` adds a typed ACTIVITY THIS RUN event store with run scoping, newest-first ordering, keeper grouping, and capped visible history.
+  - `src/components/ide/ide-activity-mock.ts` now consumes the store instead of embedding activity ordering and keeper hue mapping directly in the renderer.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

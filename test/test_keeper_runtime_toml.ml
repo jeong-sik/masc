@@ -309,6 +309,15 @@ let test_caller_env_wins_over_toml () =
   check int "applied 0 (env preempts)" 0 count;
   check int "no overrides" 0 (List.length overrides)
 
+let test_deprecated_autoboot_env_wins_over_toml () =
+  let doc = parse_or_fail "[bootstrap]\nautoboot_max = 12\n" in
+  let fake_env = env_with [("MASC_KEEPER_AUTOBOT_MAX", "2")] in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:fake_env doc
+  in
+  check int "applied 0 (deprecated env preempts canonical TOML)" 0 count;
+  check int "no overrides" 0 (List.length overrides)
+
 let test_unknown_keys_ignored () =
   let doc = parse_or_fail
     "[autonomous]\n\
@@ -510,6 +519,7 @@ let () =
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
+        ; test_case "deprecated autoboot env wins over TOML" `Quick test_deprecated_autoboot_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override

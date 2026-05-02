@@ -105,6 +105,20 @@ let test_to_oas_error_inlined () =
       Alcotest.(check string) "message" "fail" message;
       Alcotest.(check bool) "default recoverable=false" false recoverable
 
+let test_to_oas_error_uses_json_recoverable_flag () =
+  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
+  let msg =
+    {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
+  in
+  match B.to_oas_tool_result (false, msg) with
+  | Ok _ -> Alcotest.fail "expected Error"
+  | Error { message; recoverable; error_class } ->
+      Alcotest.(check string) "message" msg message;
+      Alcotest.(check bool) "recoverable from JSON" true recoverable;
+      (match error_class with
+       | Some Agent_sdk.Types.Transient -> ()
+       | _ -> Alcotest.fail "expected transient error_class from JSON")
+
 (* --- Externalize round-trip needs an isolated test process due to the
        lazy singleton. We exercise it via the env-aware path. --- *)
 
@@ -165,6 +179,8 @@ let () =
         [
           Alcotest.test_case "small inlined" `Quick test_to_oas_small_inlined;
           Alcotest.test_case "error inlined" `Quick test_to_oas_error_inlined;
+          Alcotest.test_case "error recoverable from JSON" `Quick
+            test_to_oas_error_uses_json_recoverable_flag;
           Alcotest.test_case "round-trip through OAS" `Quick
             test_round_trip_through_oas;
         ] );

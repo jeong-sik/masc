@@ -218,11 +218,9 @@ let select_board_wakeup_candidates
       List.rev selected_rev, generic_dropped
     in
     let prioritized =
-      let non_generic =
-        List.filter (fun (_, r) -> r <> "board_activity") selected_by_reason
-      in
-      let generic =
-        List.filter (fun (_, r) -> r = "board_activity") selected_by_reason
+      let non_generic, generic =
+        List.partition (fun (_, reason) -> reason <> "board_activity")
+          selected_by_reason
       in
       non_generic @ generic
     in

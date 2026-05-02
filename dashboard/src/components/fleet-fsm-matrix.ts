@@ -288,6 +288,74 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   return false
 }
 
+function backendRuntimeAttentionLevel(
+  state: string,
+  blocked: boolean,
+): FleetRuntimeAttentionLevel {
+  if (blocked || state === 'blocked' || state === 'stop_requested') return 'blocked'
+  if (state === 'idle_stale') return 'idle'
+  if (state === 'stale') return 'stale'
+  return 'ok'
+}
+
+function backendRuntimeAttentionLabel(
+  level: FleetRuntimeAttentionLevel,
+  state: string,
+): string {
+  if (state === 'stop_requested') return '정지 요청'
+  if (level === 'blocked') return '정체'
+  if (level === 'stale') return 'stale'
+  if (level === 'idle') return '무전환'
+  return 'live'
+}
+
+function backendRuntimeAttentionNextStep(
+  level: FleetRuntimeAttentionLevel,
+  state: string,
+  reason: string,
+): string {
+  if (state === 'stop_requested') return 'supervisor 회수 또는 shutdown 완료 여부 확인'
+  if (level === 'blocked') return `backend runtime_attention blocker 확인: ${reason}`
+  if (level === 'stale') return 'latest runtime evidence refresh 또는 keeper_probe 실행'
+  if (level === 'idle') return 'backlog, admission, trigger가 없는지 확인'
+  return '조치 불필요'
+}
+
+function runtimeAttentionFromBackend(
+  snapshot: KeeperCompositeSnapshot,
+  ageSec: number | null,
+  ageText: string,
+  evidenceText: string,
+): FleetRuntimeAttention | null {
+  const backend = snapshot.runtime_attention
+  if (!backend) return null
+  if (
+    backend.state === 'ok' &&
+    !backend.needs_attention &&
+    !backend.blocked &&
+    !backend.fiber_stop_requested
+  ) {
+    return null
+  }
+  const reason = backend.reason ?? backend.state
+  const level = backendRuntimeAttentionLevel(backend.state, backend.blocked)
+  const label = backendRuntimeAttentionLabel(level, backend.state)
+  const cause = `${backend.source}: ${backend.state}${reason ? ` · ${reason}` : ''}`
+  const nextStep = backendRuntimeAttentionNextStep(level, backend.state, reason)
+  const reasonText = backend.needs_attention
+    ? `backend runtime_attention · ${backend.state}${reason ? ` · ${reason}` : ''}`
+    : `backend runtime_attention · ${backend.state}`
+  return {
+    level,
+    label,
+    reason: reasonText,
+    cause,
+    nextStep,
+    title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText} · latest activity ${ageText}`,
+    ageSec,
+  }
+}
+
 function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
   const execution = snapshot.execution
   if (!execution || hasBlockingExecutionEvidence(snapshot)) return false
@@ -508,6 +576,13 @@ export function runtimeAttentionForSnapshot(
   const ageText = formatAge(ageSec)
   const evidence = executionEvidence(snapshot)
   const evidenceText = evidence.length > 0 ? evidence.join(' · ') : 'no blocking evidence'
+  const backendAttention = runtimeAttentionFromBackend(
+    snapshot,
+    ageSec,
+    ageText,
+    evidenceText,
+  )
+  if (backendAttention) return backendAttention
   const blocked = hasBlockingExecutionEvidence(snapshot)
   const idleComposite = isIdleComposite(snapshot)
 

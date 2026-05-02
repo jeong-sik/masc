@@ -514,7 +514,7 @@ let keeper_profile_cascade_name body keeper_name =
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
-let make_keeper_meta_json ?(name = "route_shadow_demo") () =
+let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -524,7 +524,7 @@ let make_keeper_meta_json ?(name = "route_shadow_demo") () =
           ; "goal", `String "Route shadow regression fixture"
           ; "cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name
           ; "updated_at", `String "2026-04-04T00:00:00Z"
-          ; "paused", `Bool true
+          ; "paused", `Bool paused
           ])
   with
   | Ok meta -> Masc_mcp.Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
@@ -1335,6 +1335,61 @@ let test_composite_routes_surface_runtime_recommended_actions () =
        actions)
 ;;
 
+let test_composite_runtime_attention_surfaces_fiber_stop () =
+  let base_path = Filename.temp_file "dashboard-keeper-fiber-stop-" "" in
+  (try Sys.remove base_path with
+   | _ -> ());
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "stop_requested_demo" in
+      let config = Masc_mcp.Coord.default_config base_path in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+      write_file
+        (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+        (make_keeper_meta_json ~name:keeper_name ~paused:false ());
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "keeper meta missing for fiber-stop composite test"
+        | Error err -> fail ("read_meta failed: " ^ err)
+      in
+      let entry =
+        Masc_mcp.Keeper_registry.register
+          ~base_path:config.base_path keeper_name meta
+      in
+      Atomic.set entry.fiber_stop true;
+      let open Yojson.Safe.Util in
+      let json =
+        Masc_mcp.Server_dashboard_http.dashboard_keeper_composite_json
+          ~config entry
+      in
+      let runtime_attention = json |> member "runtime_attention" in
+      check string "fiber-stop runtime state" "stop_requested"
+        (runtime_attention |> member "state" |> to_string);
+      check bool "fiber-stop runtime attention needed" true
+        (runtime_attention |> member "needs_attention" |> to_bool);
+      check bool "fiber-stop flag surfaced" true
+        (runtime_attention |> member "fiber_stop_requested" |> to_bool);
+      check string "fiber-stop runtime reason" "fiber_stop_requested"
+        (runtime_attention |> member "reason" |> to_string);
+      check string "fiber-stop runtime source" "registry_fiber_stop"
+        (runtime_attention |> member "source" |> to_string);
+      let actions = json |> member "recommended_actions" |> to_list in
+      check bool "fiber-stop does not recommend keeper_recover" false
+        (List.exists
+           (fun row -> row |> member "action_type" |> to_string = "keeper_recover")
+           actions);
+      check bool "fiber-stop recommends keeper_probe" true
+        (List.exists
+           (fun row -> row |> member "action_type" |> to_string = "keeper_probe")
+           actions))
+;;
+
 let test_composite_routes_skip_recent_successful_idle_recovery () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name ->
@@ -1585,6 +1640,10 @@ let () =
             "composite routes surface runtime recommended actions"
             `Slow
             test_composite_routes_surface_runtime_recommended_actions
+        ; test_case
+            "composite runtime attention surfaces fiber stop"
+            `Quick
+            test_composite_runtime_attention_surfaces_fiber_stop
         ; test_case
             "composite routes skip recent successful idle recovery"
             `Slow

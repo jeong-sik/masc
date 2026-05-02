@@ -102,13 +102,48 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
 
 (** {1 Result Conversion} *)
 
-let make_tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
-  Error { Agent_sdk.Types.message; recoverable; error_class = None }
+let make_tool_error ?(recoverable = false) ?error_class message
+  : Agent_sdk.Types.tool_result =
+  Error { Agent_sdk.Types.message; recoverable; error_class }
+
+let tool_error_class_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "" -> None
+  | "transient" | "transient_mutex_contention" -> Some Agent_sdk.Types.Transient
+  | "deterministic" | "validation_error" -> Some Agent_sdk.Types.Deterministic
+  | "unknown" -> Some Agent_sdk.Types.Unknown
+  | _ -> Some Agent_sdk.Types.Unknown
+
+let tool_error_metadata_from_json_message msg =
+  try
+    match Yojson.Safe.from_string msg with
+    | `Assoc fields ->
+        let recoverable =
+          match List.assoc_opt "recoverable" fields with
+          | Some (`Bool true) -> true
+          | _ -> false
+        in
+        let error_class =
+          match List.assoc_opt "error_class" fields with
+          | Some (`String s) -> tool_error_class_of_string s
+          | _ -> None
+        in
+        (recoverable, error_class)
+    | _ -> (false, None)
+  with Yojson.Json_error _ -> (false, None)
+
+let recoverable_from_json_message msg =
+  fst (tool_error_metadata_from_json_message msg)
 
 let to_oas_tool_result ?(recoverable = false) (success, msg)
   : Agent_sdk.Types.tool_result =
   if success then Ok { Agent_sdk.Types.content = maybe_externalize msg }
-  else make_tool_error ~recoverable (maybe_externalize msg)
+  else
+    let json_recoverable, error_class =
+      tool_error_metadata_from_json_message msg
+    in
+    let recoverable = recoverable || json_recoverable in
+    make_tool_error ~recoverable ?error_class (maybe_externalize msg)
 
 let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
   | Ok { content } -> (true, content)

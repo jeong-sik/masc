@@ -520,6 +520,27 @@ let test_normalize_failure_plain_text () =
   check bool "ok is false" false (json_bool "ok" json);
   check string "error is raw text" raw (json_string "error" json)
 
+let test_transient_mutex_contention_envelope () =
+  let normalized =
+    Keeper_tools_oas.transient_mutex_contention_tool_error
+      ~tool_name:"keeper_shell"
+      ~error_text:"Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
+      ~backtrace:"Raised at Mutex.lock" ()
+  in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check bool "recoverable" true
+    Yojson.Safe.Util.(member "recoverable" json |> to_bool);
+  check string "error_class" "transient_mutex_contention"
+    Yojson.Safe.Util.(member "error_class" json |> to_string);
+  check bool "retry recommended" true
+    Yojson.Safe.Util.(member "retry_recommended" json |> to_bool);
+  let detail = Yojson.Safe.Util.member "detail" json in
+  check string "tool_name" "keeper_shell"
+    Yojson.Safe.Util.(member "tool_name" detail |> to_string);
+  check bool "backtrace available" true
+    Yojson.Safe.Util.(member "backtrace_available" detail |> to_bool)
+
 (* ── Tool_output_validation tests (memory cap) ──────────────── *)
 
 let test_cap_short_unchanged () =
@@ -573,6 +594,8 @@ let () =
       test_case "failure extracts message from status:error" `Quick test_normalize_failure_status_error;
       test_case "failure handles ok:false hybrid" `Quick test_normalize_failure_ok_false;
       test_case "failure plain text wraps as error" `Quick test_normalize_failure_plain_text;
+      test_case "EDEADLK envelope is recoverable" `Quick
+        test_transient_mutex_contention_envelope;
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;

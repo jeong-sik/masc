@@ -921,9 +921,9 @@ let sweep_and_recover (ctx : _ context) =
       let ts = Time_compat.now () in
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry.record_error ~base_path entry.name msg;
-      match Keeper_registry.get ~base_path entry.name with
-      | Some updated -> queue_crashed_entry updated msg
-      | None -> ()
+      (match Keeper_registry.get ~base_path entry.name with
+       | Some updated -> queue_crashed_entry updated msg
+       | None -> ())
     end
   in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->

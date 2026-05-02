@@ -101,7 +101,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div class="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
+                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
                 onClick=${this.reset}
               >
                 <${RefreshCcw} size=${12} />

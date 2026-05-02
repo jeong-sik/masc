@@ -125,7 +125,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
@@ -149,7 +149,7 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
         const isActive = level === active
         const base = 'cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
         const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--color-fg-primary)]'
-        const idleCls = 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
+        const idleCls = 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
         return html`
           <button
             type="button"
@@ -230,7 +230,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                 ? html`
                     <button
                       type="button"
-                      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+                      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
                       aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}

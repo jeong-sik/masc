@@ -89,7 +89,7 @@ export function AgentMemory({ entries, testId }: AgentMemoryProps) {
                     item => html`
                       <span
                         key=${item.id}
-                        class="inline-block rounded-full bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]"
+                        class="inline-block rounded-full bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]"
                         title=${item.similarity != null
                           ? `유사도: ${(item.similarity * 100).toFixed(1)}%`
                           : undefined}

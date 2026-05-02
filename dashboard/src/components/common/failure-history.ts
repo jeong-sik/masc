@@ -82,7 +82,7 @@ export function FailureHistory({
                 ([type, count]) => html`
                   <span
                     key=${type}
-                    class="inline-flex items-center rounded-[var(--r-1)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]"
+                    class="inline-flex items-center rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]"
                   >
                     ${ERROR_ICON[type] || ERROR_ICON.default}
                     <span class="ml-1">${type}</span>
@@ -122,7 +122,7 @@ export function FailureHistory({
                 ${f.retryable && !f.resolved && onRetry
                   ? html`
                       <button
-                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--white-5)]"
+                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-bg-elevated)]"
                         onClick=${() => onRetry(f.id)}
                         aria-label="${f.message} 재시도"
                       >
@@ -133,7 +133,7 @@ export function FailureHistory({
                 ${onDismiss && !f.resolved
                   ? html`
                       <button
-                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)]"
+                        class="rounded-[var(--r-1)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-elevated)]"
                         onClick=${() => onDismiss(f.id)}
                         aria-label="${f.message} 해제"
                       >
@@ -150,7 +150,7 @@ export function FailureHistory({
       ${retryableCount > 0 && onRetry
         ? html`
             <button
-              class="mt-3 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
+              class="mt-3 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]"
               onClick=${() => failures.filter((f) => f.retryable && !f.resolved).forEach((f) => onRetry?.(f.id))}
             >
               미해결 ${retryableCount}건 일괄 재시도

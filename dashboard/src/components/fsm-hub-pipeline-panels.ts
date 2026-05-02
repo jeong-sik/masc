@@ -60,8 +60,8 @@ const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
     overall tone of the current operator insight is visible from the
     peripheral visual field. */
 const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
-  ok: 'border-[var(--color-border-default)] bg-[var(--white-2)]',
-  info: 'border-[var(--color-border-default)] bg-[var(--white-2)]',
+  ok: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
+  info: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
   warn: 'border-[var(--warn-border)] bg-[var(--warn-soft)] shadow-[0_0_0_1px_var(--warn-border)_inset]',
   error: 'border-[var(--err-border)] bg-[var(--bad-6)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
 }
@@ -135,7 +135,7 @@ export function OperationalMeaningPanel({
         : html`
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             ${visibleLanes.map(lane => html`
-              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${lane.field}</span>
                   <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
@@ -311,7 +311,7 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded-[var(--r-1)] border p-5 transition-all duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded-[var(--r-1)] border p-5 transition-all duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >
@@ -379,7 +379,7 @@ export function PipelineStep({
       : 'border-[var(--color-border-default)]'
   const bgCls = isActive && !flash
     ? 'bg-[var(--indigo-4)]'
-    : 'bg-[var(--white-2)]'
+    : 'bg-[var(--color-bg-surface)]'
   const activePulse = isActive && !flash ? 'animate-pulse' : ''
 
   const connectorCls = isActive
@@ -436,7 +436,7 @@ export function TurnPipelineStrip({
   // nowSecondsSignal independently, so this component itself never reads
   // the signal and is not re-rendered by 5 s ticks.
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>

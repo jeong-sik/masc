@@ -20,7 +20,7 @@ function GoalHorizonRow({
   if (!value) return null
   return html`
     <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)]">
-      <span class="flex-shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide">${horizon}</span>
+      <span class="flex-shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide">${horizon}</span>
       <span class="font-medium leading-relaxed text-[var(--color-fg-secondary)]">${value}</span>
     </div>
   `

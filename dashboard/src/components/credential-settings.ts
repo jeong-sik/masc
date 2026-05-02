@@ -88,7 +88,7 @@ export function credentialTypeBadgeClass(type: CredentialType): string {
     case 'gitlab':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'local':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
   }
 }
 
@@ -112,9 +112,9 @@ export function credentialStateBadgeClass(state: CredentialState | null | undefi
     case 'Stale':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'Unmaterialized':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
     default:
-      return 'bg-[var(--white-5)] text-text-muted border-[var(--color-border-default)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-muted border-[var(--color-border-default)]'
   }
 }
 
@@ -221,7 +221,7 @@ export function CredentialSettings() {
         <${ErrorState} message=${state.message} />
         <button
           type="button"
-          class="py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-text-body self-start"
+          class="py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-bg-hover)] text-text-body self-start"
           onClick=${() => loadCredentials({ force: true })}
         >
           다시 시도
@@ -445,7 +445,7 @@ export function CredentialSettings() {
               </button>
               <button
                 type="button"
-                class="${btnBase} bg-[var(--white-10)] text-text-body"
+                class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
                 onClick=${() => { showAddForm.value = false; resetAddDraft() }}
               >
                 취소

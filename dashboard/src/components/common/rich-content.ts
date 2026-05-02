@@ -24,11 +24,11 @@ function previewCard(preview: LinkPreview) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="group flex overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
+      class="group flex overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--color-bg-elevated)]"
     >
       ${imageUrl
         ? html`
-            <div class="w-[112px] shrink-0 bg-[var(--white-5)]">
+            <div class="w-[112px] shrink-0 bg-[var(--color-bg-elevated)]">
               <img src=${imageUrl} alt=${title} class="block h-full w-full object-cover" loading="lazy" />
             </div>
           `

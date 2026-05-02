@@ -33,11 +33,11 @@ function registryStateBadge(state: string | null) {
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[var(--emerald-12)]', text: 'text-[var(--color-status-ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--color-status-err)]' },
-    Dead: { bg: 'bg-[var(--white-8)]', text: 'text-[var(--color-fg-muted)]' },
+    Dead: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--color-fg-muted)]' },
     Stopped: { bg: 'bg-[var(--warn-soft)]', text: 'text-[var(--color-status-warn)]' },
-    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--stalled-fg)]' },
+    Paused: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--stalled-fg)]' },
   }
-  const c = colors[state] ?? { bg: 'bg-[var(--white-4)]', text: 'text-[var(--color-fg-muted)]' }
+  const c = colors[state] ?? { bg: 'bg-[var(--color-bg-elevated)]', text: 'text-[var(--color-fg-muted)]' }
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
@@ -59,7 +59,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
   return html`
     <div>
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
-      <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--white-5)]">
+      <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-elevated)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
                title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
@@ -174,7 +174,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
-                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
+                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors"
                     onClick=${() => { crashShowAll.value = !crashShowAll.value }}
                     aria-pressed=${crashShowAll.value}>
                     ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}
@@ -194,7 +194,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 ${visible.length === 0 ? html`
                   <div class="py-2 px-2 text-2xs text-[var(--color-fg-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
-                  <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--white-3)]">
+                  <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-surface)]">
                     <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>

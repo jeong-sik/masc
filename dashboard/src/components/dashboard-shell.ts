@@ -123,7 +123,7 @@ export function ConnectionStatus() {
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 tabular-nums attention-badge"
         >Attention ${attentionCount}<//>
       ` : null}
     </div>
@@ -140,7 +140,7 @@ export function ErrorCounterBadge() {
     <div class="relative" role="status">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
+        class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--color-bg-elevated)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
         title=${count > 0 ? `${count} unacknowledged errors` : 'No errors'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
         aria-expanded=${open}
@@ -239,7 +239,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`Server build ${label}`}
         title=${hoverTitle}
@@ -414,7 +414,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           </div>
         ` : null}
         <button type="button"
-          class=${`flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--white-4)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+          class=${`flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
           aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick=${onToggle}
           title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -437,7 +437,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -453,10 +453,10 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--white-3)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
+                  <span class="flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
                     <${SurfaceIcon} icon=${surface.icon} size=${13} />
                   </span>
                   <div class="flex-1 min-w-0">
@@ -473,7 +473,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           <${RouteLink}
                             tab=${surface.id}
                             params=${item.params}
-                            class="block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-primary)]'}"
+                            class="block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
                             ariaCurrent=${isSectionActive ? 'page' : undefined}
                           >
                             <div class="truncate">${item.label}</div>
@@ -666,7 +666,7 @@ function SurfaceLead() {
               const crumbEl = crumb.navigableTab !== null && !isLast
                 ? html`<${RouteLink}
                     tab=${crumb.navigableTab}
-                    class="cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]"
+                    class="cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)]"
                   >${crumb.label}<//>`
                 : html`<span
                     class="px-1 py-0.5 ${isLast ? 'text-[var(--color-fg-primary)]' : ''}"

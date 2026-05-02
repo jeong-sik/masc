@@ -104,7 +104,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   const detail = layer.detail ?? layer.evidence[0] ?? ''
 
   return html`
-    <div class="flex items-center gap-3 py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">
+    <div class="flex items-center gap-3 py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
       <span class="flex-shrink-0 w-30 text-2xs font-mono text-[var(--color-accent-fg)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
       <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--color-fg-secondary)]">${scoreText}</span>
@@ -150,7 +150,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (loading && !data) {
     return html`
-      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse" role="status">데이터 로딩 중...</div>
       </div>
@@ -159,7 +159,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (error && !data) {
     return html`
-      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 데이터 없음</div>
       </div>
@@ -168,7 +168,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (!data || data.count === 0) {
     return html`
-      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>

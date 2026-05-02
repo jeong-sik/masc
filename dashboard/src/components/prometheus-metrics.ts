@@ -156,7 +156,7 @@ function typeBadge(type: string): ReturnType<typeof html> {
     gauge: 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
     summary: 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   }
-  return html`<span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--color-fg-muted)]'}">${type}</span>`
+  return html`<span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'}">${type}</span>`
 }
 
 function labelPills(labels: Record<string, string>): ReturnType<typeof html> | null {
@@ -185,7 +185,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
         }}
       >${k}=${v}</button>`
     }
-    return html`<span class="rounded-[var(--r-1)] bg-[var(--white-5)] px-1 py-0.5 text-3xs text-[var(--color-fg-muted)] font-mono">${k}=${v}</span>`
+    return html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1 py-0.5 text-3xs text-[var(--color-fg-muted)] font-mono">${k}=${v}</span>`
   })}</span>`
 }
 

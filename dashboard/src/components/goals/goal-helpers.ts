@@ -184,7 +184,7 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--white-10)] overflow-hidden">
+      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden">
         <div class="${h} rounded-[var(--r-0)] transition-all duration-[var(--t-xslow)]" style="width:${pct}%;background:${barColor}"></div>
       </div>
       <span class="text-2xs font-semibold tabular-nums text-text-muted w-14 text-right">${done}/${total}</span>

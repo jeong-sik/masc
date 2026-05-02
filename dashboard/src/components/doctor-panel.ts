@@ -222,7 +222,7 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
       ${checks.map((c) => {
         const chip = chipClassForSidecarSeverity(c.severity)
         return html`
-          <li class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-2">
+          <li class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
             <div class="flex items-baseline justify-between gap-2">
               <div class="text-xs font-medium text-[var(--color-fg-secondary)]">${c.name}</div>
               <div class="flex items-center gap-1">
@@ -295,7 +295,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const expanded = useSignal(false)
   const onToggle = () => { expanded.value = !expanded.value }
   return html`
-    <div class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)]">
+    <div class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
       <${Band} kind=${bandKind} />
       <div class="p-3">
       <button
@@ -337,7 +337,7 @@ export function DoctorPanel() {
           emptyMessage="진단 데이터가 없습니다."
           render=${(data: DoctorEnvelope) => html`
             <div class="space-y-4">
-              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                 <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <${SectionCap}>시스템 전반 Doctor<//>

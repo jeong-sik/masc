@@ -269,7 +269,7 @@ function CharacterPlate({ name }: { name: string }) {
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
-            <div class="h-1.5 mt-1.5 rounded-[var(--r-0)] overflow-hidden bg-[var(--white-10)]" style="flex:1">
+            <div class="h-1.5 mt-1.5 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-hover)]" style="flex:1">
               <div class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--color-status-warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--color-status-err)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--color-accent-fg)] to-[var(--color-status-ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-sm tabular-nums text-[var(--color-fg-secondary)] min-w-9 text-right">${ctxPct}%</span>
@@ -371,7 +371,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
-                <div class="flex items-center gap-2 border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 rounded-[var(--r-1)]" key=${t.id}>
+                <div class="flex items-center gap-2 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 rounded-[var(--r-1)]" key=${t.id}>
                   <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${t.id}</span>
                   <span class="flex-1 text-[var(--color-fg-secondary)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
@@ -427,7 +427,7 @@ export function AgentProfile({ name }: { name: string }) {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
-                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--white-4)]" key=${idx}>
+                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
                     <span class="text-2xs font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
                     ${title ? html`<span class="flex-1 text-sm text-[var(--color-fg-primary)]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
@@ -459,7 +459,7 @@ export function AgentProfile({ name }: { name: string }) {
                     ${isFiltering && visible.length === 0
                       ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lines.length} items)</div>`
                       : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
-                          html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--color-fg-primary)] leading-[1.4] rounded-[var(--r-1)]">${line}</div>`)}</div>`}
+                          html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--color-fg-primary)] leading-[1.4] rounded-[var(--r-1)]">${line}</div>`)}</div>`}
                   </div>
                 `
               })()}
@@ -468,7 +468,7 @@ export function AgentProfile({ name }: { name: string }) {
         ${(profileData?.taskHistories ?? []).length > 0 ? html`
           <${Card} title="태스크 이력" class="ff-card rounded-[var(--r-1)] col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
-              <div class="border border-[var(--color-border-default)] rounded-[var(--radius-lg)] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
+              <div class="border border-[var(--color-border-default)] rounded-[var(--radius-lg)] bg-[var(--color-bg-surface)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-sm leading-normal text-[var(--color-fg-secondary)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>

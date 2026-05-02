@@ -153,8 +153,8 @@ export function deriveMatrix(
 
 const CELL_TONE: Record<MatrixCellState, { dot: string; text: string; bg: string }> = {
   bound:   { dot: 'bg-[var(--ok-10)]',     text: 'text-[var(--color-status-ok)]',        bg: 'bg-[var(--ok-10)]' },
-  unbound: { dot: 'bg-[var(--white-8)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
-  na:      { dot: 'bg-[var(--white-4)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
+  unbound: { dot: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
+  na:      { dot: 'bg-[var(--color-bg-elevated)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
   unknown: { dot: 'bg-[var(--warn-10)]',       text: 'text-[var(--color-status-warn)]',          bg: 'bg-[var(--warn-10)]'   },
 }
 
@@ -246,8 +246,8 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
         </div>
         <div class="text-3xs text-[var(--color-fg-disabled)]">
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>bound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]" aria-hidden="true"></span>unbound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]" aria-hidden="true"></span>n/a</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-bg-hover)]" aria-hidden="true"></span>unbound</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-bg-elevated)]" aria-hidden="true"></span>n/a</span>
           <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--warn-10)]" aria-hidden="true"></span>unknown</span>
         </div>
       </header>
@@ -355,7 +355,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   return html`
     <button
       type="button"
-      class=${`flex cursor-pointer items-center gap-2 truncate rounded-[var(--r-1)] px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
+      class=${`flex cursor-pointer items-center gap-2 truncate rounded-[var(--r-1)] px-2 py-1 text-left text-xs hover:bg-[var(--color-bg-elevated)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
       aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}

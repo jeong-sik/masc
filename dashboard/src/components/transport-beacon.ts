@@ -78,7 +78,7 @@ const STATE_CLASS: Record<BeaconState, string> = {
   green: 'text-[var(--color-status-ok)] bg-[var(--ok-soft)] border-[var(--color-status-ok)]',
   yellow: 'text-[var(--color-status-warn)] bg-[var(--warn-soft)] border-[var(--color-status-warn)]',
   red: 'text-[var(--color-status-err)] bg-[var(--bad-soft)] border-[var(--color-status-err)]',
-  gray: 'text-[var(--color-fg-muted)] bg-[var(--white-4)] border-[var(--color-border-default)]',
+  gray: 'text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] border-[var(--color-border-default)]',
 }
 
 const beaconView = computed<BeaconView>(() => computeBeaconView({

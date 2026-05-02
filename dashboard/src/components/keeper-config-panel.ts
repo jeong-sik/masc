@@ -330,7 +330,7 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <${BoolBadge} value=${value} />
     </div>
@@ -385,7 +385,7 @@ function Callout({
 function BoolBadge({ value }: { value: boolean }) {
   return value
     ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--color-border-default)] shadow-sm">OFF</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)] shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -421,7 +421,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
-        : 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
+        : 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
   return html`<span class="text-3xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 
@@ -454,7 +454,7 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
     <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
+        class="relative inline-flex h-5 w-9 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
         aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
         aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
@@ -711,7 +711,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
         <button type="button"
-          class="${btnBase} bg-[var(--white-10)] text-[var(--color-fg-secondary)]"
+          class="${btnBase} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >취소</button>
@@ -761,7 +761,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -822,7 +822,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <label class="flex flex-col gap-1.5 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
               <${MutedLabel}>활성 cascade profile</${MutedLabel}>
               <select
-                class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
+                class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
                 value=${currentCascade}
                 disabled=${cascadeSaving.value || cascadeState.status === 'loading' || cascadeOptions.length === 0}
                 onChange=${(event: Event) => {
@@ -891,7 +891,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${MajorSectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
-      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
       </div>
       <${BoolRow} label="검증" value=${c.execution.verify} />
@@ -934,12 +934,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
-        <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
+        <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
             <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
+          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
@@ -1035,7 +1035,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             ${goalOptions.map((goal) => {
               const checked = rd.active_goal_ids.includes(goal.id)
               return html`
-                <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
+                <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
                   <input
                     type="checkbox"
                     checked=${checked}
@@ -1103,7 +1103,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${btnBase} bg-[var(--white-10)] text-[var(--color-fg-secondary)]"
+            class="${btnBase} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
             onClick=${resetRuntimeDraft}
           >초기화</button>
           <span class="text-3xs text-accent">변경된 설정이 있습니다</span>
@@ -1124,7 +1124,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
@@ -1140,7 +1140,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
+                          <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

@@ -35,7 +35,7 @@ export function Switch({
 
   const trackClass = checked
     ? 'bg-[var(--ok-20)] border-[var(--ok-20)]'
-    : 'bg-[var(--white-4)] border-[var(--color-border-default)]'
+    : 'bg-[var(--color-bg-elevated)] border-[var(--color-border-default)]'
 
   const thumbClass = checked
     ? 'translate-x-[14px] bg-[var(--color-fg-primary)]'

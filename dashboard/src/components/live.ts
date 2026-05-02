@@ -29,7 +29,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ` : null}
 
       ${!observatoryMode ? html`
-        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-4" aria-label="이벤트 펄스 현황">
+        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] p-4" aria-label="이벤트 펄스 현황">
           <${PulseStrip} />
         </section>
       ` : null}
@@ -37,7 +37,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ${!observatoryMode ? html`<${KeeperHealthStrip} />` : null}
 
       ${!observatoryMode ? html`
-        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-2)] p-4" aria-label="에이전트 토폴로지 맵">
+        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] p-4" aria-label="에이전트 토폴로지 맵">
           <div class="flex items-center justify-between gap-3 mb-3">
             <h3 class="m-0 text-md font-semibold text-[var(--color-fg-secondary)]">에이전트 토폴로지</h3>
             <span class="text-2xs text-[var(--color-fg-muted)]">실시간 · 노드 클릭 시 상세 보기</span>

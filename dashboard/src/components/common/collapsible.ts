@@ -50,7 +50,7 @@ export function CollapsibleSection({
         onToggle?.(isOpen)
       }}
     >
-      <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--color-fg-secondary)] select-none hover:bg-[var(--white-3)] transition-colors list-none">
+      <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--color-fg-secondary)] select-none hover:bg-[var(--color-bg-surface)] transition-colors list-none">
         ${dotClass != null ? html`<span class="w-1.5 h-1.5 rounded-full ${dotClass}" aria-hidden="true"></span>` : null}
         ${title}
         ${badge ?? null}

@@ -141,13 +141,13 @@ function CoordinationHealthPanel() {
           <div class="text-2xs text-text-dim">Goal x Task x Board x Reward · ${snapshot.mode ?? 'advisory'}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">
-          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             products ${coordinationCount(snapshot, 'products')}
           </span>
-          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             violations ${coordinationCount(snapshot, 'violations')}
           </span>
-          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             evidence ${evidenceCount}
           </span>
           ${errorCount > 0 ? html`

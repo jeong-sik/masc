@@ -129,7 +129,7 @@ function SummaryCard({
       ? 'border-[var(--ok-20)] bg-[var(--ok-10)]'
       : tone === 'warn'
         ? 'border-[var(--warn-20)] bg-[var(--warn-10)]'
-        : 'border-[var(--color-border-default)] bg-[var(--white-1)]'
+        : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
 
   return html`
     <div class="rounded-[var(--r-1)] border ${toneClass} p-3">
@@ -168,12 +168,12 @@ function readinessStatusClass(status: string | null | undefined): string {
 function attentionSeverityClass(severity: string | null | undefined): string {
   if (severity === 'bad') return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
   if (severity === 'warn') return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-  return 'border-[var(--color-border-default)] bg-[var(--white-1)] text-[var(--color-fg-disabled)]'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)]'
 }
 
 function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
@@ -195,7 +195,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
 function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   if (events.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No decision-needed or blocker events are active.
       </div>
     `
@@ -213,7 +213,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               <div class="mt-0.5 text-3xs leading-relaxed">${event.summary}</div>
             </div>
             ${event.requires_decision
-              ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
+              ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
               : null}
           </div>
           ${event.recommended_action
@@ -235,7 +235,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
   if (!truth || !readiness) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         Control room readiness is unavailable for this refresh.
       </div>
     `
@@ -299,14 +299,14 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       ${watchlist.map(row => html`
         <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
           <div class="min-w-0">
@@ -422,7 +422,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   </span>
                   <span
                     class=${row.sandbox_profile
-                      ? 'rounded-[var(--r-1)] bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
+                      ? 'rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
                       : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
@@ -514,7 +514,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-2xs font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">
@@ -710,7 +710,7 @@ export function FleetTelemetryPanel() {
           <div class="flex items-center gap-2 text-3xs">
             ${activeCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
             ${attentionCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
-            ${offlineCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
             ${budgetOverrideCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>

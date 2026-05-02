@@ -65,7 +65,7 @@ const ALARM_VALUES = new Set([
 
 export function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[var(--bad-50)]'
-  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--white-7)]'
+  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--color-bg-panel-alt)]'
   if (value === 'Overflowed') return 'bg-[var(--amber-bright-45)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[var(--amber-bright-45)]'
   if (value === 'HandingOff') return 'bg-[var(--purple-50)]'
@@ -171,7 +171,7 @@ export function SwimlaneTimeline({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           상태 타임라인
@@ -256,7 +256,7 @@ export function SwimlaneTimeline({
                   class="absolute top-0 flex flex-col items-center text-[var(--color-fg-disabled)]"
                   style=${`left: ${leftPct.toFixed(2)}%; transform: translateX(-50%)`}
                 >
-                  <div class="h-1 w-px bg-[var(--white-10)]"></div>
+                  <div class="h-1 w-px bg-[var(--color-bg-hover)]"></div>
                   <div class="text-3xs font-mono leading-none mt-0.5">${tick.label}</div>
                 </div>
               `
@@ -280,7 +280,7 @@ export function SwimlaneTimeline({
               )
               const dotCls = hasTransition
                 ? 'bg-[var(--indigo)] ring-1 ring-[var(--indigo-40)]'
-                : 'bg-[var(--white-10)]'
+                : 'bg-[var(--color-bg-hover)]'
               const changedLanes = prev == null ? [] : [
                 ...(prev.phase !== obs.phase ? ['KSM'] : []),
                 ...(prev.turn !== obs.turn ? ['KTC'] : []),
@@ -306,7 +306,7 @@ export function SwimlaneTimeline({
         <${LegendItem} dotClass="bg-[var(--amber-bright-45)]" label="compact" />
         <${LegendItem} dotClass="bg-[var(--purple-50)]" label="handoff" />
         <${LegendItem} dotClass="bg-[var(--bad-50)]" label="alarm" />
-        <${LegendItem} dotClass="border border-[var(--color-border-default)] bg-[var(--white-3)]" label="idle" />
+        <${LegendItem} dotClass="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" label="idle" />
       </div>
     </div>
   `
@@ -395,7 +395,7 @@ export function TransitionTrail({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
         <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
@@ -468,7 +468,7 @@ export function TopTransitionsPanel({
   const maxCount = transitions[0]?.count ?? 1
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         Top Transitions (${transitions.length})
       </div>
@@ -492,7 +492,7 @@ export function TopTransitionsPanel({
               <span class="text-[var(--color-fg-muted)]">→</span>
               <span class="text-[var(--color-fg-secondary)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
-                <span class="h-1 w-12 rounded-[var(--r-0)] bg-[var(--white-8)] overflow-hidden">
+                <span class="h-1 w-12 rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden">
                   <span
                     class="block h-full bg-[var(--color-accent-fg)]"
                     style=${`width: ${widthPct}%`}
@@ -543,7 +543,7 @@ export function DwellHistogramPanel({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         State Dwell Time
       </div>
@@ -573,7 +573,7 @@ export function DwellHistogramPanel({
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-15 shrink-0 text-[var(--color-fg-primary)] truncate">${displayState(entry.value)}</span>
-                      <span class="flex-1 h-1.5 rounded-[var(--r-0)] bg-[var(--white-8)] overflow-hidden">
+                      <span class="flex-1 h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}

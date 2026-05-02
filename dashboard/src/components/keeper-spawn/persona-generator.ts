@@ -169,7 +169,7 @@ export function PersonaGenerator() {
         </div>
 
         ${draft?.fieldExplanations.length ? html`
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)]">
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
             ${draft.fieldExplanations.map(item => html`
               <div key=${item.path} class="grid grid-cols-[minmax(120px,0.35fr)_1fr] gap-2 border-b border-[var(--color-border-default)] px-2 py-1.5 text-3xs">
                 <span class="font-mono text-[var(--color-accent-fg)]">${item.path}</span>
@@ -198,7 +198,7 @@ export function PersonaGenerator() {
         </div>
 
         ${personaAuthoringResult.value ? html`
-          <pre class="max-h-48 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-err)]'}">${personaAuthoringResult.value.message}</pre>
+          <pre class="max-h-48 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-2 text-3xs ${personaAuthoringResult.value.success ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-err)]'}">${personaAuthoringResult.value.message}</pre>
         ` : null}
       </div>
     </div>

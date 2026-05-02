@@ -7,7 +7,7 @@ import type { ComponentChildren } from 'preact'
 type BadgeTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  default: 'bg-[var(--white-8)] text-[var(--color-fg-muted)]',
+  default: 'bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]',
   warn: 'bg-[var(--warn-12)] text-[var(--color-status-warn)]',
   ok: 'bg-[var(--ok-10)] text-[var(--ok-20)]',
   bad: 'bg-[var(--bad-10)] text-[var(--bad-light)]',

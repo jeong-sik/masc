@@ -60,7 +60,7 @@ interface AgentCapabilityProps {
 }
 
 const BASE_BADGE =
-  'inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-4)]'
+  'inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-elevated)]'
 
 export function AgentCapability({
   tools,
@@ -74,7 +74,7 @@ export function AgentCapability({
   if (visible.length === 0 && extra === 0) {
     return html`
       <span
-        class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]"
+        class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]"
         data-agent-capability
         data-testid=${testId}
       >
@@ -103,7 +103,7 @@ export function AgentCapability({
       ${extra > 0
         ? html`
             <span
-              class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]"
+              class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]"
               title="${normalized.slice(maxVisible).join(', ')}"
             >
               +${extra}

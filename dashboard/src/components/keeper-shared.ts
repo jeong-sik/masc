@@ -76,7 +76,7 @@ function GhostButton({
   return html`
     <button
       type="button"
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
       disabled=${disabled}
       onClick=${onClick}
       aria-expanded=${ariaExpanded}
@@ -165,7 +165,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
   if (hydrating) {
     return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-fg-secondary)]'
   }
-  return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -378,7 +378,7 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        <div class="border-t border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-4">
+        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
           <${ChatComposer}
             draft=${draft}
             placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
@@ -416,7 +416,7 @@ export function KeeperRuntimeActions({
   const canRecover = diagnostic?.recoverable === true
 
   const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-medium cursor-pointer transition-colors border'
-  const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]`
+  const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]`
   const activeGhostBtn = `${btnBase} border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
   const secondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
   const activeSecondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`

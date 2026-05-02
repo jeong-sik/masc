@@ -318,7 +318,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -391,7 +391,7 @@ function FieldWidget({ id, field, value, revealed }: {
             />
             <button
               type="button"
-              class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+              class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
               aria-label=${revealed ? '값 숨기기' : '값 표시'}
               onClick=${toggleReveal}
             >

@@ -185,7 +185,7 @@ function sourceTone(source: string): string {
     case 'legacy_traceln':
       return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
-      return 'text-[var(--color-fg-muted)] bg-[var(--white-3)] border-[var(--color-border-default)]'
+      return 'text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)] border-[var(--color-border-default)]'
   }
 }
 
@@ -242,7 +242,7 @@ export function renderLogRow(entry: LogEntry) {
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
-  let backgroundClass = 'bg-[var(--white-1)]'
+  let backgroundClass = 'bg-[var(--color-bg-surface)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[var(--bad-6)]'
   } else if (level === 'WARN') {
@@ -417,7 +417,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"

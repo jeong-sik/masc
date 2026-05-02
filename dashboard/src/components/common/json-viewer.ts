@@ -67,7 +67,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
     <div class="font-mono text-sm leading-relaxed flex flex-col py-0.5 w-full min-w-0">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded-[var(--r-1)] px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
+        class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
         onClick=${() => setCollapsed(!collapsed)}
         aria-expanded=${!collapsed}
         aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
@@ -94,7 +94,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
 export function JsonViewerCard({ data, title }: { data: unknown; title?: string }) {
   return html`
     <div class="bg-[var(--color-bg-page)] border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
-      ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
+      ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
       <div class="p-3 overflow-y-auto min-h-0 w-full">
         <${JsonViewer} data=${data} />
       </div>

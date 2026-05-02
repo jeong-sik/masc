@@ -171,7 +171,7 @@ describe('copyableWrapperClasses (pure)', () => {
   it('secondary returns muted white-channel tokens', () => {
     const cls = copyableWrapperClasses('secondary')
     expect(cls).toContain('border-[var(--color-border-default)]')
-    expect(cls).toContain('bg-[var(--white-2)]')
+    expect(cls).toContain('bg-[var(--color-bg-surface)]')
   })
 
   it('primary has tighter padding than secondary (hero command reads larger)', () => {

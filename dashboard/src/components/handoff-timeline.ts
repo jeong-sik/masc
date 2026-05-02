@@ -63,7 +63,7 @@ export const CHIP_CLASS_BY_KIND: Record<A2aEventKind, string> = {
   tool: 'bg-[var(--accent-10)]',
   handoff: 'bg-[var(--warn-10)]',
   context: 'bg-[var(--accent-10)]',
-  unknown: 'bg-[var(--white-5)]0',
+  unknown: 'bg-[var(--color-bg-elevated)]0',
 }
 
 interface TimelineChip {

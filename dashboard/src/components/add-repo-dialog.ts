@@ -166,7 +166,7 @@ export function AddRepoDialog() {
           </h2>
           <button
             type="button"
-            class="p-1 rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+            class="p-1 rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
             aria-label="닫기"
             onClick=${closeAddRepoDialog}
           >
@@ -287,7 +287,7 @@ export function AddRepoDialog() {
         <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-border-default)]">
           <button
             type="button"
-            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--color-fg-secondary)] hover:bg-[var(--white-15)] transition-colors"
+            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick=${closeAddRepoDialog}
             disabled=${formSubmitting.value}
           >

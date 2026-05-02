@@ -39,8 +39,8 @@ export function FilterChips<T extends string>({
     ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
     : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
   const idleToneClass = tone === 'accent'
-    ? 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
-    : 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--accent-30)]'
+    ? 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-30)]'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">
@@ -61,7 +61,7 @@ export function FilterChips<T extends string>({
           ${chip.label}
           ${chip.count != null ? html`
             <${CountBadge} class=${activeKey === chip.key
-              ? 'bg-[var(--white-10)] text-current'
+              ? 'bg-[var(--color-bg-hover)] text-current'
               : ''}>${chip.count}<//>
           ` : null}
         </button>

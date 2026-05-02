@@ -39,7 +39,7 @@ export function RichComposer({
               class=${`rounded-[var(--r-1)] border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 mode === tab
                   ? 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
-                  : 'border-transparent bg-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]'
+                  : 'border-transparent bg-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
               }`}
               onClick=${() => setMode(tab)}
               disabled=${disabled}
@@ -73,7 +73,7 @@ export function RichComposer({
                 </div>
               `
             : html`
-                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-6 text-center text-xs text-[var(--color-fg-muted)]">
+                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-6 text-center text-xs text-[var(--color-fg-muted)]">
                   미리볼 내용이 아직 없습니다.
                 </div>
               `}

@@ -166,7 +166,7 @@ function renderActivityTimeline() {
           key=${entry.key}
           data-testid="ops-activity-item"
           data-activity-kind=${entry.kind}
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-3"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
         >
           <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
             <${CountBadge} tone=${entry.tone}>${entry.label}<//>
@@ -221,7 +221,7 @@ export function Ops() {
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[var(--color-fg-secondary)] leading-relaxed">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-[var(--r-1)] bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[var(--color-fg-muted)] text-xs">
             ${workflowReady
               ? 'Target and inputs were prefilled from the recommended action.'

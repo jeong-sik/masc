@@ -33,9 +33,9 @@ export function overviewSkeletonTileCount(): number {
   return KNOWN_CONNECTOR_IDS.length
 }
 
-const BAR = 'h-3 w-1 rounded-px bg-[var(--white-4)] animate-pulse'
-const PILL = 'h-4 flex-1 rounded-[var(--r-0)] bg-[var(--white-4)] animate-pulse'
-const LINE = 'h-3 rounded-[var(--r-1)] bg-[var(--white-4)] animate-pulse'
+const BAR = 'h-3 w-1 rounded-px bg-[var(--color-bg-elevated)] animate-pulse'
+const PILL = 'h-4 flex-1 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse'
+const LINE = 'h-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] animate-pulse'
 
 function TileSkeleton() {
   return html`
@@ -56,8 +56,8 @@ function TileSkeleton() {
         <div class=${PILL}></div>
       </div>
       <div class="flex items-center gap-1">
-        <div class="h-4 w-16 rounded-[var(--r-0)] bg-[var(--white-4)] animate-pulse"></div>
-        <div class="h-4 w-11 rounded-[var(--r-0)] bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-16 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse"></div>
+        <div class="h-4 w-11 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse"></div>
       </div>
       <div class="flex items-end gap-0.5" aria-hidden="true">
         ${Array.from({ length: 45 }, (_, i) => html`<span class=${BAR} data-skeleton-bar-index=${i}></span>`)}

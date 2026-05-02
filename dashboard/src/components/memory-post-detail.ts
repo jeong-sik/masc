@@ -142,7 +142,7 @@ function CommentItem({
 
   return html`
     <div class="${indent}">
-      <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--white-3)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
+      <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
           <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
@@ -354,7 +354,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <details class="mt-1">
                   <summary class="cursor-pointer text-xs text-[var(--color-fg-muted)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
-                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--color-border-divider)]">
+                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)]">
                     ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-muted)]">출처:</span> ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
                       ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-muted)] leading-relaxed">${post.meta.state_block}</pre>`

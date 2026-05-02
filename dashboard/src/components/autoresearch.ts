@@ -228,7 +228,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
             <span class="text-[var(--color-fg-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
-            <div class="mt-1.5 h-2 rounded-[var(--r-0)] bg-[var(--white-6)] overflow-hidden flex">
+            <div class="mt-1.5 h-2 rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden flex">
               <div
                 class="h-full bg-[var(--ok-48)] transition-[width] duration-[var(--t-slow)]"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}
@@ -280,13 +280,13 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-60 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="min-w-40 max-w-60 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
-          <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)]">
+          <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
             <table class="w-full text-xs" aria-label="자율 연구 사이클 목록">
               <thead>
                 <tr class="text-[var(--color-fg-muted)] text-3xs uppercase tracking-wider border-b border-[var(--color-border-default)]">
@@ -301,7 +301,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
               </thead>
               <tbody>
                 ${visibleCycles.map(c => html`
-                  <tr key=${c.cycle} class="border-b border-[var(--color-border-divider)] hover:bg-[var(--white-4)] transition-colors duration-[var(--t-med)]">
+                  <tr key=${c.cycle} class="border-b border-[var(--color-border-divider)] hover:bg-[var(--color-bg-elevated)] transition-colors duration-[var(--t-med)]">
                     <td class="py-2 px-3 font-mono text-[var(--color-fg-muted)]">${c.cycle}</td>
                     <td class="py-2 px-3 text-[var(--color-fg-secondary)] max-w-50 truncate" title=${c.hypothesis}>${c.hypothesis}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--color-fg-secondary)]">${c.score_before.toFixed(4)}</td>
@@ -400,7 +400,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
           </${InfoCard}>
         </div>
 
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
           이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
           각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
         </div>
@@ -421,7 +421,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
           </div>
         </${InfoCard}>
 
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <${Eyebrow}>안전 하네스</${Eyebrow}>
           <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--color-fg-secondary)]">

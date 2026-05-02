@@ -108,7 +108,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
+    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${name}</div>
         <div
@@ -124,7 +124,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
           ? html`<span class="text-2xs text-[var(--color-fg-muted)]">전환 없음</span>`
           : transitions.map((t, i) => html`
               <${TransitionDot} t=${t} idx=${i} />
-              ${i < transitions.length - 1 ? html`<div class="w-3 h-px bg-[var(--white-10)]" />` : null}
+              ${i < transitions.length - 1 ? html`<div class="w-3 h-px bg-[var(--color-bg-hover)]" />` : null}
             `)
         }
       </div>
@@ -165,7 +165,7 @@ export function KeeperPhaseTimeline() {
         return d
           ? html`<${KeeperStrip} name=${k.name} data=${d} key=${k.name} />`
           : html`
-            <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)]" key=${k.name}>
+            <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" key=${k.name}>
               <div class="w-24 text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${k.name}</div>
               <span class="text-2xs text-[var(--color-fg-muted)]">데이터 없음</span>
             </div>

@@ -108,7 +108,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
   return html`
     <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
-        <thead class="bg-[var(--white-3)] text-text-muted">
+        <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
             <${ThBase}>시간</${ThBase}>
             <${ThBase}>Cascade</${ThBase}>
@@ -121,7 +121,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
         </thead>
         <tbody class="divide-y divide-card-border/40">
           ${events.map(e => html`
-            <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--white-3)] transition-colors">
+            <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--color-bg-surface)] transition-colors">
               <td class="px-3 py-2 text-text-body whitespace-nowrap">
                 <${TimeAgo} timestamp=${e.ts} />
               </td>
@@ -149,7 +149,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
   return html`
     <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
-        <thead class="bg-[var(--white-3)] text-text-muted">
+        <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
             <${ThBase}>프로바이더</${ThBase}>
             <${ThRight}>성공률</${ThRight}>
@@ -161,7 +161,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
         </thead>
         <tbody class="divide-y divide-card-border/40">
           ${providers.map(p => html`
-            <tr key=${p.provider_key} class="hover:bg-[var(--white-3)] transition-colors">
+            <tr key=${p.provider_key} class="hover:bg-[var(--color-bg-surface)] transition-colors">
               <td class="px-3 py-2 font-medium text-text-strong">${p.provider_key}</td>
               <td class="px-3 py-2 text-right tabular-nums ${p.success_rate >= 0.9 ? 'text-ok' : p.success_rate >= 0.7 ? 'text-warn' : 'text-bad'}">
                 ${Math.round(p.success_rate * 100)}%

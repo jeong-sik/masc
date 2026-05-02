@@ -175,7 +175,7 @@ export function HumanInTheLoop({
           거부
         </button>
         <button
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]"
           onClick=${() => setModifying((m) => !m)}
         >
           ${modifying ? '취소' : '수정'}

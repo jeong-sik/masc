@@ -29,7 +29,7 @@ const TABLE_CLS =
 
 const TH_CLS =
   'px-3 py-2 text-left font-medium text-[var(--color-fg-muted)] ' +
-  'border-b border-[var(--color-border-default)] bg-[var(--white-4)]'
+  'border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
 
 const TR_BASE =
   'outline-none cursor-pointer border-b border-[var(--color-border-default)] '
@@ -39,7 +39,7 @@ function trCls(selected: boolean): string {
     ? TR_BASE +
         'bg-[var(--color-accent-fg)] text-[var(--color-bg-page)]'
     : TR_BASE +
-        'hover:bg-[var(--white-6)]'
+        'hover:bg-[var(--color-bg-hover)]'
 }
 
 const TD_CLS = 'px-3 py-2'

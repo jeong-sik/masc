@@ -165,8 +165,8 @@ function EventRow({
 }) {
   const a = event.attribution
   const rowBg = active
-    ? 'bg-[var(--white-5)]'
-    : 'hover:bg-[var(--white-5)]'
+    ? 'bg-[var(--color-bg-elevated)]'
+    : 'hover:bg-[var(--color-bg-elevated)]'
   const reasonText = reasonOf(a)
   return html`
     <button
@@ -217,7 +217,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
         ${reasonOf(a)
           ? html`<div class="text-xs text-[var(--color-fg-muted)]">${reasonOf(a)}</div>`
           : null}
-        <pre class="text-2xs font-mono bg-[var(--white-5)]/30 rounded-[var(--r-1)] p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
+        <pre class="text-2xs font-mono bg-[var(--color-bg-elevated)]/30 rounded-[var(--r-1)] p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
       </div>
     <//>
   `
@@ -338,7 +338,7 @@ export function AttributionPanel() {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null
           }}
-          class="min-w-40 max-w-60 flex-1 !bg-[var(--white-5)]/20 !px-2 !py-1 !text-2xs"
+          class="min-w-40 max-w-60 flex-1 !bg-[var(--color-bg-elevated)]/20 !px-2 !py-1 !text-2xs"
         />
       </div>
 

@@ -240,7 +240,7 @@ function DomainCard({ item }: { item: ScorecardItem }) {
 
 function KeeperCard({ item }: { item: KeeperItem }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -253,7 +253,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
           <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${item.goal || 'No goal'}</div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
             ${item.active_goal_ids.map(goalId => html`
-              <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-2 py-0.5">${goalId}</span>
+              <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-2 py-0.5">${goalId}</span>
             `)}
           </div>
           ${item.last_blocker
@@ -356,7 +356,7 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
   return html`
     <div class="space-y-2">
       ${timeline.map(item => html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-xs text-[var(--color-fg-secondary)]">${item.summary}</div>
@@ -391,7 +391,7 @@ export function SafeAutonomyPanel() {
           loadingMessage="Loading safe-autonomy scorecard..."
           render=${(data: SafeAutonomyData) => html`
             <div class="space-y-4">
-              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
                     <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">

@@ -387,7 +387,7 @@ export function KeeperRepoMapping() {
         <h2 class="text-sm font-bold text-text-strong">키퍼 저장소 매핑</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--white-10)] text-text-body"
+          class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
           onClick=${() => loadKeeperRepoMappings({ force: true })}
         >
           새로고침
@@ -468,7 +468,7 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
-                  <div class="mb-3 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--white-3)] px-2.5 py-2">
+                  <div class="mb-3 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--color-bg-surface)] px-2.5 py-2">
                     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
                         <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
@@ -528,7 +528,7 @@ export function KeeperRepoMapping() {
                         return html`
                           <label
                             key="${keeperId}-${repo.id}"
-                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--white-5)] transition-colors"
+                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors"
                           >
                             <input
                               type="checkbox"

@@ -455,7 +455,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const hasData = src.entry_count > 0
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--color-fg-primary)]">${meta.label}</span>
@@ -477,7 +477,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
   const toneColor = tone === 'ok' ? 'text-[var(--color-status-ok)]' : tone === 'warn' ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
       <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">${title}</div>
       <div class="text-2xl font-bold ${toneColor}">${value}</div>
       <div class="text-3xs text-[var(--color-fg-disabled)]">${detail}</div>
@@ -519,7 +519,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
           </span>
           ${scopeBadges.length > 0 ? html`
             <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </span>
           ` : null}
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)]">${expanded.value ? '-' : '+'}</span>
@@ -537,7 +537,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         <div class="px-3 pb-3 flex flex-col gap-2">
           ${scopeBadges.length > 0 ? html`
             <div class="flex flex-wrap gap-1.5">
-              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
           <div class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] p-2">
@@ -595,7 +595,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           ` : null}
           ${item.scopeBadges.length > 0 ? html`
             <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-              ${item.scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${item.scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </span>
           ` : null}
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)]">${expanded.value ? '-' : '+'}</span>
@@ -611,7 +611,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       </div>
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'}>
         ${expanded.value ? html`
-          <div class="rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--color-fg-disabled)]">
+          <div class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-disabled)]">
             Latest: <span class="font-mono text-[var(--color-fg-primary)]">${latestPreview}</span>
           </div>
           ${item.entries.map((entry, index) => {
@@ -806,16 +806,16 @@ export function TelemetryUnified() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-4">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
         <div class="mt-1 text-base leading-relaxed text-[var(--color-fg-secondary)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
-          <span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
-          ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
-          ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
-          ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
+          <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
+          ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
+          ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
+          ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
         </div>
       </div>
 
@@ -823,7 +823,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
           <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--color-fg-primary)]">${totalEntries.toLocaleString()}</div>
         </div>
@@ -931,7 +931,7 @@ export function TelemetryUnified() {
       ` : null}
 
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden">
-        <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
+        <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
           ${isFilteringEntries
             ? ` · 검색 매치 ${displayItems.length.toLocaleString()}건`
@@ -941,11 +941,11 @@ export function TelemetryUnified() {
             : ''}
         </div>
         ${condensed.groups > 0 ? html`
-          <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-1)] flex flex-wrap gap-2 text-2xs">
+          <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex flex-wrap gap-2 text-2xs">
             ${Array.from(condensed.byCategory.entries()).map(([category, count]) => {
               const meta = CONDENSED_CATEGORY_META[category]
               return html`
-                <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-1 text-[var(--color-fg-disabled)]">
+                <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-[var(--color-fg-disabled)]">
                   <span class="font-mono ${meta.color}">${meta.icon}</span>
                   <span class="ml-1">${meta.label}</span>
                   <span class="ml-1 font-mono">${count}</span>

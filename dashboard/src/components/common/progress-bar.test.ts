@@ -44,13 +44,13 @@ describe('progressBarHeightClass (pure)', () => {
 
 describe('progressBarTrackToneClass (pure)', () => {
   it('default is the white-5 muted track', () => {
-    expect(progressBarTrackToneClass()).toBe('bg-[var(--white-5)]')
-    expect(progressBarTrackToneClass('default')).toBe('bg-[var(--white-5)]')
+    expect(progressBarTrackToneClass()).toBe('bg-[var(--color-bg-elevated)]')
+    expect(progressBarTrackToneClass('default')).toBe('bg-[var(--color-bg-elevated)]')
   })
 
   it('each variant maps to a distinct CSS var (no drift)', () => {
-    expect(progressBarTrackToneClass('dim')).toBe('bg-[var(--white-6)]')
-    expect(progressBarTrackToneClass('muted')).toBe('bg-[var(--white-8)]')
+    expect(progressBarTrackToneClass('dim')).toBe('bg-[var(--color-bg-hover)]')
+    expect(progressBarTrackToneClass('muted')).toBe('bg-[var(--color-bg-hover)]')
   })
 })
 

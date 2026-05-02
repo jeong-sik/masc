@@ -84,7 +84,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
           const badgeBg = CODE_BADGE_BG[sev]
           const label = CODE_LABELS[e.errorCode]
           return html`
-          <div key=${e.id} class="flex items-start gap-2 px-3 py-2 hover:bg-[var(--white-4)] transition-colors group">
+          <div key=${e.id} class="flex items-start gap-2 px-3 py-2 hover:bg-[var(--color-bg-elevated)] transition-colors group">
             <span class="mt-0.5 shrink-0 ${iconColor}">
               ${sev === 'info' ? html`<${Info} size=${13} />` : html`<${AlertTriangle} size=${13} />`}
             </span>
@@ -101,7 +101,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             <${ActionButton}
               variant="subtle"
               size="sm"
-              class="shrink-0 mt-0.5 p-1 opacity-0 group-hover:opacity-100 hover:text-[var(--color-status-ok)] hover:bg-[var(--white-8)]"
+              class="shrink-0 mt-0.5 p-1 opacity-0 group-hover:opacity-100 hover:text-[var(--color-status-ok)] hover:bg-[var(--color-bg-hover)]"
               title="확인"
               ariaLabel="에러 확인"
               onClick=${() => acknowledgeError(e.id)}

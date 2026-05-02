@@ -58,10 +58,10 @@ const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   warn: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   bad: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
   info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
-  neutral: 'border-[var(--color-border-default)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
+  neutral: 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
   paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
   select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
-  '': 'border-[var(--color-border-default)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
+  '': 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
 }
 
 /** Keeper lifecycle state → StatusChip tone.

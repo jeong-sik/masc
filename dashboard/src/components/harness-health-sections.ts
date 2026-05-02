@@ -125,10 +125,10 @@ export function statusChipClass(status: RailStatus): string {
     case 'warning':
       return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'stale':
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
     case 'idle':
     default:
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
   }
 }
 
@@ -139,10 +139,10 @@ export function statusCardClass(status: RailStatus): string {
     case 'warning':
       return 'border-[var(--warn-30)] bg-[var(--warn-12)]'
     case 'stale':
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
     case 'idle':
     default:
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
   }
 }
 
@@ -240,7 +240,7 @@ export function StatusPill({ status }: { status: RailStatus }) {
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
+    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
       ${text}
     </div>
   `
@@ -257,7 +257,7 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
       ${entries.map(([gate, count]) => html`
         <div class="flex items-center gap-2">
           <span class="w-20 text-right font-mono text-xs text-[var(--color-fg-muted)]">${gate}</span>
-          <div class="h-4 flex-1 overflow-hidden rounded-[var(--r-1)] bg-[var(--white-6)]">
+          <div class="h-4 flex-1 overflow-hidden rounded-[var(--r-1)] bg-[var(--color-bg-hover)]">
             <div
               class="h-full rounded-[var(--r-1)] opacity-80 transition-all"
               style=${{ width: `${(count / max) * 100}%`, background: 'var(--color-accent-fg)' }}

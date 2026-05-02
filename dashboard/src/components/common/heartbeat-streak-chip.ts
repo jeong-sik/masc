@@ -30,7 +30,7 @@ const STATE_LABEL: Record<HeartbeatState, string> = {
 const STATE_TONE: Record<HeartbeatState, string> = {
   up: 'text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
   down: 'text-[var(--bad-light)] border-[var(--bad-20)] bg-[var(--bad-10)]',
-  unknown: 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)] bg-[var(--white-2)]',
+  unknown: 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
 }
 
 /** Pure: render a streak as narrator-friendly text. Exposed so the

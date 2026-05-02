@@ -695,7 +695,7 @@ describe('ConnectorStatusPanel', () => {
 
     // Regression guard for the screenshot bug: when a connector card's
     // brand accent is green (iMessage), the outer card renders a green
-    // gradient; a neutral `bg-[var(--white-4)]` panel sitting inside it
+    // gradient; a neutral `bg-[var(--color-bg-elevated)]` panel sitting inside it
     // used to read as a "success" tint ("not started" painted green).
     // The panel now uses informational amber + a Portainer-style left
     // stripe so it's unambiguously "needs action" regardless of the

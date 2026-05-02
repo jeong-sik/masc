@@ -286,15 +286,15 @@ describe('statusCardClass', () => {
   })
 
   it('returns white border for stale', () => {
-    expect(statusCardClass('stale')).toBe('border-[var(--color-border-default)] bg-[var(--white-4)]')
+    expect(statusCardClass('stale')).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]')
   })
 
   it('returns dim border for idle', () => {
-    expect(statusCardClass('idle')).toBe('border-[var(--color-border-default)] bg-[var(--white-4)]')
+    expect(statusCardClass('idle')).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]')
   })
 
   it('returns dim border for unknown', () => {
-    expect(statusCardClass('broken' as never)).toBe('border-[var(--color-border-default)] bg-[var(--white-4)]')
+    expect(statusCardClass('broken' as never)).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]')
   })
 })
 

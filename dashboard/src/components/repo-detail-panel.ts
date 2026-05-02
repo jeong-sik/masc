@@ -189,7 +189,7 @@ export function RepoDetailPanel() {
         <${ErrorState} message=${detailState.message} />
         <button
           type="button"
-          class="text-2xs px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+          class="text-2xs px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
           onClick=${() => void loadRepoDetail(selectedId)}
         >
           다시 시도
@@ -328,7 +328,7 @@ export function RepoDetailPanel() {
                         ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--accent-10)] text-accent border border-accent/20">기본</span>`
                         : null}
                       ${branch.is_remote
-                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--color-border-default)]">원격</span>`
+                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)]">원격</span>`
                         : null}
                     </div>
                     ${branch.last_commit_at

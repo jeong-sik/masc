@@ -76,7 +76,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
+      class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -107,16 +107,16 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
   const progressBarToneClass =
     tone === 'complete' ? 'bg-[var(--ok-10)]' :
     tone === 'in-progress' ? 'bg-[var(--color-accent-fg)]' :
-    'bg-[var(--white-10)]'
+    'bg-[var(--color-bg-hover)]'
 
   return html`
     <div
-      class="mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]"
+      class="mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-setup-guide-tone=${tone}
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--white-4)]"
+        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
         aria-expanded=${isOpen}
         aria-controls=${`setup-guide-${connectorId}`}
         onClick=${toggle}
@@ -150,7 +150,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
            always visible so the progress signals out even when the
            card is collapsed (operator scanning multiple cards). -->
       <div
-        class="h-[2px] w-full bg-[var(--white-4)]"
+        class="h-[2px] w-full bg-[var(--color-bg-elevated)]"
         role="progressbar"
         aria-valuenow=${pct}
         aria-valuemin=${0}
@@ -179,7 +179,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   // emerald-filled when the step is complete.
                   const circleToneClass = done
                     ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-                    : 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+                    : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span

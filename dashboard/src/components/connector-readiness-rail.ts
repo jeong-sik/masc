@@ -96,10 +96,10 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     gradient: 'bg-gradient-to-b from-rose-500/15 to-rose-500/0',
   },
   idle: {
-    bg: 'bg-[var(--white-3)]',
+    bg: 'bg-[var(--color-bg-surface)]',
     border: 'border-[var(--color-border-default)]',
     text: 'text-[var(--color-fg-disabled)]',
-    dot: 'bg-[var(--white-10)]',
+    dot: 'bg-[var(--color-bg-hover)]',
     icon: '·',
     gradient: 'bg-gradient-to-b from-[var(--white-4)] to-[var(--white-2)]',
   },
@@ -152,7 +152,7 @@ function Pill({ pill }: { pill: RailPill }) {
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-xs font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--color-bg-page)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-xs font-bold ${inflight ? 'bg-[var(--color-bg-hover)]' : tone.dot} text-[var(--color-bg-page)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>

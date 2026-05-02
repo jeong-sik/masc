@@ -76,7 +76,7 @@ export function RecoveryWizard({
       </div>
 
       <div
-        class="mb-3 h-2 w-full rounded-full bg-[var(--white-10)]"
+        class="mb-3 h-2 w-full rounded-full bg-[var(--color-bg-hover)]"
         role="progressbar"
         aria-valuemin="0"
         aria-valuemax=${stepCount}

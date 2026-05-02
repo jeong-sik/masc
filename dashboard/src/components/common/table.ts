@@ -32,7 +32,7 @@ const TABLE_CLS =
 
 const TH_CLS =
   'px-3 py-2 text-left font-medium text-[var(--color-fg-secondary)] ' +
-  'border-b border-[var(--color-border-default)] bg-[var(--white-4)]'
+  'border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
 
 const TD_CLS =
   'px-3 py-2 text-[var(--color-fg-primary)] border-b border-[var(--color-border-default)]'
@@ -42,7 +42,7 @@ const ROW_CLS_BASE = 'transition-colors cursor-pointer '
 function rowCls(selected: boolean): string {
   return selected
     ? ROW_CLS_BASE + 'bg-[var(--color-accent-fg)]/10'
-    : ROW_CLS_BASE + 'hover:bg-[var(--white-6)]'
+    : ROW_CLS_BASE + 'hover:bg-[var(--color-bg-hover)]'
 }
 
 export function Table<T>({

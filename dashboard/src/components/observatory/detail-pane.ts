@@ -31,7 +31,7 @@ function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' 
 function toneClass(tone: 'ok' | 'bad' | 'neutral'): string {
   if (tone === 'ok') return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
   if (tone === 'bad') return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-  return 'bg-[var(--white-5)] text-text-dim border-card-border'
+  return 'bg-[var(--color-bg-elevated)] text-text-dim border-card-border'
 }
 
 function keeperOf(entry: TelemetryEntry): string | null {
@@ -79,7 +79,7 @@ export function DetailPane() {
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--white-5)]"
+          class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--color-bg-elevated)]"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
@@ -104,7 +104,7 @@ export function DetailPane() {
         <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>
-        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--white-5)]/30">${formatJson(selection.entry)}</pre>
+        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--color-bg-elevated)]/30">${formatJson(selection.entry)}</pre>
       </details>
     </div>
   `

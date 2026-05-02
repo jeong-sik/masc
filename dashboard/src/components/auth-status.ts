@@ -151,7 +151,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
         aria-controls=${popoverId}
@@ -315,7 +315,7 @@ export function RemoteWarningBanner() {
           onClick=${openPopover}
         >Open auth</button>
         <button type="button"
-          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
+          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
           aria-label="Dismiss auth banner"
           onClick=${() => { bannerDismissed.value = true }}
         ><${X} size=${13} /><//>

@@ -63,7 +63,7 @@ export function ActivityStream() {
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
-              class="activity-item rounded-[var(--r-1)] border border-[var(--color-border-divider)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
+              class="activity-item rounded-[var(--r-1)] border border-[var(--color-border-divider)] border-l-2 bg-[var(--color-bg-surface)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
               <div class="activity-item-head flex items-center gap-2">
                 <${StatusChip} tone=${eventKindTone(entry)}>${eventKindLabel(entry)}<//>

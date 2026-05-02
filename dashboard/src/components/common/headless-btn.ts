@@ -39,7 +39,7 @@ export function HeadlessBtn({
   const focusCls = focusVisible
     ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-bg-surface)]'
     : ''
-  const hoverCls = hovered && !pressed ? 'bg-[var(--white-4)]' : ''
+  const hoverCls = hovered && !pressed ? 'bg-[var(--color-bg-elevated)]' : ''
   const pressedCls = pressed ? 'scale-95 opacity-80' : ''
   const disabledCls = disabled ? 'opacity-50 pointer-events-none' : ''
 

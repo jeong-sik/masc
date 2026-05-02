@@ -54,10 +54,10 @@ export const MemorySearch: FunctionComponent<MemorySearchProps> = ({
           r => html`
             <div
               key=${r.id}
-              class="group flex cursor-pointer items-center gap-3 rounded-[var(--r-1)] px-3 py-2 hover:bg-[var(--white-6)]"
+              class="group flex cursor-pointer items-center gap-3 rounded-[var(--r-1)] px-3 py-2 hover:bg-[var(--color-bg-hover)]"
               role="listitem"
             >
-              <div class="h-1 w-12 overflow-hidden rounded-full bg-[var(--white-4)]">
+              <div class="h-1 w-12 overflow-hidden rounded-full bg-[var(--color-bg-elevated)]">
                 <div
                   class="h-full rounded-full"
                   style=${{

@@ -247,7 +247,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         ? html`<${Surf} kind="err" role="alert" padding="tight" class="mx-4 mb-4 text-xs leading-loose">${chatError.value}<//>`
         : null}
 
-      <div class="border-t border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-4">
+      <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
         <${ChatComposer}
           draft=${chatInput.value}
           placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}

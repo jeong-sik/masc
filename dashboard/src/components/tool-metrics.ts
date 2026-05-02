@@ -83,11 +83,11 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
         return html`
           <div class="tool-bar-row" key=${item.name}>
             <div class="flex items-center gap-1.5 overflow-hidden">
-              <span class="flex-shrink-0 size-4 rounded-[var(--r-1)] text-3xs font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
+              <span class="flex-shrink-0 size-4 rounded-[var(--r-1)] text-3xs font-mono font-bold flex items-center justify-center bg-[var(--color-bg-elevated)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--color-fg-primary)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs" title=${item.name}>${item.name}</span>
             </div>
-            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--white-4)]">${cat.label}</span>
-            <div class="h-3.5 rounded-xs bg-[var(--white-6)] overflow-hidden">
+            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--color-bg-elevated)]">${cat.label}</span>
+            <div class="h-3.5 rounded-xs bg-[var(--color-bg-hover)] overflow-hidden">
               <div class="h-full rounded-xs min-w-0.5 transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
             <span class="text-[var(--color-fg-muted)] text-2xs text-right font-mono">${item.call_count}</span>

@@ -177,7 +177,7 @@ export function RepoSidebar() {
           <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">저장소</span>
           <button
             type="button"
-            class="text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+            class="text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
             onClick=${() => void fetchRepositories()}
           >
             다시 시도
@@ -201,7 +201,7 @@ export function RepoSidebar() {
         </span>
         <button
           type="button"
-          class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
+          class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
           onClick=${() => { showAddRepoDialog.value = true }}
         >
           <${Plus} size=${12} aria-hidden="true" />
@@ -231,7 +231,7 @@ export function RepoSidebar() {
               <button
                 key=${repo.id}
                 type="button"
-                class="w-full text-left px-3 py-2 cursor-pointer transition-colors border-l-2 ${isSelected ? 'bg-[var(--accent-10)] border-l-accent' : 'border-l-transparent hover:bg-[var(--white-5)]'}"
+                class="w-full text-left px-3 py-2 cursor-pointer transition-colors border-l-2 ${isSelected ? 'bg-[var(--accent-10)] border-l-accent' : 'border-l-transparent hover:bg-[var(--color-bg-elevated)]'}"
                 onClick=${() => { selectRepo(repo.id) }}
                 aria-pressed=${isSelected ? 'true' : 'false'}
               >

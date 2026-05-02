@@ -83,20 +83,20 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Draining:     'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  Paused:       'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  Stopped:      'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  Paused:       'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  Stopped:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  Dead:         'bg-[var(--white-5)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Offline:      'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  Dead:         'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
+  Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   // KTC
-  idle:         'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   executing:    'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   finalizing:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KDP
-  undecided:          'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  undecided:          'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
@@ -106,19 +106,19 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   // KMC
-  accumulating: 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  accumulating: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
   // "nothing happening" state; warning = amber (partial failure
   // streak); cooling = blue (at least one past trip, currently
   // recovered). "tripped" is unobservable at snapshot time and has no
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
-  clean:   'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  clean:   'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   warning: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   cooling: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
 }
 
-const DEFAULT_CHIP = 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
+const DEFAULT_CHIP = 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
 
 export function chipClassFor(value: string): string {
   return CHIP_CLASS_BY_STATE[value] ?? DEFAULT_CHIP
@@ -135,7 +135,7 @@ export function sparkClassFor(value: string): string {
   // border utilities. Extract just the bg-* token, whether it uses
   // Tailwind's arbitrary-value bracket syntax or a plain palette class.
   const m = /\bbg-(?:\[[^\]]+\]|[a-z0-9/-]+)/i.exec(full)
-  return m?.[0] ?? 'bg-[var(--white-5)]'
+  return m?.[0] ?? 'bg-[var(--color-bg-elevated)]'
 }
 
 /** Per-axis observation ring keyed by keeper name. */
@@ -937,7 +937,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         Loading fleet composite snapshot…
       </div>
@@ -959,7 +959,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         No keepers registered.
       </div>
@@ -969,7 +969,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)]"
+      class="contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">
@@ -984,7 +984,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           ariaLabel="Keeper 필터"
           testId="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 !bg-[var(--white-5)] !px-2 !py-0.5 !text-xs"
+          class="min-w-40 max-w-65 !bg-[var(--color-bg-elevated)] !px-2 !py-0.5 !text-xs"
         />
         ${runtimeTallies
           ? html`
@@ -1047,7 +1047,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         : null}
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs" aria-label="키퍼 FSM 상태 행렬">
-          <thead class="bg-[var(--white-5)] text-[var(--color-fg-muted)]">
+          <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
             <tr>
               <th scope="col" class="px-3 py-2 text-left font-semibold">키퍼</th>
               <th scope="col" class="px-3 py-2 text-left font-semibold">런타임</th>
@@ -1074,7 +1074,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               return html`
                 <tr
                   data-keeper=${name}
-                  class="border-t border-[var(--color-border-default)] hover:bg-[var(--white-5)] ${rowTone}"
+                  class="border-t border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] ${rowTone}"
                   onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
                 >
                   <td class="px-3 py-2 font-mono text-[var(--color-fg-muted)]">${name}</td>
@@ -1113,7 +1113,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                                     key=${key}
                                     data-runtime-action
                                     data-runtime-action-type=${action.action_type}
-                                    class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                     title=${action.reason}
                                     aria-label=${action.reason}
                                     disabled=${busy}
@@ -1134,7 +1134,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             <button
                               type="button"
                               data-runtime-assist
-                              class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                              class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
                               aria-label="감독형 진단 요청"
                               disabled=${assisting}
@@ -1166,7 +1166,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                           <div
                             data-spark
                             data-axis=${a.key}
-                            class="flex h-2 overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-5)]"
+                            class="flex h-2 overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
                             title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
                           >
                             ${series.map((v, i) => html`

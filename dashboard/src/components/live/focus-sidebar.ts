@@ -47,7 +47,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
             <button
               type="button"
               key=${agent.name}
-              class=${`focus-agent-card w-full rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-[var(--t-med)] text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
+              class=${`focus-agent-card w-full rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] p-3.5 transition-colors duration-[var(--t-med)] text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
@@ -57,11 +57,11 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                 </span>
                 <span class="focus-pressure-badge rounded-[var(--r-1)] ${pressureClass(agent.pressure)}">
                   ${pressureLabel(agent.pressure)}
-                  ${agent.assignedCount > 0 ? html` <span class="bg-[var(--white-10)] px-1 text-[var(--fs-9)] rounded-[var(--r-1)]">${agent.assignedCount}</span>` : null}
+                  ${agent.assignedCount > 0 ? html` <span class="bg-[var(--color-bg-hover)] px-1 text-[var(--fs-9)] rounded-[var(--r-1)]">${agent.assignedCount}</span>` : null}
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="text-xs text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--color-border-divider)] whitespace-nowrap overflow-hidden text-ellipsis rounded-[var(--r-1)]">${agent.currentTask}</div>`
+                ? html`<div class="text-xs text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] whitespace-nowrap overflow-hidden text-ellipsis rounded-[var(--r-1)]">${agent.currentTask}</div>`
                 : null}
               <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText

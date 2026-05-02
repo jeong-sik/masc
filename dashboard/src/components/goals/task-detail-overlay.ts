@@ -36,7 +36,7 @@ import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
 import type { Task, TaskGateEvaluation } from '../../types'
 
-const CARD_BOX = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-3'
+const CARD_BOX = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3'
 
 function SectionTitle({ children }: { children: unknown }) {
   return html`<div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">${children}</div>`
@@ -101,8 +101,8 @@ function TaskEventsSection() {
         const { icon, color } = eventBadge(evt.label)
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
-          <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
+          <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
+            <div class="size-7 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
@@ -201,7 +201,7 @@ function gateTone(status?: string | null): string {
     case 'ready': return 'text-ok border-ok/25 bg-ok/10'
     case 'blocked': return 'text-bad border-bad/25 bg-bad/10'
     case 'inconclusive': return 'text-warn border-warn/25 bg-warn/10'
-    default: return 'text-text-muted border-[var(--color-border-default)] bg-[var(--white-5)]'
+    default: return 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
   }
 }
 
@@ -246,7 +246,7 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
           <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent">
             검증 대기
@@ -296,7 +296,7 @@ function ContractSection({ task }: { task: Task }) {
           <div class="text-xs font-medium text-text-strong">필수 증거</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
-              <span key=${item} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
             `)}
           </div>
         </div>
@@ -345,7 +345,7 @@ function HandoffSection({ task }: { task: Task }) {
         ${handoff.evidence_refs && handoff.evidence_refs.length > 0 ? html`
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${handoff.evidence_refs.map((item: string) => html`
-              <span key=${item} class="rounded-[var(--r-1)] border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded-[var(--r-1)] border border-warn/20 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
             `)}
           </div>
         ` : null}
@@ -391,7 +391,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ${visibleIds.map(id => {
           const goal = goalById(id)
           return html`
-            <div key=${id} class="flex items-center gap-2 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
+            <div key=${id} class="flex items-center gap-2 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] px-3 py-2">
               <span class="text-xs text-text-body">${goal?.title ?? id}</span>
               ${goal?.status ? html`<${StatusBadge} status=${goal.status} />` : null}
             </div>
@@ -430,14 +430,14 @@ export function TaskDetailOverlay() {
           <h2 id=${titleId} class="text-lg font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${task.status ?? 'todo'} />
-            <span class="rounded-[var(--r-1)] border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-2xs font-semibold text-text-body">${priorityLabel(p)}</span>
+            <span class="rounded-[var(--r-1)] border border-current/20 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-2xs font-semibold text-text-body">${priorityLabel(p)}</span>
             ${task.assignee ? html`<span class="text-2xs text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
         <button
           ref=${closeButtonRef}
           type="button"
-          class="shrink-0 size-8 flex items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="shrink-0 size-8 flex items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
         ><${X} size=${16} /></button>
@@ -453,7 +453,7 @@ export function TaskDetailOverlay() {
               class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
                   ? 'border-accent/40 bg-accent/12 text-[var(--color-accent-fg)]'
-                  : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
+                  : 'border-transparent text-text-muted hover:bg-[var(--color-bg-hover)]'
               }"
               onClick=${() => tab === 'activity' ? switchToActivityTab(task) : (activeTab.value = 'overview')}
             >${tab === 'overview' ? '개요' : '담당자 최근 활동'}</button>
@@ -468,7 +468,7 @@ export function TaskDetailOverlay() {
           ${task.description ? html`
             <div>
               <${SectionTitle}>설명</${SectionTitle}>
-              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
             </div>

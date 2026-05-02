@@ -133,7 +133,7 @@ describe('chipClassFor', () => {
 
   it('falls back to the default chip for unknown states', () => {
     const cls = chipClassFor('unknown_state_variant')
-    expect(cls).toContain('bg-[var(--white-5)]')
+    expect(cls).toContain('bg-[var(--color-bg-elevated)]')
   })
 })
 
@@ -505,8 +505,8 @@ describe('sparkClassFor', () => {
   })
 
   it('falls back to the muted white token on unknown states', () => {
-    // DEFAULT_CHIP carries `bg-[var(--white-5)]`; sparkClassFor preserves it.
-    expect(sparkClassFor('__not_a_state__').startsWith('bg-[var(--white-5)]')).toBe(true)
+    // DEFAULT_CHIP carries `bg-[var(--color-bg-elevated)]`; sparkClassFor preserves it.
+    expect(sparkClassFor('__not_a_state__').startsWith('bg-[var(--color-bg-elevated)]')).toBe(true)
   })
 })
 

@@ -78,7 +78,7 @@ export function ThemeSwitch() {
   return html`
     <button
       type="button"
-      class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs font-mono uppercase tracking-4 text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+      class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-3xs font-mono uppercase tracking-4 text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
       aria-label=${TITLE[key]}
       title=${TITLE[key]}
       onClick=${toggleTheme}

@@ -170,7 +170,7 @@ function SessionMeta({ agentName }: { agentName: string }) {
   return html`
     <div class="flex flex-wrap gap-2 mb-4">
       ${meta.map(m => html`
-        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-[var(--white-5)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-text-muted">
+        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-text-muted">
           <span class="text-text-dim">${m.label}</span>
           <span class="text-text-strong font-mono text-3xs">${m.value}</span>
         </span>
@@ -191,8 +191,8 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           const icon = taskEventIcon(evt.type)
           const color = taskEventColor(evt.type)
           return html`
-            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">
-              <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--white-5)] px-2 py-0.5 rounded-[var(--r-1)]">${icon}</span>
+            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
+              <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--color-bg-elevated)] px-2 py-0.5 rounded-[var(--r-1)]">${icon}</span>
               <span class="text-xs text-text-body flex-1 truncate">${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
             </div>
@@ -216,12 +216,12 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     <div class="border border-card-border/60 rounded-[var(--r-1)] bg-card/30 overflow-hidden hover:border-accent/20 transition-colors">
       <button
         type="button"
-        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--white-3)] border-b border-card-border/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
+        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-card-border/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
       >
         <div class="flex items-center gap-2">
-          <span class="size-2 rounded-[var(--r-0)] ${index === 0 ? 'bg-accent' : 'bg-[var(--white-20)]'}"></span>
+          <span class="size-2 rounded-[var(--r-0)] ${index === 0 ? 'bg-accent' : 'bg-[var(--color-bg-hover)]'}"></span>
           <${TimeAgo} timestamp=${report.ts} />
         </div>
         ${isLong ? html`
@@ -278,7 +278,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             </div>
           ` : null}
           ${summary.messages_sent > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-text-muted bg-[var(--white-5)] border border-[var(--color-border-default)] px-3 py-1.5 rounded-[var(--r-1)]">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-text-muted bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] px-3 py-1.5 rounded-[var(--r-1)]">
               <span class="font-bold">${summary.messages_sent}</span> 메시지
             </div>
           ` : null}

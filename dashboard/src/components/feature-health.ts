@@ -167,7 +167,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-4">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
       <div class="mb-3 flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--color-fg-primary)]">${categoryLabel}</div>
@@ -175,7 +175,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]">
+        <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]">
           ${categoryData.total}
         </div>
       </div>
@@ -202,7 +202,7 @@ export function FeatureHealth() {
             const overview = data.overview
             return html`
               <div class="space-y-4">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
                       <${SectionCap}>기능 플래그 상태<//>
@@ -284,13 +284,13 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 text-xs text-[var(--color-fg-disabled)]">
+                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-xs text-[var(--color-fg-disabled)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
-                    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-4">
+                    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
                       <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>

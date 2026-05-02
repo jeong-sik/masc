@@ -27,7 +27,7 @@ function ConfigCard({
   children: unknown
 }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}" title=${title}>
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}" title=${title}>
       ${children}
     </div>
   `
@@ -80,7 +80,7 @@ function toneClass(status: string): string {
     case 'invalid_env':
       return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[var(--rose-fg)]'
     default:
-      return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -280,9 +280,9 @@ function probeTone(signal: string | null | undefined, probeOk: boolean | null | 
     case 'possible_reuse':
       return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
     case 'no_visible_reuse':
-      return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
     default:
-      return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -323,7 +323,7 @@ function sourceTone(source: string): string {
     case 'env': return 'border-[var(--color-accent-fg)]/30 bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]'
     case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
     case 'derived': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
-    default: return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
+    default: return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -360,7 +360,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
           const field: KeeperRuntimeField<number | null> | undefined = runtime[row.key]
           if (!field) return null
           return html`
-            <div class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2">
+            <div class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
@@ -485,7 +485,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.observations?.map(item => html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
+                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
                         ${item}
                       </div>
                     `)}

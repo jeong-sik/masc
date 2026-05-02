@@ -52,9 +52,9 @@ function BoldLabel({ children }: { children: unknown }) {
 
 function CardBox({ children, dataKeeper }: { children: unknown; dataKeeper?: string }) {
   if (dataKeeper) {
-    return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
+    return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
   }
-  return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">${children}</div>`
+  return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">${children}</div>`
 }
 
 // As of 2026-04-30 the per-connector sub-tabs were merged into
@@ -323,7 +323,7 @@ export function HeaderMiniStat({
   const valueTone = headerStatToneClass(tone)
   return html`
     <div
-      class="flex min-w-15 flex-col items-end justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-1 text-right"
+      class="flex min-w-15 flex-col items-end justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-right"
       data-header-mini-stat=${label}
       data-header-mini-stat-tone=${tone}
       data-testid=${testId}
@@ -358,7 +358,7 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     default:
       return {
         dot: 'var(--color-fg-disabled)',
-        badge: 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]',
+        badge: 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]',
         label: health || 'idle',
       }
   }
@@ -914,7 +914,7 @@ function ConnectorLivePanel({
 
       ${ui.headerExpanded
         ? html`
-            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-3 text-2xs">
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -1196,7 +1196,7 @@ function ConnectorLivePanel({
                           </div>
                           ${expanded
                             ? html`
-                                <div class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] p-2">
+                                <div class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
                                   <${TextInput}
                                     value=${ui.channelDraft}
                                     placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
@@ -1313,7 +1313,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
@@ -1440,7 +1440,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
   const isError = Boolean(event.error)
   const badgeClass = isError
     ? 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
-    : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+    : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
 
   return html`
     <${CardBox}>

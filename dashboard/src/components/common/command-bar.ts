@@ -149,7 +149,7 @@ export function CommandBar({
                 const base =
                   'flex cursor-pointer items-center px-3 py-2 text-sm'
                 const activeCls = isActive
-                  ? 'bg-[var(--white-10)] text-[var(--color-fg-primary)]'
+                  ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-primary)]'
                   : 'text-[var(--color-fg-secondary)]'
                 return html`
                   <li

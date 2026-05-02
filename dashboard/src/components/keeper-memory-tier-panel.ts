@@ -204,7 +204,7 @@ export function KeeperMemoryTierPanel({
               <div class="w-24 truncate text-[var(--color-fg-primary)] font-mono" title=${row.kind}>
                 ${row.kind}
               </div>
-              <div class="relative flex-1 h-4 rounded-[var(--r-0)] bg-[var(--white-4)] border border-[var(--color-border-default)] overflow-hidden">
+              <div class="relative flex-1 h-4 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
                 <div class=${`absolute inset-y-0 left-0 ${barColor}`} style=${`width: ${pct}%`}></div>
               </div>
               <div class="w-16 text-right text-[var(--color-fg-muted)] tabular-nums">

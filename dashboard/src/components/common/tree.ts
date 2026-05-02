@@ -58,7 +58,7 @@ function treeItemCls(selected: boolean): string {
   return selected
     ? TREEITEM_BASE + 'bg-[var(--color-accent-fg)] text-[var(--color-bg-page)]'
     : TREEITEM_BASE +
-        'text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]'
+        'text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]'
 }
 
 const EXPANDER_CLS =

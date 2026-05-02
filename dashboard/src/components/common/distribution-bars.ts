@@ -74,7 +74,7 @@ export function DistributionBars({
   const maxValue = Math.max(...visibleItems.map(item => item.value), 1)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
@@ -102,7 +102,7 @@ export function DistributionBars({
                         ${valueFormatter(item.value)}
                       </span>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--white-5)]">
+                    <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]">
                       <div
                         class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)]"
                         style=${`width:${Math.min(width, 100)}%;background:${palette.fill};opacity:0.8;`}
@@ -132,7 +132,7 @@ export function SegmentedBar({
   const total = visibleItems.reduce((sum, item) => sum + item.value, 0)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
@@ -143,7 +143,7 @@ export function SegmentedBar({
         ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
-              <div class="flex h-3 overflow-hidden rounded-[var(--r-0)] bg-[var(--white-5)]">
+              <div class="flex h-3 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]">
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100

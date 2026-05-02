@@ -12,7 +12,7 @@ const COLOR: Record<HeartbeatState, string> = {
   // Emerald 500 / Rose 500 / Zinc 700 — matches the dashboard token palette.
   up: 'bg-[var(--ok-10)]',
   down: 'bg-[var(--bad-10)]',
-  unknown: 'bg-[var(--white-8)]',
+  unknown: 'bg-[var(--color-bg-hover)]',
 }
 
 const BAR_W = 'w-1'

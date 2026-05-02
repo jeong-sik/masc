@@ -192,7 +192,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   const height = topPad + n * cell + 30
 
   return html`
-    <div class="bg-[var(--white-5)] rounded-[var(--r-1)] p-3 overflow-x-auto">
+    <div class="bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 overflow-x-auto">
       <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" role="img" aria-label="에이전트 간 메모리 서브시스템 연결 행렬" style="max-height:560px">
         ${agents.map(
           (name, i) => html`
@@ -337,14 +337,14 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
   if (synapses.length === 0) return null
   const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, TOP_LINK_COUNT)
   return html`
-    <div class="bg-[var(--white-5)] rounded-[var(--r-1)] p-3 mt-3">
+    <div class="bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 mt-3">
       <div class="text-xs text-[var(--color-fg-muted)] mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
           const active = isActivePair(s.from_agent, s.to_agent)
           return html`
-            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--white-5)]' : 'hover:bg-[var(--white-5)]'}">
+            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}">
               <button
                 type="button"
                 class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-right ${ringFocusClasses()}`}
@@ -362,7 +362,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
                 class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-left ${ringFocusClasses()}`}
                 onClick=${() => openAgentDetail(s.to_agent)}
               >${shortAgentLabel(s.to_agent)}</button>
-              <div class="flex-1 bg-[var(--white-5)] rounded-[var(--r-1)] h-1.5 min-w-15">
+              <div class="flex-1 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] h-1.5 min-w-15">
                 <div class="${weightBarClass(s.weight)} rounded-[var(--r-1)] h-1.5" style="width:${pct}%"></div>
               </div>
               <span class="text-[var(--color-fg-muted)] w-10 text-right">${pct}%</span>
@@ -396,7 +396,7 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
       </td>
       <td class="py-1.5 px-2 text-sm text-right">
         <div class="flex items-center gap-2 justify-end">
-          <div class="w-16 bg-[var(--white-5)] rounded-[var(--r-1)] h-1.5">
+          <div class="w-16 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] h-1.5">
             <div class="${weightBarClass(s.weight)} rounded-[var(--r-1)] h-1.5" style="width:${pct}%"></div>
           </div>
           <span class="text-[var(--color-fg-muted)] w-10 text-right">${pct}%</span>
@@ -428,7 +428,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
         <span class="text-xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
       </div>
       <div class="flex items-center gap-2 text-xs text-[var(--color-fg-muted)] mb-1 flex-wrap">
-        <span class="bg-[var(--white-5)] px-1.5 py-0.5 rounded-[var(--r-1)]">${ep.event_type}</span>
+        <span class="bg-[var(--color-bg-elevated)] px-1.5 py-0.5 rounded-[var(--r-1)]">${ep.event_type}</span>
         ${ep.participants.map(
           (p: string) => html`<span class="font-mono">${p}</span>`,
         )}
@@ -452,7 +452,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
               <div class="mt-1 flex gap-2 flex-wrap">
                 ${Object.entries(ep.context).map(
                   ([k, v]) =>
-                    html`<span class="text-xs bg-[var(--white-5)] px-1.5 py-0.5 rounded-[var(--r-1)] text-[var(--color-fg-muted)]"
+                    html`<span class="text-xs bg-[var(--color-bg-elevated)] px-1.5 py-0.5 rounded-[var(--r-1)] text-[var(--color-fg-muted)]"
                       >${k}: ${v}</span
                     >`,
                 )}
@@ -546,7 +546,7 @@ export function MemorySubsystems() {
 
   return html`
     <div class="space-y-6">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
         이 화면은 <span class="text-[var(--color-fg-muted)] font-medium">global memory surface</span>만 보여줍니다.
         institution episodes와 Hebbian graph는 여기서 보고,
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
@@ -556,7 +556,7 @@ export function MemorySubsystems() {
       <section aria-label="아키텍처 데이터 흐름도">
         <button
           onClick=${() => (showArch.value = !showArch.value)}
-          class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded-[var(--r-1)] hover:bg-[var(--white-5)] transition-colors"
+          class="w-full flex items-center justify-between p-2 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors"
         >
           <span class="text-sm font-semibold text-[var(--color-fg-muted)] flex items-center gap-2">
             <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
@@ -569,7 +569,7 @@ export function MemorySubsystems() {
         ${
           showArch.value
             ? html`
-                <div class="mt-2 bg-[var(--white-5)] rounded-[var(--r-1)] p-3">
+                <div class="mt-2 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3">
                   <${MermaidGraph}
                     source=${ARCHITECTURE_FLOW}
                     prefix="memory-arch"
@@ -604,7 +604,7 @@ export function MemorySubsystems() {
         }
         ${
           synapses.length === 0
-            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded-[var(--r-1)] p-4 text-center">
+            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-4 text-center">
                 시냅스 데이터 없음. keeper task 완료 시 자동 생성됩니다.
               </div>`
             : html`
@@ -627,7 +627,7 @@ export function MemorySubsystems() {
                 </div>
                 ${
                   isSynapseFiltering && visibleSynapses.length === 0
-                    ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded-[var(--r-1)] p-4 text-center">
+                    ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-4 text-center">
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
@@ -666,7 +666,7 @@ export function MemorySubsystems() {
 
         ${
           pairFilter
-            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-xs">
+            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-xs">
                 <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
                 <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
                 <button
@@ -722,7 +722,7 @@ export function MemorySubsystems() {
 
         ${
           visibleEpisodes.length === 0
-            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded-[var(--r-1)] p-4 text-center">
+            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-4 text-center">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
                   : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}
@@ -895,7 +895,7 @@ function DecisionsStream() {
                           <td class="px-2 py-1.5 font-mono whitespace-nowrap">${ts}</td>
                           <td class="px-2 py-1.5 font-mono text-[var(--color-accent-fg)]">${ev.keeper_name}</td>
                           <td class="px-2 py-1.5">
-                            <span class="rounded-[var(--r-1)] px-1 py-0.5 bg-[var(--white-10)] text-text-muted">${ev.event_type}</span>
+                            <span class="rounded-[var(--r-1)] px-1 py-0.5 bg-[var(--color-bg-hover)] text-text-muted">${ev.event_type}</span>
                           </td>
                           <td class="px-2 py-1.5">${ev.outcome ?? '—'}</td>
                           <td class="px-2 py-1.5 font-mono text-text-muted">${ev.model_used ?? '—'}</td>

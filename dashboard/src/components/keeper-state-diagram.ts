@@ -31,7 +31,7 @@ interface KeeperStateDiagramProps {
 function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown }) {
   const cls = accent
     ? 'inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]'
-    : 'inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5'
+    : 'inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5'
   return html`<span class="${cls}">${children}</span>`
 }
 
@@ -269,10 +269,10 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
                   fallbackText=${mermaidSource}
                 />
                 <div class="flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-disabled)]">
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5">
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">
                     backend phase ${stateDiagram?.current_phase ?? 'unknown'}
                   </span>
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5">
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">
                     response.mermaid
                   </span>
                 </div>
@@ -306,12 +306,12 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--color-fg-secondary)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--color-fg-disabled)]">→</span>
                 <span class="font-mono text-[var(--color-accent-fg)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>
                 ${transition.operator_signal ? html`

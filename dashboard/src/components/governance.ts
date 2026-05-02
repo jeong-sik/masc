@@ -29,7 +29,7 @@ import { formatAgeSummary } from './governance-utils'
 export { refreshGovernance } from './governance-store'
 
 function MetaTag({ children, mono = false }: { children: unknown; mono?: boolean }) {
-  const cls = `rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
+  const cls = `rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
   return html`<span class=${cls}>${children}</span>`
 }
 
@@ -107,7 +107,7 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judgment</h2>
-        <span class="rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
+        <span class="rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
       </div>
@@ -117,7 +117,7 @@ function GovernanceSummaryStrip() {
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded-[var(--r-1)] border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="rounded-[var(--r-1)] border-transparent bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
@@ -179,7 +179,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">Judge model ${label}</span>
@@ -239,7 +239,7 @@ function JudgmentsSection() {
     const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
     const chipClass = tone === 'warn'
       ? 'border-warn/30 bg-warn/10 text-warn'
-      : 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted'
+      : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
     return html`
       <div data-testid="live-judge-empty">
         <${Card} title=${title} class="section mb-5" variant="compact">
@@ -318,7 +318,7 @@ export function approvalRiskToneClass(riskLevel: string): string {
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
-  return 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
 function approvalDispositionToneClass(disposition?: string | null): string {
@@ -326,7 +326,7 @@ function approvalDispositionToneClass(disposition?: string | null): string {
   if (normalized === 'alert') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'pause') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'pass') return 'border-ok/30 bg-ok/10 text-ok'
-  return 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
 const RISK_RANK: Record<string, number> = {
@@ -409,7 +409,7 @@ function KeeperApprovalEmptyState() {
     ? 'border-warn/30 bg-warn/10 text-warn'
     : ctx.tone === 'ok'
       ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
-      : 'border-[var(--color-border-default)] bg-[var(--white-5)] text-text-muted'
+      : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted'
   return html`
     <div data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
@@ -500,7 +500,7 @@ function KeeperApprovalQueueSection() {
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-sm px-3 py-1 font-extrabold'
         : 'border-warn/40 bg-warn/15 text-warn text-sm px-3 py-1 font-extrabold')
-    : 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
@@ -540,7 +540,7 @@ function KeeperApprovalQueueSection() {
                 return html`
                   <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
@@ -631,7 +631,7 @@ function ApprovalRulesSection() {
                 return html`
                   <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">

@@ -127,9 +127,9 @@ function actionCategoryClass(group: ActionTimelineGroup): string {
     case 'governance':
       return 'border-[var(--rose-light)]/35 bg-[var(--color-status-err)]/10 text-[var(--bad-light)]'
     case 'lifecycle':
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
     default:
-      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -195,11 +195,11 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             type="button"
             class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1.5 text-2xs transition-all duration-[var(--t-med)] ${showLifecycle.value
               ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
-              : 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)]'}"
+              : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
             생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
-            <span class="rounded-[var(--r-1)] bg-[var(--white-6)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
+            <span class="rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
           </button>
         </div>
       </div>
@@ -231,7 +231,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 </div>
                 <div class="mt-3 flex flex-wrap gap-1.5">
                   ${group.kinds.slice(0, 4).map(kind => html`
-                    <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
+                    <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
                       ${activityEventKindLabel(kind)}
                     </span>
                   `)}
@@ -247,7 +247,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                     ` : null}
                     <button
                       type="button"
-                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-all duration-[var(--t-med)] hover:bg-[var(--white-8)]"
+                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-all duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
                       aria-expanded=${expanded}
                     >
@@ -258,8 +258,8 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 ${expanded ? html`
                   <div class="mt-3 flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
                     ${group.rawEvents.map(event => html`
-                      <div class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
-                        <span class="inline-flex min-w-18 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                      <div class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" key=${event.seq}>
+                        <span class="inline-flex min-w-18 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                           ${activityEventKindLabel(event.kind)}
                         </span>
                         <div class="min-w-0 flex-1">

@@ -133,7 +133,7 @@ async function submitAddRepo(): Promise<void> {
 // ── Styles ───────────────────────────────────────────────
 
 const inputBase =
-  'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] shadow-inner'
+  'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] shadow-inset'
 
 const labelBase = 'block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5'
 

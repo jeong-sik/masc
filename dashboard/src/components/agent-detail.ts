@@ -253,7 +253,7 @@ export function AgentDetailOverlay() {
         <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
-              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
+              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inset">${agentEmoji}</div>` : ''}
               <div>
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
@@ -396,7 +396,7 @@ export function AgentDetailOverlay() {
           <${Card} title="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
               <${TextInput}
-                class="px-4 py-2.5 rounded-[var(--r-1)] bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inner"
+                class="px-4 py-2.5 rounded-[var(--r-1)] bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inset"
                 value=${mentionText.value}
                 name="agent_direct_mention"
                 ariaLabel="직접 멘션 메시지"

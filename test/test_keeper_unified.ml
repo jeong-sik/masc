@@ -5060,14 +5060,13 @@ let test_per_attempt_retry_budget_with_near_zero_remaining () =
   with
   | None -> fail "is_retry=true must provide budget even with tiny remaining"
   | Some budget ->
-      check bool "effective >= min_oas_timeout_budget_sec"
-        (budget.effective_timeout_sec >= 15.0)
-        true;
+      check bool "effective >= min_oas_timeout_budget_sec" true
+        (budget.effective_timeout_sec >= 15.0);
       check string "source indicates per-attempt retry"
+        "ok"
         (if String.equal budget.source "adaptive_per_attempt_retry"
             || String.equal budget.source "override_per_attempt_retry"
          then "ok" else budget.source)
-        "ok"
 
 let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
   match
@@ -5080,9 +5079,8 @@ let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
   with
   | None -> fail "is_retry=true should resolve with healthy remaining"
   | Some budget ->
-      check bool "effective capped by min(adaptive, remaining)"
+      check bool "effective capped by min(adaptive, remaining)" true
         (budget.effective_timeout_sec <= 1200.0)
-        true
 
 let test_non_retry_still_refuses_tiny_budget () =
   match

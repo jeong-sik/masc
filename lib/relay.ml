@@ -284,7 +284,7 @@ let compress_context ~summary ~task ~todos ~pdca ~files
 (** Build handoff prompt for the new agent *)
 let build_handoff_prompt ~payload ~generation =
   let header = Printf.sprintf
-    "🔄 **RELAY HANDOFF** (Generation %d)\n\n\
+    "**RELAY HANDOFF** (Generation %d)\n\n\
      You are continuing work from a previous agent session.\n\
      The previous agent's context was getting full, so it handed off to you.\n\n\
      **IMPORTANT**: Continue the work seamlessly. The user should not notice the transition.\n\n"

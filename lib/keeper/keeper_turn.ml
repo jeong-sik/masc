@@ -163,9 +163,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    (false, "❌ invalid keeper name")
+    (false, "invalid keeper name")
   else if message = "" then
-    (false, "❌ message is required")
+    (false, "message is required")
   else
     let turn_instructions = get_string_opt args "turn_instructions" in
     let no_skill_route = get_bool args "no_skill_route" false in
@@ -173,18 +173,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "❌ " ^ e)
+    | Error e -> (false, "" ^ e)
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "❌ " ^ e)
+    | Error e -> (false, "" ^ e)
     | Ok () ->
     (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "❌ " ^ e)
+    | Error e -> (false, "" ^ e)
     | Ok () ->
     match ensure_keeper_exists
       ~ctx ~name
     with
-    | Error e -> (false, "❌ " ^ e)
+    | Error e -> (false, "" ^ e)
     | Ok meta0 ->
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
@@ -194,7 +194,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       match resolve_turn_cascade_name meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;
-        (false, "❌ " ^ e)
+        (false, "" ^ e)
       | Ok turn_cascade_name ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
@@ -220,7 +220,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (match ensure_api_keys_for_labels effective_models with
        | Error e ->
          Progress.stop_tracking turn_task_id;
-         (false, "❌ " ^ e)
+         (false, "" ^ e)
        | Ok () ->
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          ignore (Cascade_runtime.refresh_local_discovery_if_possible effective_models);
@@ -433,7 +433,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
               Progress.stop_tracking turn_task_id;
-              (false, Printf.sprintf "❌ Agent.run failed: %s" e_str)
+              (false, Printf.sprintf "Agent.run failed: %s" e_str)
             | Ok result ->
               let explicit_accountability_claim =
                 Keeper_social_model.extract_accountability_claim result

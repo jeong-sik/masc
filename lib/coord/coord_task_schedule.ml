@@ -668,10 +668,10 @@ let claim_next_r
 
           let message = match released_task_id with
             | Some rid ->
-                Printf.sprintf "⚠ %s auto-released %s, then claimed [P%d] %s: %s"
+                Printf.sprintf "%s auto-released %s, then claimed [P%d] %s: %s"
                   agent_name rid task.priority task.id task.title
             | None ->
-                Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s"
+                Printf.sprintf "%s auto-claimed [P%d] %s: %s"
                   agent_name task.priority task.id task.title
           in
           Claim_next_claimed {
@@ -691,12 +691,12 @@ let claim_next_r
 let claim_next config ~agent_name =
   match claim_next_r config ~agent_name () with
   | Claim_next_claimed { message; _ } -> message
-  | Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+  | Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
   | Claim_next_no_eligible { excluded_count } ->
       Printf.sprintf
-        "📋 No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d."
+        "No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d."
         excluded_count
-  | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+  | Claim_next_error e -> Printf.sprintf "Error: %s" e
 
 (** Release stale task claims older than [ttl_seconds].
     A Claimed or InProgress task whose assignee has no recent heartbeat

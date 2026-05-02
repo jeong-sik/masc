@@ -419,7 +419,7 @@ let transition_task_r
            Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf
-               "✅ %s already %s (no-op)"
+               "%s already %s (no-op)"
                task_id
                (task_status_to_string task.task_status))
         else (
@@ -717,7 +717,7 @@ let transition_task_r
            | Types.Reject_verification -> ());
           Ok
             (Printf.sprintf
-               "✅ %s %s → %s"
+               "%s %s → %s"
                task_id
                (task_status_to_string task.task_status)
                (task_status_to_string new_status)))
@@ -849,8 +849,8 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  else agent);
                let msg =
                  if reason = ""
-                 then Printf.sprintf "🚫 Cancelled %s" task_id
-                 else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason
+                 then Printf.sprintf "Cancelled %s" task_id
+                 else Printf.sprintf "Cancelled %s - %s" task_id reason
                in
                let _ = broadcast config ~from_agent:agent_name ~content:msg in
                emit_task_activity
@@ -914,7 +914,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                   Log.RoomTask.error
                     "hebbian task_cancelled hook error: %s"
                     (Printexc.to_string exn));
-               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)))
+               Ok (Printf.sprintf "%s cancelled %s" agent_name task_id)))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | e -> Error (Types.IoError (Printexc.to_string e))))
@@ -1028,7 +1028,7 @@ let link_task_execution_artifacts_r
                        | Some autoresearch_loop_id ->
                          [ "autoresearch_loop_id", `String autoresearch_loop_id ]
                        | None -> []));
-             Ok (Printf.sprintf "✅ Linked execution artifacts for %s" task_id))
+             Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | e -> Error (Types.IoError (Printexc.to_string e))))

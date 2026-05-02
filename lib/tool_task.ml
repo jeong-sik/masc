@@ -598,10 +598,10 @@ let handle_claim_next ?agent_tool_names ctx _args =
         sync_planning_current_task_with_owned_task ctx;
         append_claim_observation message ~now:(Time_compat.now ())
           ~agent_name:ctx.agent_name ~task_id
-    | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-        Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count
-    | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+        Printf.sprintf "No eligible tasks available (blocked/excluded: %d)" excluded_count
+    | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
   in
   (true, message)
 

@@ -46,7 +46,7 @@ let handle_plan_init ctx args : tool_result =
       ] in
       (true, Yojson.Safe.to_string response)
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to init planning: %s" e)
+      (false, Printf.sprintf "Failed to init planning: %s" e)
 
 let handle_plan_update ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -61,7 +61,7 @@ let handle_plan_update ctx args : tool_result =
       ] in
       (true, Yojson.Safe.to_string response)
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to update plan: %s" e)
+      (false, Printf.sprintf "Failed to update plan: %s" e)
 
 let handle_note_add ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
@@ -76,16 +76,16 @@ let handle_note_add ctx args : tool_result =
       ] in
       (true, Yojson.Safe.to_string response)
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to add note: %s" e)
+      (false, Printf.sprintf "Failed to add note: %s" e)
 
 let handle_deliver ctx args : tool_result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e -> (false, Printf.sprintf "❌ %s" e)
+  | Error e -> (false, Printf.sprintf "%s" e)
   | Ok task_id ->
   let content = get_string args "content" "" in
   if String.equal (String.trim content) "" then
-    (false, "❌ content is required for masc_deliver")
+    (false, "content is required for masc_deliver")
   else
   let result = Planning_eio.set_deliverable ctx.config ~task_id ~content in
   match result with
@@ -97,12 +97,12 @@ let handle_deliver ctx args : tool_result =
       ] in
       (true, Yojson.Safe.to_string response)
   | Error e ->
-      (false, Printf.sprintf "❌ Failed to set deliverable: %s" e)
+      (false, Printf.sprintf "Failed to set deliverable: %s" e)
 
 let handle_plan_get ctx args : tool_result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e -> (false, Printf.sprintf "❌ %s" e)
+  | Error e -> (false, Printf.sprintf "%s" e)
   | Ok task_id ->
       let result = Planning_eio.load ctx.config ~task_id in
       match result with
@@ -115,12 +115,12 @@ let handle_plan_get ctx args : tool_result =
           ] in
           (true, Yojson.Safe.to_string response)
       | Error e ->
-          (false, Printf.sprintf "❌ Planning context not found: %s" e)
+          (false, Printf.sprintf "Planning context not found: %s" e)
 
 let handle_plan_set_task ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
-    (false, "❌ task_id is required")
+    (false, "task_id is required")
   else begin
     Planning_eio.set_current_task ctx.config ~task_id;
     let response = `Assoc [

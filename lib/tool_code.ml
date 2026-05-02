@@ -341,9 +341,9 @@ let handle_code_search ctx args =
   let max_results = get_int args "max_results" 50 in
 
   if String.equal query "" then
-    (false, "❌ Query required: 'query' parameter")
+    (false, "Query required: 'query' parameter")
   else if String.equal (String.trim path) "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     (* Validate path first *)
     let search_path_result =
@@ -432,7 +432,7 @@ let handle_code_search ctx args =
             "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
              try simplifying the query or set is_regex=true with a valid regex."
         in
-        (false, Printf.sprintf "❌ %s\nrg output: %s" hint
+        (false, Printf.sprintf "%s\nrg output: %s" hint
            (if String.equal trimmed_out "" then "(empty)"
             else String_util.utf8_safe ~max_bytes:303 ~suffix:"..." trimmed_out |> String_util.to_string))
     | status, output ->
@@ -451,20 +451,20 @@ let handle_code_symbols ctx args =
   let path = get_string args "path" "" in
 
   if String.equal path "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "❌ File not found: %s" path)
+          (false, Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "❌ Binary file detected")
+          (false, "Binary file detected")
         else begin
           (* Read file and extract symbols *)
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -518,7 +518,7 @@ let handle_code_symbols ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end
@@ -530,19 +530,19 @@ let handle_code_read ctx args =
   let limit = get_int args "limit" 100 in
 
   if String.equal path "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "❌ File not found: %s" path)
+          (false, Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "❌ Binary file detected")
+          (false, "Binary file detected")
         else begin
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -573,7 +573,7 @@ let handle_code_read ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end

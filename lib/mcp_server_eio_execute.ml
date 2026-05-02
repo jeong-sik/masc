@@ -583,7 +583,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   match init_error with
   | Some msg ->
       with_system_internal_audit ~agent_name
-        (false, Printf.sprintf "❌ %s" msg)
+        (false, Printf.sprintf "%s" msg)
   | None ->
 
   let is_read_only = Tool_dispatch.is_read_only name in
@@ -736,7 +736,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
       ();
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
-         "⚠️ MASC room not initialized.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step init+join, then call %s.\n💡 Alternative: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
+         "MASC room not initialized.\n\nFastest: masc_start(path=\"<project>\") — one-step init+join, then call %s.\nAlternative: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
          name name agent_name room_initialized)
   end
   else if join_required && not is_joined then begin
@@ -748,7 +748,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
       ();
     with_system_internal_audit ~agent_name
       (false, Printf.sprintf
-         "❌ Join required before using %s.\n\n💡 Fastest: masc_start(path=\"<project>\") — one-step join with room scope.\n💡 Alternative: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
+         "Join required before using %s.\n\nFastest: masc_start(path=\"<project>\") — one-step join with room scope.\nAlternative: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
          name name agent_name is_joined)
   end
   else (

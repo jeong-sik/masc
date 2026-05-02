@@ -1091,7 +1091,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             let link_note = maybe_link_task () in
             Ok
               (Printf.sprintf
-                 "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
+                 "Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
                   Repo: %s%s%s\n\nNext: cd %s"
                  worktree_path branch_name repo_name race_note link_note
                  worktree_path)
@@ -1179,7 +1179,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                     agent_name branch_name worktree_path repo_name task_id (now_iso ()) in
                   log_event config (Yojson.Safe.from_string event);
 
-                  Ok (Printf.sprintf "✅ Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
+                  Ok (Printf.sprintf "Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
                       worktree_path branch_name repo_name note
                       (provision_note ^ link_note) worktree_path)
                 end
@@ -1274,10 +1274,10 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 log_event config (Yojson.Safe.from_string event);
 
                 (* Return result with post-processing status *)
-                let msg = Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
+                let msg = Printf.sprintf "Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
                   worktree_path branch_name branch_status prune_status in
                 if branch_exit <> 0 || prune_exit <> 0 then
-                  Error (IoError (msg ^ "\n   ⚠️ Post-processing had failures"))
+                  Error (IoError (msg ^ "\n   Post-processing had failures"))
                 else
                   Ok msg
               end

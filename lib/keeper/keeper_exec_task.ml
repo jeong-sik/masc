@@ -322,7 +322,7 @@ let handle_keeper_task_tool
           ~keeper_name:meta.name ~agent_name:meta.agent_name
       then
         Some
-          "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
+          "Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
       else
         None
     in
@@ -331,7 +331,7 @@ let handle_keeper_task_tool
       | Coord.Claim_next_claimed { message; _ } ->
           if !auto_started_ok then message ^ " Task auto-started — begin work now."
           else message
-      | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         let scope_suffix =
           match meta.active_goal_ids with
@@ -342,9 +342,9 @@ let handle_keeper_task_tool
                 (String.concat ", " goal_ids)
         in
         Printf.sprintf
-          "📋 No eligible tasks%s. ACTION: Stop task-checking — blocked/excluded=%d."
+          "No eligible tasks%s. ACTION: Stop task-checking — blocked/excluded=%d."
           scope_suffix excluded_count
-      | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+      | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
       match result with

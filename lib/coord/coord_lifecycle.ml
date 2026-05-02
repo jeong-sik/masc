@@ -134,7 +134,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          Log.Coord.warn
            "agent rejoin: invalid agent JSON for %s: %s | snapshot=%s"
            nickname e (Yojson.Safe.to_string snapshot));
-    Printf.sprintf "✅ %s already in the namespace (last_seen updated)" nickname
+    Printf.sprintf "%s already in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
   let session_id = generate_session_id () in
@@ -198,7 +198,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
             `List (List.map (fun s -> `String s) capabilities) );
         ]);
 
-  Printf.sprintf "✅ %s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
+  Printf.sprintf "%s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
     nickname nickname agent_type session_id
   end
 
@@ -261,6 +261,6 @@ let leave config ~agent_name =
        Log.Coord.error "relation-materializer leave hook error: %s"
          (Printexc.to_string exn));
 
-    Printf.sprintf "✅ %s left the namespace" actual_name
+    Printf.sprintf "%s left the namespace" actual_name
   end else
-    Printf.sprintf "⚠ %s was not in the namespace" actual_name
+    Printf.sprintf "%s was not in the namespace" actual_name

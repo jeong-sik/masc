@@ -197,7 +197,7 @@ let html () = {|<!DOCTYPE html>
 <body>
   <div class="container">
     <header>
-      <h1>📊 Credits Dashboard</h1>
+      <h1>Credits Dashboard</h1>
       <div class="updated" id="updated">Loading...</div>
     </header>
 

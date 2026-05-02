@@ -270,7 +270,7 @@ let notify event =
         task_id = None;
       } in
       send_notification
-        ~title:"⚠️ MASC - Approval Needed"
+        ~title:"MASC - Approval Needed"
         ~subtitle:agent
         ~message:(Printf.sprintf "Action: %s" action)
         ?focus_cmd
@@ -300,7 +300,7 @@ let notify event =
       } in
       send_notification
         ~title:(Printf.sprintf "%s MASC" emoji)
-        ~subtitle:"✅ Task Completed"
+        ~subtitle:"Task Completed"
         ~message:(Printf.sprintf "%s finished %s" agent task_id)
         ?focus_cmd
         ()

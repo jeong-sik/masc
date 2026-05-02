@@ -449,15 +449,15 @@ let format_token_info result =
         Printf.sprintf " (cache: +%d created, %d read)" cc cr
       | _ -> ""
     in
-    Printf.sprintf "\n📊 Tokens: %d in / %d out%s | Cost: $%.4f" inp out cache_info cost
+    Printf.sprintf "\nTokens: %d in / %d out%s | Cost: $%.4f" inp out cache_info cost
   | _ -> ""
 
 (** Result to human-readable string *)
 let result_to_string result =
   let token_info = format_token_info result in
   if result.success then
-    Printf.sprintf "✅ Agent completed in %dms%s\n\n%s"
+    Printf.sprintf "Agent completed in %dms%s\n\n%s"
       result.elapsed_ms token_info result.output
   else
-    Printf.sprintf "❌ Agent failed (exit %d) in %dms%s\n\n%s"
+    Printf.sprintf "Agent failed (exit %d) in %dms%s\n\n%s"
       result.exit_code result.elapsed_ms token_info result.output

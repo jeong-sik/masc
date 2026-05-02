@@ -93,7 +93,7 @@ let init config ~agent_name =
     then (
       let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
       write_backlog config backlog);
-    let result = "✅ MASC room created!" in
+    let result = "MASC room created!" in
     (* Auto-join if agent specified — uses Coord_lifecycle.join via the caller *)
     match agent_name with
     | Some _name -> result (* Caller is responsible for joining after init *)
@@ -144,7 +144,7 @@ let resume config ~by =
 (** Reset room - delete .masc/ folder *)
 let reset config =
   if not (is_initialized config)
-  then "⚠ MASC not initialized. Nothing to reset."
+  then "MASC not initialized. Nothing to reset."
   else (
     (* Recursive delete *)
     let rec rm_rf path =
@@ -158,5 +158,5 @@ let reset config =
       else Sys.remove path
     in
     rm_rf (masc_dir config);
-    Printf.sprintf "🗑️ MASC room reset! (.masc/ deleted at %s)" config.base_path)
+    Printf.sprintf "MASC room reset! (.masc/ deleted at %s)" config.base_path)
 ;;

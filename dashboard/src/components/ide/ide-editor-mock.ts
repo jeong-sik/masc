@@ -4,6 +4,7 @@ import {
   createCodeDocumentStore,
   type CodeDocumentLine,
 } from './code-document-store'
+import { CodeLineText, useHighlightedCodeLines } from './ide-code-renderer'
 import {
   createKeeperLineOwnershipStore,
   type KeeperEdit,
@@ -12,8 +13,8 @@ import {
 
 // PR-5 precursor: the editor remains a read-only fixture, but both source
 // document rows and blame-by-keeper ownership now flow through typed stores.
-// Replacing the row text renderer with Shiki/CodeMirror can keep these same
-// CodeDocumentLine + LineOwnership contracts.
+// The syntax renderer is deliberately read-only and keeps the same
+// CodeDocumentLine + LineOwnership contracts for a future CodeMirror swap.
 
 const EDITOR_FILE = 'runtime/cascade/router.ts'
 
@@ -88,6 +89,7 @@ export function IdeEditorMock() {
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
+  const highlightedLines = useHighlightedCodeLines(document)
 
   return html`
     <div
@@ -126,7 +128,7 @@ export function IdeEditorMock() {
           lineHeight: 1.6,
         }}
       >
-        ${lines.map(line => MockEditorRow(line, ownership.get(line.num)))}
+        ${lines.map(line => MockEditorRow(line, ownership.get(line.num), highlightedLines[line.num - 1]))}
       </ol>
     </div>
   `
@@ -138,7 +140,7 @@ function keeperColor(owner: LineOwnership | undefined): string {
     : 'var(--color-fg-disabled)'
 }
 
-function MockEditorRow(line: CodeDocumentLine, owner: LineOwnership | undefined) {
+function MockEditorRow(line: CodeDocumentLine, owner: LineOwnership | undefined, highlightedHtml: string | undefined) {
   const color = keeperColor(owner)
   const dot = owner
     ? color
@@ -163,7 +165,7 @@ function MockEditorRow(line: CodeDocumentLine, owner: LineOwnership | undefined)
       >${owner?.keeper_id ?? '—'}</span>
       <span aria-hidden="true" style=${{ width: '6px', height: '6px', borderRadius: '50%', background: dot, justifySelf: 'center' }} />
       <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', minWidth: '24px', textAlign: 'right' }}>${line.num}</span>
-      <span style=${{ color: 'var(--color-fg-secondary)', whiteSpace: 'pre' }}>${line.text}</span>
+      <${CodeLineText} line=${line} highlightedHtml=${highlightedHtml} />
     </li>
   `
 }

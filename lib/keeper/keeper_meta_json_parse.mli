@@ -59,6 +59,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
+  ; ps_auto_resume_after_sec : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option

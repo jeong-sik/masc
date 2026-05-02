@@ -9,6 +9,7 @@ type t =
   | Dead_cleaned
   | Self_preservation
   | Paused_pruned
+  | Auto_resumed
 
 val to_string : t -> string
 val all_custom_events : t list

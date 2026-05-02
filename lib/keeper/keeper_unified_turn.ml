@@ -2002,7 +2002,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              between the cycle's read and its write. #9764 / #9769:
              field-level merge preserves heartbeat-owned fields from
              disk so the retry does not clobber concurrent heartbeat
-             writes (previous "caller wins" retry was losing the race). *)
+             writes (previous "caller wins" retry was losing the race).
+             Self-healing circuit breaker: clear [auto_resume_after_sec]
+             so a successful turn resets the exponential back-off to the
+             initial delay for the next auto-pause cycle. *)
+          let updated_meta =
+            if updated_meta.auto_resume_after_sec <> None
+            then { updated_meta with auto_resume_after_sec = None }
+            else updated_meta
+          in
           (match
              write_meta_with_merge
                ~merge:Keeper_meta_merge.heartbeat_fields_from_disk

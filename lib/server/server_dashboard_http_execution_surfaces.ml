@@ -158,7 +158,7 @@ let dashboard_transport_health_snapshot_json () =
 
 let keepalive_running_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some true
-  | "resumed" | "self_preservation" -> Some true
+  | "resumed" | "self_preservation" | "auto_resumed" -> Some true
   | "paused" -> Some true
   | "paused_pruned" -> Some false   (* prune == removed from supervision *)
   | "dead_cleaned" -> Some false    (* cleanup == no longer alive *)
@@ -167,7 +167,7 @@ let keepalive_running_of_lifecycle_event = function
 
 let phase_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "running"
-  | "resumed" | "self_preservation" -> Some "running"
+  | "resumed" | "self_preservation" | "auto_resumed" -> Some "running"
   | "paused" -> Some "paused"
   | "paused_pruned" -> Some "stopped"
   | "stopped" -> Some "stopped"
@@ -177,7 +177,7 @@ let phase_of_lifecycle_event = function
 
 let pipeline_stage_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "idle"
-  | "resumed" | "self_preservation" -> Some "idle"
+  | "resumed" | "self_preservation" | "auto_resumed" -> Some "idle"
   | "paused" -> Some "paused"
   | "paused_pruned" -> Some "offline"
   | "stopped" | "dead" | "dead_cleaned" -> Some "offline"
@@ -186,7 +186,7 @@ let pipeline_stage_of_lifecycle_event = function
 
 let paused_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "resumed" | "running"
-  | "self_preservation" -> Some false
+  | "self_preservation" | "auto_resumed" -> Some false
   | "paused" | "paused_pruned" | "stopped" -> Some true
   | "dead" | "dead_cleaned" | "crashed" -> Some false
   | _ -> None

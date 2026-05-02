@@ -52,6 +52,13 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val next_auto_resume_after_sec :
+  initial_sec:float -> max_sec:float -> float option -> float option
+(** Compute the next auto-resume backoff delay after an auto-pause.  [None]
+    means this is the first auto-pause; [Some sec] means the previous
+    backoff should double up to [max_sec].  [initial_sec <= 0] disables
+    auto-resume. *)
+
 val should_cleanup_dead : now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
 (** True when a dead tombstone has exceeded the configured TTL. *)
 

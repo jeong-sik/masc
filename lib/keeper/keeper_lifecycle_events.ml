@@ -1,16 +1,16 @@
 (** Issue #8575: SSOT for the [event] string emitted by
     {!Oas_events.publish_keeper_lifecycle}.
 
-    The supervisor and keepalive together emit ten distinct event
+    The supervisor and keepalive together emit eleven distinct event
     names through that function. The docstring on
     [Oas_events.publish_keeper_lifecycle] previously listed only five
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
     self-healing events ([reconciled] / [dead_cleaned] /
-    [self_preservation] / [paused_pruned]) — exactly the events that
-    signal supervisor recovery actions where observability matters
-    most.
+    [self_preservation] / [paused_pruned] / [auto_resumed]) — exactly
+    the events that signal supervisor recovery actions where
+    observability matters most.
 
     This module pins the vocabulary in one place. The custom-event
     Variant covers verbs that do not map 1:1 to a phase; the
@@ -32,7 +32,8 @@
     - [Restarted]          : supervisor relaunched after crash within budget
     - [Dead_cleaned]       : tombstone cleanup after restart budget exhaustion
     - [Self_preservation]  : supervisor refused a cascade-wide action to protect itself
-    - [Paused_pruned]      : paused keeper removed from registry after timeout *)
+    - [Paused_pruned]      : paused keeper removed from registry after timeout
+    - [Auto_resumed]       : supervisor auto-resumed a keeper after circuit-breaker back-off *)
 type t =
   | Started
   | Reconciled
@@ -40,6 +41,7 @@ type t =
   | Dead_cleaned
   | Self_preservation
   | Paused_pruned
+  | Auto_resumed
 
 let to_string = function
   | Started -> "started"
@@ -48,10 +50,11 @@ let to_string = function
   | Dead_cleaned -> "dead_cleaned"
   | Self_preservation -> "self_preservation"
   | Paused_pruned -> "paused_pruned"
+  | Auto_resumed -> "auto_resumed"
 
 let all_custom_events : t list =
   [ Started; Reconciled; Restarted; Dead_cleaned;
-    Self_preservation; Paused_pruned ]
+    Self_preservation; Paused_pruned; Auto_resumed ]
 
 let valid_custom_event_strings : string list =
   List.map to_string all_custom_events

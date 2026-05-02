@@ -258,6 +258,10 @@ type keeper_meta = {
   continuity_summary : string;
   active_goal_ids : string list;
   paused : bool;
+  auto_resume_after_sec : float option;
+      (** Self-healing circuit breaker: when [Some sec] the supervisor
+          can auto-resume this keeper after [sec] seconds following the
+          updated pause timestamp. [None] means operator-owned pause. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set

@@ -779,6 +779,14 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart
   end
 
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0 then None
+  else
+    Some (
+      match previous with
+      | None -> Float.min max_sec initial_sec
+      | Some prev -> Float.min max_sec (prev *. 2.0))
+
 (** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
     watchdog detected a termination storm (window count >= threshold).  The
     caller must skip enqueuing the entry into [to_restart] so the supervisor
@@ -796,10 +804,30 @@ let handle_crash_auto_pause (ctx : _ context)
     ~lifecycle_detail ~log_message =
   (match read_meta ctx.config entry.name with
    | Ok (Some meta) ->
+       (* Self-healing circuit breaker: compute the next auto-resume delay
+          using exponential back-off.  The first auto-pause sets the initial
+          delay (env-tunable, default 1 h); each subsequent auto-pause
+          doubles it up to the configured maximum (default 24 h).  The
+          keeper will be re-launched by [sweep_and_recover] once the delay
+          has elapsed since the [updated_at] timestamp written here.
+          Setting [MASC_KEEPER_AUTO_RESUME_INITIAL_SEC=0] disables the
+          circuit breaker so behaviour falls back to the manual-resume
+          baseline. *)
+       let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
+       let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
+       let auto_resume_after_sec =
+         next_auto_resume_after_sec ~initial_sec ~max_sec
+           meta.auto_resume_after_sec
+       in
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config { meta with paused = true }
+            ctx.config
+            { meta with
+              paused = true;
+              auto_resume_after_sec;
+              updated_at = now_iso ();
+            }
         with
         | Ok () -> ()
         | Error err ->
@@ -835,8 +863,10 @@ let handle_stale_storm_pause (ctx : _ context)
     ~log_message:
       (Printf.sprintf
          "STALE STORM AUTO-PAUSED (count=%d in 6h window). \
-          Operator must investigate cascade/provider/fd issue and \
-          resume the keeper manually. See issue #10765."
+          Supervisor will attempt self-healing auto-resume with exponential \
+          back-off (see MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). \
+          Operator may also resume manually via masc_keeper_up or API. \
+          See issue #10765."
          count)
 
 let handle_oas_timeout_budget_pause (ctx : _ context)
@@ -848,8 +878,11 @@ let handle_oas_timeout_budget_pause (ctx : _ context)
     ~log_message:
       (Printf.sprintf
          "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). \
-          Operator must tune or reroute the cascade/model before resuming; \
-          restarting would re-enter the same slow-provider budget loop."
+          Supervisor will attempt self-healing auto-resume with exponential \
+          back-off (see MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). \
+          Operator may also tune or reroute the cascade/model before resuming \
+          manually; restarting into the same slow-provider budget loop is \
+          avoided by the back-off delay."
          count)
 
 let sweep_and_recover (ctx : _ context) =
@@ -1092,6 +1125,73 @@ let sweep_and_recover (ctx : _ context) =
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"
                     name (Printexc.to_string exn))
+           | _ -> ());
+  (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
+     auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause
+     timer has elapsed.  Clearing [paused = false] here lets Phase 4
+     (reconcile_keepalive_keepers) pick them up and restart them on the same
+     sweep.  Reconcile-gated pauses (ambiguous commit timeouts) and
+     operator-initiated pauses ([auto_resume_after_sec = None]) are
+     intentionally skipped so they continue to require human action. *)
+  Keeper_types.keeper_names ctx.config
+  |> List.iter (fun name ->
+         if Keeper_registry.is_running ~base_path name then ()
+         else
+           match read_meta ctx.config name with
+           | Ok (Some meta) when meta.paused
+                                 && Option.is_some meta.auto_resume_after_sec
+                                 && not (paused_meta_requires_reconcile_recovery meta)
+                                 && not (Keeper_approval_queue.has_pending_for_keeper
+                                           ~keeper_name:meta.name) ->
+               let resume_after_sec =
+                 Option.value ~default:0.0 meta.auto_resume_after_sec in
+               let paused_ts =
+                 Coord_resilience.Time.parse_iso8601_opt meta.updated_at
+                 |> Option.value ~default:0.0
+               in
+               if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec then begin
+                 (* Resume: clear [paused] flag but retain [auto_resume_after_sec]
+                    so the doubled delay is ready for the next auto-pause.  It
+                    will be reset to [None] on a successful turn completion. *)
+                 let resumed_meta =
+                   { meta with
+                     paused = false;
+                     updated_at = now_iso ();
+                     runtime =
+                       { meta.runtime with
+                         last_blocker = "";
+                         last_blocker_class = None;
+                       };
+                   }
+                 in
+                 (match
+                    write_meta_with_merge
+                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                      ctx.config resumed_meta
+                  with
+                  | Ok () ->
+                      publish_lifecycle
+                        ~event:(Keeper_lifecycle_events.Custom_event
+                                  { verb = Keeper_lifecycle_events.Auto_resumed;
+                                    phase = None })
+                        name
+                        (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec) ();
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_auto_resumed_total
+                        ~labels:[("keeper", name)]
+                        ();
+                      Log.Keeper.info
+                        "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if \
+                         re-paused; resets to initial on successful turn)"
+                        name resume_after_sec
+                        (Float.min
+                           (Env_config.KeeperSupervisor.auto_resume_max_sec)
+                           (resume_after_sec *. 2.0))
+                  | Error err ->
+                      Log.Keeper.warn
+                        "%s: auto-resume meta write failed: %s"
+                        name err)
+               end
            | _ -> ());
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

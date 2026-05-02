@@ -76,7 +76,7 @@ function GhostButton({
   return html`
     <button
       type="button"
-      class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
       disabled=${disabled}
       onClick=${onClick}
       aria-expanded=${ariaExpanded}
@@ -208,7 +208,7 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
@@ -247,7 +247,7 @@ export function KeeperDiagnosticSummary({
           />`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -415,7 +415,7 @@ export function KeeperRuntimeActions({
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-medium cursor-pointer transition-colors border'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]`
   const activeGhostBtn = `${btnBase} border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
   const secondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`

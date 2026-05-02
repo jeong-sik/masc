@@ -45,7 +45,7 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
 
   return html`
     <div
-      class="h-64 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
+      class="h-64 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
       data-event-stream
       data-testid=${testId}
       role="log"

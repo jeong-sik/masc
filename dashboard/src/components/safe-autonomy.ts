@@ -240,7 +240,7 @@ function DomainCard({ item }: { item: ScorecardItem }) {
 
 function KeeperCard({ item }: { item: KeeperItem }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-4)] p-4">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -258,7 +258,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
           </div>
           ${item.last_blocker
             ? html`
-              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
+              <div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
                 blocker: ${item.last_blocker}
               </div>
             `
@@ -356,7 +356,7 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
   return html`
     <div class="space-y-2">
       ${timeline.map(item => html`
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+        <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-xs text-[var(--color-fg-secondary)]">${item.summary}</div>
@@ -391,7 +391,7 @@ export function SafeAutonomyPanel() {
           loadingMessage="Loading safe-autonomy scorecard..."
           render=${(data: SafeAutonomyData) => html`
             <div class="space-y-4">
-              <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+              <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-4)] p-4">
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
                     <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">

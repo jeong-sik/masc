@@ -17,7 +17,7 @@ import { ringFocusClasses } from './ring'
 // primitives (TextInput/TextArea/NumberInput/Select) via these aliases.
 // `placeholder` color and `focus-visible` border color remain inline
 // pending follow-up token slots (input-placeholder, input-border-focus).
-const INPUT_BASE = `w-full rounded bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
+const INPUT_BASE = `w-full rounded-[var(--r-1)] bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
 
 interface TextInputProps {
   id?: string

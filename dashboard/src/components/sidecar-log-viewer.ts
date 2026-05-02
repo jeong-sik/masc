@@ -189,7 +189,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   return html`
     <div
       id=${`sidecar-log-${connectorId}`}
-      class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-2"
+      class="mt-3 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-2"
     >
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
@@ -241,7 +241,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           `
         : null}
       ${entry.error
-        ? html`<div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
+        ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
           ? html`
               <div class="rounded bg-[var(--color-bg-page)] p-2">
@@ -251,7 +251,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           : entry.available
             ? filtered.length === 0 && hasFilter
               ? html`
-                  <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                  <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                     필터 조건에 맞는 라인이 없습니다.
                     ${entry.lines.length > MAX_FILTER_WINDOW
                       ? ` (최근 ${MAX_FILTER_WINDOW}줄만 검색)`
@@ -262,7 +262,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
                 `
             : html`
-                <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.
                 </div>
               `}

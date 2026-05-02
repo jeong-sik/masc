@@ -100,7 +100,7 @@ export function CopyableCode({
   const labelTone = copyableLabelClasses(variant)
   return html`
     <div
-      class=${`group flex items-center gap-2 rounded border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
+      class=${`group flex items-center gap-2 rounded-[var(--r-1)] border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
       data-copyable-code
       data-copyable-variant=${variant}
       data-copied=${justCopied ? 'true' : 'false'}
@@ -114,7 +114,7 @@ export function CopyableCode({
         : null}
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--color-fg-disabled)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] focus-visible:opacity-100 group-hover:opacity-100"
+        class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-transparent p-1 text-[var(--color-fg-disabled)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] focus-visible:opacity-100 group-hover:opacity-100"
         aria-label=${ariaLabel || (label ? `${label} 복사` : '명령 복사')}
         data-copy-button
         onClick=${onCopy}

@@ -121,7 +121,7 @@ function LoopSelector() {
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">실행자 필터</label>
         <select
           aria-label="실행자 필터"
-          class="bg-card border border-card-border text-[var(--color-fg-secondary)] text-xs rounded px-2 py-1 outline-none focus:border-accent"
+          class="bg-card border border-card-border text-[var(--color-fg-secondary)] text-xs rounded-[var(--r-1)] px-2 py-1 outline-none focus:border-accent"
           value=${authorFilter.value}
           onChange=${(e: Event) => {
             const target = e.target as HTMLSelectElement
@@ -252,7 +252,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     </div>
 
     ${loop.error ? html`
-      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
+      <div class="mt-3 px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
         ${loop.error}
       </div>
     ` : null}
@@ -280,13 +280,13 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="min-w-40 max-w-60 flex-1 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
-          <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded border border-[var(--white-6)] bg-[var(--white-3)]">
+          <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded-[var(--r-1)] border border-[var(--white-6)] bg-[var(--white-3)]">
             <table class="w-full text-xs" aria-label="자율 연구 사이클 목록">
               <thead>
                 <tr class="text-[var(--color-fg-muted)] text-3xs uppercase tracking-wider border-b border-[var(--white-10)]">
@@ -348,7 +348,7 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${warnings.map((w, i) => html`
-        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--color-status-warn)] text-xs">
+        <div key=${i} class="px-3 py-1.5 rounded-[var(--r-1)] bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--color-status-warn)] text-xs">
           ${w}
         </div>
       `)}
@@ -400,7 +400,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
           </${InfoCard}>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
           이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
           각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
         </div>
@@ -421,7 +421,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
           </div>
         </${InfoCard}>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] p-3">
           <${Eyebrow}>안전 하네스</${Eyebrow}>
           <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--color-fg-secondary)]">
@@ -455,7 +455,7 @@ function LoopDetailView() {
 
   if (detailError.value) {
     return html`
-      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
+      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
         ${detailError.value}
       </div>
     `
@@ -497,7 +497,7 @@ function LoopDetailView() {
         </div>
         <${LoopOverview} loop=${loop} />
         ${loopActionError.value ? html`
-          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
+          <div class="mt-3 px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
             ${loopActionError.value}
           </div>
         ` : null}
@@ -544,7 +544,7 @@ export function Autoresearch() {
   if (state.status === 'error') {
     return html`
       <div class="flex flex-col gap-4">
-        <div class="px-4 py-3 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-sm">
+        <div class="px-4 py-3 rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-sm">
           ${state.message}
         </div>
         <${ActionButton}
@@ -584,10 +584,10 @@ export function Autoresearch() {
         </${Eyebrow}>
         <div class="flex items-center gap-2">
           <${StartFormButton}
-            class="px-2.5 py-1 rounded text-2xs text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
+            class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
           />
           <a href="/api/v1/autoresearch/loops/csv" download="autoresearch_loops.csv"
-            class="px-2.5 py-1 rounded text-2xs text-[var(--color-fg-muted)] border border-card-border hover:text-[var(--color-fg-secondary)] hover:border-accent/40 transition-colors no-underline"
+            class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] border border-card-border hover:text-[var(--color-fg-secondary)] hover:border-accent/40 transition-colors no-underline"
           >
             CSV 다운로드
           </a>

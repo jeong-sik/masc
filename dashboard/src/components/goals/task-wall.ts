@@ -66,7 +66,7 @@ export function TaskWall() {
 
   return html`
     <section
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       aria-label="키퍼별 태스크 월"
     >
       <header class="mb-2 flex items-baseline justify-between">

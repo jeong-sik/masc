@@ -18,7 +18,7 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
         : html`
             <div role="log" aria-label="에이전트 활동 로그" class="flex flex-col gap-0.5 max-h-70 overflow-y-auto">
               ${entries.map((entry: JournalEntry, idx: number) => html`
-                <div class="agent-journal-entry flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                <div class="agent-journal-entry flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded-[var(--r-1)] hover:bg-[var(--white-4)]" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
                   <span class="agent-journal-type">${entry.eventType}</span>
                   <span class="agent-journal-text">${trimText(entry.text, 120) ?? ''}</span>

@@ -71,7 +71,7 @@ export function FlowControlPanel() {
             ${maintenanceLoading.value ? '...' : 'Clean Zombies'}<//>
         </div>
         ${maintenanceResult.value ? html`
-          <pre class="mt-3 p-3 rounded border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-40 overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
+          <pre class="mt-3 p-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-40 overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
         ` : null}
       </details>
     <//>

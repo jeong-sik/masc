@@ -102,7 +102,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const cat = toolCategory(toolName)
 
   return html`
-    <div class="flex flex-col py-1.5 px-2 rounded hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
+    <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
       <div class="flex items-center gap-2 text-sm">
         <div class="flex-shrink-0 size-6 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
@@ -196,7 +196,7 @@ export function AgentTimelineSection() {
                       const detail = evt.detail as Record<string, string | undefined>
                       const title = detail.title ?? detail.content ?? ''
                       return html`
-                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded-[var(--r-1)] hover:bg-[var(--white-4)]" key=${idx}>
                           <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
                           <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
                           ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}

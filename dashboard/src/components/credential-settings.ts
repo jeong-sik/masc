@@ -221,7 +221,7 @@ export function CredentialSettings() {
         <${ErrorState} message=${state.message} />
         <button
           type="button"
-          class="py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-text-body self-start"
+          class="py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-text-body self-start"
           onClick=${() => loadCredentials({ force: true })}
         >
           다시 시도
@@ -287,8 +287,8 @@ export function CredentialSettings() {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
-  const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
+  const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
   const helperStyle = 'mt-1 text-3xs leading-relaxed text-text-dim'
 
   return html`
@@ -308,7 +308,7 @@ export function CredentialSettings() {
       </div>
 
       ${isAdding ? html`
-        <div class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-sm">
           <${SectionHeader} title="새 크리덴셜" />
           <div class="flex flex-col gap-3">
             <div>
@@ -456,11 +456,11 @@ export function CredentialSettings() {
       ` : null}
 
       ${list.length === 0 ? html`
-        <div class="py-8 text-center text-2xs text-text-muted rounded border border-card-border/30 bg-card/10">
+        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10">
           등록된 크리덴셜이 없습니다.
         </div>
       ` : html`
-        <div class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm">
           <table class="w-full text-left">
             <thead>
               <tr class="border-b border-card-border/30 bg-card/40">
@@ -507,7 +507,7 @@ export function CredentialSettings() {
                   <td class="py-2 px-3 text-right">
                     <button
                       type="button"
-                      class="text-2xs font-semibold px-2 py-1 rounded bg-[var(--color-status-err)]/10 text-[var(--color-status-err)] border border-[var(--color-status-err)]/20 hover:bg-[var(--color-status-err)]/20 transition-colors cursor-pointer"
+                      class="text-2xs font-semibold px-2 py-1 rounded-[var(--r-1)] bg-[var(--color-status-err)]/10 text-[var(--color-status-err)] border border-[var(--color-status-err)]/20 hover:bg-[var(--color-status-err)]/20 transition-colors cursor-pointer"
                       onClick=${() => handleDelete(cred.id)}
                       disabled=${deletingId.value === cred.id}
                     >

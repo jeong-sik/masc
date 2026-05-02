@@ -27,7 +27,7 @@ function ConfigCard({
   children: unknown
 }) {
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}" title=${title}>
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}" title=${title}>
       ${children}
     </div>
   `
@@ -215,7 +215,7 @@ function WarningBlock({
   if (warnings.length === 0) return null
 
   return html`
-    <div class="rounded border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
       <div class="mb-2 text-2xs uppercase tracking-1 text-[var(--yellow-100)]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
@@ -360,7 +360,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
           const field: KeeperRuntimeField<number | null> | undefined = runtime[row.key]
           if (!field) return null
           return html`
-            <div class="flex items-center justify-between gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2">
+            <div class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2">
               <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
@@ -429,7 +429,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
               ${state.value.error}
             </div>
           `
@@ -485,7 +485,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.observations?.map(item => html`
-                      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
+                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
                         ${item}
                       </div>
                     `)}
@@ -497,7 +497,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
+                      <div class="rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
                         ${item}
                       </div>
                     `)}

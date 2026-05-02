@@ -147,7 +147,7 @@ function InfoRow({
         ? (value ? 'ON' : 'OFF')
         : String(value)
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <div class="flex items-center gap-2">
         ${icon ? html`<span class="text-[var(--color-fg-muted)]">${icon}</span>` : null}
         <span class="text-xs font-medium text-text-muted">${label}</span>
@@ -189,7 +189,7 @@ export function RepoDetailPanel() {
         <${ErrorState} message=${detailState.message} />
         <button
           type="button"
-          class="text-2xs px-3 py-1.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+          class="text-2xs px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
           onClick=${() => void loadRepoDetail(selectedId)}
         >
           다시 시도
@@ -242,7 +242,7 @@ export function RepoDetailPanel() {
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50"
             onClick=${() => void handleSync()}
             disabled=${syncing.value}
           >
@@ -253,7 +253,7 @@ export function RepoDetailPanel() {
           </button>
           <button
             type="button"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--bad-12)] text-[var(--color-status-err)] hover:bg-[var(--bad-20)] transition-colors"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--bad-12)] text-[var(--color-status-err)] hover:bg-[var(--bad-20)] transition-colors"
             onClick=${() => void handleDelete()}
           >
             <${Trash2} size=${13} aria-hidden="true" />
@@ -319,7 +319,7 @@ export function RepoDetailPanel() {
                 ${branches.map(branch => html`
                   <div
                     key=${branch.name}
-                    class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm"
+                    class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm"
                   >
                     <div class="flex items-center gap-2">
                       <${GitBranch} size=${12} class="text-[var(--color-fg-muted)]" aria-hidden="true" />

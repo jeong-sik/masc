@@ -258,7 +258,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
 
   return html`
     <div
-      class=${`flex min-w-0 flex-col gap-3 rounded border bg-[var(--color-bg-surface)] p-3 transition-colors ${
+      class=${`flex min-w-0 flex-col gap-3 rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-3 transition-colors ${
         selected
           ? 'border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
           : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
@@ -387,7 +387,7 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
   return html`
     <button
       type="button"
-      class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+      class=${`w-full cursor-pointer rounded-[var(--r-1)] border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
       disabled=${view.busy}
       aria-busy=${view.busy ? 'true' : 'false'}
       aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
@@ -704,7 +704,7 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <div
-      class="mb-2 flex items-center gap-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
+      class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
@@ -746,7 +746,7 @@ export function ConnectorOverviewStrip({
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
-      class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-overview-strip-root
     >
       <${IncidentBanner} droppedIds=${droppedIds} />

@@ -53,7 +53,7 @@ export function AgentMemory({ entries, testId }: AgentMemoryProps) {
       data-agent-memory
       data-testid=${testId}
     >
-      <div class="flex-1 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
+      <div class="flex-1 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
         <h4 class="mb-2 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">
           단기 기억 (최근 ${shortTerm.length}개)
         </h4>
@@ -75,7 +75,7 @@ export function AgentMemory({ entries, testId }: AgentMemoryProps) {
         </div>
       </div>
 
-      <div class="flex-1 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
+      <div class="flex-1 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
         <h4 class="mb-2 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">
           장기 기억 (${longTerm.length}개 클러스터)
         </h4>

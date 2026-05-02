@@ -114,7 +114,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
   if (!first) return null
 
   return html`
-    <section class="rounded border border-[var(--warn-24)] bg-[var(--warn-soft)] p-3 mb-3" aria-label="조건-Phase 불일치 경고">
+    <section class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-soft)] p-3 mb-3" aria-label="조건-Phase 불일치 경고">
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--color-status-warn)]">
           ⚠️ 조건-Phase 불일치

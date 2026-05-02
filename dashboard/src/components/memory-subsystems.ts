@@ -419,7 +419,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
-    <div class="border border-[var(--white-10)] rounded p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
+    <div class="border border-[var(--white-10)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
@@ -546,7 +546,7 @@ export function MemorySubsystems() {
 
   return html`
     <div class="space-y-6">
-      <div class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
         이 화면은 <span class="text-[var(--color-fg-muted)] font-medium">global memory surface</span>만 보여줍니다.
         institution episodes와 Hebbian graph는 여기서 보고,
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
@@ -666,7 +666,7 @@ export function MemorySubsystems() {
 
         ${
           pairFilter
-            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--white-10)] rounded text-xs">
+            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--white-10)] rounded-[var(--r-1)] text-xs">
                 <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
                 <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
                 <button
@@ -712,7 +712,7 @@ export function MemorySubsystems() {
             hasFilter
               ? html`<button
                   onClick=${clearFilters}
-                  class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--white-10)] rounded hover:border-[var(--white-10)]0"
+                  class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--white-10)] rounded-[var(--r-1)] hover:border-[var(--white-10)]0"
                 >
                   필터 해제
                 </button>`
@@ -844,7 +844,7 @@ function DecisionsStream() {
           />
           ${hasFilter
             ? html`<button
-                class="text-2xs text-text-muted hover:text-text-strong px-2 py-1 border border-card-border/40 rounded"
+                class="text-2xs text-text-muted hover:text-text-strong px-2 py-1 border border-card-border/40 rounded-[var(--r-1)]"
                 onClick=${() => {
                   keeperFilter.value = ''
                   eventFilter.value = ''
@@ -860,7 +860,7 @@ function DecisionsStream() {
         : error && !data
           ? html`<div class="text-sm text-[var(--color-status-err)]">decisions 오류: ${error}</div>`
           : html`
-              <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+              <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
                 <table class="w-full text-2xs" aria-label="decision events">
                   <thead>
                     <tr class="border-b border-[var(--color-border-default)] text-text-muted uppercase tracking-1">

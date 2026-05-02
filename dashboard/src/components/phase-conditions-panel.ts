@@ -106,7 +106,7 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
         ${diagnosis.rows.map(row => html`
           <li
             key=${row.key}
-            class=${`rounded border px-3 py-2 text-2xs leading-normal ${rowClass(row)}`}
+            class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${rowClass(row)}`}
             aria-current=${row.determining ? 'step' : undefined}
           >
             <div class="flex flex-wrap items-center gap-2">

@@ -937,7 +937,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
+        class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         Loading fleet composite snapshot…
       </div>
@@ -948,7 +948,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-4 text-sm text-[var(--bad-light)]"
+        class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] p-4 text-sm text-[var(--bad-light)]"
       >
         Fleet snapshot failed: ${error}
       </div>
@@ -959,7 +959,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
+        class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--color-fg-muted)]"
       >
         No keepers registered.
       </div>
@@ -969,7 +969,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="contain-content rounded border border-[var(--white-10)] bg-[var(--white-5)]"
+      class="contain-content rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)]"
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">

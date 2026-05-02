@@ -82,18 +82,18 @@ function InspectorOverview() {
     <div class="grid gap-4">
       <${Card} title="대시보드 포커스" class="section">
         <div class="grid gap-3">
-          <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
+          <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--white-5)]/10 px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
             이제 대시보드는 <strong class="text-[var(--color-fg-secondary)]">핵심 운영 화면</strong>에 더 집중합니다.
             낮은 활용도의 화면은 줄이고, 진짜 자주 보는 상태/개입/근거 화면으로 빠르게 이동할 수 있게 정리했습니다.
           </div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             ${FOCUS_SURFACES.map(surface => html`
-              <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-4 py-3">
+              <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--white-5)]/10 px-4 py-3">
                 <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">${surface.title}</div>
                 <div class="mt-2 text-2xs leading-loose text-[var(--color-fg-muted)]">${surface.description}</div>
                 <button
                   type="button"
-                  class="mt-3 rounded border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)]"
+                  class="mt-3 rounded-[var(--r-1)] border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)]"
                   onClick=${() => navigate(surface.tab, surface.params)}
                 >
                   ${surface.action}

@@ -46,7 +46,7 @@ export function AgentTrust({ metrics, testId }: AgentTrustProps) {
 
   return html`
     <div
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-agent-trust
       data-testid=${testId}
     >
@@ -72,19 +72,19 @@ export function AgentTrust({ metrics, testId }: AgentTrustProps) {
       </div>
 
       <div class="mb-2 grid grid-cols-3 gap-2 text-center">
-        <div class="rounded bg-[var(--ok-1)] p-1">
+        <div class="rounded-[var(--r-1)] bg-[var(--ok-1)] p-1">
           <div class="text-lg text-[var(--ok-10)]" aria-label="승인 ${metrics.approvals}회">
             ${metrics.approvals}
           </div>
           <div class="text-3xs text-[var(--color-fg-secondary)]">승인</div>
         </div>
-        <div class="rounded bg-[var(--error-1)] p-1">
+        <div class="rounded-[var(--r-1)] bg-[var(--error-1)] p-1">
           <div class="text-lg text-[var(--error-10)]" aria-label="거부 ${metrics.rejections}회">
             ${metrics.rejections}
           </div>
           <div class="text-3xs text-[var(--color-fg-secondary)]">거부</div>
         </div>
-        <div class="rounded bg-[var(--warn-1)] p-1">
+        <div class="rounded-[var(--r-1)] bg-[var(--warn-1)] p-1">
           <div class="text-lg text-[var(--warn-10)]" aria-label="수정 ${metrics.overrides}회">
             ${metrics.overrides}
           </div>

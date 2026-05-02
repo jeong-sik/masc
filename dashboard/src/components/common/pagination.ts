@@ -56,7 +56,7 @@ const PAGE_BUTTON_ACTIVE_CLS = [
   'text-[var(--button-primary-fg)]',
 ].join(' ')
 const CURSOR_NAV_CLS = [
-  'inline-flex items-center gap-2 rounded border border-[var(--color-border-default)]',
+  'inline-flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)]',
   'bg-[var(--color-bg-surface)] px-3 py-2 font-mono',
 ].join(' ')
 const CURSOR_BUTTON_CLS = [

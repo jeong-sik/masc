@@ -64,7 +64,7 @@ export function RecoveryWizard({
 
   return html`
     <div
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-recovery-wizard
       data-testid=${testId}
     >

@@ -240,7 +240,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
           <${TraceBadge} tone="neutral">${hint}</${TraceBadge}>
         ` : null}
       </div>
-      <div class="rounded border ${borderColor} ${bgColor} overflow-hidden">
+      <div class="rounded-[var(--r-1)] border ${borderColor} ${bgColor} overflow-hidden">
         <div class="${shouldCollapse ? `max-h-[${RESULT_COLLAPSED_MAX_HEIGHT}px] overflow-hidden relative` : ''}"
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
@@ -307,7 +307,7 @@ function BroadcastDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = typeof event.detail.content === 'string' ? event.detail.content : ''
   if (!content) return null
   return html`
-    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded border border-[var(--white-6)]">
+    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded-[var(--r-1)] border border-[var(--white-6)]">
       <${Markdown} text=${content} />
     </div>
   `
@@ -356,7 +356,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
     const phaseColor = phase === 'called' ? 'text-[var(--color-accent-fg)]' : 'text-[var(--color-status-ok)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">단계:</span>
           <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
@@ -375,7 +375,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const turn = d.turn
     const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)]">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">턴 ${turn != null ? String(turn) : '-'}:</span>
           <span class="font-mono font-semibold text-[var(--color-fg-primary)]">${phaseLabel}</span>
@@ -462,7 +462,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
         <div class="text-xs"><span class="text-[var(--color-fg-disabled)]">도메인:</span> <span class="font-mono text-[var(--color-status-err)]">${domain}</span></div>
         ${errorDetail ? html`<div class="text-2xs font-mono text-[var(--color-fg-primary)] break-all">${errorDetail}</div>` : null}
       </div>
@@ -475,7 +475,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
   if (detailRows.length === 0) return null
   return html`
-    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
+    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)]">
       ${detailRows.map(row => html`
         <div class="flex items-start gap-2 text-xs leading-relaxed">
           <span class="min-w-[92px] text-[var(--color-fg-disabled)] font-mono">${row.label}</span>
@@ -521,7 +521,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded ${gateRejected ? 'opacity-50' : ''}">
       ${'' /* Icon */}
-      <div class="flex-shrink-0 mt-0.5 size-7 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
+      <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
       </div>
 

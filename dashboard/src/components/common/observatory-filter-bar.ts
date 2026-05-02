@@ -53,7 +53,7 @@ export function ObservatoryFilterBar() {
 
   return html`
     <div
-      class="mb-3 flex flex-wrap items-center gap-2 rounded border border-card-border bg-bg-1/60 px-3 py-2"
+      class="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-card-border bg-bg-1/60 px-3 py-2"
       role="region"
       aria-label="Active observability filters"
     >

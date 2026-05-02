@@ -1,5 +1,5 @@
 // CollapsibleSection — consistent expandable section
-// Replaces 5+ inline `<details class="rounded border border-[var(--color-border-default)] overflow-hidden">` patterns
+// Replaces 5+ inline `<details class="rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden">` patterns
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -43,7 +43,7 @@ export function CollapsibleSection({
     <details
       open=${open}
       id=${id}
-      class="rounded border border-[var(--color-border-default)] overflow-hidden ${cx ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden ${cx ?? ''}"
       onToggle=${(event: Event) => {
         const isOpen = (event.currentTarget as HTMLDetailsElement).open
         if (isOpen) setHasOpened(true)

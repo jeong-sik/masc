@@ -301,7 +301,7 @@ export function PrometheusMetrics() {
         <div class="flex items-center gap-3">
           ${lastUpdated.value && html`<span class="text-xs text-[var(--color-fg-muted)]">${lastUpdated.value}</span>`}
           <button
-            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
+            class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -311,7 +311,7 @@ export function PrometheusMetrics() {
       </div>
 
       ${error.value && html`
-        <div class="rounded bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]">
+        <div class="rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]">
           ${error.value}
         </div>
       `}

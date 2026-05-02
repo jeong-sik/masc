@@ -13,7 +13,7 @@
 import { html } from 'htm/preact'
 import { ringFocusClasses } from './ring'
 
-const CHECKBOX_BASE = `w-4 h-4 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer transition-colors hover:bg-[var(--white-8)] hover:border-[var(--white-20)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} accent-[var(--color-accent-fg)]`
+const CHECKBOX_BASE = `w-4 h-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer transition-colors hover:bg-[var(--white-8)] hover:border-[var(--white-20)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} accent-[var(--color-accent-fg)]`
 
 interface CheckboxProps {
   checked?: boolean

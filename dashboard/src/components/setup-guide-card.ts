@@ -111,7 +111,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
   return html`
     <div
-      class="mt-2 overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-2)]"
+      class="mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)]"
       data-setup-guide-tone=${tone}
     >
       <button

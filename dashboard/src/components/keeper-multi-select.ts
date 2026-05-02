@@ -55,7 +55,7 @@ export function KeeperMultiSelect({
 
   return html`
     <section
-      class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3"
+      class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3"
       role="group"
       aria-label=${label}
     >

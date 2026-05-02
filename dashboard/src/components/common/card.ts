@@ -1,5 +1,5 @@
 // SurfaceCard — reusable card container with Tailwind variants
-// Replaces 40+ inline `p-4 rounded border border-[var(--color-border-default)]` patterns
+// Replaces 40+ inline `p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)]` patterns
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

@@ -113,7 +113,7 @@ export function HumanInTheLoop({
 
   return html`
     <div
-      class="rounded border p-3 ${risk.border} ${risk.bg}"
+      class="rounded-[var(--r-1)] border p-3 ${risk.border} ${risk.bg}"
       role="alertdialog"
       aria-label="사람 개입 요청"
       aria-live="polite"
@@ -144,7 +144,7 @@ export function HumanInTheLoop({
         ? html`
             <div class="mb-2">
               <textarea
-                class="w-full rounded border border-[var(--color-accent)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-fg-primary)] outline-none"
+                class="w-full rounded-[var(--r-1)] border border-[var(--color-accent)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-fg-primary)] outline-none"
                 rows="2"
                 aria-label="수정 내용"
                 value=${modifiedAction}
@@ -175,7 +175,7 @@ export function HumanInTheLoop({
           거부
         </button>
         <button
-          class="rounded border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
           onClick=${() => setModifying((m) => !m)}
         >
           ${modifying ? '취소' : '수정'}

@@ -95,7 +95,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
+      <div class="mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           All open cases are older than ${formatAgeSummary(oldestAge)}.
@@ -117,7 +117,7 @@ function GovernanceSummaryStrip() {
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="rounded-[var(--r-1)] border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
@@ -160,7 +160,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -179,7 +179,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded border border-[var(--white-5)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--white-5)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">Judge model ${label}</span>
@@ -261,7 +261,7 @@ function JudgmentsSection() {
     <${Card} title=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
-          <div class="rounded border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
+          <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
               <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
@@ -369,7 +369,7 @@ function KeeperApprovalAlertBanner() {
 
   return html`
     <div
-      class="mb-3.5 flex items-center gap-4 rounded border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
+      class="mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
       data-testid="keeper-hitl-alert-banner"
       role="status"
       aria-live="polite"
@@ -508,7 +508,7 @@ function KeeperApprovalQueueSection() {
         <div class="text-xs text-text-muted">
           Keeper tool calls above the risk threshold wait here.
         </div>
-        <span class="rounded border ${countBadgeClass}">
+        <span class="rounded-[var(--r-1)] border ${countBadgeClass}">
           ${items.length} pending
         </span>
       </div>
@@ -538,7 +538,7 @@ function KeeperApprovalQueueSection() {
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
-                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
@@ -629,7 +629,7 @@ function ApprovalRulesSection() {
               ${rules.map((rule: KeeperApprovalRule) => {
                 const deleting = actingId === `rule:${rule.id}`
                 return html`
-                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}

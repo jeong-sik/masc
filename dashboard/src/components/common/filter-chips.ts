@@ -33,8 +33,8 @@ export function FilterChips<T extends string>({
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
-    ? 'inline-flex min-h-9 items-center gap-1.5 rounded border px-3 py-2 text-2xs font-medium'
-    : 'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[length:var(--fs-xs)]'
+    ? 'inline-flex min-h-9 items-center gap-1.5 rounded-[var(--r-1)] border px-3 py-2 text-2xs font-medium'
+    : 'inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-[length:var(--fs-xs)]'
   const activeToneClass = tone === 'accent'
     ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
     : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'

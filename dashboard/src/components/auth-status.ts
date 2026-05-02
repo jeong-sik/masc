@@ -151,7 +151,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
         aria-controls=${popoverId}
@@ -253,7 +253,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               }}
             />
             <button type="button"
-              class="shrink-0 py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
             >Apply</button>
@@ -268,7 +268,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
           </div>
           ${authenticated ? html`
             <button type="button"
-              class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+              class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
               onClick=${() => { void handleClearToken() }}
             >Clear token</button>
           ` : html`
@@ -283,7 +283,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
               />
               <button type="button"
-                class="w-full py-1.5 px-3 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+                class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
                 onClick=${() => { void handleSetToken() }}
               >Set token</button>
             </div>

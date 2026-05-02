@@ -346,7 +346,7 @@ function FieldWidget({ id, field, value, revealed }: {
   // baseInput — preserved for the type=number branch which still uses
   // a raw <input type="number"> until NumberInput migration handles
   // signal-typed numeric values across the form.
-  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
+  const baseInput = 'w-full rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
   // tightMonoOverride — TextInput class extension. INPUT_BASE owns
   // border/text/placeholder/focus-visible. Only the size/font/bg need
   // overrides to match the compact mono-style of the connector form
@@ -391,7 +391,7 @@ function FieldWidget({ id, field, value, revealed }: {
             />
             <button
               type="button"
-              class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+              class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
               aria-label=${revealed ? '값 숨기기' : '값 표시'}
               onClick=${toggleReveal}
             >
@@ -430,7 +430,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
         <${LoadingState}>config schema 불러오는 중...<//>
       </div>
     `
@@ -438,7 +438,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
@@ -453,7 +453,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </div>
     `
@@ -462,7 +462,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
+    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required

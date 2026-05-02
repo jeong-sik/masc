@@ -42,7 +42,7 @@ export const MemorySearch: FunctionComponent<MemorySearchProps> = ({
         type="text"
         value=${localQuery}
         onInput=${handleInput}
-        class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         placeholder="기억 검색 (의미적 유사도)..."
         aria-label="메모리 검색"
       />

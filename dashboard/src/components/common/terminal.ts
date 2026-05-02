@@ -116,7 +116,7 @@ function renderLine(line: TerminalLine): ReturnType<typeof html> {
 export function Terminal({ lines, prompt = 'agent:$ ', testId }: TerminalProps) {
   return html`
     <div
-      class="h-64 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono"
+      class="h-64 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono"
       data-terminal
       data-testid=${testId}
       role="log"

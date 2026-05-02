@@ -150,7 +150,7 @@ export function FailureHistory({
       ${retryableCount > 0 && onRetry
         ? html`
             <button
-              class="mt-3 w-full rounded border border-[var(--color-border-default)] py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
+              class="mt-3 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-5)]"
               onClick=${() => failures.filter((f) => f.retryable && !f.resolved).forEach((f) => onRetry?.(f.id))}
             >
               미해결 ${retryableCount}건 일괄 재시도

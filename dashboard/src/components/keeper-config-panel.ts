@@ -321,7 +321,7 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <span class="text-xs font-semibold text-text-strong">${value}</span>
     </div>
@@ -375,7 +375,7 @@ function Callout({
       ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
-    <div class="rounded border px-3 py-3 shadow-sm ${toneClass}">
+    <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-sm ${toneClass}">
       <div class="text-2xs font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
       <div class="text-xs leading-relaxed">${body}</div>
     </div>
@@ -400,7 +400,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
@@ -411,7 +411,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded-[var(--r-1)] mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 
@@ -445,13 +445,13 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
 
 // ── Inline editing components for runtime config ────────
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
@@ -470,12 +470,12 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   min?: number; max?: number; step?: number; suffix?: string
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <${MutedLabel}>${label}</${MutedLabel}>
       <div class="flex items-center gap-1.5">
         <input type="number"
           aria-label=${label}
-          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
+          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded-[var(--r-1)] py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
@@ -507,7 +507,7 @@ function InlineSelectRow({
       <${MutedLabel}>${label}</${MutedLabel}>
       <select
         aria-label=${label}
-        class="text-xs bg-card/60 border border-card-border rounded px-2 py-1 text-text-strong"
+        class="text-xs bg-card/60 border border-card-border rounded-[var(--r-1)] px-2 py-1 text-text-strong"
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -699,7 +699,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
 
   // --- Toolbar ---
   const toolbar = html`
@@ -819,10 +819,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       />
       ${hasCascadeSelector
         ? html`
-            <label class="flex flex-col gap-1.5 py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
+            <label class="flex flex-col gap-1.5 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
               <${MutedLabel}>활성 cascade profile</${MutedLabel}>
               <select
-                class="rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
+                class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
                 value=${currentCascade}
                 disabled=${cascadeSaving.value || cascadeState.status === 'loading' || cascadeOptions.length === 0}
                 onChange=${(event: Event) => {
@@ -891,7 +891,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${MajorSectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
-      <div class="mb-1.5 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
       </div>
       <${BoolRow} label="검증" value=${c.execution.verify} />
@@ -939,7 +939,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
             <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
+          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
@@ -1021,7 +1021,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       <${SectionHeader} title="네임스페이스 조율" />
-      <div class="py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
+      <div class="py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
         <div class="flex items-center justify-between gap-3 mb-2">
           <${MutedLabel}>active_goal_ids</${MutedLabel}>
           <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
@@ -1062,7 +1062,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ` : null}
       </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
-      <div class="mb-2 flex items-center gap-2 rounded border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
+      <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
         <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
@@ -1096,7 +1096,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       ${runtimeHasChanges ? html`
-        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded border border-accent/30 bg-accent/5">
+        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-accent/30 bg-accent/5">
           <button type="button"
             class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
             onClick=${saveRuntimeConfig}
@@ -1124,13 +1124,13 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
             ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
-                <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
+                <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
                   <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">

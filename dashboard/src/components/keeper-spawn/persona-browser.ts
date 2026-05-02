@@ -42,7 +42,7 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const title = persona.displayName ?? persona.name
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-45">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-45">
       <div class="text-base text-[var(--color-fg-secondary)] font-medium">${title}</div>
       ${persona.role ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${persona.role}</div>` : null}
       ${persona.mode ? html`<div class="text-3xs text-[var(--color-fg-muted)]">모드: ${persona.mode}</div>` : null}

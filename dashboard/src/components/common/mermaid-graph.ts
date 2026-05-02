@@ -122,7 +122,7 @@ export function MermaidGraph({
         <div class="space-y-2">
           <${EmptyState} message=${error} compact />
           ${fallbackText ? html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm leading-loose text-[var(--color-fg-disabled)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm leading-loose text-[var(--color-fg-disabled)]">
               ${fallbackText}
             </div>
           ` : null}

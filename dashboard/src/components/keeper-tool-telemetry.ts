@@ -198,7 +198,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   if (s.tools.length === 0) {
     return html`
-      <div class="p-4 rounded border border-[var(--color-border-default)] bg-card/30">
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-card/30">
         <div class="text-xs text-[var(--color-fg-muted)]">도구 텔레메트리 데이터 없음</div>
         <${FreshnessLine} data=${s} />
       </div>

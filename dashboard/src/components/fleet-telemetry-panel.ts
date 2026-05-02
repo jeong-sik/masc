@@ -132,7 +132,7 @@ function SummaryCard({
         : 'border-[var(--color-border-default)] bg-[var(--white-1)]'
 
   return html`
-    <div class="rounded border ${toneClass} p-3">
+    <div class="rounded-[var(--r-1)] border ${toneClass} p-3">
       <${Eyebrow} tone="disabled">${title}</${Eyebrow}>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
       <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-disabled)]">${detail}</div>
@@ -143,7 +143,7 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
       <div class="font-medium text-[var(--color-status-warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
@@ -173,7 +173,7 @@ function attentionSeverityClass(severity: string | null | undefined): string {
 
 function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
@@ -195,7 +195,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
 function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   if (events.length === 0) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No decision-needed or blocker events are active.
       </div>
     `
@@ -204,7 +204,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${events.slice(0, 6).map(event => html`
-        <div class="rounded border px-3 py-2 ${attentionSeverityClass(event.severity)}">
+        <div class="rounded-[var(--r-1)] border px-3 py-2 ${attentionSeverityClass(event.severity)}">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-2xs font-medium">
@@ -235,7 +235,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
   if (!truth || !readiness) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         Control room readiness is unavailable for this refresh.
       </div>
     `
@@ -299,14 +299,14 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)]">
       ${watchlist.map(row => html`
         <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
           <div class="min-w-0">
@@ -514,7 +514,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-2xs font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">

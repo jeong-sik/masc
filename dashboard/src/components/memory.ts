@@ -157,7 +157,7 @@ function renderCategorySection(
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
     return html`
-      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
+      <div class="mb-3 px-3 py-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
         ${label} — ${hidden}건 숨김
       </div>
     `
@@ -175,7 +175,7 @@ function renderCategorySection(
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer disabled:opacity-50"
             disabled=${loadingMore}
             onClick=${() => {
               expandCategory(category, limits, limit, posts.length)
@@ -198,14 +198,14 @@ function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
-        class="w-full py-2.5 rounded border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
+        class="w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
         onClick=${() => { showNewPostForm.value = true }}
       >+ 새 글 작성</button>
     `
   }
 
   return html`
-    <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] grid gap-3">
+    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] grid gap-3">
       <${TextInput}
         name="board_post_title"
         ariaLabel="새 글 제목"
@@ -224,11 +224,11 @@ function NewPostForm() {
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--white-6)]"
+          class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--white-6)]"
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          class="px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
@@ -242,11 +242,11 @@ function SortBar() {
   const current = boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="flex flex-col gap-3 mb-4 p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 border cursor-pointer
+            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-all duration-150 border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
@@ -269,7 +269,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer
+              class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]'
@@ -319,12 +319,12 @@ function SortBar() {
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             <//>
             <button type="button"
-              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -341,7 +341,7 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
       <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -403,7 +403,7 @@ function PostCard({ post }: { post: BoardPost }) {
   return html`
     <button
       type="button"
-      class=${`board-post group w-full flex gap-3 rounded p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
+      class=${`board-post group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Select checkbox -->
@@ -420,13 +420,13 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
         <button type="button"
           aria-label="추천"
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
         <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${post.votes ?? 0}</span>
         <button type="button"
           aria-label="비추천"
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('down', event)}
         ><span aria-hidden="true">▼</span></button>
       </div>
@@ -515,7 +515,7 @@ export function Memory() {
           <div>
             <${MemorySummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer"
+              class="mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
@@ -530,7 +530,7 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${hint ? html`
-        <div class="mb-4 px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
+        <div class="mb-4 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
           ${hint}
         </div>
       ` : null}

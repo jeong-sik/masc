@@ -70,7 +70,7 @@ function SynapseWeightBar({ weight }: { weight: number }) {
     <${ProgressBar}
       pct=${pct}
       size="sm"
-      trackClass="w-16 rounded"
+      trackClass="w-16 rounded-[var(--r-1)]"
       class=${synapseWeightFillClass(weight)}
       ariaLabel="시냅스 가중치 ${pct}%"
     />
@@ -230,7 +230,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="border border-[var(--white-10)] rounded px-2 py-1.5 text-xs">
+                          <div class="border border-[var(--white-10)] rounded-[var(--r-1)] px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>

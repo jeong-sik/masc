@@ -119,7 +119,7 @@ export function filterTaskHistories(
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded shadow-sm">
+    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)] shadow-sm">
       <${IdPill}>${task.id}<//>
       <span class="flex-1 text-sm text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
@@ -129,7 +129,7 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="border border-card-border rounded bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
+    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
       <div class="mb-3">
         <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
       </div>
@@ -247,13 +247,13 @@ export function AgentDetailOverlay() {
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--dialog-overlay-bg)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
-      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-sm shadow-black/50 ring-1 ring-white/5"
+      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-[var(--r-1)] border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-sm shadow-black/50 ring-1 ring-white/5"
     >
       <div class="p-6 flex flex-col gap-5">
         <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
-              ${agentEmoji ? html`<div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
+              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
               <div>
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
@@ -273,9 +273,9 @@ export function AgentDetailOverlay() {
             </div>
             <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
               ${agent?.current_task || missionBrief?.current_work
-                ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
+                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
-              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
+              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
@@ -321,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class=${`px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-[var(--t-med)] shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+              class=${`px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-[var(--t-med)] shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기
@@ -362,7 +362,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded-[var(--r-1)] shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -380,7 +380,7 @@ export function AgentDetailOverlay() {
                   ['속도', agentFitness.value.speed_score],
                   ['종합', agentFitness.value.overall_fitness],
                 ].map(([label, val]) => html`
-                  <div class="rounded border border-card-border/50 bg-card/30 p-3 text-center">
+                  <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/30 p-3 text-center">
                     <div class="text-3xs font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
                     <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
                   </div>
@@ -396,7 +396,7 @@ export function AgentDetailOverlay() {
           <${Card} title="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
               <${TextInput}
-                class="px-4 py-2.5 rounded bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inner"
+                class="px-4 py-2.5 rounded-[var(--r-1)] bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inner"
                 value=${mentionText.value}
                 name="agent_direct_mention"
                 ariaLabel="직접 멘션 메시지"

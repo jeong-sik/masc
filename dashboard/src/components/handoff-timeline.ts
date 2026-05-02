@@ -286,7 +286,7 @@ export function HandoffTimeline({
   const isFiltering = query.value.trim() !== ''
 
   return html`
-    <section role="region" aria-label="A2A 이벤트 타임라인" class="rounded border border-card-border bg-card-bg p-4 flex flex-col gap-3">
+    <section role="region" aria-label="A2A 이벤트 타임라인" class="rounded-[var(--r-1)] border border-card-border bg-card-bg p-4 flex flex-col gap-3">
       <header class="flex items-baseline justify-between">
         <div>
           <h3 class="text-sm font-semibold text-text">A2A Event Timeline</h3>
@@ -309,7 +309,7 @@ export function HandoffTimeline({
           placeholder="keeper / event / task / peer 필터"
           aria-label="Handoff timeline 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+          class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
         />
       </div>
       ${error !== null
@@ -364,7 +364,7 @@ export function HandoffTimeline({
                           onClick=${() => onSelectKeeper?.(row.keeper)}
                         >${row.keeper}</button>`
                       : html`<div class=${rowLabelCls} title=${row.keeper}>${row.keeper}</div>`}
-                    <div class="relative flex-1 h-6 rounded bg-bg-1/40 border border-card-border/50">
+                    <div class="relative flex-1 h-6 rounded-[var(--r-1)] bg-bg-1/40 border border-card-border/50">
                       ${row.chips.map(chip => {
                         const pct = ((chip.ts - windowStart) / span) * 100
                         const cls = CHIP_CLASS_BY_KIND[chip.kind]

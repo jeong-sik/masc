@@ -374,7 +374,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
+    <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--color-fg-primary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -403,7 +403,7 @@ function ProfileCard({
       ${profile.keeper_assignable
         ? html`
           <form
-            class="rounded border border-[var(--color-border-default)] bg-[var(--bg-panel)] p-2 mb-3"
+            class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--bg-panel)] p-2 mb-3"
             onSubmit=${handleAssignKeeper}
           >
             <div class="flex items-center gap-2 flex-wrap mb-2">
@@ -417,7 +417,7 @@ function ProfileCard({
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
                     aria-label="키퍼 선택"
-                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
+                    class="min-w-44 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}
                     onChange=${(event: Event) => {
@@ -431,7 +431,7 @@ function ProfileCard({
                   </select>
                   <button
                     type="submit"
-                    class="rounded border border-[var(--color-accent-fg)] bg-[var(--color-accent-fg)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    class="rounded-[var(--r-1)] border border-[var(--color-accent-fg)] bg-[var(--color-accent-fg)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
                     disabled=${assigning.value || selectedKeeper.value === ''}
                   >
                     ${assigning.value ? '할당 중...' : '키퍼 할당'}
@@ -511,7 +511,7 @@ function ProfileCard({
 function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
   if (orphans.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--color-status-warn)] bg-[var(--color-bg-page)] p-3 text-xs">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-status-warn)] bg-[var(--color-bg-page)] p-3 text-xs">
       <div class="font-semibold text-[var(--color-fg-primary)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
@@ -557,7 +557,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
   const visibleErrors = config.validation_errors.slice(0, 3)
   const visibleProfiles = config.invalid_profiles.slice(0, 4)
   return html`
-    <div class=${`rounded border ${boxTone} p-3 text-xs mb-3`}>
+    <div class=${`rounded-[var(--r-1)] border ${boxTone} p-3 text-xs mb-3`}>
       <div class="flex items-center gap-2 flex-wrap mb-2">
         <${StatusChip} tone=${tone}>${validationLabel(config.validation_status)}<//>
         <span class="text-[var(--color-fg-muted)]">
@@ -1132,7 +1132,7 @@ function CascadeRawConfigEditor({
           ? html`
             <div
               role="alert"
-              class="rounded border border-[var(--bad-light)] bg-[var(--bad-bg-soft, var(--color-bg-page))] px-3 py-2 text-xs text-[var(--bad-light)]"
+              class="rounded-[var(--r-1)] border border-[var(--bad-light)] bg-[var(--bad-bg-soft, var(--color-bg-page))] px-3 py-2 text-xs text-[var(--bad-light)]"
             >
               <strong class="font-semibold">cascade.toml 적용 실패:</strong>
               <span class="ml-1 font-mono break-all">${materializationError}</span>
@@ -1146,7 +1146,7 @@ function CascadeRawConfigEditor({
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
             aria-label="설정 편집기"
-            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
+            class="h-96 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
             spellcheck="false"
             readonly=${!sourceEditable}
             value=${editorText.value}
@@ -1183,7 +1183,7 @@ function CascadeRawConfigEditor({
           <div class="flex items-center gap-3 flex-wrap">
             <button
               type="submit"
-              class="rounded border border-[var(--color-accent-fg)] bg-[var(--color-accent-fg)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              class="rounded-[var(--r-1)] border border-[var(--color-accent-fg)] bg-[var(--color-accent-fg)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
               disabled=${saveDisabled}
             >
               ${saving.value ? '저장 중...' : mode.saveLabel}
@@ -1213,7 +1213,7 @@ function CascadeRawConfigEditor({
               </div>
               <textarea
                 aria-label="설정 미리보기"
-                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
+                class="h-72 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
                 spellcheck="false"
                 readonly
                 value=${raw?.raw_json ?? ''}

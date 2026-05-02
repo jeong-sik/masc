@@ -50,7 +50,7 @@ export function filterTools<T extends Pick<ToolMetricsTopEntry, 'name'>>(
 
 function KpiCard({ children, label }: { children: unknown; label: string }) {
   return html`
-    <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="flex flex-col items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${children}</span>
       <span class="text-2xs text-[var(--color-fg-muted)] font-medium">${label}</span>
     </div>

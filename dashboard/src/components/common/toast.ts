@@ -173,7 +173,7 @@ export function ToastContainer() {
         <div
           key=${t.id}
           role=${t.type === 'error' ? 'alert' : 'status'}
-          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded border-l-[3px] border-l-solid border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-sm animate-[slideInRight_var(--enter-duration)_var(--enter-easing)] ${BORDER_COLOR[t.type]}"
+          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded-[var(--r-1)] border-l-[3px] border-l-solid border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-sm animate-[slideInRight_var(--enter-duration)_var(--enter-easing)] ${BORDER_COLOR[t.type]}"
           onMouseEnter=${() => pauseToastTimer(t.id)}
           onMouseLeave=${() => resumeToastTimer(t.id)}
           onFocusIn=${() => pauseToastTimer(t.id)}
@@ -185,7 +185,7 @@ export function ToastContainer() {
           ${t.action ? html`
             <button
               type="button"
-              class="shrink-0 text-2xs px-2 py-1 rounded border border-[var(--color-border-default)] bg-[var(--white-5)] text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-[var(--t-fast)]"
+              class="shrink-0 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-[var(--t-fast)]"
               onClick=${(e: Event) => {
                 e.stopPropagation()
                 t.action!.onClick()

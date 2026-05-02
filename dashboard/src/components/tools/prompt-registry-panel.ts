@@ -172,10 +172,10 @@ export function PromptRegistryPanel() {
       </div>
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
-      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[var(--sky-light)]">${status}</div>` : null}
+      ${status ? html`<div class="mb-4 rounded-[var(--r-1)] border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[var(--sky-light)]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div class="min-h-65 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-2">
+        <div class="min-h-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
             <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">
               등록된 프롬프트
@@ -207,14 +207,14 @@ export function PromptRegistryPanel() {
           </div>
           <div class="flex max-h-130 flex-col gap-2 overflow-y-auto pr-1">
             ${visiblePrompts.length === 0 ? html`
-              <div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-6 text-center text-2xs text-[var(--color-fg-muted)]">
+              <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-6 text-center text-2xs text-[var(--color-fg-muted)]">
                 조건에 맞는 프롬프트가 없습니다.
               </div>
             ` : null}
             ${visiblePrompts.map(prompt => html`
               <button
                 type="button"
-                class="rounded border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
+                class="rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
                   ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--color-border-default)] bg-[var(--white-2)] hover:bg-[var(--white-4)]'}"
                 onClick=${() => {
@@ -234,7 +234,7 @@ export function PromptRegistryPanel() {
           </div>
         </div>
 
-        <div class="min-w-0 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-4">
+        <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-4">
           ${selectedPrompt ? html`
             <div class="mb-4 flex flex-wrap items-center gap-2">
               <div class="font-mono text-sm text-[var(--color-fg-secondary)]">${selectedPrompt.key}</div>
@@ -245,18 +245,18 @@ export function PromptRegistryPanel() {
             </div>
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
-              <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">마크다운 파일</div>
                 <div class="mt-1 break-all font-mono text-xs text-[var(--color-fg-primary)]">${selectedPrompt.file_path ?? '미설정'}</div>
               </div>
-              <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">문자 수</div>
                 <div class="mt-1 font-mono text-xs text-[var(--color-fg-primary)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
 
             ${selectedPrompt.template_variables.length > 0 ? html`
-              <div class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
+              <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
@@ -268,7 +268,7 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4">
               <div class="mb-2 text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">파일 기준값</div>
-              <div class="max-h-55 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
+              <div class="max-h-55 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
@@ -300,7 +300,7 @@ export function PromptRegistryPanel() {
               <//>
             </div>
           ` : html`
-            <div class="rounded border border-dashed border-[var(--color-border-default)] px-4 py-10 text-center text-xs text-[var(--color-fg-muted)]">
+            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-4 py-10 text-center text-xs text-[var(--color-fg-muted)]">
               ${loading ? '프롬프트 목록을 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
             </div>
           `}

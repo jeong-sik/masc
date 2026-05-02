@@ -247,7 +247,7 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
 
   return html`
     <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <div class="relative min-h-[420px] overflow-hidden rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      <div class="relative min-h-[420px] overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div ref=${containerRef} class="h-[420px] w-full" data-testid="git-graph-canvas"></div>
         ${loading ? html`
           <div class="absolute inset-0 grid place-items-center bg-[var(--panel-dark-60)] text-sm text-[var(--color-fg-muted)]">
@@ -255,12 +255,12 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
           </div>
         ` : null}
         ${error ? html`
-          <div class="absolute inset-x-4 top-4 rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-sm text-[var(--bad-light)]">
+          <div class="absolute inset-x-4 top-4 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-sm text-[var(--bad-light)]">
             ${error}
           </div>
         ` : null}
       </div>
-      <aside class="min-h-[12rem] rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <aside class="min-h-[12rem] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         ${selected ? html`
           <div class="grid gap-2 text-sm">
             <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">선택</div>

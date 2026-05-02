@@ -263,7 +263,7 @@ function CharacterPlate({ name }: { name: string }) {
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--color-fg-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
+          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--color-fg-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded-[var(--r-1)]">${model}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
@@ -358,7 +358,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${ps.status === 'error'
-        ? html`<div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
+        ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
         : null}
 
       <${CharacterPlate} name=${name} />
@@ -371,7 +371,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
-                <div class="flex items-center gap-2 border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 rounded" key=${t.id}>
+                <div class="flex items-center gap-2 border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 rounded-[var(--r-1)]" key=${t.id}>
                   <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${t.id}</span>
                   <span class="flex-1 text-[var(--color-fg-secondary)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
@@ -459,7 +459,7 @@ export function AgentProfile({ name }: { name: string }) {
                     ${isFiltering && visible.length === 0
                       ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lines.length} items)</div>`
                       : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
-                          html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--color-fg-primary)] leading-[1.4] rounded">${line}</div>`)}</div>`}
+                          html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--color-fg-primary)] leading-[1.4] rounded-[var(--r-1)]">${line}</div>`)}</div>`}
                   </div>
                 `
               })()}
@@ -480,7 +480,7 @@ export function AgentProfile({ name }: { name: string }) {
       ${isKeeper ? html`
         <${KeeperChatPanel} name=${keeperChatName} />
       ` : html`
-        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[var(--color-bg-elevated)] border border-[var(--ff-gold-15)] rounded">
+        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[var(--color-bg-elevated)] border border-[var(--ff-gold-15)] rounded-[var(--r-1)]">
           <span class="text-sm font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
           <${TextInput}
             placeholder="메시지 입력..."

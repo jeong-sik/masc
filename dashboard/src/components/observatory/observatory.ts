@@ -123,7 +123,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
+    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
@@ -150,7 +150,7 @@ function ViewSelector({
   onSelect: (view: ObservatoryView) => void
 }) {
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
+    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${([
         { key: 'timeline', label: '타임라인' },
         { key: 'live', label: '라이브' },
@@ -291,7 +291,7 @@ export function Observatory() {
             <${RangeSelector} />
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
+              class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value
                   ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
                   : 'border-card-border text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
@@ -315,7 +315,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
@@ -329,7 +329,7 @@ export function Observatory() {
         : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
-            <div class="flex flex-col gap-2 rounded border border-card-border bg-card/30 p-4">
+            <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
               <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
               <${EventTrack}
                 events=${data.events}

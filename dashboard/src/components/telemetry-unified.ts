@@ -455,7 +455,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const hasData = src.entry_count > 0
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--color-fg-primary)]">${meta.label}</span>
@@ -477,7 +477,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
   const toneColor = tone === 'ok' ? 'text-[var(--color-status-ok)]' : tone === 'warn' ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">${title}</div>
       <div class="text-2xl font-bold ${toneColor}">${value}</div>
       <div class="text-3xs text-[var(--color-fg-disabled)]">${detail}</div>
@@ -806,7 +806,7 @@ export function TelemetryUnified() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-4">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
         <div class="mt-1 text-base leading-relaxed text-[var(--color-fg-secondary)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
@@ -823,7 +823,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
           <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--color-fg-primary)]">${totalEntries.toLocaleString()}</div>
         </div>
@@ -859,7 +859,7 @@ export function TelemetryUnified() {
       <div class="flex items-center gap-3 flex-wrap">
         <select
           aria-label="텔레메트리 소스 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
@@ -870,7 +870,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="키퍼 이름..."
           aria-label="키퍼 이름 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-32"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
         />
@@ -878,7 +878,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="session_id"
           aria-label="session_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${sessionFilter.value}
           onInput=${(e: Event) => { sessionFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -886,7 +886,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="operation_id"
           aria-label="operation_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${operationFilter.value}
           onInput=${(e: Event) => { operationFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -894,7 +894,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="worker_run_id"
           aria-label="worker_run_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${workerRunFilter.value}
           onInput=${(e: Event) => { workerRunFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -902,13 +902,13 @@ export function TelemetryUnified() {
           type="search"
           placeholder="엔트리 검색..."
           aria-label="엔트리 텍스트 검색"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-48"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-48"
           value=${entrySearch.value}
           onInput=${(e: Event) => { entrySearch.value = (e.target as HTMLInputElement).value }}
         />
         <select
           aria-label="표시 개수 제한"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
           value=${String(limit.value)}
           onChange=${(e: Event) => { limit.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -925,12 +925,12 @@ export function TelemetryUnified() {
       </div>
 
       ${error ? html`
-        <div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
+        <div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
           ${error}
         </div>
       ` : null}
 
-      <div class="rounded border border-[var(--color-border-default)] overflow-hidden">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
           ${isFilteringEntries
@@ -945,7 +945,7 @@ export function TelemetryUnified() {
             ${Array.from(condensed.byCategory.entries()).map(([category, count]) => {
               const meta = CONDENSED_CATEGORY_META[category]
               return html`
-                <span class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-1 text-[var(--color-fg-disabled)]">
+                <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-1 text-[var(--color-fg-disabled)]">
                   <span class="font-mono ${meta.color}">${meta.icon}</span>
                   <span class="ml-1">${meta.label}</span>
                   <span class="ml-1 font-mono">${count}</span>

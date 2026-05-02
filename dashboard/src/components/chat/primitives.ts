@@ -228,7 +228,7 @@ function ChatMessageBubble({
       </div>
       ${entry.error
         ? html`
-            <div class="rounded border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -241,7 +241,7 @@ function ChatMessageBubble({
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
-                        <div class="rounded border border-[var(--slate-gray-12)] bg-[var(--white-3)] px-3 py-2.5">
+                        <div class="rounded-[var(--r-1)] border border-[var(--slate-gray-12)] bg-[var(--white-3)] px-3 py-2.5">
                           <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">${item.label}</div>
                           <div class="mt-1 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
                         </div>
@@ -251,7 +251,7 @@ function ChatMessageBubble({
                 : null}
               ${entry.details.skillPrimary
                 ? html`
-                    <div class="chat-detail-callout rounded border border-[var(--ok-border)] px-3 py-3">
+                    <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
                       <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--ok-fg)]">스킬 경로</div>
                       <div class="mt-1 text-sm font-semibold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
@@ -266,7 +266,7 @@ function ChatMessageBubble({
                       <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
+                          <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
                             <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
                             <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>

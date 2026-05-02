@@ -478,7 +478,7 @@ function MetricChip({
   tone?: string
 }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
       <div class="text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)]">${label}</div>
       <div class="mt-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-fg-secondary)]">
         <${StatusChip} tone=${tone} uppercase=${false}>${value}<//>
@@ -724,7 +724,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                   ${lifeEntries.length > 0
                     ? html`
                         ${lifeEntries.map((entry) => html`
-                          <div key=${entry.id} class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                          <div key=${entry.id} class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
                             <div class="flex items-center justify-between gap-2">
                               <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
                                 ${entry.source}

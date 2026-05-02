@@ -36,7 +36,7 @@ import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
 import type { Task, TaskGateEvaluation } from '../../types'
 
-const CARD_BOX = 'rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3'
+const CARD_BOX = 'rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3'
 
 function SectionTitle({ children }: { children: unknown }) {
   return html`<div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">${children}</div>`
@@ -102,7 +102,7 @@ function TaskEventsSection() {
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
           <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
+            <div class="size-7 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
@@ -255,7 +255,7 @@ function ContractSection({ task }: { task: Task }) {
       </div>
 
       ${isAwaitingVerification ? html`
-        <div class="rounded border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
+        <div class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
           <div class="flex items-center justify-between gap-3 flex-wrap">
             <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
             <a
@@ -337,7 +337,7 @@ function HandoffSection({ task }: { task: Task }) {
   return html`
     <div>
       <${SectionTitle}>최근 Handoff</${SectionTitle}>
-      <div class="rounded border border-warn/20 bg-warn/8 px-4 py-3">
+      <div class="rounded-[var(--r-1)] border border-warn/20 bg-warn/8 px-4 py-3">
         <div class="text-sm leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
         ${handoff.reason ? html`<div class="mt-2 text-2xs text-text-muted">reason: ${handoff.reason}</div>` : null}
         ${handoff.next_step ? html`<div class="mt-1 text-2xs text-text-muted">next: ${handoff.next_step}</div>` : null}
@@ -391,7 +391,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ${visibleIds.map(id => {
           const goal = goalById(id)
           return html`
-            <div key=${id} class="flex items-center gap-2 rounded border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
+            <div key=${id} class="flex items-center gap-2 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
               <span class="text-xs text-text-body">${goal?.title ?? id}</span>
               ${goal?.status ? html`<${StatusBadge} status=${goal.status} />` : null}
             </div>
@@ -422,10 +422,10 @@ export function TaskDetailOverlay() {
       onClose=${closeTaskDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="fixed inset-0 z-[60] bg-[var(--dialog-overlay-bg)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
-      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[var(--color-bg-surface)] rounded border border-[var(--dialog-panel-border)] shadow-[0_24px_64px_var(--black-50)]"
+      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[var(--color-bg-surface)] rounded-[var(--r-1)] border border-[var(--dialog-panel-border)] shadow-[0_24px_64px_var(--black-50)]"
     >
       ${'' /* Sticky Header */}
-      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-t-2xl">
+      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-[var(--r-1)]-t-2xl">
         <div class="flex-1 min-w-0">
           <h2 id=${titleId} class="text-lg font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
@@ -437,7 +437,7 @@ export function TaskDetailOverlay() {
         <button
           ref=${closeButtonRef}
           type="button"
-          class="shrink-0 size-8 flex items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="shrink-0 size-8 flex items-center justify-center rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
         ><${X} size=${16} /></button>
@@ -450,7 +450,7 @@ export function TaskDetailOverlay() {
             <button
               key=${tab}
               type="button"
-              class="px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
+              class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
                   ? 'border-accent/40 bg-accent/12 text-[var(--color-accent-fg)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
@@ -468,7 +468,7 @@ export function TaskDetailOverlay() {
           ${task.description ? html`
             <div>
               <${SectionTitle}>설명</${SectionTitle}>
-              <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
+              <div class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
             </div>

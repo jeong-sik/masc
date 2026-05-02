@@ -143,7 +143,7 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
   return html`
     <section
       data-testid="composite-fsm-flowchart"
-      class="rounded border border-[var(--white-10)] bg-[var(--white-5)] contain-content ${props.class ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] contain-content ${props.class ?? ''}"
       aria-label="복합 FSM 플로우차트"
     >
       <header class="border-b border-[var(--white-10)] p-3">

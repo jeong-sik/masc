@@ -169,7 +169,7 @@ export function PersonaGenerator() {
         </div>
 
         ${draft?.fieldExplanations.length ? html`
-          <div class="rounded border border-[var(--white-10)] bg-[var(--white-4)]">
+          <div class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)]">
             ${draft.fieldExplanations.map(item => html`
               <div key=${item.path} class="grid grid-cols-[minmax(120px,0.35fr)_1fr] gap-2 border-b border-[var(--white-6)] px-2 py-1.5 text-3xs">
                 <span class="font-mono text-[var(--color-accent-fg)]">${item.path}</span>

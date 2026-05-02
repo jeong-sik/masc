@@ -100,7 +100,7 @@ export function KeeperUtilitiesPanel() {
           return html`
             <article
               key=${`${action.target_type}:${action.action_type}`}
-              class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3"
+              class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] p-3"
               data-testid="keeper-utility-action"
             >
               <div class="flex items-start justify-between gap-3">

@@ -367,7 +367,7 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
+      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
@@ -429,7 +429,7 @@ export function LogViewer() {
             </label>
             <button
               type="button"
-              class="logs-refresh-btn rounded border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
+              class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -443,7 +443,7 @@ export function LogViewer() {
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
+          <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">

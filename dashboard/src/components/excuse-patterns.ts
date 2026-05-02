@@ -80,7 +80,7 @@ export function ExcusePatterns() {
         <form onSubmit=${handleSave}>
           <textarea
             name="patterns"
-            class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--color-border-divider)] rounded font-mono text-sm mb-4 text-[var(--text-primary)]"
+            class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--color-border-divider)] rounded-[var(--r-1)] font-mono text-sm mb-4 text-[var(--text-primary)]"
             spellcheck="false"
           >${jsonStr}</textarea>
           

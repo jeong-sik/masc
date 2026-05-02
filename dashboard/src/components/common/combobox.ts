@@ -22,14 +22,14 @@ interface ComboboxProps {
 }
 
 const INPUT_CLS =
-  'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
+  'w-full rounded-[var(--r-1)] bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
   'text-[var(--color-fg-primary)] px-3 py-2 text-sm transition-colors ' +
   'hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] ' +
   'focus-visible:border-[var(--info-border)] outline-none'
 
 const LISTBOX_CLS =
   'absolute z-50 top-full mt-1 left-0 w-full max-h-60 overflow-auto ' +
-  'bg-[var(--dialog-panel-bg)] rounded-md border border-[var(--dialog-panel-border)] ' +
+  'bg-[var(--dialog-panel-bg)] rounded-[var(--r-1)] border border-[var(--dialog-panel-border)] ' +
   shadow-xl py-1'
 
 const OPTION_BASE = 'px-3 py-2 text-sm cursor-pointer '

@@ -31,7 +31,7 @@ import {
 
 function StatCard({ value, label }: { value: number; label: string }) {
   return html`
-    <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
       <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${value}</span>
       <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">${label}</span>
     </div>

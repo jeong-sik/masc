@@ -47,7 +47,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
             <button
               type="button"
               key=${agent.name}
-              class=${`focus-agent-card w-full rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
+              class=${`focus-agent-card w-full rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
@@ -61,7 +61,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="text-[0.75rem] text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--color-border-divider)] whitespace-nowrap overflow-hidden text-ellipsis rounded">${agent.currentTask}</div>`
+                ? html`<div class="text-[0.75rem] text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--color-border-divider)] whitespace-nowrap overflow-hidden text-ellipsis rounded-[var(--r-1)]">${agent.currentTask}</div>`
                 : null}
               <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText

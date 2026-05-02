@@ -15,7 +15,7 @@ interface SearchProps {
 }
 
 const INPUT_CLS =
-  'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
+  'w-full rounded-[var(--r-1)] bg-[var(--white-4)] border border-[var(--color-border-default)] ' +
   'text-[var(--color-fg-primary)] px-3 py-2 text-sm transition-colors ' +
   'hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] ' +
   'focus-visible:border-[var(--info-border)] outline-none'

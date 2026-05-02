@@ -85,7 +85,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
         style="border-color: ${color}; background: ${color}33"
       />
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
-        <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 shadow-sm text-2xs whitespace-nowrap">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 shadow-sm text-2xs whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--color-fg-muted)] mt-0.5">${t.event_type ?? eventLabel(t.selected_event)}</div>
           ${signal ? html`
@@ -108,7 +108,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
+    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--white-6)] bg-[var(--white-3)]" role="listitem" aria-label="${name}: ${getPhaseStyle(toPascalPhase(phase)).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${name}</div>
         <div
@@ -165,7 +165,7 @@ export function KeeperPhaseTimeline() {
         return d
           ? html`<${KeeperStrip} name=${k.name} data=${d} key=${k.name} />`
           : html`
-            <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
+            <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
               <div class="w-24 text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${k.name}</div>
               <span class="text-2xs text-[var(--color-fg-muted)]">데이터 없음</span>
             </div>

@@ -58,7 +58,7 @@ export function TaskStaleAlert() {
 
   return html`
     <section
-      class="rounded border border-warn/30 bg-warn/5 p-3"
+      class="rounded-[var(--r-1)] border border-warn/30 bg-warn/5 p-3"
       aria-label="오래된 태스크 점유"
     >
       <header class="mb-2 flex items-baseline justify-between gap-2">

@@ -52,8 +52,8 @@ const CARD_BOX = 'rounded-sm border border-[var(--color-border-default)] bg-[var
 const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
 const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
-const GOAL_PANEL = 'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
-const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded border p-3 transition-colors w-full text-left'
+const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
+const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded-[var(--r-1)] border p-3 transition-colors w-full text-left'
 const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`
 
 /**
@@ -764,7 +764,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="mt-1.5 flex flex-col gap-1.5">
           <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
-            <div class="ml-6 flex flex-col gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
+            <div class="ml-6 flex flex-col gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
               ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>
@@ -796,7 +796,7 @@ function DetailMetric({
           ? 'text-bad'
           : 'text-text-strong'
   return html`
-    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
       <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">${label}</div>
       <div class="mt-2 text-lg font-semibold tabular-nums ${toneClass}">${value}</div>
     </div>
@@ -811,7 +811,7 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
         <button
           key=${tab}
           type="button"
-          class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
+          class="rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
             ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
             : 'border-card-border/60 bg-[var(--white-3)] text-text-body hover:border-card-border/90'}"
           onClick=${() => { detailTab.value = tab }}
@@ -834,7 +834,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     ?? null
 
   return html`
-    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">${keeper.name}</div>
@@ -864,7 +864,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
+        <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
@@ -883,7 +883,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
       ` : null}
       ${latestEvent ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
+        <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최근 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">
@@ -919,7 +919,7 @@ function GoalTimeline({ events }: { events: GoalDetailTimelineEvent[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${events.map(event => html`
-        <div key=${`${event.kind}:${event.lane}:${event.ts}`} class="rounded border p-3 ${timelineSeverityClass(event.severity)}">
+        <div key=${`${event.kind}:${event.lane}:${event.ts}`} class="rounded-[var(--r-1)] border p-3 ${timelineSeverityClass(event.severity)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-sm font-semibold">${event.title}</div>
             <div class="text-3xs text-text-dim">
@@ -996,7 +996,7 @@ function GoalDetailPanel({
         </div>
       </div>
 
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
+      <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
         ${selectedNode.status_reason}
       </div>
 
@@ -1006,7 +1006,7 @@ function GoalDetailPanel({
       ${loading && !detail ? html`<${LoadingState}>goal detail 로드 중...<//>` : null}
 
       ${activeTab === 'summary' ? html`
-        <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+        <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
           <div class="mb-2 flex flex-wrap items-center gap-2">
             <span class="text-2xs font-semibold uppercase text-text-muted">Goal FSM</span>
             <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-semibold text-text-body">
@@ -1014,19 +1014,19 @@ function GoalDetailPanel({
             </span>
           </div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2 text-xs text-text-body">
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-2">
               <div class="text-3xs uppercase text-text-muted">state</div>
               <div class="mt-1 font-semibold text-text-strong">${goalPhaseLabel(selectedNode.goal_fsm.state)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-2">
               <div class="text-3xs uppercase text-text-muted">kind</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmStateKindLabel(selectedNode.goal_fsm.state_kind)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-2">
               <div class="text-3xs uppercase text-text-muted">activity</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmObservationLabel(selectedNode.goal_fsm.activity_observation)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-2">
               <div class="text-3xs uppercase text-text-muted">stagnation</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmStagnationLabel(selectedNode.goal_fsm.stagnation_status)}</div>
             </div>
@@ -1130,7 +1130,7 @@ function GoalDetailPanel({
                   ? html`
                     <div class="flex flex-col gap-2">
                       ${detail.approvals.map((approval, index) => html`
-                        <div key=${String(approval.id ?? index)} class="rounded border border-warn/20 bg-warn/6 p-3 text-xs">
+                        <div key=${String(approval.id ?? index)} class="rounded-[var(--r-1)] border border-warn/20 bg-warn/6 p-3 text-xs">
                           <div class="flex flex-wrap items-center justify-between gap-2">
                             <strong class="text-text-strong">${String(approval.tool_name ?? 'tool')}</strong>
                             <span class="text-text-dim">${String(approval.risk_level ?? 'risk')}</span>
@@ -1255,7 +1255,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

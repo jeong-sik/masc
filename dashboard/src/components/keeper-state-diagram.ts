@@ -235,7 +235,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
@@ -294,7 +294,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         ${INVARIANT_LABELS.map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
-            <div class=${`rounded border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>
+            <div class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>
               <div class="font-semibold">${label}</div>
               <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
             </div>
@@ -306,7 +306,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
           <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--color-fg-secondary)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--color-fg-disabled)]">→</span>

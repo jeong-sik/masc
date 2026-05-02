@@ -133,7 +133,7 @@ async function submitAddRepo(): Promise<void> {
 // ── Styles ───────────────────────────────────────────────
 
 const inputBase =
-  'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all shadow-inner'
+  'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all shadow-inner'
 
 const labelBase = 'block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5'
 
@@ -177,7 +177,7 @@ export function AddRepoDialog() {
         <div class="px-4 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
           ${formError.value
             ? html`
-              <div class="rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
+              <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
                 ${formError.value}
               </div>
             `
@@ -287,7 +287,7 @@ export function AddRepoDialog() {
         <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--white-10)]">
           <button
             type="button"
-            class="px-4 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--color-fg-secondary)] hover:bg-[var(--white-15)] transition-colors"
+            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--color-fg-secondary)] hover:bg-[var(--white-15)] transition-colors"
             onClick=${closeAddRepoDialog}
             disabled=${formSubmitting.value}
           >
@@ -295,7 +295,7 @@ export function AddRepoDialog() {
           </button>
           <button
             type="button"
-            class="px-4 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[#000] hover:opacity-90 transition-opacity disabled:opacity-50"
+            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[#000] hover:opacity-90 transition-opacity disabled:opacity-50"
             onClick=${() => void submitAddRepo()}
             disabled=${formSubmitting.value}
           >

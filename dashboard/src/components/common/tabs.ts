@@ -16,7 +16,7 @@ interface TabsCtx {
 const Ctx = createContext<TabsCtx | null>(null)
 
 const TABLIST_DEFAULT_CLASS =
-  'inline-flex items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-0.5'
+  'inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-0.5'
 
 const TAB_DEFAULT_CLASS = [
   'relative inline-flex items-center justify-center rounded-sm border border-transparent px-2.5 py-1',

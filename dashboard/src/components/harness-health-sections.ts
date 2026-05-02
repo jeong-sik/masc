@@ -240,7 +240,7 @@ export function StatusPill({ status }: { status: RailStatus }) {
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
+    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
       ${text}
     </div>
   `
@@ -282,7 +282,7 @@ export function HeroRailCard({
   freshness: string
 }) {
   return html`
-    <div class=${`rounded border p-3 ${statusCardClass(status)}`}>
+    <div class=${`rounded-[var(--r-1)] border p-3 ${statusCardClass(status)}`}>
       <div class="flex items-start justify-between gap-3">
         <${ItemTitle}>${label}</${ItemTitle}>
         <${StatusPill} status=${status} />
@@ -305,7 +305,7 @@ export function ScopePairing() {
             </div>
             <button
               type="button"
-              class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
+              class="rounded-[var(--r-1)] border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => navigate('lab', { section: 'autoresearch' })}
             >오토리서치 열기</button>
           </div>

@@ -285,7 +285,7 @@ export function resetKeeperRepoMappings(): void {
 
 function RepoBadge({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-1 px-2.5 rounded text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">
+    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">
       ${name}
     </span>
   `
@@ -331,7 +331,7 @@ export function KeeperRepoMapping() {
   const mappings = mState.status === 'loaded' ? mState.data : []
   const mappingByKeeper = new Map(mappings.map(m => [m.keeper_id, m]))
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
 
   async function handleSave(keeperId: string) {
     const draft = draftMappings.value.get(keeperId)
@@ -395,13 +395,13 @@ export function KeeperRepoMapping() {
       </div>
 
       ${saveError.value ? html`
-        <div class="rounded border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
           ${saveError.value}
         </div>
       ` : null}
 
       ${keepers.length === 0 ? html`
-        <div class="py-8 text-center text-2xs text-text-muted rounded border border-card-border/30 bg-card/10">
+        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10">
           등록된 키퍼가 없습니다.
         </div>
       ` : html`
@@ -443,7 +443,7 @@ export function KeeperRepoMapping() {
             return html`
               <div
                 key=${keeperId}
-                class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm"
+                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm"
               >
                 <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3">
                   <div class="flex items-center gap-2 min-w-0">
@@ -468,12 +468,12 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
-                  <div class="mb-3 rounded border border-card-border/40 bg-[var(--white-3)] px-2.5 py-2">
+                  <div class="mb-3 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--white-3)] px-2.5 py-2">
                     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
                         <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
                         <select
-                          class="rounded border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent"
+                          class="rounded-[var(--r-1)] border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent"
                           value=${draftCredentialId ?? ''}
                           onChange=${(event: Event) => {
                             const target = event.currentTarget as HTMLSelectElement

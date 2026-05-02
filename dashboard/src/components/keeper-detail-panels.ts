@@ -139,7 +139,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
 }) {
   const icon = KPI_ICON[label] ?? ''
   return html`
-    <div class="p-3.5 rounded border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
+    <div class="p-3.5 rounded-[var(--r-1)] border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
       <div class="flex items-center justify-between">
         <${SectionHeader} size="xs">${label}</${SectionHeader}>
         ${icon ? html`<span class="text-2xs opacity-60">${icon}</span>` : null}
@@ -162,7 +162,7 @@ function DetailCard({ class: cx, children }: {
   children: unknown
 }) {
   return html`
-    <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}">${children}</div>
+    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}">${children}</div>
   `
 }
 
@@ -186,30 +186,30 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
   if (!hasAny) return null
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
       <div class="mb-2 text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">운영 건강도</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
-          <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
             <${Eyebrow}>하트비트</${Eyebrow}>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
         ${compSavedRatio != null ? html`
-          <div class="p-2 rounded border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
             <${Eyebrow}>압축 절감률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${(compSavedRatio * 100).toFixed(1)}%</span>
             ${avgSaved != null ? html`<${MutedSpan}>avg ${formatTokens(avgSaved)} saved</${MutedSpan}>` : null}
           </div>
         ` : null}
         ${dropRatio != null ? html`
-          <div class="p-2 rounded border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
             <${Eyebrow}>메모리 손실률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${(dropRatio * 100).toFixed(1)}%</span>
           </div>
         ` : null}
         ${lastCompAgo != null ? html`
-          <div class="p-2 rounded border ${KPI_TONE['default']} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE['default']} flex flex-col gap-0.5">
             <${Eyebrow}>마지막 압축</${Eyebrow}>
             <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDuration(lastCompAgo)} 전</span>
           </div>
@@ -366,7 +366,7 @@ function KpiSection({ title, question, children }: {
   children: unknown
 }) {
   return html`
-    <section class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" aria-label=${title}>
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" aria-label=${title}>
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">${title}</h3>
         <span class="text-3xs text-[var(--color-fg-disabled)] truncate">${question}</span>
@@ -759,11 +759,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
-                <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>
                 </div>
@@ -1140,7 +1140,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
 
       ${'' /* Cascade fallback events */}
       ${fallbackCount > 0 ? html`
-        <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
+        <div class="md:col-span-2 p-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <${DetailRow}>
             <>캐스케이드 폴백</>
             <span class="text-3xs text-[var(--color-status-err)]">${fallbackCount}회</span>

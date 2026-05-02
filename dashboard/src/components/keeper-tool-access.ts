@@ -47,7 +47,7 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
 
   return html`
     <section
-      class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4"
+      class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4"
       aria-label="툴 / 실행 접근 요약 (read-only)"
     >
       <header class="mb-2 flex items-baseline justify-between gap-2">

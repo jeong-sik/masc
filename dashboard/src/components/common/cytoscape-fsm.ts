@@ -348,7 +348,7 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
   }
 
   return html`
-    <div class=${`relative rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] overflow-hidden ${className}`.trim()}>
+    <div class=${`relative rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] overflow-hidden ${className}`.trim()}>
       ${loading ? html`
         <div class="absolute inset-0 flex items-center justify-center text-2xs text-[var(--color-fg-disabled)]">
           <${InlineSpinner} class="mr-2" />

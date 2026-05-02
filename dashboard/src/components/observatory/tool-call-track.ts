@@ -101,7 +101,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
       </div>
       <div
         ref=${trackRef}
-        class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        class="relative flex-1 h-8 rounded-[var(--r-1)] bg-bg-1/40 border border-card-border/50 cursor-crosshair"
         role="group"
         aria-label="도구 호출 타임라인 마커"
         onMouseMove=${(e: MouseEvent) => {

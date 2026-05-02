@@ -282,7 +282,7 @@ function StatCell({
       : tone === 'ok' ? 'text-[var(--color-status-ok)]'
       : 'text-text-strong'
   return html`
-    <div class="flex flex-col gap-0.5 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+    <div class="flex flex-col gap-0.5 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
       <span class="text-2xs uppercase tracking-1 text-text-muted">${label}</span>
       <span class="text-lg font-semibold ${toneClass}">${value}</span>
       ${sub ? html`<span class="text-2xs text-text-disabled">${sub}</span>` : null}
@@ -436,10 +436,10 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
 
   return html`
     <section class="flex flex-col gap-2" aria-label="Provider × Model cost matrix">
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">provider × model · $ spent</span>
       </div>
-      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Provider by model cost matrix">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
@@ -507,14 +507,14 @@ function CostLatency({ buckets, p50, p95 }: {
 
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Latency distribution · ${total} calls`}>
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">latency distribution · ${total} calls</span>
         <div class="flex gap-3 font-mono text-2xs">
           <span class="text-text-muted">p50 · <span class="text-[var(--color-accent-fg)]">${p50 == null ? '—' : `${Math.round(p50)}ms`}</span></span>
           <span class="text-text-muted">p95 · <span class="text-[var(--color-status-err)]">${p95 == null ? '—' : `${Math.round(p95)}ms`}</span></span>
         </div>
       </div>
-      <div class="flex items-end gap-1 rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-3" role="img" aria-label=${`Latency histogram · ${buckets.length} buckets`}>
+      <div class="flex items-end gap-1 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-3" role="img" aria-label=${`Latency histogram · ${buckets.length} buckets`}>
         ${buckets.map((b, i) => {
           const pct = (b.count / max) * 100
           const bad = b.lo_ms >= 8000
@@ -526,7 +526,7 @@ function CostLatency({ buckets, p50, p95 }: {
           `
         })}
       </div>
-      <div class="grid grid-cols-4 gap-px rounded border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
+      <div class="grid grid-cols-4 gap-px rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
         ${bands.map(b => html`
           <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%)`}>
             <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">${b.label}</span>
@@ -550,11 +550,11 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
 
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
-      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Heuristic events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
@@ -623,11 +623,11 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
 
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Stress board · ${events.length} events`}>
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">stress board · ${events.length} events</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
-      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Stress events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
@@ -669,7 +669,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 
   return html`
     <section class="flex flex-col gap-2" aria-label="Heuristic by module">
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.unique_decision_tuples} unique tuples</span>
       </div>
       <div class="flex flex-col gap-2">
@@ -677,7 +677,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
           const totalCount = sites.reduce((s, x) => s + x.count, 0)
           const totalTriggered = sites.reduce((s, x) => s + x.triggered_count, 0)
           return html`
-            <div key=${moduleName} class="rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+            <div key=${moduleName} class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
               <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-1.5">
                 <span class="text-xs font-semibold text-text-strong">${moduleName}</span>
                 <span class="font-mono text-2xs text-text-muted">${sites.length} sites · ${totalCount} obs · ${totalTriggered} triggered</span>
@@ -721,11 +721,11 @@ function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: nu
 
   return html`
     <section class="flex flex-col gap-4" aria-label="Audit ledger">
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">audit ledger · ${count} entries</span>
       </div>
 
-      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Audit ledger entries">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
@@ -762,11 +762,11 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
 
   return html`
     <section class="flex flex-col gap-4" aria-label="Keeper decisions">
-      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">keeper decisions · ${events.length} events · limit ${limit}</span>
       </div>
 
-      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Keeper decision events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
@@ -836,7 +836,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
             <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${viewMode.value === 'model' ? '모델별' : 'Keeper별'} 토큰 / 비용 / latency</p>
           </div>
           <div class="flex items-center gap-2">
-            <div class="flex rounded border border-card-border/40 p-0.5" role="group" aria-label="보기 모드">
+            <div class="flex rounded-[var(--r-1)] border border-card-border/40 p-0.5" role="group" aria-label="보기 모드">
               <button
                 type="button"
                 role="radio"
@@ -918,11 +918,11 @@ function CostDashboardContent({ view }: { view: CostView }) {
           : null}
 
         ${data.length === 0 ? html`
-          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
+          <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
             이 시간 창에서 기록된 ${viewMode.value === 'model' ? '모델' : 'Keeper'} 비용이 없습니다.
           </div>
         ` : html`
-          <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+          <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
             <table class="w-full" aria-label=${`${data.length}개 ${viewMode.value === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
               <thead>
                 <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">

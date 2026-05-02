@@ -240,14 +240,14 @@ body[data-mode="split"] .zone-deck { display: none; }
   min-width: 0;
   position: relative;
 }
-.code-line:hover { background: rgb(255 255 255 / .015); }
+.code-line:hover { background: var(--color-hover-overlay); }
 .code-line.is-selected { background: rgb(var(--brass-glow) / .06); }
 .code-line.is-anchor-hover { background: rgb(var(--brass-glow) / .05); }
 .code-line.is-heatmap-1 { background: rgb(var(--brass-glow) / .02); }
 .code-line.is-heatmap-2 { background: rgb(var(--brass-glow) / .05); }
 .code-line.is-heatmap-3 { background: rgb(var(--brass-glow) / .10); }
-.code-line.is-diff-add { background: rgb(var(--ok-glow) / .08); }
-.code-line.is-diff-del { background: rgb(var(--err-glow) / .08); }
+.code-line.is-diff-add { background: var(--color-diff-add); }
+.code-line.is-diff-del { background: var(--color-diff-del); }
 
 .cl-gutter {
   grid-area: gutter;
@@ -606,7 +606,7 @@ body[data-mode="split"] .zone-rail {
 /* ───────── command palette ───────── */
 .cmd-scrim {
   position: fixed; inset: 0; z-index: 80;
-  background: rgb(8 7 5 / .55);
+  background: var(--scrim);
   backdrop-filter: blur(2px);
   display: none;
   align-items: flex-start; justify-content: center;

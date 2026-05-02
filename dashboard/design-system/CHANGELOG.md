@@ -43,6 +43,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - SPEC §10-11 historical PR-S/M tables consolidated into §12 audit
   - README.md tier definitions + directory tree refreshed
 
+- **Production pagination atom**
+  - `dashboard/src/components/common/pagination.ts` promotes the preview-only G4 pagination pattern into a reusable production primitive.
+  - Supports numbered page windows and cursor pagination, both covered by unit and jest-axe tests.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

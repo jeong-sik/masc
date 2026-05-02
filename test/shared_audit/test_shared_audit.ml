@@ -220,6 +220,38 @@ let test_store_skips_malformed_jsonl_lines () =
     | [ entry ] -> check string "valid entry preserved" valid.id entry.id
     | _ -> fail "expected exactly one valid audit entry")
 
+let test_store_skips_invalid_envelope_jsonl_lines () =
+  let dir = unique_temp_dir "audit_invalid_envelope" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let valid = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let path = audit_path ~base_dir:dir ~ts:valid.ts in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
+    output_string oc
+      {|{"id":"bad-envelope","ts":1.0,"payload":{"kind":"missing-category"}}|};
+    output_char oc '\n';
+    close_out oc;
+    let entries = Store.recent store ~n:10 in
+    check int "invalid envelope line skipped" 1 (List.length entries);
+    match entries with
+    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
+    | _ -> fail "expected exactly one valid audit entry")
+
+let test_store_resume_skips_malformed_jsonl_lines () =
+  let dir = unique_temp_dir "audit_malformed_resume" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let valid = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let path = audit_path ~base_dir:dir ~ts:valid.ts in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
+    output_string oc "{not json\n";
+    close_out oc;
+    let resumed = Store.create ~base_dir:dir in
+    let next = Store.append resumed ~category:"X" ~payload:(`Int 2) in
+    check (option string)
+      "resume links to last valid entry after malformed line"
+      (Some (Env.hash_for_chain valid)) next.prev_hash)
+
 let test_store_base_dir_inspector () =
   let dir = unique_temp_dir "audit_inspector" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -250,6 +282,8 @@ let () =
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
       test_case "skips malformed JSONL lines" `Quick test_store_skips_malformed_jsonl_lines;
+      test_case "skips invalid envelope JSONL lines" `Quick test_store_skips_invalid_envelope_jsonl_lines;
+      test_case "resume skips malformed JSONL lines" `Quick test_store_resume_skips_malformed_jsonl_lines;
       test_case "base_dir inspector" `Quick test_store_base_dir_inspector;
     ];
   ]

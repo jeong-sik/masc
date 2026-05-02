@@ -116,25 +116,30 @@ Operational contract:
 
 Missing file is not an error (returns 0 overrides, uses env/defaults).
 Parse errors log a warning and fall back to env defaults.
+For compatibility keys that runtime still reads, the legacy process env
+also preempts TOML. Example: `MASC_KEEPER_AUTOBOT_MAX` preempts
+`bootstrap.autoboot_max` even though TOML writes the canonical
+`MASC_KEEPER_AUTOBOOT_MAX` boot override.
 
 Legacy compatibility names that are no longer read by the unified turn path
 are intentionally excluded from this TOML surface.
 
-**Sections** (69 knobs total):
+**Sections** (80 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
 | `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
-| `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
-| `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat` |
-| `[turn]` | 17 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
+| `[reactive]` | 3 | `max_turns_per_call`, `concurrency`, `max_idle_turns` |
+| `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
+| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
 | `[watchdog]` | 4 | `stale_sec`, `grace_sec`, `noop_threshold` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
-| `[alert]` | 16 | `slack_enabled`, `slack_dm_user_id`, `github_enabled` |
+| `[memory]` | 5 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
+| `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
 | `[debug]` | 1 | `enabled` |
 
 **Example** (`<active config root>/keeper_runtime.toml`):
@@ -146,6 +151,12 @@ semaphore_wait_timeout_sec = 150 # default: 60
 
 [reactive]
 max_turns_per_call = 15
+concurrency = 4
+
+[heartbeat]
+board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap
+board_debounce_sec = 30
+board_wakeup_max = 4 # caps total non-explicit board wakeups after reason prioritization
 
 [bootstrap]
 max_active_keepers = 12

@@ -222,6 +222,59 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.title).toContain('latest activity 10m ago')
   })
 
+  it('prefers backend runtime_attention over narrower frontend heuristics', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'ok',
+        terminal_reason_code: 'completed',
+        operator_disposition: 'pass',
+        operator_disposition_reason: 'healthy',
+        tool_contract_result: 'passive_only',
+      }),
+      runtime_attention: {
+        state: 'blocked',
+        needs_attention: true,
+        blocked: true,
+        fiber_stop_requested: false,
+        reason: 'passive_only',
+        raw_phase: 'Running',
+        is_live: false,
+        source: 'execution_receipt',
+      },
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.cause).toContain('execution_receipt')
+    expect(attention.cause).toContain('passive_only')
+    expect(attention.reason).toContain('backend runtime_attention')
+  })
+
+  it('maps backend stop-requested attention to shutdown follow-up', () => {
+    const snap = snapshot({
+      is_live: true,
+      runtime_attention: {
+        state: 'stop_requested',
+        needs_attention: true,
+        blocked: false,
+        fiber_stop_requested: true,
+        reason: 'fiber stop requested',
+        raw_phase: 'Running',
+        is_live: true,
+        source: 'composite_snapshot',
+      },
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.label).toBe('정지 요청')
+    expect(attention.reason).toContain('backend runtime_attention')
+    expect(attention.reason).toContain('stop_requested')
+    expect(attention.cause).toContain('fiber stop requested')
+    expect(attention.nextStep).toContain('shutdown 완료')
+  })
+
   it('keeps recent healthy non-live keepers waiting instead of stale', () => {
     const snap = snapshot({
       is_live: false,
@@ -229,6 +282,16 @@ describe('runtimeAttentionForSnapshot', () => {
       execution: execution({
         recorded_at: '2026-04-25T07:38:30Z',
       }),
+      runtime_attention: {
+        state: 'ok',
+        needs_attention: false,
+        blocked: false,
+        fiber_stop_requested: false,
+        reason: null,
+        raw_phase: 'Running',
+        is_live: false,
+        source: 'composite_snapshot',
+      },
     })
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)

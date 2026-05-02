@@ -101,6 +101,16 @@ let key_to_env =
     "debug.enabled",                    "MASC_KEEPER_DEBUG";
   ]
 
+let preempting_env_names env_name =
+  match env_name with
+  | "MASC_KEEPER_AUTOBOOT_MAX" ->
+      [ "MASC_KEEPER_AUTOBOOT_MAX"; "MASC_KEEPER_AUTOBOT_MAX" ]
+  | _ -> [ env_name ]
+
+let env_is_set env_lookup env_name =
+  preempting_env_names env_name
+  |> List.exists (fun name -> Option.is_some (env_lookup name))
+
 let resolved_config_root ~base_path =
   let inputs = Config_dir_resolver.inputs_from_env () in
   let resolution =
@@ -142,11 +152,10 @@ let apply_one
     ?(env_lookup = Env_config_core.raw_value_opt)
     ?(env_set = Config_boot_overrides.set)
     (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
-  match env_lookup env_name with
-  | Some _ ->
+  if env_is_set env_lookup env_name then
     (* Caller env override — leave alone. *)
     false
-  | None ->
+  else
     match List.assoc_opt toml_key doc with
     | None -> false
     | Some v ->
@@ -166,9 +175,8 @@ let resolve_overrides
   let count =
     List.fold_left
       (fun acc (toml_key, env_name) ->
-        match env_lookup env_name with
-        | Some _ -> acc
-        | None ->
+        if env_is_set env_lookup env_name then acc
+        else
           match List.assoc_opt toml_key doc with
           | None -> acc
           | Some v ->

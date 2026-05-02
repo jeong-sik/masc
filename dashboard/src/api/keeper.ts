@@ -29,6 +29,7 @@ export type {
   KeeperCompositeMeasurement,
   KeeperLastOutcome,
   KeeperCompositeExecution,
+  KeeperRuntimeAttention,
   KeeperPhaseDiagnosis,
   KeeperPhaseDiagnosisRow,
   KeeperCompositePhase,

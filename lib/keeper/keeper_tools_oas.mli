@@ -47,6 +47,15 @@ val max_consecutive_failures : int
     as a string under [result] / [error]. *)
 val normalize_tool_result : success:bool -> string -> string
 
+(** Build the structured, recoverable envelope used when a keeper tool
+    raises mutex EDEADLK / "Resource deadlock avoided". *)
+val transient_mutex_contention_tool_error :
+  tool_name:string ->
+  error_text:string ->
+  ?backtrace:string ->
+  unit ->
+  string
+
 (** Max chars for the SSE error preview rendered to dashboards. *)
 val sse_error_preview_max_chars : int
 

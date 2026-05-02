@@ -132,6 +132,35 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
         ("detail", `Null);
       ])
 
+let transient_mutex_contention_error_class = "transient_mutex_contention"
+
+let transient_mutex_contention_tool_error
+    ~(tool_name : string)
+    ~(error_text : string)
+    ?backtrace
+    () : string =
+  let message =
+    Printf.sprintf
+      "tool %s hit transient mutex contention (EDEADLK); not counted toward consecutive-failure budget. Retry the same call or wait for the contending operation to finish."
+      tool_name
+  in
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("ok", `Bool false);
+      ("error", `String message);
+      ("error_class", `String transient_mutex_contention_error_class);
+      ("recoverable", `Bool true);
+      ("transient", `Bool true);
+      ("retry_recommended", `Bool true);
+      ( "detail",
+        `Assoc [
+          ("tool_name", `String tool_name);
+          ("exception", `String error_text);
+          ("operator_action", `String "retry_same_call_or_wait");
+          ("backtrace_available", `Bool (Option.is_some backtrace));
+        ] );
+    ])
+
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
 let sse_error_preview_max_chars = 300
@@ -373,7 +402,7 @@ let make_keeper_tool_handler
         !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
         (* Tool-call observability via OAS Event_bus. See above. *)
         (try Sse.broadcast
-          (`Assoc [
+          (`Assoc ([
             ("type", `String "keeper_tool_call");
             ("name", `String meta.name);
             ("tool_name", `String name);
@@ -381,7 +410,15 @@ let make_keeper_tool_handler
             ("success", `Bool false);
             ("error_text", `String error_text);
             ("ts_unix", `Float ts);
-          ])
+          ]
+          @
+          if is_edeadlk then
+            [
+              ( "error_class",
+                `String transient_mutex_contention_error_class );
+              ("recoverable", `Bool true);
+            ]
+          else []))
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         let msg =
           if is_edeadlk then
@@ -400,11 +437,17 @@ let make_keeper_tool_handler
              Log.Keeper.error
                "tool %s EDEADLK backtrace (#10682):\n%s" name bt
          | None -> ());
-        let normalized_exn = normalize_tool_result ~success:false msg in
+        let normalized_exn =
+          if is_edeadlk then
+            transient_mutex_contention_tool_error
+              ~tool_name:name ~error_text ?backtrace:edeadlk_backtrace ()
+          else
+            normalize_tool_result ~success:false msg
+        in
         (try
           Keeper_types_support.append_jsonl_line
             (Keeper_types_support.keeper_decision_log_path config meta.name)
-            (`Assoc [
+            (`Assoc ([
               "ts_unix", `Float ts;
               "event", `String "tool_exec";
               "keeper_name", `String meta.name;
@@ -413,7 +456,15 @@ let make_keeper_tool_handler
               "result_bytes", `Int (String.length normalized_exn);
               "ok", `Bool false;
               "error", `String error_text;
-            ])
+            ]
+            @
+            if is_edeadlk then
+              [
+                ( "error_class",
+                  `String transient_mutex_contention_error_class );
+                ("recoverable", `Bool true);
+              ]
+            else []))
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         Keeper_tool_call_log.set_truncation_info
           ~keeper_name:meta.name

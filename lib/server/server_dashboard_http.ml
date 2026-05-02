@@ -661,6 +661,7 @@ let composite_execution_blocked execution =
 
 type composite_runtime_attention = {
   cra_is_live : bool;
+  cra_fiber_stop_requested : bool;
   cra_stale_long_enough : bool;
   cra_idle_attention : bool;
   cra_blocked : bool;
@@ -672,6 +673,9 @@ type composite_runtime_attention = {
 
 let composite_runtime_attention ~snapshot ~execution =
   let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
+  let fiber_stop_requested =
+    Option.value ~default:false (json_bool "fiber_stop_flag" snapshot)
+  in
   let latest = composite_latest_activity_epoch snapshot execution in
   let now = Unix.gettimeofday () in
   let stale_long_enough =
@@ -684,13 +688,16 @@ let composite_runtime_attention ~snapshot ~execution =
   in
   let blocked = composite_execution_blocked execution in
   let stale_without_live_turn = (not is_live) && stale_long_enough in
-  let needs_attention = blocked || stale_without_live_turn || idle_attention in
+  let needs_attention =
+    blocked || fiber_stop_requested || stale_without_live_turn || idle_attention
+  in
   let reason =
     match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> Some value
     | _ -> (
         match json_string "terminal_reason_code" execution with
         | Some value when String.trim value <> "" -> Some value
+        | _ when fiber_stop_requested -> Some "fiber_stop_requested"
         | _ when idle_attention -> Some "idle_composite"
         | _ when stale_without_live_turn -> Some "not_live"
         | _ when blocked -> Some "runtime_blocked"
@@ -698,12 +705,14 @@ let composite_runtime_attention ~snapshot ~execution =
   in
   let state =
     if blocked then "blocked"
+    else if fiber_stop_requested then "stop_requested"
     else if idle_attention then "idle_stale"
     else if stale_without_live_turn then "stale"
     else "ok"
   in
   {
     cra_is_live = is_live;
+    cra_fiber_stop_requested = fiber_stop_requested;
     cra_stale_long_enough = stale_long_enough;
     cra_idle_attention = idle_attention;
     cra_blocked = blocked;
@@ -718,12 +727,15 @@ let composite_runtime_attention_json attention ~snapshot =
     [ "state", `String attention.cra_state
     ; "needs_attention", `Bool attention.cra_needs_attention
     ; "blocked", `Bool attention.cra_blocked
+    ; "fiber_stop_requested", `Bool attention.cra_fiber_stop_requested
     ; "reason", Json_util.string_opt_to_json attention.cra_reason
     ; "raw_phase", Json_util.string_opt_to_json (json_string "phase" snapshot)
     ; "is_live", `Bool attention.cra_is_live
     ; ( "source",
         `String
-          (if attention.cra_blocked then "execution_receipt" else "composite_snapshot") )
+          (if attention.cra_blocked then "execution_receipt"
+           else if attention.cra_fiber_stop_requested then "registry_fiber_stop"
+           else "composite_snapshot") )
     ]
 
 let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
@@ -795,6 +807,11 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
       [
         probe ("Inspect configuration/auth blocker: " ^ reason);
         message ("Resolve configuration/auth blocker: " ^ reason);
+      ]
+    else if attention.cra_fiber_stop_requested then
+      [
+        probe ("Inspect stop-requested keeper shutdown: " ^ reason);
+        message ("Confirm keeper shutdown or supervisor reap: " ^ reason);
       ]
     else if composite_execution_saturated execution && not stale_long_enough then
       [ probe ("Inspect local runtime saturation: " ^ reason) ]

@@ -158,6 +158,26 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.recommended_actions[0]!.confirm_required).toBe(true)
   })
 
+  it('parses backend runtime_attention', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      runtime_attention: {
+        state: 'blocked',
+        needs_attention: true,
+        blocked: true,
+        fiber_stop_requested: false,
+        reason: 'passive_only',
+        raw_phase: 'Running',
+        is_live: false,
+        source: 'execution_receipt',
+      },
+    })
+
+    expect(result.runtime_attention?.state).toBe('blocked')
+    expect(result.runtime_attention?.reason).toBe('passive_only')
+    expect(result.runtime_attention?.fiber_stop_requested).toBe(false)
+  })
+
   it('parses snapshot with measurement auto_rules', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,

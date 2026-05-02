@@ -161,6 +161,17 @@ const KeeperCompositeExecutionSchema = object({
   ),
 })
 
+const KeeperRuntimeAttentionSchema = object({
+  state: string(),
+  needs_attention: boolean(),
+  blocked: boolean(),
+  fiber_stop_requested: optional(boolean()),
+  reason: nullable(string()),
+  raw_phase: nullable(string()),
+  is_live: boolean(),
+  source: string(),
+})
+
 const OperatorRecommendedActionSchema = object({
   action_type: string(),
   target_type: string(),
@@ -201,6 +212,7 @@ export const KeeperCompositeSnapshotSchema = object({
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
   execution: optional(KeeperCompositeExecutionSchema),
+  runtime_attention: optional(KeeperRuntimeAttentionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */
   latest_receipt: optional(unknown()),
@@ -213,6 +225,7 @@ export type KeeperPhaseDiagnosis = InferOutput<typeof KeeperPhaseDiagnosisSchema
 export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRowSchema>
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
+export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>

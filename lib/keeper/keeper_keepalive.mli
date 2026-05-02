@@ -53,10 +53,11 @@ val semaphore_wait_timeout_sec : float
 
 exception Semaphore_wait_timeout of float
 (** Raised inside [with_keeper_turn_slot] when acquiring either the
-    autonomous or turn semaphore exceeds [semaphore_wait_timeout_sec].
-    The float carries the wait cap so the caller can render it without
-    re-reading the env var. Callers should treat this as "skip this
-    turn, retry on next heartbeat" rather than a keeper failure. *)
+    autonomous, reactive, or global turn semaphore exceeds
+    [semaphore_wait_timeout_sec]. The float carries the wait cap so the
+    caller can render it without re-reading the env var. Callers should
+    treat this as "skip this turn, retry on next heartbeat" rather than
+    a keeper failure. *)
 
 (** Test-only reset for the autonomous FIFO wait queue. *)
 val reset_autonomous_turn_queue_for_test : unit -> unit

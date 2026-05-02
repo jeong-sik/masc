@@ -11,6 +11,9 @@
       2. TOML value from [<resolved config root>/keeper_runtime.toml]
       3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
 
+    Legacy env names that are still honored at runtime also count as
+    process env overrides for their canonical TOML key.
+
     The TOML loader runs at server startup, before any module that reads
     these env vars initializes. It stores boot defaults in a process-local
     override table so existing config readers can resolve TOML-backed values
@@ -53,9 +56,17 @@ val resolve_overrides :
       [autonomous]
       max_turns_per_call          = 7
       semaphore_wait_timeout_sec  = 60
+      concurrency                 = 3
 
       [reactive]
       max_turns_per_call          = 15
+      concurrency                 = 4
+
+      [heartbeat]
+      sleep_chunk_sec             = 1.5
+      board_debounce_sec          = 30
+      board_generic_wakeup_limit  = 3
+      board_wakeup_max            = 4
 
       [turn]
       stream_idle_timeout_sec   = 120

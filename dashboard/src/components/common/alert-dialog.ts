@@ -110,7 +110,7 @@ export function AlertDialog({
       <div
         ref=${panelRef}
         class=${
-          'relative w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-md ' +
+          'relative w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-[var(--r-2)] ' +
           'border border-[var(--dialog-panel-border)] ' +
           'shadow-[var(--shadow-raised)] overflow-hidden ' +
           'transition-[opacity,transform] duration-[var(--enter-duration)] ease-[var(--enter-easing)] ' +

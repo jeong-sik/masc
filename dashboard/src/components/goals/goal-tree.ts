@@ -655,7 +655,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)]"
+              class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)]"
               style="color:${horizonColor(node.horizon)}"
             >
               ${horizonLabel(node.horizon)}

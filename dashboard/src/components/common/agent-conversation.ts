@@ -36,7 +36,7 @@ function MessageBubble({
   const isTool = msg.role === 'tool'
 
   const baseCls =
-    'max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed break-words'
+    'max-w-[80%] rounded-[var(--r-3)] px-3 py-2 text-sm leading-relaxed break-words'
   const roleCls = isSystem
     ? 'mx-auto bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] text-xs italic'
     : isTool

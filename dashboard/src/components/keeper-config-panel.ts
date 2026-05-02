@@ -503,7 +503,7 @@ function InlineSelectRow({
   onChange: (v: string) => void
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5 gap-3">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-4)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5 gap-3">
       <${MutedLabel}>${label}</${MutedLabel}>
       <select
         aria-label=${label}

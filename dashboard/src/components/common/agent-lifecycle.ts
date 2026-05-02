@@ -94,7 +94,7 @@ export function AgentLifecycle({
 
   return html`
     <div
-      class="rounded-lg border border-[var(--gray-6)] bg-[var(--gray-1)] p-4"
+      class="rounded-[var(--r-3)] border border-[var(--gray-6)] bg-[var(--gray-1)] p-4"
       role="region"
       aria-label="에이전트 생명주기"
       data-testid=${testId}

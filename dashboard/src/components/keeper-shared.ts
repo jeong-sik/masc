@@ -357,7 +357,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-2xl border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
                   ${chatAccess.message}
                 </div>
               `
@@ -372,7 +372,7 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-2xl border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `

@@ -158,7 +158,7 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
         ${tooltip
           ? html`
             <div
-              class="absolute pointer-events-none z-10 px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap"
+              class="absolute pointer-events-none z-10 px-2.5 py-1.5 rounded-[var(--r-2)] text-xs whitespace-nowrap"
               style=${{
                 left: `${Math.min(tooltip.x + 12, canvasWidth() - 140)}px`,
                 top: `${Math.max(tooltip.y - 32, 4)}px`,

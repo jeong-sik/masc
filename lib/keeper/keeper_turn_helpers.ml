@@ -173,7 +173,7 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   {
     turn_lane = "pre_dispatch";
     tool_surface_class = "none";
-    tool_requirement = "none";
+    tool_requirement = No_tools;
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;

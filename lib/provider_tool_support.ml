@@ -6,38 +6,38 @@ type capabilities = {
   supports_runtime_mcp_http_headers : bool;
 }
 
+(** CLI providers (Claude Code, Kimi CLI, Gemini CLI, Codex CLI) use runtime
+    MCP for tool invocation, not inline function-calling.  The OAS base
+    capabilities for CLI kinds may disagree on [supports_runtime_mcp_tools]
+    (e.g. Gemini CLI defaults to [false] in OAS despite supporting MCP via
+    its --mcp-config flag).  Normalize all CLI kinds to the same contract:
+    disable inline tools, enable runtime MCP. *)
 let normalize_cli_provider_caps
     ~(provider_cfg : Llm_provider.Provider_config.t)
     (caps : Llm_provider.Capabilities.capabilities) =
   match provider_cfg.kind with
-  | Llm_provider.Provider_config.Claude_code ->
+  | Llm_provider.Provider_config.Claude_code
+  | Llm_provider.Provider_config.Kimi_cli
+  | Llm_provider.Provider_config.Gemini_cli
+  | Llm_provider.Provider_config.Codex_cli ->
       {
         caps with
         supports_tools = false;
         supports_tool_choice = false;
         supports_runtime_mcp_tools = true;
         supports_runtime_tool_events = true;
-      }
-  | Llm_provider.Provider_config.Kimi_cli ->
-      {
-        caps with
-        supports_tools = false;
-        supports_tool_choice = false;
-        supports_runtime_mcp_tools = true;
-        supports_runtime_tool_events = true;
-      }
-  | Llm_provider.Provider_config.Gemini_cli ->
-      {
-        caps with
-        supports_tools = false;
-        supports_tool_choice = false;
-        supports_runtime_mcp_tools = false;
-        supports_runtime_tool_events = false;
       }
   | _ -> caps
 
+(** Resolve OAS-level capabilities for a provider config.
+
+    CLI kinds (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
+    [for_model_id] because the CLI tool selects the underlying model
+    internally — the model_id in the config is a routing hint, not an
+    API model identifier that OAS can look up.  All other kinds consult
+    [for_model_id] first, falling back to the kind-level base. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  let base_caps =
+  let caps =
     match provider_cfg.kind with
     | Llm_provider.Provider_config.Ollama ->
         Llm_provider.Capabilities.ollama_capabilities
@@ -57,11 +57,11 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     | Llm_provider.Provider_config.Claude_code
     | Gemini_cli
     | Kimi_cli
-    | Codex_cli -> base_caps
+    | Codex_cli -> caps
     | _ -> (
         match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
-        | Some caps -> caps
-        | None -> base_caps)
+        | Some override -> override
+        | None -> caps)
   in
   let caps = normalize_cli_provider_caps ~provider_cfg caps in
   match provider_cfg.supports_tool_choice_override with

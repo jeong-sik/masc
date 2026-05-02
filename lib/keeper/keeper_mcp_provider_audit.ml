@@ -12,7 +12,7 @@
     | claude_code  | [Keeper_cli_mcp_config.try_construct_for_keeper]   | MASC_AUTO_CONSTRUCT_CLAUDE_MCP    | true    |
     | kimi_cli     | (same module)                                      | (same)                            | true    |
     | codex_cli    | [Server_runtime_bootstrap.sync_codex_mcp_config]   | MASC_SYNC_CODEX_MCP_CONFIG        | false   |
-    | gemini_cli   | none — only [OAS_GEMINI_NO_MCP] disable flag       | (only disable, no enable)         | n/a     |
+    | gemini_cli   | [Keeper_types_profile.effective_oas_env]           | OAS_GEMINI_ALLOWED_MCP            | true    |
     | glm          | n/a — HTTP API, OAS-side dispatch                  | n/a                               | n/a     |
     | ollama       | n/a — HTTP API, OAS-side dispatch                  | n/a                               | n/a     |
 
@@ -47,7 +47,7 @@ type result = {
 
     - [keeper_cli_mcp_config.ml:16,22] — claude_code + kimi_cli
     - [server_runtime_bootstrap.ml:625,798,801] — codex_cli
-    - [keeper_types_profile.ml:1298] — gemini_cli (disable flag only)
+    - [keeper_types_profile.ml:1423] — gemini_cli (auto-inject OAS_GEMINI_ALLOWED_MCP)
     - [llm_provider/transport_*.ml] — glm, ollama (no MCP client) *)
 let lookup provider =
   let construct =
@@ -76,11 +76,11 @@ let lookup provider =
             module_name = "Server_runtime_bootstrap.sync_codex_mcp_config";
           }
     | "gemini_cli" | "gemini" ->
-        No_auto_construct_path
+        Auto_construct_active
           {
-            reason =
-              "no enable path; only OAS_GEMINI_NO_MCP disable flag exists \
-               (keeper_types_profile.ml:1298)";
+            env_flag = "OAS_GEMINI_ALLOWED_MCP";
+            default_when_unset = true;
+            module_name = "Keeper_types_profile.effective_oas_env";
           }
     | "glm" | "glm-coding" | "ollama" ->
         Not_applicable_http_api

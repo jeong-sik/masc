@@ -33,16 +33,17 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
         reason = "non-turn phase (blocked upstream)" }
 
 let route_effective_cascade_for_tool_requirement
-    ~(effective_cascade : string) ~(tool_requirement : string) :
+    ~(effective_cascade : string) ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) :
     routing_decision =
-  if not (String.equal tool_requirement "required") then
-    {
-      effective_cascade;
-      reason = "tool-optional or text-only turn keeps routed cascade";
-    }
-  else
+  match tool_requirement with
+  | Required ->
     {
       effective_cascade;
       reason =
         "tool-required turn keeps routed cascade; provider capability filter enforces tool support";
+    }
+  | Optional | No_tools ->
+    {
+      effective_cascade;
+      reason = "tool-optional or text-only turn keeps routed cascade";
     }

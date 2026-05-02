@@ -141,7 +141,7 @@ let prepare_agent_setup
     ; tool_surface =
         { turn_lane = "text_only"
         ; tool_surface_class = "none"
-        ; tool_requirement = "none"
+        ; tool_requirement = No_tools
         ; visible_tool_count = 0
         ; tool_gate_enabled = false
         ; tool_surface_fallback_used = false
@@ -755,18 +755,19 @@ let prepare_agent_setup
         "mixed"
     in
     let tool_requirement =
-      if visible_tool_count = 0 then "none"
-      else if tool_gate_requested then "required"
-      else "optional"
+      if visible_tool_count = 0 then No_tools
+      else if tool_gate_requested then Required
+      else Optional
     in
     let lane =
       if is_retry then "retry"
-      else if String.equal tool_requirement "required" then "tool_required"
-      else if String.equal tool_requirement "optional" then "tool_optional"
-      else (
-        match current_tool_choice with
-        | Some Agent_sdk.Types.None_ -> "tool_disabled"
-        | _ -> "text_only")
+      else match tool_requirement with
+        | Required -> "tool_required"
+        | Optional -> "tool_optional"
+        | No_tools ->
+            (match current_tool_choice with
+             | Some Agent_sdk.Types.None_ -> "tool_disabled"
+             | _ -> "text_only")
     in
     { all_allowed
     ; absolute_turn = turn
@@ -1288,7 +1289,7 @@ let prepare_agent_setup
                     ; "final_visible", `Int (List.length all_allowed)
                     ; "turn_lane", `String lane
                     ; "tool_surface_class", `String computed_surface.tool_surface_class
-                    ; "tool_requirement", `String computed_surface.tool_requirement
+                    ; "tool_requirement", tool_requirement_to_yojson computed_surface.tool_requirement
                     ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested
                     ; "tool_surface_fallback_used", `Bool computed_surface.tool_surface_fallback_used
                     ; "hook_ms", `Float hook_elapsed_ms

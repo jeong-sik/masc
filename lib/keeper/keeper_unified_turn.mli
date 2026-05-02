@@ -82,7 +82,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_cascades:string list ->
   estimated_input_tokens:int ->
   max_turns:int ->
@@ -209,7 +209,7 @@ val next_fail_open_cascade_for_turn :
   ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_cascades:string list ->
   Agent_sdk.Error.sdk_error ->
   Keeper_error_classify.degraded_retry option

@@ -81,10 +81,12 @@ val assert_receipt_authoritative :
     fail-closed via [Result.Error] propagation or surface a metric.
     Memory: feedback_keeper_runtime_fail_closed_for_unknown_permissive_default. *)
 
+type tool_requirement = Keeper_agent_tool_surface.tool_requirement
+
 type tool_surface =
   { turn_lane : string
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool

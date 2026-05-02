@@ -51,7 +51,7 @@ let next_fail_open_cascade_for_turn
     ?rotation_cascades
     ~(base_cascade : string)
     ~(effective_cascade : string)
-    ~(tool_requirement : string)
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_cascades : string list)
     (err : Agent_sdk.Error.sdk_error) : EC.degraded_retry option =
   let fallback_hint =
@@ -293,7 +293,7 @@ let next_fail_open_cascade_for_turn_with_budget
     ?rotation_cascades
     ~(base_cascade : string)
     ~(effective_cascade : string)
-    ~(tool_requirement : string)
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_cascades : string list)
     ~(estimated_input_tokens : int)
     ~(max_turns : int)

@@ -225,6 +225,7 @@
         test_provider_error
         test_keeper_synthetic_marker
         test_keeper_turn_fsm_wired_sites
+        test_effective_oas_env
         )
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
@@ -423,6 +424,7 @@
           test_provider_error
           test_keeper_synthetic_marker
           test_keeper_turn_fsm_wired_sites
+          test_effective_oas_env
           )
  (libraries masc_test_deps multimodal))
 

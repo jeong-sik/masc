@@ -238,10 +238,10 @@ let run_turn
   | Error e -> Error (Agent_sdk.Error.Internal e)
   | Ok oas_allowed_paths ->
     let require_tool_choice_support =
-      String.equal initial_tool_surface.tool_requirement "required"
+      initial_tool_surface.tool_requirement = Required
     in
     let require_tool_support =
-      String.equal initial_tool_surface.tool_requirement "required"
+      initial_tool_surface.tool_requirement = Required
       && tools <> []
     in
     let timeout_s =

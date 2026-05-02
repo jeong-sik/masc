@@ -2068,7 +2068,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
   {
     turn_lane = "tool_optional";
     tool_surface_class = "mixed";
-    tool_requirement = "optional";
+    tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Optional;
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;
@@ -3965,7 +3965,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quo
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "hard quota degraded retry"
@@ -3975,7 +3975,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Resumable_cli_session
             {
@@ -3992,7 +3992,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Admission_queue_timeout
             {
@@ -4008,7 +4008,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
   in
@@ -4019,7 +4019,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Oas_timeout_budget
             {
@@ -4036,7 +4036,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_cascade_max_turns_error ())
   in
   expect_degraded_retry "max turns degraded retry"
@@ -4046,7 +4046,7 @@ let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       (wrapped_claude_limit_error ())
   in
   check bool "required tool turn stays terminal" true
@@ -4056,7 +4056,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_only_cascade_name
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   check bool "local_only does not broaden further" true
@@ -4066,7 +4066,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery 
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_recovery_cascade_name
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   check bool "local_recovery does not broaden further" true
@@ -4095,7 +4095,7 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -4107,7 +4107,7 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [ "tool_rerank"; KC.default_cascade_name ]
       (wrapped_claude_limit_error ())
@@ -4120,7 +4120,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [
           "tool_rerank";
@@ -4137,7 +4137,7 @@ let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -4149,7 +4149,7 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (wrapped_claude_limit_error ())
   in
@@ -4161,7 +4161,7 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -4179,7 +4179,7 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
         ]
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [
           "tool_rerank";
@@ -4197,7 +4197,7 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
       ~rotation_cascades:[ "resilient_profile" ]
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -4210,7 +4210,7 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
       ~rotation_cascades:[ KC.local_recovery_cascade_name; "required_safe" ]
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -4223,7 +4223,7 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
       ~rotation_cascades:[ KC.local_recovery_cascade_name ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -4236,7 +4236,7 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
       ~rotation_cascades:[ KC.local_recovery_cascade_name; " big_three " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -4249,7 +4249,7 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
       ~rotation_cascades:[ ""; " tool_rerank "; " catalog_next "; "catalog_next" ]
       ~base_cascade:" tool_rerank "
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -4263,7 +4263,7 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
@@ -4277,7 +4277,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [ "ollama_only"; "local_with_kimi_coding_with_glm" ]
       (wrapped_claude_limit_error ())
@@ -4292,7 +4292,7 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
@@ -5230,7 +5230,7 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
@@ -5251,7 +5251,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
@@ -5347,7 +5347,7 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4

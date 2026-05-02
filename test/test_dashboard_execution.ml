@@ -487,7 +487,7 @@ let append_execution_receipt ?(outcome = "ok")
         {
           turn_lane = "tool";
           tool_surface_class = "mixed";
-          tool_requirement = "required";
+          tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;

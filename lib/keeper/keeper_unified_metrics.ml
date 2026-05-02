@@ -955,8 +955,7 @@ let append_decision_record
                 | Some e when String.length e > 0 ->
                   let e_lower = String.lowercase_ascii e in
                   let starts_with prefix =
-                    String.length e_lower >= String.length prefix
-                    && String.sub e_lower 0 (String.length prefix) = prefix
+                    Base.String.is_prefix e_lower ~prefix
                   in
                   let contains needle =
                     string_contains_substring ~needle e_lower

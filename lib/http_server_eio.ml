@@ -425,8 +425,7 @@ module Router = struct
             String.length route.path > 7
             && String.sub route.path 0 7 = "PREFIX:"
             && let prefix = String.sub route.path 7 (String.length route.path - 7) in
-               String.length req_path >= String.length prefix
-               && String.sub req_path 0 (String.length prefix) = prefix
+               Base.String.is_prefix req_path ~prefix
             && List.mem req_method route.methods
           ) routes
         in

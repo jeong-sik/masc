@@ -270,8 +270,7 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
       is_gh_api_read_only cmd_lower
     else
       List.exists (fun prefix ->
-        String.length cmd_lower >= String.length prefix
-        && String.sub cmd_lower 0 (String.length prefix) = prefix
+        Base.String.is_prefix cmd_lower ~prefix
       ) gh_read_only_prefixes
   | Some (Masc Code_git) ->
     if is_effectively_read_only_tool tool_name then true

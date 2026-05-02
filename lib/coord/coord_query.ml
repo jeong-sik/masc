@@ -136,7 +136,7 @@ let audit_orphan_tasks config : (Types.task * string) list =
       || let prefix = assignee ^ "-" in
          List.exists (fun name ->
            String.length name > String.length prefix
-           && String.sub name 0 (String.length prefix) = prefix
+           && Base.String.is_prefix name ~prefix
          ) active_names
     in
     let backlog = read_backlog config in

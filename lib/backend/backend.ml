@@ -810,8 +810,7 @@ module Memory = struct
   let list_keys t ~prefix =
     with_lock t (fun () ->
       let keys = Hashtbl.fold (fun k _ acc ->
-        if String.length k >= String.length prefix &&
-           String.sub k 0 (String.length prefix) = prefix then
+        if Base.String.is_prefix k ~prefix then
           k :: acc
         else acc
       ) t.data [] in

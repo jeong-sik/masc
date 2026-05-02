@@ -1,13 +1,36 @@
 (** Operator-facing keeper sandbox control.
 
     This module keeps Docker lifecycle operations scoped to MASC keeper labels
-    and the active base path.  It deliberately manages only containers with
-    [container_kind=managed]; turn/oneshot containers remain owned by their
-    existing execution paths and stale cleanup. *)
+    and the active base path.  Start operations deliberately manage only
+    [container_kind=managed]; stop operations default to that same safe scope,
+    but can target [turn] or [all] when an operator needs to clear abandoned
+    turn containers before TTL cleanup. *)
 
 open Keeper_types
 
 let managed_kind = "managed"
+let turn_kind = "turn"
+
+type stop_scope =
+  | Stop_managed
+  | Stop_turn
+  | Stop_all
+
+let stop_scope_to_string = function
+  | Stop_managed -> managed_kind
+  | Stop_turn -> turn_kind
+  | Stop_all -> "all"
+
+let parse_stop_scope raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "managed" -> Ok Stop_managed
+  | "turn" -> Ok Stop_turn
+  | "all" -> Ok Stop_all
+  | other ->
+      Error
+        (Printf.sprintf
+           "invalid container_kind %S; expected managed, turn, or all"
+           other)
 
 let now_ms () =
   int_of_float (Unix.gettimeofday () *. 1000.0)
@@ -201,14 +224,24 @@ let start_managed_container
                     Error message))
     | Error err -> Error err
 
-let stop_managed_containers ?keeper_name ~(config : Coord.config)
+let stop_containers ?keeper_name ~scope ~(config : Coord.config)
     ~(timeout_sec : float) () =
+  let container_kind =
+    match scope with
+    | Stop_managed -> Some managed_kind
+    | Stop_turn -> Some turn_kind
+    | Stop_all -> None
+  in
   Keeper_sandbox_runtime.stop_containers
     ?keeper_name
-    ~container_kind:managed_kind
+    ?container_kind
     ~base_path:config.base_path
     ~timeout_sec
     ()
+
+let stop_managed_containers ?keeper_name ~(config : Coord.config)
+    ~(timeout_sec : float) () =
+  stop_containers ?keeper_name ~scope:Stop_managed ~config ~timeout_sec ()
 
 let cleanup_stale ~(config : Coord.config) ~(timeout_sec : float) () =
   Keeper_sandbox_runtime.cleanup_stale_containers

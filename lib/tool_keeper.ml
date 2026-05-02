@@ -1153,55 +1153,62 @@ let handle_keeper_sandbox_start ctx args : tool_result =
 let handle_keeper_sandbox_stop ctx args : tool_result =
   let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
   let prune_stale = get_bool args "prune_stale" false in
+  let container_kind_raw =
+    get_string args "container_kind" Keeper_sandbox_control.managed_kind
+  in
   let keeper_name =
     match String.trim (get_string args "name" "") with
     | "" -> None
     | name -> Some name
   in
-  let stop_result =
-    Keeper_sandbox_control.stop_managed_containers
-      ?keeper_name ~config:ctx.config ~timeout_sec ()
-  in
-  let stale_cleanup =
-    if prune_stale then
-      Some
-        (Keeper_sandbox_control.cleanup_stale ~config:ctx.config
-           ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
-    else
-      None
-  in
-  (match keeper_name with
-   | Some name -> invalidate_status_cache name
-   | None -> Keeper_status_detail.invalidate_status_cache_all ());
-  let stop_json =
-    `Assoc
-      [
-        ("matched", `Int stop_result.matched);
-        ("removed", `Int stop_result.removed);
-        ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
-      ]
-  in
-  let stale_json =
-    match stale_cleanup with
-    | None -> `Null
-    | Some cleanup ->
+  match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
+  | Error err -> (false, err)
+  | Ok scope ->
+      let stop_result =
+        Keeper_sandbox_control.stop_containers
+          ?keeper_name ~scope ~config:ctx.config ~timeout_sec ()
+      in
+      let stale_cleanup =
+        if prune_stale then
+          Some
+            (Keeper_sandbox_control.cleanup_stale ~config:ctx.config
+               ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
+        else
+          None
+      in
+      (match keeper_name with
+       | Some name -> invalidate_status_cache name
+       | None -> Keeper_status_detail.invalidate_status_cache_all ());
+      let stop_json =
         `Assoc
           [
-            ("scanned", `Int cleanup.scanned);
-            ("removed", `Int cleanup.removed);
-            ("errors",
-             `List (List.map (fun err -> `String err) cleanup.errors));
+            ("matched", `Int stop_result.matched);
+            ("removed", `Int stop_result.removed);
+            ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
           ]
-  in
-  ( true,
-    Yojson.Safe.pretty_to_string
-      (`Assoc
-         [
-           ("action", `String "stop");
-           ("keeper", Json_util.string_opt_to_json keeper_name);
-           ("stop_result", stop_json);
-           ("stale_cleanup", stale_json);
-         ]) )
+      in
+      let stale_json =
+        match stale_cleanup with
+        | None -> `Null
+        | Some cleanup ->
+            `Assoc
+              [
+                ("scanned", `Int cleanup.scanned);
+                ("removed", `Int cleanup.removed);
+                ("errors",
+                 `List (List.map (fun err -> `String err) cleanup.errors));
+              ]
+      in
+      ( true,
+        Yojson.Safe.pretty_to_string
+          (`Assoc
+             [
+               ("action", `String "stop");
+               ("keeper", Json_util.string_opt_to_json keeper_name);
+               ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
+               ("stop_result", stop_json);
+               ("stale_cleanup", stale_json);
+             ]) )
 
 (* masc_keeper_reconcile tool removed along with the manual_reconcile
    blocker mechanism. Failed turns record evidence via Keeper_registry;

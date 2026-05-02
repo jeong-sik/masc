@@ -180,6 +180,10 @@ let () =
             Test_operator_control_keeper
             .test_keeper_sandbox_start_status_stop_with_fake_docker;
           Alcotest.test_case
+            "keeper sandbox stop targets turn containers with kind" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_stop_targets_turn_containers_with_kind;
+          Alcotest.test_case
             "keeper turn sandbox factory reuses playground runtime" `Quick
             Test_operator_control_keeper
             .test_keeper_turn_sandbox_factory_reuses_playground_runtime;

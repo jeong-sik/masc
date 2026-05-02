@@ -532,17 +532,22 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_sandbox_stop";
-    description = "Stop managed keeper sandbox containers. By default stops all managed keeper sandbox containers in the current base path.";
+    description = "Stop keeper sandbox containers scoped to this base path. Defaults to managed containers; pass container_kind=turn or container_kind=all to clean abandoned turn containers.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional keeper handle. When omitted, stop all managed keeper sandbox containers for this base path.");
+          ("description", `String "Optional keeper handle. When omitted, stop matching keeper sandbox containers for this base path.");
+        ]);
+        ("container_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "managed"; `String "turn"; `String "all"]);
+          ("description", `String "Container kind to stop. Defaults to managed; use turn for turn-scoped containers such as masc-keeper-turn-*.");
         ]);
         ("prune_stale", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "Also run stale keeper sandbox cleanup after stopping managed containers.");
+          ("description", `String "Also run stale keeper sandbox cleanup after stopping matching containers.");
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");

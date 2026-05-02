@@ -116,7 +116,21 @@ case \"$cmd\" in\n\
     exit 0\n\
     ;;\n\
   ps)\n\
-    if read_state; then\n\
+    want_kind=''\n\
+    while [ \"$#\" -gt 0 ]; do\n\
+      case \"$1\" in\n\
+        --filter)\n\
+          case \"$2\" in\n\
+            label=masc.mcp.kind=*) want_kind=${2#label=masc.mcp.kind=} ;;\n\
+          esac\n\
+          shift 2\n\
+          ;;\n\
+        *)\n\
+          shift\n\
+          ;;\n\
+      esac\n\
+    done\n\
+    if read_state && { [ -z \"$want_kind\" ] || [ \"$kind\" = \"$want_kind\" ]; }; then\n\
       printf '%s\\n' \"$cid\"\n\
     fi\n\
     exit 0\n\
@@ -433,6 +447,112 @@ let test_keeper_sandbox_start_status_stop_with_fake_docker () =
       Alcotest.(check bool) "why_no_container restored" true
         (Option.is_some
            (final_sandbox |> member "why_no_container" |> to_string_option)))
+
+let test_keeper_sandbox_stop_targets_turn_containers_with_kind () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "nick0cave" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      let turn_state =
+        String.concat "\t"
+          [
+            "turn-1";
+            "masc-keeper-turn-nick0cave-none-1-1";
+            "alpine:test";
+            "running";
+            "true";
+            "2026-05-02T00:00:00Z";
+            keeper_name;
+            "turn";
+            "none";
+            string_of_int (Unix.getpid ());
+            "1000";
+            "1800";
+          ]
+        ^ "\n"
+      in
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      write_file state_file turn_state;
+      let ok_default, default_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_stop"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      Alcotest.(check bool) "default sandbox stop ok" true ok_default;
+      let default_json = parse_json_exn default_body in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "default stop scope managed" "managed"
+        (default_json |> member "container_kind" |> to_string);
+      Alcotest.(check int) "default stop ignores turn container" 0
+        (default_json |> member "stop_result" |> member "matched" |> to_int);
+      let ok_invalid, invalid_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_stop"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("container_kind", `String "future");
+              ])
+      in
+      Alcotest.(check bool) "invalid kind rejected" false ok_invalid;
+      Alcotest.(check bool) "invalid kind message actionable" true
+        (contains_substring invalid_body
+           "expected managed, turn, or all");
+      let invalid_json = parse_json_exn invalid_body in
+      Alcotest.(check string) "invalid kind typed validation error"
+        "validation_error"
+        (invalid_json |> member "error_code" |> to_string);
+      let ok_turn, turn_body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_stop"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("container_kind", `String "turn");
+              ])
+      in
+      Alcotest.(check bool) "turn sandbox stop ok" true ok_turn;
+      let turn_json = parse_json_exn turn_body in
+      Alcotest.(check string) "turn stop scope surfaced" "turn"
+        (turn_json |> member "container_kind" |> to_string);
+      Alcotest.(check int) "turn stop matches turn container" 1
+        (turn_json |> member "stop_result" |> member "matched" |> to_int);
+      Alcotest.(check int) "turn stop removes turn container" 1
+        (turn_json |> member "stop_result" |> member "removed" |> to_int);
+      let log = read_file log_path in
+      Alcotest.(check bool) "turn stop filters by kind label" true
+        (contains_substring log "--filter label=masc.mcp.kind=turn");
+      Alcotest.(check bool) "turn stop filters by keeper label" true
+        (contains_substring log
+           ("--filter label=masc.mcp.keeper=" ^ keeper_name));
+      Alcotest.(check bool) "turn stop filters by base path hash label" true
+        (contains_substring log "--filter label=masc.mcp.base_path_hash=");
+      Alcotest.(check bool) "turn container removed by id" true
+        (contains_substring log "rm -f turn-1"))
 
 let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
   let base_dir = temp_dir () in

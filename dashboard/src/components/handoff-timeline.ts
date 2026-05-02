@@ -289,7 +289,7 @@ export function HandoffTimeline({
     <section role="region" aria-label="A2A 이벤트 타임라인" class="rounded-[var(--r-1)] border border-card-border bg-card-bg p-4 flex flex-col gap-3">
       <header class="flex items-baseline justify-between">
         <div>
-          <h3 class="text-sm font-semibold text-text">A2A Event Timeline</h3>
+          <h3 class="text-sm font-semibold text-text-strong">A2A Event Timeline</h3>
           <p class="text-2xs text-text-muted">
             OAS event_bus → SSE relay. 최근 ${Math.round(windowMs / 1000 / 60)}분, keeper당 row.
           </p>
@@ -309,7 +309,7 @@ export function HandoffTimeline({
           placeholder="keeper / event / task / peer 필터"
           aria-label="Handoff timeline 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
+          class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-card-border bg-bg-1/40 px-2 py-1 text-2xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
         />
       </div>
       ${error !== null
@@ -345,8 +345,8 @@ export function HandoffTimeline({
                 ${visibleRows.map(row => {
                   const isSelected = selectedKeeper === row.keeper
                   const labelCls = isSelected
-                    ? 'text-text ring-1 ring-accent-fg bg-[var(--accent-10)]'
-                    : 'text-text-muted hover:text-text hover:bg-bg-1/60'
+                    ? 'text-text-strong ring-1 ring-accent-fg bg-[var(--accent-10)]'
+                    : 'text-text-muted hover:text-text-strong hover:bg-bg-1/60'
                   const clickable = typeof onSelectKeeper === 'function'
                   const rowLabelCls =
                     `w-32 shrink-0 truncate text-2xs font-mono rounded-[var(--r-1)] px-1 text-left ${labelCls}` +

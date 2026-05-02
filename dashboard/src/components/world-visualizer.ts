@@ -42,6 +42,12 @@ function yjsWebsocketUrl(): string | null {
   )
 }
 
+/** Resolve a CSS custom property for Canvas 2D fillStyle/strokeStyle. */
+function cssVar(prop: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  return getComputedStyle(document.documentElement).getPropertyValue(prop).trim() || fallback
+}
+
 export function WorldVisualizer() {
   const [keepers, setKeepers] = useState<KeeperState[]>([])
   const [traces, setTraces] = useState<Trace[]>([])
@@ -91,9 +97,15 @@ export function WorldVisualizer() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    // Resolve design tokens for canvas rendering (Cockpit SPEC compliance)
+    const activeColor = cssVar('--color-status-ok', '#6b9e6b')
+    const pausedColor = cssVar('--color-status-err', '#c46a5a')
+    const traceColor = cssVar('--agent-working', '#7ae09a')
+    const textColor = cssVar('--fg-1', '#f0e9dc')
+
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    
+
     const centerX = canvas.width / 2
     const centerY = canvas.height / 2
 
@@ -103,8 +115,10 @@ export function WorldVisualizer() {
       const x = centerX + Math.cos(trace.position) * (trace.position % 100)
       const y = centerY + Math.sin(trace.position) * (trace.position % 100)
       ctx.arc(x, y, 3, 0, 2 * Math.PI)
-      ctx.fillStyle = 'rgba(0, 255, 128, 0.4)'
+      ctx.globalAlpha = 0.4
+      ctx.fillStyle = traceColor
       ctx.fill()
+      ctx.globalAlpha = 1.0
     })
 
     // Draw Keepers
@@ -115,18 +129,14 @@ export function WorldVisualizer() {
       const x = centerX + Math.cos(angle) * radius
       const y = centerY + Math.sin(angle) * radius
 
-      if (keeper.state === 'active') {
-        ctx.fillStyle = '#00FF00'
-      } else {
-        ctx.fillStyle = '#FF0000'
-      }
+      ctx.fillStyle = keeper.state === 'active' ? activeColor : pausedColor
 
       ctx.arc(x, y, 8, 0, 2 * Math.PI)
       ctx.fill()
-      ctx.fillStyle = '#FFF'
+      ctx.fillStyle = textColor
       ctx.font = '10px monospace'
       ctx.fillText(keeper.name, x + 12, y + 4)
-      
+
       // Local Sight lines
       traces.slice(-6).forEach(trace => {
         const tx = centerX + Math.cos(trace.position) * (trace.position % 100)
@@ -134,21 +144,23 @@ export function WorldVisualizer() {
         ctx.beginPath()
         ctx.moveTo(x, y)
         ctx.lineTo(tx, ty)
-        ctx.strokeStyle = 'rgba(0, 255, 128, 0.1)'
+        ctx.globalAlpha = 0.1
+        ctx.strokeStyle = traceColor
         ctx.stroke()
+        ctx.globalAlpha = 1.0
       })
     })
   }, [keepers, traces])
 
   return html`
-    <div style=${{ padding: '20px', background: '#111', color: '#FFF', borderRadius: '8px', marginBottom: '20px' }}>
+    <div style=${{ padding: '20px', background: 'var(--bg-0)', color: 'var(--fg-1)', borderRadius: '8px', marginBottom: '20px' }}>
       <h2 style=${{ margin: 0, paddingBottom: '10px' }}>Dream IDE: 7 Physical Laws Visualization</h2>
-      <p style=${{ fontSize: '12px', color: '#AAA' }}>Stigmergy Intensity • Local Sight (Max 6) • Active Inference</p>
-      <canvas 
-        ref=${canvasRef} 
-        width=${800} 
-        height=${300} 
-        style=${{ border: '1px solid #333', background: '#000', display: 'block', margin: '0 auto' }} 
+      <p style=${{ fontSize: '12px', color: 'var(--fg-3)' }}>Stigmergy Intensity · Local Sight (Max 6) · Active Inference</p>
+      <canvas
+        ref=${canvasRef}
+        width=${800}
+        height=${300}
+        style=${{ border: '1px solid var(--line-1)', background: 'var(--bg-0)', display: 'block', margin: '0 auto' }}
       />
     </div>
   `

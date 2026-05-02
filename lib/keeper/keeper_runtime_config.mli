@@ -68,6 +68,9 @@ val resolve_overrides :
       board_generic_wakeup_limit  = 3
       board_wakeup_max            = 4
 
+      [proactive]
+      min_interval_sec            = 900
+
       [turn]
       stream_idle_timeout_sec   = 120
       tool_cost_max_usd           = 1.25

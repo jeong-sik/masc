@@ -1178,6 +1178,38 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
   check string "bootstrap channel is scheduled_autonomous" "scheduled_autonomous"
     (WO.channel_to_string decision.channel)
 
+let test_provider_cooldown_blocks_bootstrap_turn () =
+  let meta =
+    { minimal_meta with
+      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      proactive =
+        { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta obs
+  in
+  check bool "provider cooldown blocks bootstrap turn" false decision.should_run;
+  check bool "bootstrap cooldown skip reason emitted" true
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest) } ->
+         List.exists
+           (function
+             | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+             | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
+
 (* Phase 2 — Minimum proactive cadence *)
 
 let test_min_interval_fires_without_work_signal () =
@@ -1278,6 +1310,39 @@ let test_min_interval_never_fires_for_bootstrap () =
        | WO.Run { reasons = (first, rest) } ->
            List.mem WO.Never_started (first :: rest)
        | WO.Skip _ -> false))
+
+let test_provider_cooldown_blocks_min_interval_turn () =
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+        ~meta obs
+    in
+    check bool "provider cooldown blocks min-interval turn" false decision.should_run;
+    check bool "min-interval cooldown skip reason emitted" true
+      (match decision.verdict with
+       | WO.Skip { reasons = (first, rest) } ->
+           List.exists
+             (function
+               | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+               | _ -> false)
+             (first :: rest)
+       | WO.Run _ -> false))
 
 let test_runtime_trust_snapshot_tolerates_null_telemetry () =
   Eio_main.run @@ fun env ->
@@ -6657,12 +6722,16 @@ let () =
             test_bootstrap_turn_fires_when_never_started;
           test_case "bootstrap: channel is scheduled_autonomous" `Quick
             test_bootstrap_turn_emits_scheduled_autonomous_channel;
+          test_case "bootstrap: provider cooldown blocks first turn" `Quick
+            test_provider_cooldown_blocks_bootstrap_turn;
           test_case "min interval: fires without work signal after interval" `Quick
             test_min_interval_fires_without_work_signal;
           test_case "min interval: does not fire before elapsed" `Quick
             test_min_interval_does_not_fire_before_elapsed;
           test_case "min interval: never fires for bootstrap turn" `Quick
             test_min_interval_never_fires_for_bootstrap;
+          test_case "min interval: provider cooldown blocks turn" `Quick
+            test_provider_cooldown_blocks_min_interval_turn;
 	          test_case "runtime trust snapshot tolerates null telemetry" `Quick
 	            test_runtime_trust_snapshot_tolerates_null_telemetry;
 	          test_case "runtime trust snapshot surfaces terminal reason" `Quick

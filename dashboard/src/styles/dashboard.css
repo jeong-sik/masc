@@ -96,7 +96,7 @@
   &:hover { color: var(--vote-hover); }
   &.upvote:hover, &.upvote.active { color: var(--vote-up); }
   &.downvote:hover, &.downvote.active { color: var(--vote-down); }
-  &.animate { animation: votePop 0.3s ease; }
+  &.animate { animation: votePop 0.3s var(--ease-out); }
 }
 
 /* Board comments: compound selector, kept as raw CSS */

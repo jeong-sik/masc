@@ -122,7 +122,7 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       ~rotation_cascades:[ "catalog_first"; "base_only" ]
       ~base_cascade:"base_only"
       ~effective_cascade:"tool_use_strict"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_use_strict" ]
       err
   with

@@ -740,8 +740,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             if
               Keeper_agent_run.should_require_tools_for_initial_turn
                 ~max_turns ~turn_affordances
-            then "required"
-            else "optional"
+            then Keeper_agent_tool_surface.Required
+            else Keeper_agent_tool_surface.Optional
           in
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =

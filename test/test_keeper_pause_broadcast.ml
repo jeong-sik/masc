@@ -12,7 +12,7 @@ open Alcotest
 module R = Masc_mcp.Keeper_execution_receipt
 module U = Yojson.Safe.Util
 
-let mk_tool_surface ?(tool_requirement = "required")
+let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
     ?(required_tools = []) ?(missing_required_tools = []) () :
     R.tool_surface =
   {
@@ -37,7 +37,7 @@ let mk_receipt
     ?(requested_tools = [])
     ?(required_tools = [])
     ?(missing_required_tools = [])
-    ?(tool_requirement = "required")
+    ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
     ?(cascade_outcome = "completed")
     ?current_task_id
     ?stop_reason

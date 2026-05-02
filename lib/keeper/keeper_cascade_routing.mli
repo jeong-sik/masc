@@ -39,5 +39,5 @@ val select_cascade :
     and provider capability gate own the concrete candidate set. *)
 val route_effective_cascade_for_tool_requirement :
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   routing_decision

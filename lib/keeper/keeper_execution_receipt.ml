@@ -65,10 +65,12 @@ let assert_receipt_authoritative ~outcome ~turn_state =
       Error { outcome = "receipt_skipped"; turn_state = other }
   | (`Error | `Cancelled), _ -> Ok ()
 
+type tool_requirement = Keeper_agent_tool_surface.tool_requirement
+
 type tool_surface =
   { turn_lane : string
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -295,7 +297,7 @@ let operator_disposition (receipt : t) =
   else if provider_runtime_failure then
     ("pause_human", "provider_runtime_error")
   else if
-    String.equal receipt.tool_surface.tool_requirement "required"
+    receipt.tool_surface.tool_requirement = Required
     && (List.mem tool_contract_result
           [
             "violated";
@@ -452,7 +454,7 @@ let to_json (receipt : t) =
           [
             ("turn_lane", `String receipt.tool_surface.turn_lane);
             ("tool_surface_class", `String receipt.tool_surface.tool_surface_class);
-            ("tool_requirement", `String receipt.tool_surface.tool_requirement);
+            ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson receipt.tool_surface.tool_requirement);
             ("visible_tool_count", `Int receipt.tool_surface.visible_tool_count);
             ("tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
@@ -602,7 +604,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; ( "missing_required_tools",
               list_json receipt.tool_surface.missing_required_tools )
           ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; "tool_requirement", `String receipt.tool_surface.tool_requirement
+          ; "tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson receipt.tool_surface.tool_requirement
           ; "tool_surface_class", `String receipt.tool_surface.tool_surface_class
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ] )

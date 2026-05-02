@@ -77,7 +77,7 @@ val recoverable_cascade_failure_reason :
     do not broaden further. *)
 val degraded_retry_after_recoverable_error :
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 
@@ -99,7 +99,7 @@ val degraded_rotation_after_recoverable_error :
   ?fallback_hint:string ->
   base_cascade:string ->
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_cascades:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option

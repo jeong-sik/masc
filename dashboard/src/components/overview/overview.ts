@@ -353,7 +353,7 @@ export function Overview() {
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
   const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="flex flex-col gap-8">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />

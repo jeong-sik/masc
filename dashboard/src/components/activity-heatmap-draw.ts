@@ -53,7 +53,7 @@ export function drawHeatmap(
   const h = canvasHeight()
 
   // Background
-  ctx.fillStyle = '#0f1117'
+  ctx.fillStyle = 'var(--color-bg-surface)'
   ctx.fillRect(0, 0, w, h)
 
   // Hour labels (top)

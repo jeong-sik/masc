@@ -28,6 +28,54 @@ module Float = Stdlib.Float
     Must be called after all tool schemas are registered (server init).
 
     Tools without a registered schema are allowed through (permissive). *)
+let is_internal_marker_key key =
+  String.length key > 0 && Char.equal key.[0] '_'
+
+let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
+  match args with
+  | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> not (is_internal_marker_key key)) fields)
+  | _ -> args
+
+let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
+  match args with
+  | `Assoc fields ->
+      let has key =
+        List.exists (fun (field, _) -> String.equal field key) fields
+      in
+      let fields =
+        if has "note" && not (has "notes") then
+          List.map
+            (fun (key, value) ->
+              if String.equal key "note" then ("notes", value) else (key, value))
+            fields
+        else
+          List.filter
+            (fun (key, _) -> not (String.equal key "note" && has "notes"))
+            fields
+      in
+      let has key =
+        List.exists (fun (field, _) -> String.equal field key) fields
+      in
+      let fields =
+        if has "to" && not (has "action") then
+          List.map
+            (fun (key, value) ->
+              if String.equal key "to" then ("action", value) else (key, value))
+            fields
+        else
+          List.filter
+            (fun (key, _) -> not (String.equal key "to" && has "action"))
+            fields
+      in
+      `Assoc fields
+  | _ -> args
+
+let prepare_args ~name args =
+  let args = strip_internal_marker_args args in
+  if String.equal name "masc_transition" then normalize_transition_args args
+  else args
+
 let register_pre_hook () =
   let lookup name =
     Option.map
@@ -36,7 +84,12 @@ let register_pre_hook () =
   in
   let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
-    match hook ~name ~args with
+    let prepared_args = prepare_args ~name args in
+    match hook ~name ~args:prepared_args with
+    | Agent_sdk.Tool_middleware.Pass
+      when not (Yojson.Safe.equal prepared_args args) ->
+      Log.debug "tool_input_validation normalized args for %s" name;
+      Proceed prepared_args
     | Agent_sdk.Tool_middleware.Pass -> Pass
     | Agent_sdk.Tool_middleware.Proceed coerced ->
       Log.debug "tool_input_validation coerced args for %s" name;
@@ -52,4 +105,3 @@ let register_pre_hook () =
         tool_name = name;
         duration_ms = 0.0;
       })
-

@@ -312,7 +312,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
                 <span class="text-2xs text-[var(--color-fg-muted)]">${node.weight}회</span>
               </div>
               <div class="h-1 rounded-sm bg-[var(--color-bg-panel-alt)] overflow-hidden">
-                <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
+                <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style="width:${pct}%"></div>
               </div>
             </div>
             <span class="text-sm font-semibold text-[var(--color-fg-muted)]-light min-w-8 text-right">${score.toFixed(1)}</span>

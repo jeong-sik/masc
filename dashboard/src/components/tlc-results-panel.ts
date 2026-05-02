@@ -178,7 +178,7 @@ function ResultsTable({ entries }: { entries: TlcResultEntry[] }) {
         </thead>
         <tbody>
           ${entries.map((entry) => html`
-            <tr class="border-t border-[var(--white-10)]">
+            <tr class="border-t border-[var(--color-border-default)]">
               <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.spec_name}</td>
               <td class="py-1 pr-4 font-mono text-[var(--color-fg-muted)]">${entry.cfg_name}</td>
               <td class="py-1 pr-4">

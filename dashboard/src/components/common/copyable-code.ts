@@ -60,7 +60,7 @@ export function copyableWrapperClasses(variant: CopyableVariant): string {
       return 'border-[var(--accent-30)] bg-[var(--accent-12)] px-2.5 py-2'
     case 'secondary':
     default:
-      return 'border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1.5'
+      return 'border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-1.5'
   }
 }
 
@@ -100,7 +100,7 @@ export function CopyableCode({
   const labelTone = copyableLabelClasses(variant)
   return html`
     <div
-      class=${`group flex items-center gap-2 rounded-[var(--r-1)] border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
+      class=${`group flex items-center gap-2 rounded-[var(--r-1)] border transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--white-4)] ${wrapperTone}`}
       data-copyable-code
       data-copyable-variant=${variant}
       data-copied=${justCopied ? 'true' : 'false'}

@@ -97,7 +97,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   },
   idle: {
     bg: 'bg-[var(--white-3)]',
-    border: 'border-[var(--white-8)]',
+    border: 'border-[var(--color-border-default)]',
     text: 'text-[var(--color-fg-disabled)]',
     dot: 'bg-[var(--white-10)]',
     icon: '·',

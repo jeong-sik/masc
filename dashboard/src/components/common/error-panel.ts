@@ -47,7 +47,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
   if (items.length === 0) {
     return html`
       <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-panel)] backdrop-blur-xl">
-        <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)]">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-divider)]">
           <span class="text-xs font-medium text-[var(--color-fg-muted)]">에러 없음</span>
           <${ActionButton} variant="subtle" size="sm" class="p-0.5" ariaLabel="에러 패널 닫기" onClick=${onClose}>
             <${X} size=${14} />
@@ -62,7 +62,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
 
   return html`
     <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-panel)] backdrop-blur-xl flex flex-col" role="alert">
-      <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)] shrink-0">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-divider)] shrink-0">
         <span class="text-xs font-medium text-[var(--color-fg-muted)]">미확인 에러 <span class="text-[var(--color-status-err)]">${items.length}</span>건</span>
         <div class="flex items-center gap-1">
           <${ActionButton}

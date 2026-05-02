@@ -143,10 +143,10 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
   return html`
     <section
       data-testid="composite-fsm-flowchart"
-      class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] contain-content ${props.class ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] contain-content ${props.class ?? ''}"
       aria-label="복합 FSM 플로우차트"
     >
-      <header class="border-b border-[var(--white-10)] p-3">
+      <header class="border-b border-[var(--color-border-default)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">
           복합 FSM 플로우차트 (TLA+ spec)
         </h2>

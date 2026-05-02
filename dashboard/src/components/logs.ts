@@ -185,7 +185,7 @@ function sourceTone(source: string): string {
     case 'legacy_traceln':
       return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
-      return 'text-[var(--color-fg-muted)] bg-[var(--white-3)] border-[var(--white-10)]'
+      return 'text-[var(--color-fg-muted)] bg-[var(--white-3)] border-[var(--color-border-default)]'
   }
 }
 
@@ -252,7 +252,7 @@ export function renderLogRow(entry: LogEntry) {
   return html`
     <div
       key=${entry.seq}
-      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[var(--white-5)] px-3 py-3 ${backgroundClass}"
+      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
     >
       <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}
@@ -368,7 +368,7 @@ export function LogViewer() {
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
       <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
-        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
+        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
               class="logs-select px-3 py-2 text-xs"
@@ -417,7 +417,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"

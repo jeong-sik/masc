@@ -408,7 +408,7 @@ export function AgentProfile({ name }: { name: string }) {
                 </div>
               ` : null}
               ${interests.length > 0 ? html`
-                <div class="border-t border-[var(--white-6)] pt-2 mt-2">
+                <div class="border-t border-[var(--color-border-default)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
                     ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]" key=${t}>${t}</span>`)}

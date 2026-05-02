@@ -655,7 +655,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded-md border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
+              class="shrink-0 rounded-md border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
               style="color:${horizonColor(node.horizon)}"
             >
               ${horizonLabel(node.horizon)}
@@ -672,7 +672,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             ${node.metric ? html`
               <span
-                class="rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-3)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
+                class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
                 title=${`metric · ${node.metric}${node.target_value ? ` → ${node.target_value}` : ''}`}
               >
                 <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
@@ -966,12 +966,12 @@ function GoalDetailPanel({
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
-            <span class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
+            <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
             ${selectedNode.metric ? html`
               <span
-                class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
                 title="이 목표가 추적하는 metric"
               >
                 <span class="text-text-muted">metric</span>
@@ -1255,7 +1255,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

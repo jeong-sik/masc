@@ -77,7 +77,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     <div class="flex items-center gap-1.5">
       <select
         aria-label="Cascade 프로필 선택"
-        class="py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)] cursor-pointer"
+        class="py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--color-border-default)] cursor-pointer"
         title=${invalidProfiles.length > 0
           ? `Cascade 프로필\n\n비활성화된 잘못된 프로필:\n${invalidSummary}`
           : 'Cascade 프로필'}
@@ -153,7 +153,7 @@ export function KeeperDetailMissingState({
         <div class="mt-4">
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
+            class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
             onClick=${onClose}
           >
             목록으로 돌아가기
@@ -180,12 +180,12 @@ export function KeeperDetailHeaderInfo({
       <button
         type="button"
         onClick=${onClose}
-        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
+        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
       >
         <span aria-hidden="true">←</span>
         목록
       </button>
-      <div class="size-12 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+      <div class="size-12 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
       <div class="flex flex-col gap-0.5">
         <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
@@ -262,7 +262,7 @@ function KeeperDetailQuickFact({
   children: ComponentChildren
 }) {
   return html`
-    <div class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
+    <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
       <${SectionLabel}>${label}</${SectionLabel}>
       <div class="mt-1 text-sm font-medium leading-snug text-[var(--color-fg-primary)]">${children}</div>
     </div>
@@ -311,13 +311,13 @@ export function KeeperDetailOverviewSidebar({
           <//>
         </div>
 
-        <div class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] p-3.5">
+        <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3.5">
           <${SectionLabel}>빠른 이동</${SectionLabel}>
           <div class="mt-3 flex flex-col gap-2">
             ${KEEPER_DETAIL_SECTIONS.map((section) => html`
               <button
                 type="button"
-                class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
+                class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
                 onClick=${() => scrollToKeeperDetailSection(section.id)}
               >
                 <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
@@ -350,7 +350,7 @@ export function KeeperDetailSection({
       class="scroll-mt-24 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
       aria-label=${title}
     >
-      <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">
+      <div class="border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
         <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--color-fg-muted)]">${eyebrow}</div>
         <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
           <div>

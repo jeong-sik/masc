@@ -323,7 +323,7 @@ export function HeaderMiniStat({
   const valueTone = headerStatToneClass(tone)
   return html`
     <div
-      class="flex min-w-15 flex-col items-end justify-center rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1 text-right"
+      class="flex min-w-15 flex-col items-end justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-1 text-right"
       data-header-mini-stat=${label}
       data-header-mini-stat-tone=${tone}
       data-testid=${testId}
@@ -1634,7 +1634,7 @@ export function ConnectorStatusPanel() {
 
   if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-6 text-center text-xs text-[var(--color-fg-disabled)]">
         ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
       </div>
     `

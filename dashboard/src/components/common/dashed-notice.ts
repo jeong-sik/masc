@@ -28,7 +28,7 @@ export function dashedNoticeClasses(
   extra?: string,
 ): string {
   const borderClass = border === 'subtle'
-    ? 'border-[var(--white-8)]'
+    ? 'border-[var(--color-border-default)]'
     : 'border-[var(--color-border-default)]'
   const sized = size === 'md'
     ? 'rounded-[var(--r-1)] px-4 py-6 text-xs'

@@ -88,7 +88,7 @@ export function credentialTypeBadgeClass(type: CredentialType): string {
     case 'gitlab':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'local':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+      return 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
   }
 }
 
@@ -112,9 +112,9 @@ export function credentialStateBadgeClass(state: CredentialState | null | undefi
     case 'Stale':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'Unmaterialized':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+      return 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
     default:
-      return 'bg-[var(--white-5)] text-text-muted border-[var(--white-10)]'
+      return 'bg-[var(--white-5)] text-text-muted border-[var(--color-border-default)]'
   }
 }
 

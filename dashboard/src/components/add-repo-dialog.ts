@@ -159,8 +159,8 @@ export function AddRepoDialog() {
         if (e.target === e.currentTarget) closeAddRepoDialog()
       }}
     >
-      <div class="w-full max-w-lg rounded-xl border border-[var(--white-10)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] mx-4">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--white-10)]">
+      <div class="w-full max-w-lg rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] mx-4">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-default)]">
           <h2 id="add-repo-title" class="text-sm font-semibold text-[var(--color-fg-secondary)]">
             저장소 추가
           </h2>
@@ -284,7 +284,7 @@ export function AddRepoDialog() {
             : null}
         </div>
 
-        <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--white-10)]">
+        <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-border-default)]">
           <button
             type="button"
             class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--color-fg-secondary)] hover:bg-[var(--white-15)] transition-colors"

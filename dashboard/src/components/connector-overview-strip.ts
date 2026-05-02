@@ -261,7 +261,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       class=${`flex min-w-0 flex-col gap-3 rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-3 transition-colors ${
         selected
           ? 'border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
-          : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
+          : 'border-[var(--color-border-default)] hover:border-[var(--color-border-default)]'
       }`}
       data-overview-tile=${id}
       data-overview-selected=${selected ? 'true' : 'false'}

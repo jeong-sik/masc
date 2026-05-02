@@ -104,7 +104,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   return html`
     <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
       <div class="flex items-center gap-2 text-sm">
-        <div class="flex-shrink-0 size-6 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
+        <div class="flex-shrink-0 size-6 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>

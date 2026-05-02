@@ -45,7 +45,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
     }
   }
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>

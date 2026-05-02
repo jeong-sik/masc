@@ -380,7 +380,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
 function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
   const pct = Math.round(s.weight * 100)
   return html`
-    <tr class="border-b border-[var(--white-10)]">
+    <tr class="border-b border-[var(--color-border-default)]">
       <td class="py-1.5 px-2 text-sm font-mono">
         <button
           class="hover:text-[var(--color-accent-fg)] hover:underline focus:outline-none focus:text-[var(--color-accent-fg)]"
@@ -419,7 +419,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
-    <div class="border border-[var(--white-10)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
+    <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--color-border-default)] transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
@@ -440,7 +440,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
               <div class="mt-1.5 space-y-0.5">
                 ${ep.learnings.map(
                   (l: string) =>
-                    html`<div class="text-xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--white-10)]">${l}</div>`,
+                    html`<div class="text-xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${l}</div>`,
                 )}
               </div>
             `
@@ -546,7 +546,7 @@ export function MemorySubsystems() {
 
   return html`
     <div class="space-y-6">
-      <div class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
         이 화면은 <span class="text-[var(--color-fg-muted)] font-medium">global memory surface</span>만 보여줍니다.
         institution episodes와 Hebbian graph는 여기서 보고,
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
@@ -633,7 +633,7 @@ export function MemorySubsystems() {
                     : html`<div class="overflow-x-auto">
                         <table class="w-full text-left" aria-label="Hebbian 시냅스 상세 테이블">
                           <thead>
-                            <tr class="border-b border-[var(--white-10)] text-xs text-[var(--color-fg-muted)]">
+                            <tr class="border-b border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
                               <th scope="col" class="py-1.5 px-2">출처</th>
                               <th scope="col" class="py-1.5 px-2"><span class="sr-only">방향</span></th>
                               <th scope="col" class="py-1.5 px-2">대상</th>
@@ -666,7 +666,7 @@ export function MemorySubsystems() {
 
         ${
           pairFilter
-            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--white-10)] rounded-[var(--r-1)] text-xs">
+            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-xs">
                 <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
                 <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
                 <button
@@ -712,7 +712,7 @@ export function MemorySubsystems() {
             hasFilter
               ? html`<button
                   onClick=${clearFilters}
-                  class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--white-10)] rounded-[var(--r-1)] hover:border-[var(--white-10)]0"
+                  class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--color-border-default)] rounded-[var(--r-1)] hover:border-[var(--color-border-default)]0"
                 >
                   필터 해제
                 </button>`

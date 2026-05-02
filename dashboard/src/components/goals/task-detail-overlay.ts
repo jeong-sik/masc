@@ -36,7 +36,7 @@ import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
 import type { Task, TaskGateEvaluation } from '../../types'
 
-const CARD_BOX = 'rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3'
+const CARD_BOX = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-3'
 
 function SectionTitle({ children }: { children: unknown }) {
   return html`<div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">${children}</div>`
@@ -102,7 +102,7 @@ function TaskEventsSection() {
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
           <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
+            <div class="size-7 shrink-0 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
@@ -201,7 +201,7 @@ function gateTone(status?: string | null): string {
     case 'ready': return 'text-ok border-ok/25 bg-ok/10'
     case 'blocked': return 'text-bad border-bad/25 bg-bad/10'
     case 'inconclusive': return 'text-warn border-warn/25 bg-warn/10'
-    default: return 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'
+    default: return 'text-text-muted border-[var(--color-border-default)] bg-[var(--white-5)]'
   }
 }
 
@@ -246,7 +246,7 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
           <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">
             검증 대기
@@ -296,7 +296,7 @@ function ContractSection({ task }: { task: Task }) {
           <div class="text-xs font-medium text-text-strong">필수 증거</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
-              <span key=${item} class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
             `)}
           </div>
         </div>
@@ -437,7 +437,7 @@ export function TaskDetailOverlay() {
         <button
           ref=${closeButtonRef}
           type="button"
-          class="shrink-0 size-8 flex items-center justify-center rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="shrink-0 size-8 flex items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
         ><${X} size=${16} /></button>
@@ -468,7 +468,7 @@ export function TaskDetailOverlay() {
           ${task.description ? html`
             <div>
               <${SectionTitle}>설명</${SectionTitle}>
-              <div class="rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
             </div>

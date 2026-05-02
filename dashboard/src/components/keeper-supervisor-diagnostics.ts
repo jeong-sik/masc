@@ -174,7 +174,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
-                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
+                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
                     onClick=${() => { crashShowAll.value = !crashShowAll.value }}
                     aria-pressed=${crashShowAll.value}>
                     ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}

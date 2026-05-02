@@ -104,7 +104,7 @@ export function FailureHistory({
             <div
               key=${f.id}
               role="listitem"
-              class="flex items-start gap-2 rounded-[var(--r-1)] border border-[var(--white-5)] p-2"
+              class="flex items-start gap-2 rounded-[var(--r-1)] border border-[var(--color-border-divider)] p-2"
               data-failure-id=${f.id}
             >
               <span class="mt-0.5 text-xs" aria-hidden="true">${icon}</span>

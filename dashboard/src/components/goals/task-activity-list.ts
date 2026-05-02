@@ -164,7 +164,7 @@ export function TaskActivityList({
             class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium border cursor-pointer transition-colors ${
               filter === chip.key
                 ? 'border-accent/40 bg-accent/12 text-[var(--color-accent-fg)]'
-                : 'border-[var(--white-10)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)]'
+                : 'border-[var(--color-border-default)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)]'
             }"
             onClick=${() => { activeFilter.value = chip.key }}
           >${chip.label}</button>

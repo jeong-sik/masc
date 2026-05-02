@@ -756,7 +756,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
-                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
@@ -777,7 +777,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
                   <${MonoBadge}>${pr.branch}</${MonoBadge}>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
@@ -793,7 +793,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">워크트리 (${worktrees.length})</${SectionHeader}>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
-                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
+                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
               `)}
             </div>
           </div>
@@ -1017,12 +1017,12 @@ export function KeeperDetailPage() {
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
                     하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </span>`
                 : null}
               ${keeper.last_speech_act
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
                     최근 <span class="font-mono text-[var(--color-fg-primary)]">${keeper.last_speech_act}</span>
                   </span>`
                 : null}
@@ -1046,7 +1046,7 @@ export function KeeperDetailPage() {
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview

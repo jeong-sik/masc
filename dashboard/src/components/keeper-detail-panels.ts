@@ -759,11 +759,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
-                <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-2">
                   <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>
                 </div>
@@ -831,7 +831,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>latest turn input</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(latestTotal)}</span>
           </div>
-          <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
+          <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--color-border-default)] bg-[var(--white-2)] flex">
             ${latestEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`<div

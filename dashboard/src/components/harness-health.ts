@@ -212,8 +212,8 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
       </div>
 
       <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-disabled)]">
-        <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
-        <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1">실선: 실시간 신호</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1">점선: 스냅샷 갱신</span>
         <span class="rounded-[var(--r-0)] border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
       </div>
 
@@ -222,7 +222,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
         prefix="harness-flow"
         fallbackText=${fallbackText}
         minHeightClass="min-h-65"
-        diagramClass="border border-[var(--white-8)]"
+        diagramClass="border border-[var(--color-border-default)]"
       />
     </div>
   `
@@ -264,7 +264,7 @@ export function HarnessHealth() {
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
-        <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
@@ -274,12 +274,12 @@ export function HarnessHealth() {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-[var(--r-1)] border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
               <button
                 type="button"
-                class="rounded-[var(--r-1)] border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
               >오토리서치 보기</button>
             </div>
@@ -311,7 +311,7 @@ export function HarnessHealth() {
           </div>
         </div>
 
-        <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
           ${data.scope_note}
         </div>
 
@@ -382,7 +382,7 @@ export function HarnessHealth() {
               ] satisfies KpiStripIslandData['cells']}
             />
 
-            <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 

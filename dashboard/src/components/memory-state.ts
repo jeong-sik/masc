@@ -270,7 +270,7 @@ export function visibilityLabel(vis: string): string | null {
 }
 
 export function visibilityBadgeColor(vis: string): string {
-  if (vis === 'internal') return 'bg-[var(--white-10)] text-[var(--purple)] border-[var(--white-20)]'
+  if (vis === 'internal') return 'bg-[var(--white-10)] text-[var(--purple)] border-[var(--color-border-strong)]'
   return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
 }
 

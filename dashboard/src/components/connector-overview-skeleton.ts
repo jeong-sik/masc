@@ -40,7 +40,7 @@ const LINE = 'h-3 rounded-[var(--r-1)] bg-[var(--white-4)] animate-pulse'
 function TileSkeleton() {
   return html`
     <div
-      class="flex min-w-0 flex-col gap-2 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3"
+      class="flex min-w-0 flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-overview-skeleton-tile
     >
       <div class="flex min-w-0 items-center gap-2">

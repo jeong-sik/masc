@@ -133,7 +133,7 @@ describe('CopyableCode', () => {
     render(html`<${CopyableCode} label="tail" command="./run.sh tail" />`, container)
     const wrap = container.querySelector('[data-copyable-code]')!
     expect(wrap.getAttribute('data-copyable-variant')).toBe('secondary')
-    expect(wrap.className).toContain('border-[var(--white-8)]')
+    expect(wrap.className).toContain('border-[var(--color-border-default)]')
     expect(wrap.className).not.toContain('border-[var(--accent-30)]')
   })
 
@@ -170,7 +170,7 @@ describe('copyableWrapperClasses (pure)', () => {
 
   it('secondary returns muted white-channel tokens', () => {
     const cls = copyableWrapperClasses('secondary')
-    expect(cls).toContain('border-[var(--white-8)]')
+    expect(cls).toContain('border-[var(--color-border-default)]')
     expect(cls).toContain('bg-[var(--white-2)]')
   })
 

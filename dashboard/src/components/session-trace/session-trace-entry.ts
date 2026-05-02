@@ -208,7 +208,7 @@ function DiffBlock({ text }: { text: string }) {
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
       ${truncatedCount > 0 ? html`
-        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--white-6)]">
+        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--color-border-default)]">
           ... ${truncatedCount} lines truncated for performance ...
         </div>
       ` : null}
@@ -225,7 +225,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 
   const titleLabel = isErr ? 'Error' : 'Result'
   const titleColor = isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'
-  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
+  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--color-border-default)]'
   const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--white-3)]'
 
   const MAX_TEXT_LEN = 100000
@@ -253,7 +253,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
         ${needsCollapse ? html`
           <button
             type="button"
-            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
+            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--color-border-default)] bg-transparent"
             onClick=${() => { expanded.value = !expanded.value }}
           >
             ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}
@@ -307,7 +307,7 @@ function BroadcastDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = typeof event.detail.content === 'string' ? event.detail.content : ''
   if (!content) return null
   return html`
-    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded-[var(--r-1)] border border-[var(--white-6)]">
+    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded-[var(--r-1)] border border-[var(--color-border-default)]">
       <${Markdown} text=${content} />
     </div>
   `
@@ -356,7 +356,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
     const phaseColor = phase === 'called' ? 'text-[var(--color-accent-fg)]' : 'text-[var(--color-status-ok)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--color-border-default)] space-y-1">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">단계:</span>
           <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
@@ -375,7 +375,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const turn = d.turn
     const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
     return html`
-      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)]">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--color-border-default)]">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">턴 ${turn != null ? String(turn) : '-'}:</span>
           <span class="font-mono font-semibold text-[var(--color-fg-primary)]">${phaseLabel}</span>
@@ -475,7 +475,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
   if (detailRows.length === 0) return null
   return html`
-    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--white-6)]">
+    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-[var(--r-1)] bg-[var(--white-3)] border border-[var(--color-border-default)]">
       ${detailRows.map(row => html`
         <div class="flex items-start gap-2 text-xs leading-relaxed">
           <span class="min-w-[92px] text-[var(--color-fg-disabled)] font-mono">${row.label}</span>
@@ -521,7 +521,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
       ${'' /* Icon */}
-      <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
+      <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
       </div>
 

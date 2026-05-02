@@ -56,7 +56,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   return html`
     <div class="flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
       ${items.map(item => html`
-        <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded-[var(--r-1)] font-medium">
+        <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--color-border-default)] px-2 py-1 rounded-[var(--r-1)] font-medium">
           ${item}
         </span>
       `)}

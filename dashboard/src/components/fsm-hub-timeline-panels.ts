@@ -171,7 +171,7 @@ export function SwimlaneTimeline({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           상태 타임라인
@@ -184,10 +184,10 @@ export function SwimlaneTimeline({
               <span
                 class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono tabular-nums ${
                   count === 0
-                    ? 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
+                    ? 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)]'
                     : isBusiest
                       ? 'text-[var(--info-fg)] border-[var(--info-border)] bg-[var(--info-soft)]'
-                      : 'text-[var(--color-fg-primary)] border-[var(--white-10)]'
+                      : 'text-[var(--color-fg-primary)] border-[var(--color-border-default)]'
                 }`}
                 title=${`${lane.label} · ${count} transition${count === 1 ? '' : 's'} in this window`}
               >${lane.short} ${count}</span>
@@ -210,7 +210,7 @@ export function SwimlaneTimeline({
               <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--color-fg-muted)]">
                 ${lane.short}
               </div>
-              <div class="flex h-4 flex-1 overflow-hidden rounded-[var(--r-1)] border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
+              <div class="flex h-4 flex-1 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
                 ${segments.map((seg, segIndex) => {
                   const pct = ((seg.to - seg.from) / spanWidth) * 100
                   const holdFor = fmtDuration(Math.max(0, seg.to - seg.from))
@@ -306,7 +306,7 @@ export function SwimlaneTimeline({
         <${LegendItem} dotClass="bg-[var(--amber-bright-45)]" label="compact" />
         <${LegendItem} dotClass="bg-[var(--purple-50)]" label="handoff" />
         <${LegendItem} dotClass="bg-[var(--bad-50)]" label="alarm" />
-        <${LegendItem} dotClass="border border-[var(--white-8)] bg-[var(--white-3)]" label="idle" />
+        <${LegendItem} dotClass="border border-[var(--color-border-default)] bg-[var(--white-3)]" label="idle" />
       </div>
     </div>
   `
@@ -395,7 +395,7 @@ export function TransitionTrail({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
         <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
@@ -468,7 +468,7 @@ export function TopTransitionsPanel({
   const maxCount = transitions[0]?.count ?? 1
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         Top Transitions (${transitions.length})
       </div>
@@ -543,7 +543,7 @@ export function DwellHistogramPanel({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         State Dwell Time
       </div>

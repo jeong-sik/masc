@@ -253,7 +253,7 @@ export function AgentDetailOverlay() {
         <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
-              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
+              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--white-5)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
               <div>
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
@@ -262,9 +262,9 @@ export function AgentDetailOverlay() {
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--white-5)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--color-border-divider)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}

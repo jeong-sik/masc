@@ -385,7 +385,7 @@ function Callout({
 function BoolBadge({ value }: { value: boolean }) {
   return value
     ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--white-10)] shadow-sm">OFF</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-text-dim border border-[var(--color-border-default)] shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -421,7 +421,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
-        : 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+        : 'bg-[var(--white-5)] text-text-dim border-[var(--color-border-default)]'
   return html`<span class="text-3xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 
@@ -891,7 +891,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${MajorSectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
-      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
       </div>
       <${BoolRow} label="검증" value=${c.execution.verify} />
@@ -1124,7 +1124,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0

@@ -125,7 +125,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
@@ -149,7 +149,7 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
         const isActive = level === active
         const base = 'cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
         const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--color-fg-primary)]'
-        const idleCls = 'border-[var(--white-8)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
+        const idleCls = 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
         return html`
           <button
             type="button"
@@ -189,7 +189,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   return html`
     <div
       id=${`sidecar-log-${connectorId}`}
-      class="mt-3 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-2"
+      class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
     >
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
@@ -230,7 +230,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                 ? html`
                     <button
                       type="button"
-                      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+                      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
                       aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
@@ -251,7 +251,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           : entry.available
             ? filtered.length === 0 && hasFilter
               ? html`
-                  <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                  <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                     필터 조건에 맞는 라인이 없습니다.
                     ${entry.lines.length > MAX_FILTER_WINDOW
                       ? ` (최근 ${MAX_FILTER_WINDOW}줄만 검색)`
@@ -262,7 +262,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
                 `
             : html`
-                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.
                 </div>
               `}

@@ -125,10 +125,10 @@ export function statusChipClass(status: RailStatus): string {
     case 'warning':
       return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'stale':
-      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
     case 'idle':
     default:
-      return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+      return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
   }
 }
 
@@ -139,10 +139,10 @@ export function statusCardClass(status: RailStatus): string {
     case 'warning':
       return 'border-[var(--warn-30)] bg-[var(--warn-12)]'
     case 'stale':
-      return 'border-[var(--white-12)] bg-[var(--white-4)]'
+      return 'border-[var(--color-border-default)] bg-[var(--white-4)]'
     case 'idle':
     default:
-      return 'border-[var(--white-8)] bg-[var(--white-4)]'
+      return 'border-[var(--color-border-default)] bg-[var(--white-4)]'
   }
 }
 
@@ -240,7 +240,7 @@ export function StatusPill({ status }: { status: RailStatus }) {
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
+    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
       ${text}
     </div>
   `
@@ -305,7 +305,7 @@ export function ScopePairing() {
             </div>
             <button
               type="button"
-              class="rounded-[var(--r-1)] border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => navigate('lab', { section: 'autoresearch' })}
             >오토리서치 열기</button>
           </div>
@@ -444,7 +444,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
             ${item.strategies.length > 0 ? html`
               <div class="mt-2 flex flex-wrap gap-1">
                 ${item.strategies.map(strategy => html`
-                  <span class="rounded-[var(--r-0)] border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${strategy}</span>
                 `)}
               </div>
             ` : null}

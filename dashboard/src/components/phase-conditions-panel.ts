@@ -64,7 +64,7 @@ function rowClass(row: PhaseConditionRow): string {
   if (row.value) {
     return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-fg-primary)]'
   }
-  return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
+  return 'border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
 }
 
 export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis }) {

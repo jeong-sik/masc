@@ -57,7 +57,7 @@ export function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'active') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
   if (band === 'attention') return 'border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)]'
   if (band === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
-  return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+  return 'border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
 }
 
 export function stageBadgeClass(stageKey: string): string {
@@ -66,7 +66,7 @@ export function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'
-  return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
+  return 'border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
 }
 
 export function compactModelLabel(model: string | null | undefined): string | null {
@@ -636,12 +636,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-xs font-semibold text-[var(--color-fg-secondary)]">${fallbackStateTitle}</strong>
-                      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">${countSourceLabel}</span>
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">${countSourceLabel}</span>
                     </div>
                     <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                      <span class="rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
-                      ${configuredKeeperHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
+                      ${configuredKeeperHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
                     </div>
                   </div>
                 </div>
@@ -790,7 +790,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ` : null}
 
               <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-1">
                   ${lastActivityLabel}
                   <span class="ml-1 text-[var(--color-fg-primary)]">
                     ${lastActivityAt
@@ -801,7 +801,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
                 </span>
                 ${isKeeper && contextMeta ? html`
-                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>CTX</span>
                     <span class="font-mono font-medium ${contextMeta.pct > 85 ? 'text-[var(--color-status-err)]' : contextMeta.pct > 60 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-secondary)]'}">${contextMeta.pct}%</span>
                     ${contextMeta.detail ? html`
@@ -813,7 +813,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
                 ` : null}
                 ${modelMeta && modelDisplay ? html`
-                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>${modelMeta.label}</span>
                     <span class="max-w-[18rem] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-3xs text-[var(--color-fg-primary)]" translate="no" title=${modelMeta.value}>${modelDisplay}</span>
                   </span>
@@ -822,15 +822,15 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
               ${(recentTools.length > 0 || toolCallCount != null || toolAuditAt) ? html`
                 <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-                  <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
+                  <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
                   <${AgentCapability} tools=${recentTools} maxVisible=${3} />
                   ${toolCallCount != null && toolCallCount > 0 ? html`
-                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
+                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       ${toolCallCount}회 관찰됨
                     </span>
                   ` : null}
                   ${toolAuditAt ? html`
-                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
+                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       감사 <${TimeAgo} timestamp=${toolAuditAt} />
                     </span>
                   ` : null}

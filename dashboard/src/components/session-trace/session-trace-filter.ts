@@ -68,7 +68,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
             const v = (e.target as HTMLInputElement).value
             setTraceSearchQuery(agentName, v)
           }}
-          class="w-full !bg-[var(--white-3)] !border-[var(--white-6)] !px-3 !py-1.5 !text-xs"
+          class="w-full !bg-[var(--white-3)] !border-[var(--color-border-default)] !px-3 !py-1.5 !text-xs"
         />
         ${searchQuery ? html`
           <button

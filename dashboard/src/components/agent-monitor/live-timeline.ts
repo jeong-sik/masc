@@ -155,12 +155,12 @@ export function AgentLiveTimeline({ name }: { name: string }) {
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <${FilterChips} chips=${FILTER_CHIPS} active=${activeFilter} />
         <div class="flex items-center gap-2 text-2xs">
-          <span class="px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
+          <span class="px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
           <span class="text-[var(--color-fg-muted)]">${filtered.length} events</span>
           <button type="button"
             class="px-2 py-0.5 rounded-[var(--r-1)] text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
               ? 'border-[var(--ok-border)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
-              : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
+              : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}
           >

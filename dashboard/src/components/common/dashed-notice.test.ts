@@ -40,7 +40,7 @@ describe('dashedNoticeClasses (pure)', () => {
   })
 
   it('subtle border tone uses --white-8 (dimmer)', () => {
-    expect(dashedNoticeClasses('sm', 'subtle')).toContain('border-[var(--white-8)]')
+    expect(dashedNoticeClasses('sm', 'subtle')).toContain('border-[var(--color-border-default)]')
   })
 
   it('extra class is appended (caller composition)', () => {

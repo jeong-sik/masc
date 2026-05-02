@@ -90,6 +90,19 @@ describe('createKeeperLineOwnershipAccumulator', () => {
     expect(s.knownKeepers()).toEqual(['nick0cave', 'sangsu'])
   })
 
+  it('returns snapshots that cannot mutate accumulator state', () => {
+    const s = createKeeperLineOwnershipAccumulator(file)
+    s.ingest(edit({ line_start: 2, line_end: 2 }))
+
+    const ownership = s.ownership() as Map<number, unknown>
+    ownership.clear()
+    expect(s.ownership().get(2)).toMatchObject({ keeper_id: 'nick0cave' })
+
+    const events = s.eventsForLine(2) as KeeperEdit[]
+    events.push(edit({ keeper_id: 'sangsu' }))
+    expect(s.eventsForLine(2).map((event) => event.keeper_id)).toEqual(['nick0cave'])
+  })
+
   it('reset keeps subscribers possible by clearing in place and optionally switches file', () => {
     const s = createKeeperLineOwnershipAccumulator(file)
     s.ingest(edit({ line_start: 1, line_end: 2 }))

@@ -66,9 +66,9 @@ export function createKeeperLineOwnershipAccumulator(
   const keepers = new Set<string>()
 
   const filePath = (): string => activeFilePath
-  const ownership = (): ReadonlyMap<number, LineOwnership> => ownershipByLine
+  const ownership = (): ReadonlyMap<number, LineOwnership> => new Map(ownershipByLine)
   const eventsForLine = (line: number): ReadonlyArray<KeeperEdit> =>
-    Number.isSafeInteger(line) ? eventsByLine.get(line) ?? [] : []
+    Number.isSafeInteger(line) ? [...(eventsByLine.get(line) ?? [])] : []
   const knownKeepers = (): ReadonlyArray<string> => [...keepers].sort()
 
   const ingest = (event: KeeperEdit): boolean => {

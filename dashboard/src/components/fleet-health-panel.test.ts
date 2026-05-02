@@ -36,6 +36,9 @@ vi.mock('./tool-quality-panel', () => ({
 vi.mock('./governance-monitor', () => ({
   GovernanceMonitor: () => html`<div data-testid="governance-monitor">GovernanceMonitor</div>`,
 }))
+vi.mock('./keeper-reactivity-monitor', () => ({
+  KeeperReactivityMonitor: () => html`<div data-testid="keeper-reactivity-monitor">KeeperReactivityMonitor</div>`,
+}))
 
 // Import after mocks are in place.
 import { FleetHealthPanel } from './fleet-health-panel'
@@ -96,7 +99,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
   })
 
-  it('renders FilterChips with 5 view options', () => {
+  it('renders FilterChips with all 7 view options', () => {
     render(html`<${FleetHealthPanel} />`)
 
     expect(screen.getByText('개요')).toBeTruthy()
@@ -104,6 +107,8 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('Keeper 비교')).toBeTruthy()
     expect(screen.getByText('도구 품질')).toBeTruthy()
     expect(screen.getByText('거버넌스')).toBeTruthy()
+    expect(screen.getByText('Attribution')).toBeTruthy()
+    expect(screen.getByText('반응성 모니터')).toBeTruthy()
   })
 
   it('marks the default chip as active (aria-selected)', () => {
@@ -136,6 +141,15 @@ describe('FleetHealthPanel', () => {
     fireEvent.click(defaultChip)
 
     expect(location.hash).not.toContain('view=')
+  })
+
+  it('renders KeeperReactivityMonitor for view=keeper-health', () => {
+    setRoute('keeper-health')
+    render(html`<${FleetHealthPanel} />`)
+
+    expect(screen.getByTestId('keeper-reactivity-monitor')).toBeTruthy()
+    expect(screen.queryByTestId('telemetry-unified')).toBeNull()
+    expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
   })
 
   it('falls back to default view for unknown view param', () => {

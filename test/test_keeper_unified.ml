@@ -1280,6 +1280,8 @@ let test_min_interval_never_fires_for_bootstrap () =
        | WO.Run { reasons = (first, rest) } ->
            List.mem WO.Never_started (first :: rest)
        | WO.Skip _ -> false))
+
+let test_runtime_trust_snapshot_tolerates_null_telemetry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in

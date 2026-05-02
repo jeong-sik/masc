@@ -1013,7 +1013,6 @@ let keeper_cycle_decision
         in
         let min_interval_elapsed =
           not is_bootstrap
-          && since_last_scheduled_autonomous > 0
           && since_last_scheduled_autonomous >= proactive_min_interval_sec
         in
         (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown

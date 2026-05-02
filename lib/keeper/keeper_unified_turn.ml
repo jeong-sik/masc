@@ -1555,8 +1555,19 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              the keeper fiber for a transient API blip is an overreaction
              that causes unnecessary restarts and context loss.
              Only persistent errors (auth failure, config error, context
-             overflow after compaction) increment the crash counter. *)
-          if not is_auto_recoverable then
+             overflow after compaction) increment the crash counter.
+
+             Exception: cascade exhaustion always increments the failure
+             counter regardless of auto-recoverable classification.
+             Auto-recoverable cascade subtypes (Candidates_filtered_after_cycles,
+             Max_turns_exceeded) were skipping the counter, preventing
+             auto-pause from ever triggering. The keeper would loop
+             indefinitely on a broken cascade without operator notification.
+             Retry eligibility != failure tracking. *)
+          let counts_toward_crash =
+            not is_auto_recoverable || EC.is_cascade_exhausted_error err
+          in
+          if counts_toward_crash then
             Keeper_registry.increment_turn_failures ~base_path meta.name
           else
             Log.Keeper.info

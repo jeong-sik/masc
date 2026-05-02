@@ -43,7 +43,7 @@ import type { ComponentChildren } from 'preact'
 const BASE =
   'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-sm border'
 const TONE_ACCENT =
-  'border-accent/20 bg-[var(--accent-10)] text-accent-fg'
+  'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
 const MONO_CLASS = 'font-mono'
 
 /** Pure: class string for an IdPill, with optional monospace and
@@ -69,7 +69,7 @@ interface IdPillProps {
       task slugs and agent runtime names). */
   mono?: boolean
   /** Extra Tailwind classes for caller composition — parent group-
-      hover states (`group-hover:bg-accent/20 transition-colors`),
+      hover states (`group-hover:bg-[var(--accent-20)] transition-colors`),
       margin/width, custom title attribute. The primitive
       deliberately does not know about parent `group` context. */
   class?: string

@@ -868,7 +868,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   role="radio"
                   aria-checked=${windowMinutes.value === o.key}
                   class="rounded-[var(--r-1)] border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
-                    ? 'border-accent/50 bg-[var(--accent-15)] text-accent-fg'
+                    ? 'border-[var(--accent-50)] bg-[var(--accent-15)] text-accent-fg'
                   : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
                   onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key, view) }}
                 >

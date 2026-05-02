@@ -151,7 +151,7 @@ function verdictToneClass(label: string): string {
     case 'approved': return 'border-ok/30 bg-ok/10 text-ok'
     case 'reject':
     case 'rejected': return 'border-warn/30 bg-warn/10 text-warn'
-    default: return 'border-accent/30 bg-[var(--accent-10)] text-accent-fg'
+    default: return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
   }
 }
 
@@ -246,21 +246,21 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent-fg border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent-fg border-[var(--accent-25)] bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
-          <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">
+          <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">
             검증 대기
           </span>
         ` : null}
       </div>
 
       ${isAwaitingVerification ? html`
-        <div class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] px-4 py-3">
           <div class="flex items-center justify-between gap-3 flex-wrap">
             <div class="text-xs font-medium text-accent-fg">Verifier Keeper 검증 중</div>
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
-              class="rounded-[var(--r-1)] border border-accent/50 bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
+              class="rounded-[var(--r-1)] border border-[var(--accent-50)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
               title="검증 패널에서 이 태스크를 직접 승인/반려"
             >검증에 개입 →</a>
           </div>
@@ -452,7 +452,7 @@ export function TaskDetailOverlay() {
               type="button"
               class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
-                  ? 'border-accent/40 bg-accent/12 text-[var(--color-accent-fg)]'
+                  ? 'border-[var(--accent-40)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--color-bg-hover)]'
               }"
               onClick=${() => tab === 'activity' ? switchToActivityTab(task) : (activeTab.value = 'overview')}

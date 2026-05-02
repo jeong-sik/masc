@@ -94,7 +94,7 @@ export function TaskStaleAlert() {
               ${e.task.assignee ? html`
                 <button
                   type="button"
-                  class="rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
+                  class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
                   title="해당 키퍼 상세로 이동해 직접 nudge"
                   onClick=${() => e.task.assignee && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: e.task.assignee })}
                 >

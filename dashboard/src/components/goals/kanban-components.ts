@@ -329,7 +329,7 @@ export function TaskBacklog() {
           title="검증 대기"
           count=${sortedAwaitingVerification.length}
           description="verifier keeper가 completion_contract 정량 기준을 독립 실측 중인 태스크입니다."
-          badgeClass="border border-accent/30 bg-[var(--accent-10)] text-accent-fg"
+          badgeClass="border border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg"
         >
           ${sortedAwaitingVerification.length === 0
             ? html`<${EmptyState} message=${emptyColumnMessage ?? '검증 대기 중인 태스크가 없습니다'} compact />`

@@ -331,7 +331,7 @@ export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
     <${CollapsibleSection}
       title=${html`터 예산 ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}`}
       open=${diverges}
-      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}
+      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-[var(--accent-50)]'}
     >
       <${TurnBudgetPanel} keeper=${keeper} />
     <//>

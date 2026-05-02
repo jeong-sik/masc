@@ -94,7 +94,7 @@ export function TaskWall() {
                 <li key=${t.id}>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-accent/40 hover:bg-[var(--accent-10)]"
+                    class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-[var(--accent-40)] hover:bg-[var(--accent-10)]"
                     title=${`${t.id} · ${t.status ?? 'unknown'}`}
                     onClick=${() => navigate('workspace', { section: 'planning', task: t.id })}
                   >

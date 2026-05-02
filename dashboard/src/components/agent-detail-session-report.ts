@@ -213,7 +213,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     : report.content
 
   return html`
-    <div class="border border-card-border/60 rounded-[var(--r-1)] bg-card/30 overflow-hidden hover:border-accent/20 transition-colors">
+    <div class="border border-card-border/60 rounded-[var(--r-1)] bg-card/30 overflow-hidden hover:border-[var(--accent-20)] transition-colors">
       <button
         type="button"
         class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-card-border/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
@@ -273,7 +273,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             </div>
           ` : null}
           ${summary.tasks_claimed > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-accent-fg bg-[var(--accent-10)] border border-accent/20 px-3 py-1.5 rounded-[var(--r-1)]">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-accent-fg bg-[var(--accent-10)] border border-[var(--accent-20)] px-3 py-1.5 rounded-[var(--r-1)]">
               <span class="font-bold">${summary.tasks_claimed}</span> 수임
             </div>
           ` : null}

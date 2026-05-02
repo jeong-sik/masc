@@ -64,7 +64,7 @@ function InspectorTabButton({
       class=${[
         'rounded-[var(--r-0)] border px-3 py-1.5 text-2xs font-semibold transition-colors',
         active
-          ? 'border-accent/30 bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
+          ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
           : 'border-card-border bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]',
       ].join(' ')}
       aria-pressed=${active ? 'true' : 'false'}
@@ -93,7 +93,7 @@ function InspectorOverview() {
                 <div class="mt-2 text-2xs leading-loose text-[var(--color-fg-muted)]">${surface.description}</div>
                 <button
                   type="button"
-                  class="mt-3 rounded-[var(--r-1)] border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)]"
+                  class="mt-3 rounded-[var(--r-1)] border border-[var(--accent-25)] bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)]"
                   onClick=${() => navigate(surface.tab, surface.params)}
                 >
                   ${surface.action}

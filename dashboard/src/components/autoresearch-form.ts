@@ -108,7 +108,7 @@ function inputHandler(sig: { value: string }) {
 export function StartFormButton({ class: cx }: { class?: string }) {
   return html`
     <button type="button"
-      class=${cx ?? 'px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border border-accent/50 text-accent-fg hover:bg-[var(--accent-10)] transition-colors'}
+      class=${cx ?? 'px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-50)] text-accent-fg hover:bg-[var(--accent-10)] transition-colors'}
       onClick=${() => { showStartForm.value = true }}
     >
       새 루프 시작
@@ -254,7 +254,7 @@ export function StartAutoresearchForm() {
           <button type="button"
             class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold border transition-colors ${
               canSubmit.value
-                ? 'border-accent/60 bg-accent/15 text-accent-fg hover:bg-accent/25'
+                ? 'border-[var(--accent-60)] bg-[var(--accent-15)] text-accent-fg hover:bg-[var(--accent-25)]'
                 : 'border-card-border bg-card/60 text-[var(--color-fg-muted)] cursor-not-allowed opacity-50'
             }"
             disabled=${!canSubmit.value}

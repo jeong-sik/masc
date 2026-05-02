@@ -104,7 +104,7 @@ export function KeeperMultiSelect({
                 aria-checked=${on}
                 aria-label=${o.name}
                 class="inline-flex items-center gap-1 rounded-[var(--r-1)] border px-2 py-0.5 text-2xs font-mono transition-colors ${on
-                  ? 'border-accent/40 bg-[var(--accent-15)] text-accent-fg'
+                  ? 'border-[var(--accent-40)] bg-[var(--accent-15)] text-accent-fg'
                   : 'border-card-border/40 bg-[var(--color-bg-surface)] text-text-muted hover:border-card-border/70 hover:text-text-strong'}"
                 onClick=${() => toggleKeeperInFilter(o.name)}
               >

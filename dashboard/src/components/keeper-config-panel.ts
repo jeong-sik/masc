@@ -354,8 +354,8 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-      <${StatusDot} size="xs" class="bg-accent/50 shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
+    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
+      <${StatusDot} size="xs" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
       ${title}
     </div>
   `
@@ -400,7 +400,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-sm hover:bg-[var(--accent-20)] transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
@@ -1062,8 +1062,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ` : null}
       </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
-      <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
+      <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
+        <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}
@@ -1096,7 +1096,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       ${runtimeHasChanges ? html`
-        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-accent/30 bg-accent/5">
+        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)]">
           <button type="button"
             class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
             onClick=${saveRuntimeConfig}

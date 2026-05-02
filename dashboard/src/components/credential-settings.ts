@@ -84,7 +84,7 @@ export function credentialTypeLabel(type: CredentialType): string {
 export function credentialTypeBadgeClass(type: CredentialType): string {
   switch (type) {
     case 'github':
-      return 'bg-[var(--accent-10)] text-accent-fg border-accent/20'
+      return 'bg-[var(--accent-10)] text-accent-fg border-[var(--accent-20)]'
     case 'gitlab':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'local':
@@ -179,8 +179,8 @@ export function resetCredentials(): void {
 
 function SectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" aria-hidden="true"></span>
+    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" aria-hidden="true"></span>
       ${title}
     </div>
   `

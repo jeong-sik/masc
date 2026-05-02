@@ -129,9 +129,9 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-[var(--shadow-1)] hover:border-accent/30 transition-colors group">
+    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-[var(--shadow-1)] hover:border-[var(--accent-30)] transition-colors group">
       <div class="mb-3">
-        <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
+        <${IdPill} class="group-hover:bg-[var(--accent-20)] transition-colors">${row.taskId}<//>
       </div>
       <pre class="m-0 whitespace-pre-wrap text-xs leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
@@ -294,7 +294,7 @@ export function AgentDetailOverlay() {
                         </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--color-bg-elevated)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent-fg/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-accent/10">${continuitySummary}</span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent-fg/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--accent-10)]">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}

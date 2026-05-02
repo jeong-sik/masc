@@ -263,14 +263,14 @@ function JudgmentsSection() {
         ${judgments.map(j => html`
           <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
-              <span class="inline-flex items-center rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent-fg">${j.target_kind ?? 'unknown'}</span>
+              <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent-fg">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
               ${j.confidence != null ? html`<span class="ml-auto text-2xs text-text-muted">Confidence ${Math.round(j.confidence * 100)}%</span>` : null}
             </div>
             <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
             ${j.recommended_action ? html`
               <div class="mt-2 flex items-center gap-1.5 text-2xs">
-                <span class="rounded-[var(--r-1)] border border-accent/20 bg-accent/8 px-1.5 py-0.5 font-medium text-accent-fg">${j.recommended_action.action_kind ?? 'action'}</span>
+                <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] px-1.5 py-0.5 font-medium text-accent-fg">${j.recommended_action.action_kind ?? 'action'}</span>
                 ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
                 ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
               </div>
@@ -317,7 +317,7 @@ export function approvalRiskToneClass(riskLevel: string): string {
   const normalized = riskLevel.trim().toLowerCase()
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
-  if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent-fg'
+  if (normalized === 'medium') return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
@@ -408,7 +408,7 @@ function KeeperApprovalEmptyState() {
   const chipClass = ctx.tone === 'warn'
     ? 'border-warn/30 bg-warn/10 text-warn'
     : ctx.tone === 'ok'
-      ? 'border-accent/20 bg-[var(--accent-10)] text-accent-fg'
+      ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted'
   return html`
     <div data-testid="keeper-hitl-empty">
@@ -543,7 +543,7 @@ function KeeperApprovalQueueSection() {
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
-                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
                         ${item.tool_name}
                       </span>
                       <span class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(item.risk_level)}">
@@ -634,7 +634,7 @@ function ApprovalRulesSection() {
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}
                       </span>
-                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
                         ${rule.tool_name}
                       </span>
                       ${rule.max_risk ? html`<span class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}

@@ -11,7 +11,7 @@ describe('approvalRiskToneClass', () => {
   })
 
   it('returns accent tone for medium', () => {
-    expect(approvalRiskToneClass('medium')).toBe('border-accent/30 bg-[var(--accent-10)] text-accent-fg')
+    expect(approvalRiskToneClass('medium')).toBe('border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg')
   })
 
   it('returns muted tone for low', () => {
@@ -32,7 +32,7 @@ describe('approvalRiskToneClass', () => {
   })
 
   it('trims whitespace', () => {
-    expect(approvalRiskToneClass('  medium  ')).toBe('border-accent/30 bg-[var(--accent-10)] text-accent-fg')
+    expect(approvalRiskToneClass('  medium  ')).toBe('border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg')
   })
 })
 

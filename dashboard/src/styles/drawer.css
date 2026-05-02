@@ -117,7 +117,7 @@
 
 .bar {
   display: inline-block; flex: 1; height: 6px;
-  background: var(--color-bg-elevated); border-radius: 3px; overflow: hidden;
+  background: var(--color-bg-elevated); border-radius: var(--r-1); overflow: hidden;
   vertical-align: middle; position: relative; min-width: 40px;
 }
 .bar-fill { display: block; height: 100%; background: var(--color-fg-muted); }

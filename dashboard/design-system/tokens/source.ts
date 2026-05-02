@@ -193,6 +193,7 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("sp-0h", "2px", "raw", "dimension", "half-step gutter"));
 
   // Radius
+  out.push(t("r-0", "2px", "raw", "dimension"));
   out.push(t("r-1", "3px", "raw", "dimension"));
   out.push(t("r-2", "5px", "raw", "dimension"));
   out.push(t("r-3", "8px", "raw", "dimension"));

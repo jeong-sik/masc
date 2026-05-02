@@ -60,7 +60,7 @@
 .sl-toggle input {
   appearance: none;
   width: 9px; height: 9px; margin: 0;
-  border: 1px solid var(--color-border-strong); border-radius: 2px;
+  border: 1px solid var(--color-border-strong); border-radius: var(--r-0);
   background: var(--color-bg-elevated); cursor: pointer;
   position: relative; flex-shrink: 0;
 }
@@ -118,7 +118,7 @@
   padding: 2px 4px;
   background: var(--color-bg-page);
   border: 1px solid var(--brass-3);
-  border-radius: 2px;
+  border-radius: var(--r-0);
   z-index: 3;
 }
 
@@ -442,7 +442,7 @@
   transform: translate(-50%, -50%);
   min-width: 14px; height: 14px;
   padding: 0 3px;
-  border-radius: 7px;
+  border-radius: var(--r-3);
   font: 600 9px/14px var(--font-mono);
   text-align: center;
   cursor: pointer;

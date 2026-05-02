@@ -88,6 +88,7 @@
   --sp-7: 32px;
   --sp-8: 40px;
   --sp-0h: 2px;
+  --r-0: 2px;
   --r-1: 3px;
   --r-2: 5px;
   --r-3: 8px;
@@ -148,20 +149,13 @@
   --spacing-group: 12px;
   --spacing-card: 16px;
   --radius-xl: 24px;
-  --color-slate-100: #f1f5f9;
-  --color-slate-200: #e2e8f0;
-  --color-slate-300: #cbd5e1;
   --color-slate-400: #94a3b8;
   --color-slate-500: #64748b;
   --color-slate-600: #475569;
-  --color-slate-700: #334155;
   --color-slate-800: #1e293b;
-  --color-slate-900: #0f172a;
   --color-blue-400: #60a5fa;
   --color-sky-400: #38bdf8;
   --color-purple-500: #a855f7;
-  --color-pink-400: #f472b6;
-  --color-orange-400: #fb923c;
   --color-yellow-100: #fde68a;
   --color-red-100: #fecaca;
   --color-cyan-100: #cffafe;

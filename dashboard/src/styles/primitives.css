@@ -60,7 +60,7 @@
   display: inline-block;
   height: 4px; width: 100%;
   background: var(--color-bg-hover);
-  border-radius: 2px;
+  border-radius: var(--r-0);
   overflow: hidden;
   vertical-align: middle;
 }
@@ -76,7 +76,7 @@
 /* bar with segments (a/b/c split — e.g. passing/failing/skipped) */
 .bar-seg {
   display: flex; height: 4px; width: 100%;
-  background: var(--color-bg-hover); border-radius: 2px; overflow: hidden;
+  background: var(--color-bg-hover); border-radius: var(--r-0); overflow: hidden;
 }
 .bar-seg > span { display: block; height: 100%; }
 .bar-seg .seg-ok { background: var(--ok); }
@@ -179,7 +179,7 @@
   background: var(--color-bg-hover);
   border: 1px solid var(--color-border-strong);
   border-bottom-width: 2px;
-  border-radius: 3px;
+  border-radius: var(--r-1);
 }
 
 /* ════════ STATUS BAND ════════
@@ -204,7 +204,7 @@
   font-family: var(--font-mono);
   font-size: .92em;
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: var(--r-0);
   background: var(--color-bg-hover);
   color: var(--color-fg-primary);
 }

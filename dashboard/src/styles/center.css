@@ -15,7 +15,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .wf-track .track-bars {
-  position: relative; height: 14px; background: var(--color-bg-elevated); border-radius: 2px;
+  position: relative; height: 14px; background: var(--color-bg-elevated); border-radius: var(--r-0);
   min-width: 0;
 }
 .wf-bar {
@@ -32,7 +32,7 @@
 .wf-scale-ctrl button {
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
   color: var(--color-fg-muted); font: var(--fs-10)/1 var(--font-mono);
-  padding: 3px 7px; cursor: pointer; border-radius: 2px; letter-spacing: .03em;
+  padding: 3px 7px; cursor: pointer; border-radius: var(--r-0); letter-spacing: .03em;
 }
 .wf-scale-ctrl button:hover { color: var(--color-fg-primary); }
 .wf-scale-ctrl button.is-active { background: var(--color-bg-hover); border-color: var(--brass-3); color: var(--brass-1); }

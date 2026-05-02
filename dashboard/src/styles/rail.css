@@ -83,7 +83,7 @@
 .tool-count {
   font-size: var(--fs-9); color: var(--color-fg-muted);
   padding: 0 3px; background: var(--color-bg-hover);
-  border-radius: 6px; margin-left: 2px;
+  border-radius: var(--r-2); margin-left: 2px;
 }
 .tool-chip.is-last .tool-count {
   color: var(--brass-1);
@@ -143,6 +143,6 @@
 }
 .tl-legend-row:last-child { border-bottom: none; }
 .tl-swatch {
-  width: 8px; height: 8px; border-radius: 2px;
+  width: 8px; height: 8px; border-radius: var(--r-0);
   flex-shrink: 0;
 }

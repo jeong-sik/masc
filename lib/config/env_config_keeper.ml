@@ -182,6 +182,13 @@ module KeeperSupervisor = struct
       are removed from disk. Default: 86400 (24 hours). *)
   let paused_cleanup_ttl_sec =
     Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+
+  (** Auto-resume cooldown: seconds after which an auto-paused keeper is
+      automatically resumed. Minimum 300s (5 min) to prevent rapid
+      resume-storm loops. Keepers with [paused_at = None] (legacy /
+      operator-initiated pauses) are never auto-resumed. *)
+  let auto_resume_after_sec =
+    Float.max 300.0 (get_float ~default:1800.0 "MASC_KEEPER_AUTO_RESUME_AFTER_SEC")
 end
 
 (** {1 Keeper Poll Intervals}

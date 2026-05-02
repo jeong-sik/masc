@@ -728,6 +728,8 @@ let metric_keeper_restart_outcomes =
    hours (4h+ zombie keepers observed 2026-04-26). *)
 let metric_keeper_oas_timeout_budget_strike =
   "masc_keeper_oas_timeout_budget_strike_total"
+let metric_keeper_auto_resume_total =
+  "masc_keeper_auto_resume_total"
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"

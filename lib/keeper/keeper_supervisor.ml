@@ -15,6 +15,14 @@ open Keeper_execution
 
 module StringMap = Map.Make (String)
 
+let () =
+  Prometheus.register_counter
+    ~name:"masc_keeper_auto_resume_total"
+    ~help:
+      "Total keepers automatically resumed from auto-pause after cooldown. \
+       Labels: keeper."
+    ()
+
 (* ── Pure helpers ────────────────────────────────────────── *)
 
 let backoff_delay attempt =
@@ -557,7 +565,7 @@ let cleanup_dead_tombstone (ctx : _ context)
           match
             write_meta_with_merge
               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-              ctx.config { meta with paused = true }
+              ctx.config { meta with paused = true; paused_at = Some (Time_compat.now ()) }
           with
           | Ok () -> true
           | Error err when is_version_conflict_error err ->
@@ -799,7 +807,7 @@ let handle_crash_auto_pause (ctx : _ context)
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config { meta with paused = true }
+            ctx.config { meta with paused = true; paused_at = Some (Time_compat.now ()) }
         with
         | Ok () -> ()
         | Error err ->
@@ -1092,6 +1100,45 @@ let sweep_and_recover (ctx : _ context) =
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"
                     name (Printexc.to_string exn))
+           | _ -> ());
+  (* Phase 3b: auto-resume paused keepers past cooldown. Only keepers
+     with a recorded [paused_at] timestamp are candidates — legacy
+     pauses ([paused_at = None]) and reconcile-recovery pauses are
+     excluded so operator-initiated pauses are never overridden. *)
+  let auto_resume_sec = Env_config_keeper.KeeperSupervisor.auto_resume_after_sec in
+  Keeper_types.keeper_names ctx.config
+  |> List.iter (fun name ->
+         if Keeper_registry.is_running ~base_path name then ()
+         else
+           match read_meta ctx.config name with
+           | Ok (Some meta)
+             when meta.paused
+                  && not (paused_meta_requires_reconcile_recovery meta) ->
+               (match meta.paused_at with
+                | Some ts when now -. ts >= auto_resume_sec ->
+                  let m =
+                    { meta with paused = false; paused_at = None }
+                  in
+                  (match
+                     write_meta_with_merge
+                       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                       ctx.config m
+                   with
+                   | Ok () ->
+                     Prometheus.inc_counter
+                       Prometheus.metric_keeper_auto_resume_total
+                       ~labels:[ ("keeper", meta.name) ]
+                       ();
+                     Log.Keeper.info
+                       "%s: auto-resuming paused keeper (%.0fs since pause, \
+                        cooldown=%.0fs)"
+                       meta.name (now -. ts) auto_resume_sec
+                   | Error err ->
+                     Log.Keeper.warn
+                       "%s: auto-resume meta write failed: %s"
+                       meta.name err)
+                | Some _ -> () (* still in cooldown *)
+                | None -> () (* legacy / operator pause — never auto-resume *))
            | _ -> ());
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

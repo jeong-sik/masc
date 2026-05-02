@@ -434,6 +434,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         active_goal_ids =
           active_goal_ids;
         paused = false;
+        paused_at = None;
         autoboot_enabled;
         current_task_id = None;
         work_discovery_enabled = p.profile_defaults.work_discovery_enabled;

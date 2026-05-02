@@ -56,6 +56,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
+  ; ps_paused_at : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option
@@ -486,6 +487,7 @@ let parse_keeper_state
   in
   let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
+  let ps_paused_at = Safe_ops.json_float_opt "paused_at" json in
   let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
   let ps_current_task_id =
     match Safe_ops.json_string_opt "current_task_id" json with
@@ -501,6 +503,7 @@ let parse_keeper_state
   ; ps_continuity_summary
   ; ps_active_goal_ids
   ; ps_paused
+  ; ps_paused_at
   ; ps_autoboot_enabled
   ; ps_current_task_id
   ; ps_max_context_override
@@ -611,6 +614,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; continuity_summary = state.ps_continuity_summary
                    ; active_goal_ids = state.ps_active_goal_ids
                    ; paused = state.ps_paused
+                   ; paused_at = state.ps_paused_at
                    ; autoboot_enabled = state.ps_autoboot_enabled
                    ; current_task_id = state.ps_current_task_id
                    ; max_context_override = state.ps_max_context_override

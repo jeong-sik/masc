@@ -428,6 +428,10 @@ val metric_keeper_oas_timeout_budget_strike : string
       fiber with a fresh context budget. Counter reset on any
       successful turn. *)
 
+val metric_keeper_auto_resume_total : string
+(** Total keepers automatically resumed from auto-pause after cooldown.
+    Labels: [keeper]. *)
+
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string

@@ -1012,6 +1012,11 @@ let keeper_cycle_decision
           Keeper_config.keeper_proactive_min_interval_sec ()
         in
         let min_interval_elapsed =
+          (* Exclude the bootstrap case: when is_bootstrap is true, the bootstrap
+             bypass already fires the turn and emits Never_started.  Using
+             min_interval_elapsed here would also set Min_interval_elapsed on a
+             bootstrap turn, which is misleading — the two paths are mutually
+             exclusive by design. *)
           not is_bootstrap
           && since_last_scheduled_autonomous >= proactive_min_interval_sec
         in

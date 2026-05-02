@@ -1185,66 +1185,64 @@ let test_min_interval_fires_without_work_signal () =
      the keeper should fire a housekeeping turn even when there are no
      observable work signals. *)
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
-    with_env "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC" "60" (fun () ->
-      let meta =
-        { minimal_meta with
-          proactive =
-            { enabled = true; idle_sec = 0; cooldown_sec = 600 };
-          runtime =
-            { minimal_meta.runtime with
-              proactive_rt =
-                { minimal_meta.runtime.proactive_rt with
-                  (* 1000s > 900s min_interval, so the elapsed condition triggers *)
-                  last_ts = Time_compat.now () -. 1000.0;
-                };
-            };
-        }
-      in
-      let obs = { base_observation with idle_seconds = 0 } in
-      let decision =
-        WO.keeper_cycle_decision
-          ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
-          ~meta obs
-      in
-      check bool "min interval elapsed fires turn" true decision.should_run;
-      check bool "Min_interval_elapsed reason emitted" true
-        (match decision.verdict with
-         | WO.Run { reasons = (first, rest) } ->
-             List.mem WO.Min_interval_elapsed (first :: rest)
-         | WO.Skip _ -> false)))
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                (* 1000s > 900s min_interval, so the elapsed condition triggers *)
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval elapsed fires turn" true decision.should_run;
+    check bool "Min_interval_elapsed reason emitted" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false))
 
 let test_min_interval_does_not_fire_before_elapsed () =
   (* With since_last = 500s and min_interval = 900s, the keeper should
      NOT get a free housekeeping turn (no work signals present either). *)
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
-    with_env "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC" "60" (fun () ->
-      let meta =
-        { minimal_meta with
-          proactive =
-            { enabled = true; idle_sec = 0; cooldown_sec = 600 };
-          runtime =
-            { minimal_meta.runtime with
-              proactive_rt =
-                { minimal_meta.runtime.proactive_rt with
-                  (* 500s < 900s min_interval, so not-yet-elapsed condition holds *)
-                  last_ts = Time_compat.now () -. 500.0;
-                };
-            };
-        }
-      in
-      let obs = { base_observation with idle_seconds = 0 } in
-      let decision =
-        WO.keeper_cycle_decision
-          ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
-          ~meta obs
-      in
-      check bool "min interval not yet elapsed: should_run=false" false decision.should_run;
-      check bool "No_signal reason present when interval pending" true
-        (match decision.verdict with
-         | WO.Skip { reasons = (first, rest) } ->
-             List.exists (function WO.No_signal -> true | _ -> false)
-               (first :: rest)
-         | WO.Run _ -> false)))
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                (* 500s < 900s min_interval, so not-yet-elapsed condition holds *)
+                last_ts = Time_compat.now () -. 500.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval not yet elapsed: should_run=false" false decision.should_run;
+    check bool "No_signal reason present when interval pending" true
+      (match decision.verdict with
+       | WO.Skip { reasons = (first, rest) } ->
+           List.exists (function WO.No_signal -> true | _ -> false)
+             (first :: rest)
+       | WO.Run _ -> false))
 
 let test_min_interval_never_fires_for_bootstrap () =
   (* The Min_interval_elapsed path must not fire when is_bootstrap = true

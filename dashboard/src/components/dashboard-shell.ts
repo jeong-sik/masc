@@ -251,7 +251,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-xl grid gap-1.5">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[var(--shadow-panel)] grid gap-1.5">
               <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>

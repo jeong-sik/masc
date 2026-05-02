@@ -20,7 +20,7 @@ const BACKDROP_CLS =
 
 function panelCls(position: string): string {
   const base =
-    'fixed bg-[var(--dialog-panel-bg)] border-[var(--dialog-panel-border)] shadow-xl overflow-auto '
+    'fixed bg-[var(--dialog-panel-bg)] border-[var(--dialog-panel-border)] shadow-[var(--shadow-panel)] overflow-auto '
   switch (position) {
     case 'left':
       return base + 'left-0 top-0 h-full w-80 border-r'

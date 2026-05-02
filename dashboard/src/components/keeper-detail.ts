@@ -603,7 +603,7 @@ function KeeperClearContextDialog({
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
       overlayClass="fixed inset-0 z-[80] bg-[var(--dialog-overlay-bg)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-130 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-2xl"
+      panelClass="w-full max-w-130 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[var(--shadow-raised)]"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
@@ -940,7 +940,7 @@ export function KeeperDetailPage() {
 
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl backdrop-blur-xl">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
         <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}

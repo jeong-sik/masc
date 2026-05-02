@@ -219,7 +219,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
       role="dialog"
       aria-labelledby=${labelId}
       data-state="open"
-      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-xl p-3 z-50"
+      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-panel)] p-3 z-50"
     >
       <h2 id=${labelId} class="sr-only">Auth status panel</h2>
       <div class="flex flex-col gap-3">

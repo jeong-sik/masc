@@ -144,7 +144,7 @@ export function KeeperDetailMissingState({
     : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
-      <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-2xl">
+      <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-[var(--shadow-raised)]">
         <${SectionLabel}>키퍼 상세</${SectionLabel}>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
@@ -294,7 +294,7 @@ export function KeeperDetailOverviewSidebar({
 }) {
   return html`
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
-      <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
+      <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-panel)]">
         <div>
           <${SectionLabel}>개요</${SectionLabel}>
           <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
@@ -347,7 +347,7 @@ export function KeeperDetailSection({
   return html`
     <section
       id=${id}
-      class="scroll-mt-24 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-2xl"
+      class="scroll-mt-24 rounded-[28px] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
       aria-label=${title}
     >
       <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">

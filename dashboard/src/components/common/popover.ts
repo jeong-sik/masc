@@ -117,7 +117,7 @@ export function Popover({
               ' left-0 min-w-48 max-w-80 ' +
               'bg-[var(--dialog-panel-bg)] rounded-md ' +
               'border border-[var(--dialog-panel-border)] ' +
-              shadow-xl p-3'
+              'shadow-[var(--shadow-panel)] p-3'
             }
           >
             ${children}

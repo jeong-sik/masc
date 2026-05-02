@@ -30,7 +30,7 @@ const INPUT_CLS =
 const LISTBOX_CLS =
   'absolute z-50 top-full mt-1 left-0 w-full max-h-60 overflow-auto ' +
   'bg-[var(--dialog-panel-bg)] rounded-[var(--r-1)] border border-[var(--dialog-panel-border)] ' +
-  shadow-xl py-1'
+  'shadow-[var(--shadow-panel)] py-1'
 
 const OPTION_BASE = 'px-3 py-2 text-sm cursor-pointer '
 

@@ -224,7 +224,7 @@ export function App() {
                     <span>${currentView?.label ?? 'Surface'}</span>
                     ${currentSection && currentSection.label !== currentView?.label
                       ? html`
-                          <span class="text-[#c6a15b]">/</span>
+                          <span class="text-[var(--color-warn)]">/</span>
                           <span class="truncate">${currentSection.label}</span>
                         `
                       : null}

@@ -185,7 +185,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-sm border border-[var(--slate-gray-16)] bg-[var(--slate-gray-8)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
+                          <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
                             ${timestamp}
                           </span>
                         `
@@ -236,12 +236,12 @@ function ChatMessageBubble({
 
       ${expanded && entry.details
         ? html`
-            <div class="chat-detail-panel rounded-card border border-[var(--slate-gray-14)] px-3 py-3">
+            <div class="chat-detail-panel rounded-card border border-[var(--color-border-default)] px-3 py-3">
               ${overview.length > 0
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
-                        <div class="rounded-[var(--r-1)] border border-[var(--slate-gray-12)] bg-[var(--white-3)] px-3 py-2.5">
+                        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2.5">
                           <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">${item.label}</div>
                           <div class="mt-1 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
                         </div>
@@ -323,7 +323,7 @@ export function ChatTranscript({
 
   return html`
     <div
-      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
+      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--white-3)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
@@ -335,7 +335,7 @@ export function ChatTranscript({
         ? html`
             <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] px-6 text-center">
               <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
-              <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--text-secondary)]">${emptyText}</div>
+              <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
             </div>
           `
         : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`)}
@@ -387,7 +387,7 @@ export function ChatComposer({
         <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
-        class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
+        class="control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose"
         placeholder=${placeholder}
         aria-label="메시지 입력"
         value=${draft}

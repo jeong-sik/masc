@@ -24,7 +24,7 @@
   font-size: var(--fs-12); color: var(--color-fg-secondary);
   min-width: 0; overflow: hidden;
 }
-.topbar-brand { font-weight: 600; color: var(--color-fg-primary); letter-spacing: .02em; flex-shrink: 0; }
+.topbar-brand { font-weight: var(--fw-semi); color: var(--color-fg-primary); letter-spacing: .02em; flex-shrink: 0; }
 .topbar-brand .brand-dot {
   display: inline-block; width: 7px; height: 7px;
   background: var(--brass-1); border-radius: 50%; margin-right: 8px;
@@ -32,7 +32,7 @@
 }
 .topbar-sep { width: 1px; height: 14px; background: var(--color-border-strong); flex-shrink: 0; }
 .topbar-crumbs { display: flex; gap: var(--sp-2); color: var(--color-fg-muted); min-width: 0; overflow: hidden; }
-.topbar-crumbs b { color: var(--color-fg-primary); font-weight: 500; }
+.topbar-crumbs b { color: var(--color-fg-primary); font-weight: var(--fw-med); }
 .topbar-spacer { flex: 1; }
 .topbar-pills { display: flex; gap: var(--sp-2); flex-shrink: 0; }
 .topbar-pill {
@@ -102,7 +102,7 @@
 .top-tabs button {
   background: transparent; border: none;
   border-bottom: 2px solid transparent;
-  color: var(--color-fg-muted); font-size: var(--fs-11); font-weight: 600;
+  color: var(--color-fg-muted); font-size: var(--fs-11); font-weight: var(--fw-semi);
   letter-spacing: .06em; text-transform: uppercase;
   padding: 4px 10px; cursor: pointer; border-radius: 0;
 }

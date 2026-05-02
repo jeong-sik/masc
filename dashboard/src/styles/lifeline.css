@@ -22,7 +22,7 @@
 }
 .ll-label-caps {
   font-size: var(--fs-10);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--color-fg-muted);
@@ -32,7 +32,7 @@
   font-family: var(--font-mono);
   font-size: var(--fs-12);
   letter-spacing: 0;
-  font-weight: 500;
+  font-weight: var(--fw-med);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ll-label .ll-hb {
@@ -170,9 +170,9 @@
   z-index: 10;
 }
 .ll-tip.is-open { opacity: 1; }
-.ll-tip-head { color: var(--brass-1); font-weight: 600; }
+.ll-tip-head { color: var(--brass-1); font-weight: var(--fw-semi); }
 .ll-tip-row { color: var(--color-fg-muted); }
-.ll-tip-row b { color: var(--color-fg-secondary); font-weight: 400; }
+.ll-tip-row b { color: var(--color-fg-secondary); font-weight: var(--fw-reg); }
 
 /* heartbeat dot at the far right of cells */
 .ll-hb-tail {
@@ -206,7 +206,7 @@
 }
 .ll-tail-meta b {
   color: var(--color-fg-primary);
-  font-weight: 500;
+  font-weight: var(--fw-med);
 }
 .ll-zoom {
   display: inline-flex;

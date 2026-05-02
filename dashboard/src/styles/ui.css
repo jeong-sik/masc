@@ -13,9 +13,9 @@
 
   & p { margin: 6px 0; }
 
-  & h1 { font-size: var(--fs-16); font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
-  & h2 { font-size: var(--fs-14); font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
-  & h3 { font-size: var(--fs-13); font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
+  & h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
     background: var(--color-bg-elevated);
@@ -60,7 +60,7 @@
   & hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
 
   & a { color: var(--brass-1); &:hover { text-decoration: underline; } }
-  & strong { font-weight: 600; }
+  & strong { font-weight: var(--fw-semi); }
   & del { color: var(--color-fg-muted); }
 
   & table { margin: 8px 0; }

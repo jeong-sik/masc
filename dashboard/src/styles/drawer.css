@@ -38,7 +38,7 @@
   background: transparent; border: none;
   border-bottom: 2px solid transparent;
   padding: 8px 12px; color: var(--color-fg-muted);
-  font-size: var(--fs-11); font-weight: 600;
+  font-size: var(--fs-11); font-weight: var(--fw-semi);
   letter-spacing: .06em; text-transform: uppercase;
   cursor: pointer; border-radius: 0; position: relative;
 }

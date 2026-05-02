@@ -14,7 +14,7 @@
 
 .pipeline-stage-node.active .pipeline-stage-label {
   color: var(--color-fg-primary);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
 }
 
 .pipeline-stage-node.active.stage-idle .pipeline-stage-dot {

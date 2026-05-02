@@ -26,7 +26,7 @@
   scrollbar-width: thin;
 }
 .sl-toolbar .label {
-  color: var(--color-fg-muted); letter-spacing: .08em; font-weight: 600;
+  color: var(--color-fg-muted); letter-spacing: .08em; font-weight: var(--fw-semi);
   font-size: var(--fs-10);
 }
 .sl-tb-brand { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -49,7 +49,7 @@
   flex-shrink: 0;
   padding-left: var(--sp-3);
 }
-.sl-range b { color: var(--color-fg-secondary); font-weight: 500; }
+.sl-range b { color: var(--color-fg-secondary); font-weight: var(--fw-med); }
 
 .sl-toggle {
   display: inline-flex; align-items: center; gap: 4px;
@@ -218,7 +218,7 @@
 .sl-status.dot-idle { background: var(--idle); }
 
 .sl-name {
-  color: var(--color-fg-primary); font-weight: 500;
+  color: var(--color-fg-primary); font-weight: var(--fw-med);
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
@@ -229,7 +229,7 @@
   color: var(--color-fg-muted); flex-shrink: 0;
   display: flex; gap: 3px;
 }
-.sl-meta b { color: var(--color-fg-primary); font-weight: 500; }
+.sl-meta b { color: var(--color-fg-primary); font-weight: var(--fw-med); }
 .sl-meta .err { color: var(--err); }
 
 /* mini-sparkline in label */

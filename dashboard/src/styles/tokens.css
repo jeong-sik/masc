@@ -413,7 +413,7 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 /* Label — small-caps lock-up used on every panel title */
 .label {
   font-size: var(--fs-11);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--fg-3);

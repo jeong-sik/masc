@@ -17,7 +17,7 @@
   color: var(--color-fg-muted);
   letter-spacing: .08em;
   text-transform: uppercase;
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   font-size: var(--fs-9);
   flex-shrink: 0;
 }
@@ -91,7 +91,7 @@
   letter-spacing: .08em;
   text-transform: uppercase;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   flex-shrink: 0;
 }
 .layer-explode:hover { background: var(--color-bg-hover); color: var(--color-fg-primary); }
@@ -273,7 +273,7 @@ body[data-explode="1"] .lyr::before {
 .approve-stamp .stamp-glyph {
   font-family: var(--font-mono);
   font-size: 56px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   line-height: 1;
   opacity: 0.08;
   letter-spacing: .08em;

@@ -133,6 +133,6 @@
 }
 .keeper-row:hover { background: var(--color-bg-elevated); }
 .keeper-row.is-active { background: var(--color-bg-hover); border-left-color: var(--brass-1); }
-.keeper-row .name { color: var(--color-fg-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.keeper-row .name { color: var(--color-fg-primary); font-weight: var(--fw-med); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .keeper-row.is-active .name { color: var(--brass-1); }
 .keeper-row .meta { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }

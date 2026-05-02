@@ -20,7 +20,7 @@
 }
 .stat-row .k {
   color: var(--color-fg-muted); font-size: var(--fs-11);
-  font-weight: 500; letter-spacing: .04em; text-transform: uppercase; padding-top: 1px;
+  font-weight: var(--fw-med); letter-spacing: .04em; text-transform: uppercase; padding-top: 1px;
 }
 .stat-row .v {
   color: var(--color-fg-primary); font-variant-numeric: tabular-nums;

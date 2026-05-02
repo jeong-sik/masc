@@ -52,7 +52,7 @@
 
 .tk-sym {
   font-size: var(--fs-11);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .06em;
   color: var(--color-fg-primary);
   min-width: 36px;

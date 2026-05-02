@@ -246,7 +246,7 @@ function SortBar() {
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-all duration-150 border cursor-pointer
+            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-all duration-[var(--t-med)] border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]'
@@ -269,7 +269,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer
+              class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-[var(--t-med)] border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]'
@@ -319,12 +319,12 @@ function SortBar() {
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             <//>
             <button type="button"
-              class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-all duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >

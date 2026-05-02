@@ -158,7 +158,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           <span class="px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
           <span class="text-[var(--color-fg-muted)]">${filtered.length} events</span>
           <button type="button"
-            class="px-2 py-0.5 rounded-[var(--r-1)] text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
+            class="px-2 py-0.5 rounded-[var(--r-1)] text-3xs border cursor-pointer transition-all duration-[var(--t-med)] ${autoScroll.value
               ? 'border-[var(--ok-border)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
               : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
@@ -173,7 +173,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         ${filtered.length === 0
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
-              <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded-[var(--r-1)] hover:bg-[var(--white-4)]" key=${idx}>
+              <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--white-4)]" key=${idx}>
                 <${StatusChip} tone=${eventKindBadgeTone(entry)}>${eventKindLabel(entry.eventType)}<//>
                 <span class="flex-1 text-[var(--color-fg-primary)] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`

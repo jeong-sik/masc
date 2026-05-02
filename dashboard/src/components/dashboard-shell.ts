@@ -239,7 +239,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`Server build ${label}`}
         title=${hoverTitle}
@@ -708,7 +708,7 @@ export function DashboardMain() {
     <${SurfaceLead} />
     <${ObservatoryFilterBar} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
-      <div class="animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-both">
+      <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">
         <${TabContent} />
       </div>
     <//>

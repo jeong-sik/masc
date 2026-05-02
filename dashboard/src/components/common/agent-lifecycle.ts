@@ -35,7 +35,7 @@ const TRANSITIONS: LifecycleTransition[] = [
 
 function nodeClass(isCurrent: boolean): string {
   const base =
-    'transition-all duration-300'
+    'transition-all duration-[var(--t-slow)]'
   if (isCurrent) {
     return `${base} r-6 stroke-[var(--accent-9)] stroke-2 fill-[var(--accent-3)]`
   }
@@ -156,7 +156,7 @@ export function AgentLifecycle({
                 stroke=${isFlashing ? 'var(--accent-9)' : 'var(--gray-8)'}
                 stroke-width=${isFlashing ? '2.5' : '1.5'}
                 marker-end=${isFlashing ? 'url(#arrowhead-flash)' : 'url(#arrowhead)'}
-                class=${isFlashing ? 'transition-colors duration-300' : ''}
+                class=${isFlashing ? 'transition-colors duration-[var(--t-slow)]' : ''}
               />
               <text
                 x=${(from.x + to.x) / 2}

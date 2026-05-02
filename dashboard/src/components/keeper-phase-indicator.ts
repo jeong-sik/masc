@@ -76,7 +76,7 @@ export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | str
 
   return html`
     <span
-      class="inline-flex items-center gap-1 rounded-[var(--r-1)] font-semibold tracking-wide select-none transition-all duration-300 ${size}"
+      class="inline-flex items-center gap-1 rounded-[var(--r-1)] font-semibold tracking-wide select-none transition-all duration-[var(--t-slow)] ${size}"
       style="color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border}; box-shadow: ${style.glow}; ${isBuffer ? 'animation: loadingPulse 2.5s ease-in-out infinite;' : ''}"
       title="단계: ${phase ?? 'unknown'} — ${style.label}"
       role="status"

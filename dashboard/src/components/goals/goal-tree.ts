@@ -520,7 +520,7 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   return html`
     <div class="flex items-center gap-2">
       <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
-        <div class="${h} rounded-[var(--r-0)] transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
+        <div class="${h} rounded-[var(--r-0)] transition-all duration-[var(--t-xslow)]" style="width:${clamped}%;background:${barColor}"></div>
       </div>
       <span class="${DECK_META} w-9 text-right font-semibold tabular-nums">${clamped}%</span>
     </div>

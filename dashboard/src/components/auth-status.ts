@@ -151,7 +151,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
         aria-controls=${popoverId}

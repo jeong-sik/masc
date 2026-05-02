@@ -94,7 +94,7 @@ export function Status() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <div class="transition-opacity duration-300">
+      <div class="transition-opacity duration-[var(--t-slow)]">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
           ${renderSection(section)}
         <//>

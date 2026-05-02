@@ -429,7 +429,7 @@ export function TransitionTrail({
             <div
               data-trail-index=${trailIndex}
               title=${tooltip}
-              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
               <span class="w-[52px] shrink-0 text-right text-[var(--color-fg-disabled)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
@@ -484,7 +484,7 @@ export function TopTransitionsPanel({
             : ''
           return html`
             <div
-              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
               title=${`${entry.field}: ${entry.from} → ${entry.to} (관측 ${entry.count}회)`}
             >
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
@@ -554,7 +554,7 @@ export function DwellHistogramPanel({
           const color = FIELD_COLOR[lane.field] ?? 'text-[var(--color-fg-primary)]'
           const barColor = BAR_COLOR[lane.field] ?? 'bg-[var(--color-accent-fg)]'
           return html`
-            <div class=${`transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}>
+            <div class=${`transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''}`}>
               <div class="flex items-center gap-1.5 mb-0.5">
                 <span class=${`text-3xs font-semibold ${color}`}>${lane.field}</span>
                 <span class="text-3xs text-[var(--color-fg-disabled)]">${fmtDuration(lane.totalSeconds)}</span>

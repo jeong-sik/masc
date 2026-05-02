@@ -230,11 +230,11 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           ${totalCycles > 0 ? html`
             <div class="mt-1.5 h-2 rounded-[var(--r-0)] bg-[var(--white-6)] overflow-hidden flex">
               <div
-                class="h-full bg-[var(--ok-48)] transition-[width] duration-300"
+                class="h-full bg-[var(--ok-48)] transition-[width] duration-[var(--t-slow)]"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}
               />
               <div
-                class="h-full bg-[var(--bad-30)] transition-[width] duration-300"
+                class="h-full bg-[var(--bad-30)] transition-[width] duration-[var(--t-slow)]"
                 style=${{ width: `${(loop.total_discards / totalCycles) * 100}%` }}
               />
             </div>
@@ -301,7 +301,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
               </thead>
               <tbody>
                 ${visibleCycles.map(c => html`
-                  <tr key=${c.cycle} class="border-b border-[var(--color-border-divider)] hover:bg-[var(--white-4)] transition-colors duration-150">
+                  <tr key=${c.cycle} class="border-b border-[var(--color-border-divider)] hover:bg-[var(--white-4)] transition-colors duration-[var(--t-med)]">
                     <td class="py-2 px-3 font-mono text-[var(--color-fg-muted)]">${c.cycle}</td>
                     <td class="py-2 px-3 text-[var(--color-fg-secondary)] max-w-50 truncate" title=${c.hypothesis}>${c.hypothesis}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--color-fg-secondary)]">${c.score_before.toFixed(4)}</td>

@@ -47,7 +47,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
             <button
               type="button"
               key=${agent.name}
-              class=${`focus-agent-card w-full rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
+              class=${`focus-agent-card w-full rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-[var(--t-med)] text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">

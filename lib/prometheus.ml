@@ -684,6 +684,8 @@ let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
+let metric_llm_provider_capability_drops =
+  "masc_llm_provider_capability_drops_total"
 
 (* Domain-specific counters not yet constant-ised. *)
 let metric_anti_rationalization_fallback =
@@ -1061,6 +1063,9 @@ let init () =
      first observation. *)
   add metric_llm_provider_http_status
     "Total HTTP responses from LLM providers, labeled by provider, model, and status code"
+    Counter;
+  add metric_llm_provider_capability_drops
+    "Total OAS capability drops from LLM providers, labeled by model and field"
     Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here

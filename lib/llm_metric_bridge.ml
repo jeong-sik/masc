@@ -31,7 +31,7 @@
 let http_status_metric = "masc_llm_provider_http_status_total"
 
 (** Canonical metric name for silent capability drops. *)
-let capability_drop_metric = "masc_llm_provider_capability_drops_total"
+let capability_drop_metric = Prometheus.metric_llm_provider_capability_drops
 
 (** Emit a single HTTP status observation to the Prometheus counter.
 

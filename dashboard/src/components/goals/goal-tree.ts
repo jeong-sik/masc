@@ -827,11 +827,11 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const trust = keeper.runtime_trust
   const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
   const trustSummary =
-    trust?.attention_reason
-    ?? trust?.disposition_reason
-    ?? trust?.execution_summary?.mutation_guard_summary
-    ?? trust?.execution_summary?.sandbox_summary
-    ?? null
+    trust?.attention_reason?.trim()
+    || trust?.disposition_reason?.trim()
+    || trust?.execution_summary?.mutation_guard_summary?.trim()
+    || trust?.execution_summary?.sandbox_summary?.trim()
+    || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
   const latestNextAction = trust?.latest_next_action?.trim() || null

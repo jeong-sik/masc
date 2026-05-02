@@ -401,7 +401,7 @@ export function AgentProfile({ name }: { name: string }) {
                       ariaLabel=${`${c.name} 에이전트 프로필 열기`}
                       onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}>
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
-                      <span class="text-[var(--white-50)] text-sm tabular-nums">${c.collaborations}회</span>
+                      <span class="text-[var(--color-fg-muted)] text-sm tabular-nums">${c.collaborations}회</span>
                       ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
                     <//>
                   `)}
@@ -411,8 +411,8 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="border-t border-[var(--color-border-default)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
+                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--color-fg-secondary)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--color-fg-secondary)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}

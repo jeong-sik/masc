@@ -661,7 +661,7 @@ function SurfaceLead() {
             ${trail.map((crumb, i) => {
               const isLast = i === trail.length - 1
               const sep = i > 0
-                ? html`<span aria-hidden="true" class="text-[var(--white-10)]">›</span>`
+                ? html`<span aria-hidden="true" class="text-[var(--color-fg-disabled)]">›</span>`
                 : null
               const crumbEl = crumb.navigableTab !== null && !isLast
                 ? html`<${RouteLink}

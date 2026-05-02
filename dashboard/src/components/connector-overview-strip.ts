@@ -683,12 +683,12 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
             > · ${offlineLabel}</span>`
           : null}
       </span>
-      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span aria-hidden="true" class="text-[var(--color-fg-disabled)]">·</span>
       <span>
         <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-healthy>${summary.healthyCount}/${summary.connectorTotal}</span>
         <span> healthy</span>
       </span>
-      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span aria-hidden="true" class="text-[var(--color-fg-disabled)]">·</span>
       <span>
         <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-bindings>${summary.bindingCount}</span>
         <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'}</span>

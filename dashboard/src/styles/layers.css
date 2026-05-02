@@ -294,7 +294,7 @@ body[data-explode="1"] .lyr::before {
   right: 70px;
   pointer-events: auto;
   width: 240px;
-  background: linear-gradient(180deg, rgb(138 106 160 / .16), rgb(138 106 160 / .06));
+  background: linear-gradient(180deg, rgb(var(--stalled-glow) / .16), rgb(var(--stalled-glow) / .06));
   border: 1px solid rgb(var(--stalled-glow) / .35);
   border-radius: var(--r-1);
   padding: 6px 8px 8px;

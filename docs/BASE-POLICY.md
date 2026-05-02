@@ -114,14 +114,19 @@ preferred over both Base and raw Stdlib when they already exist.
 
 | Counter | What it measures |
 |---|---|
-| `mli_open_base` | `.mli` files in `lib/` that start with `open Base` |
-| `ml_base_stdlib_shadow` | `.ml` files in `lib/` that have both `open Base` and a Stdlib-shadow block (`module List = Stdlib.List`) |
+| `mli_open_base` | `.mli` files in `lib/` containing the `open Base` directive (anchored: `^[ \t]*open[ \t]+Base\b`, excludes comments/docstrings) |
+| `ml_base_stdlib_shadow` | `.ml` files in `lib/` that contain both the `open Base` directive and a Stdlib-shadow block (`module List = Stdlib.List`) |
 
-These counters are recorded in `.ci/health-baseline.json` and tracked
+These counters are recorded in `.ci/health-baseline.json` and reported
 by `scripts/health_snapshot.sh`.  A PR that increases either counter
-above the baseline fails the health gate (`--fail-on-lib-regression`).
+above the baseline fails the gate when the audit is run with
+`--fail-on-regression`:
 
-Run the audit locally:
+```sh
+bash scripts/base-policy-audit.sh --fail-on-regression
+```
+
+Run without arguments to report counts without failing:
 
 ```sh
 bash scripts/base-policy-audit.sh

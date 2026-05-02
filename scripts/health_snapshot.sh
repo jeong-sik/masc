@@ -185,6 +185,21 @@ print(node[field])
 PY
 }
 
+# Read a top-level integer field from a JSON file (no section nesting).
+extract_json_top_int() {
+  local json_file="$1"
+  local key="$2"
+  python3 - "$json_file" "$key" <<'PY'
+import json
+import sys
+
+path, key = sys.argv[1], sys.argv[2]
+with open(path) as handle:
+    data = json.load(handle)
+print(int(data[key]))
+PY
+}
+
 echo "=== Health Snapshot ==="
 if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "Running scripts/dune-local.sh build @check"
@@ -221,12 +236,18 @@ case "$anti_fake_status" in
 esac
 
 base_policy_json="$(mktemp)"
-bash scripts/base-policy-audit.sh \
-  --json-out "$base_policy_json" \
+base_policy_cmd=(
+  bash scripts/base-policy-audit.sh
+  --json-out "$base_policy_json"
   --baseline-file "$BASELINE_FILE"
+)
+if [ -n "$BASELINE_REF" ]; then
+  base_policy_cmd+=(--baseline-ref "$BASELINE_REF")
+fi
+"${base_policy_cmd[@]}"
 
-mli_open_base="$(python3 -c "import json; d=json.load(open('$base_policy_json')); print(d['mli_open_base'])")"
-ml_base_stdlib_shadow="$(python3 -c "import json; d=json.load(open('$base_policy_json')); print(d['ml_base_stdlib_shadow'])")"
+mli_open_base="$(extract_json_top_int "$base_policy_json" "mli_open_base")"
+ml_base_stdlib_shadow="$(extract_json_top_int "$base_policy_json" "ml_base_stdlib_shadow")"
 rm -f "$base_policy_json"
 
 lib_failwith="$(count_pattern lib 'failwith')"

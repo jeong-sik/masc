@@ -395,12 +395,29 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                                 ~sw:ctx.sw ~net ~cascade_name:meta.cascade_name () with
                         | Error _ -> false
                         | Ok candidates ->
-                            (match Cascade_health_filter.filter_healthy_strict ~sw:ctx.sw ~net candidates with
-                             | Error _ -> false
-                             | Ok healthy ->
-                                 List.exists (fun (p : Llm_provider.Provider_config.t) ->
-                                   Result.is_ok (Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:p.model_id)
-                                 ) healthy))
+                            let healthy =
+                              Cascade_health_filter.filter_healthy ~sw:ctx.sw
+                                ~net candidates
+                            in
+                            let has_recovery_evidence
+                                (p : Llm_provider.Provider_config.t) =
+                              let provider_key = p.model_id in
+                              match
+                                Cascade_health_tracker.provider_info
+                                  Cascade_health_tracker.global
+                                  ~provider_key
+                              with
+                              | None -> false
+                              | Some info ->
+                                  info.events_in_window > 0
+                                  && info.success_rate > 0.0
+                                  && (not info.in_cooldown)
+                                  && Result.is_ok
+                                       (Cascade_health_tracker.check_circuit_breaker
+                                          Cascade_health_tracker.global
+                                          ~provider_key)
+                            in
+                            List.exists has_recovery_evidence healthy)
                  in
                  if cascade_recovered () then
                    Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name meta.cascade_name

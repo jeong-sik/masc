@@ -275,7 +275,7 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="tabular-nums"><span class="text-[var(--color-status-warn)]">⚠️</span> ${failures.turn_failed} 실패</span>
           <span class="tabular-nums"><span class="text-[var(--color-status-err)]">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
-        <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden flex" aria-label="성공/실패 비율 바">
+        <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-[var(--r-0)] overflow-hidden flex" aria-label="성공/실패 비율 바">
           <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${pctSuccess.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${pctFail.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--color-status-err)]" style="width:${pctReject}%" title=${`거절 ${pctReject.toFixed(0)}%`}></div>
@@ -307,7 +307,7 @@ function OutcomesLedger({ keeper, outcomes }: {
             <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">
               <span class="text-[var(--color-fg-disabled)]">주요 실패 원인:</span>
               ${verdicts.top_failure_reasons.map(reason => html`
-                <span class="px-2 py-0.5 rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] font-mono text-[var(--color-fg-primary)]">${reason}</span>
+                <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] font-mono text-[var(--color-fg-primary)]">${reason}</span>
               `)}
             </div>
           ` : null}
@@ -334,11 +334,11 @@ function OutcomesLedger({ keeper, outcomes }: {
           <${MutedSpan}>supervisor 이력</${MutedSpan}>
         </div>
         <div class="flex flex-wrap gap-1.5 text-2xs">
-          <span class="px-2 py-0.5 rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
-          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
-          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
+          <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
+          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
+          <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`
-            <span class="px-2 py-0.5 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
+            <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
           ` : null}
         </div>
       <//>
@@ -547,7 +547,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
 
   return html`
     <${DetailCard} class="flex items-center gap-3 mb-5">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" role="img" aria-label="컨텍스트 비율 스파크라인" style="background:var(--bg-deepest);">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)]" role="img" aria-label="컨텍스트 비율 스파크라인" style="background:var(--bg-deepest);">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -621,15 +621,15 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center gap-4 mb-1.5">
             <span class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
-              <span class="inline-block w-2.5 h-0.5 rounded bg-[var(--cyan)]"></span> input
+              <span class="inline-block w-2.5 h-0.5 rounded-[var(--r-1)] bg-[var(--cyan)]"></span> input
               <span class="font-mono text-[var(--cyan)]">${formatTokens(lastInput)}</span>
             </span>
             <span class="flex items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
-              <span class="inline-block w-2.5 h-0.5 rounded bg-[var(--color-status-ok)]"></span> output
+              <span class="inline-block w-2.5 h-0.5 rounded-[var(--r-1)] bg-[var(--color-status-ok)]"></span> output
               <span class="font-mono text-[var(--good)]">${formatTokens(lastOutput)}</span>
             </span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="입출력 토큰 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="입출력 토큰 추이" style="background:var(--bg-deepest);">
             ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="var(--cyan)" stroke-width="1.5" opacity="0.8"/>` : null}
             ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5" opacity="0.8"/>` : null}
           </svg>
@@ -698,7 +698,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <${MutedSpan}>${promptPoints.length}개 스냅샷</${MutedSpan}>
         ${latest?.prompt_fingerprint
           ? html`<span class="inline-flex items-center gap-1">
-              <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
+              <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
               <${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${10} />
             </span>`
           : null}
@@ -709,7 +709,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>estimated prompt tokens</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="프롬프트 토큰 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="프롬프트 토큰 추이" style="background:var(--bg-deepest);">
             ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
@@ -831,7 +831,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>latest turn input</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(latestTotal)}</span>
           </div>
-          <div class="h-3 rounded-sm overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
+          <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
             ${latestEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`<div
@@ -869,7 +869,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>stacked history</${Eyebrow}>
             <${MutedSpan}>${points.length} turns</${MutedSpan}>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
               const comp = point.ctx_composition
               if (!comp || comp.display_total_tokens <= 0) return null
@@ -1004,7 +1004,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추론 텔레메트리</span>
         <${MutedSpan}>${telemetryPoints.length}개 지점</${MutedSpan}>
-        ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
+        ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--white-5)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
       </div>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         ${wallTokPerSec.length > 0 ? html`
@@ -1013,7 +1013,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>wall tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastWallTps.toFixed(1)}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="Wall TPS 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="Wall TPS 추이" style="background:var(--bg-deepest);">
             ${wallTpsLine ? html`<polyline points="${wallTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgWallTps.toFixed(1)}</div>
@@ -1026,7 +1026,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>hw tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastHwTps.toFixed(1)}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="하드웨어 TPS 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="하드웨어 TPS 추이" style="background:var(--bg-deepest);">
             ${hwTpsLine ? html`<polyline points="${hwTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgHwTps.toFixed(1)} · decode-only</div>
@@ -1039,7 +1039,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>API latency</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
             ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
           </svg>
         <//>
@@ -1097,11 +1097,11 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         <${DetailRow}>
           <${Eyebrow}>지연 시간</${Eyebrow}>
           <span class="flex items-center gap-2">
-            ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
+            ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </span>
         </${DetailRow}>
-        <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+        <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" style="background:var(--bg-deepest);">
           ${fallbackIndices.map((idx: number) => {
             const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
             return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="var(--color-status-err)" stroke-width="1.5" opacity="0.6"/>`
@@ -1116,7 +1116,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <${Eyebrow}>비용</${Eyebrow}>
           <span class="text-xs font-mono tabular-nums text-[var(--purple)]">$${totalCost.toFixed(4)}</span>
         </${DetailRow}>
-        <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+        <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" style="background:var(--bg-deepest);">
           ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="var(--purple)" stroke-width="1.5"/>` : null}
         </svg>
       <//>
@@ -1218,14 +1218,14 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
       />
       <div class="flex flex-col">
         ${filtered.map((f, i) => html`
-          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="font-mono text-[var(--cyan)] text-2xs truncate">${f.key}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate">${f.value}</span>
           </div>
         `)}
         ${extras.map((f, i) => html`
-          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate ${f.mono ? 'font-mono' : ''}">${f.value}</span>
           </div>
@@ -1243,7 +1243,7 @@ export function EquipmentList({ items }: { items: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map((item, i) => html`
-        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--white-3)]">
           <span class="text-xs text-[var(--color-fg-primary)]">${item}</span>
           <span class="text-3xs text-[var(--cyan)] font-mono">#${i + 1}</span>
         </div>
@@ -1259,7 +1259,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   return html`
     <div class="max-h-55 overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
-        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded">
+        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-[var(--r-1)]">
           <${StatusChip} tone="info" uppercase=${false} class="text-2xs font-medium">${name}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] font-mono">${relation}</span>
         </div>

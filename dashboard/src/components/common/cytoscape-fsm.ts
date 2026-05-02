@@ -33,17 +33,19 @@ export interface FsmGraphSpec {
 // strings are rejected. Resolve once per render against `:root` and
 // pass literal hex/rgb values into the stylesheet.
 const TOKEN_FALLBACKS: Record<string, string> = {
-  '--slate-800': '#1e293b',
-  '--slate-700': '#334155',
-  '--slate-600': '#475569',
-  '--slate-500': '#64748b',
-  '--slate-400': '#94a3b8',
-  '--frost-100': '#e2e8f0',
-  '--emerald': '#22c55e',
-  '--amber-bright': '#f59e0b',
-  '--color-status-err': '#ef4444',
-  '--white-pure': '#ffffff',
-  '--panel-dark': '#0f172a',
+  '--color-bg-3': '#211e1a',
+  '--color-bg-4': '#2a2621',
+  '--color-line-1': '#2a2520',
+  '--color-line-2': '#3a332c',
+  '--color-fg-3': '#7a7065',
+  '--color-fg-4': '#4a453e',
+  '--color-frost-100': '#e2e8f0',
+  '--color-white-pure': '#ffffff',
+  '--color-emerald': '#22c55e',
+  '--color-amber-bright': '#f59e0b',
+  '--color-err': '#c46a5a',
+  '--color-indigo': '#818cf8',
+  '--color-cyan': '#22d3ee',
 }
 
 function resolveCssVar(token: string): string {
@@ -62,23 +64,23 @@ function resolveCssVar(token: string): string {
 // lazily inside buildStylesheet/buildNodeColors so that token changes
 // (theme switch) propagate on next render.
 const NODE_COLOR_TOKENS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
-  state:    { bg: '--slate-800', border: '--slate-600', text: '--frost-100' },
-  active:   { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
-  buffer:   { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
-  terminal: { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
-  start:    { bg: '--slate-800', border: '#6366f1',     text: '#c7d2fe' },
-  end:      { bg: '--slate-800', border: '#6b7280',     text: '#9ca3af' },
-  ok:       { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
-  warn:     { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
-  err:      { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
-  dim:      { bg: '--slate-800', border: '#374151',     text: '#6b7280' },
+  state:    { bg: '--color-bg-3', border: '--color-line-2', text: '--color-frost-100' },
+  active:   { bg: '#065f46',     border: '--color-emerald',   text: '--color-white-pure' },
+  buffer:   { bg: '#78350f',     border: '--color-amber-bright', text: '--color-white-pure' },
+  terminal: { bg: '#7f1d1d',     border: '--color-err', text: '--color-white-pure' },
+  start:    { bg: '--color-bg-3', border: '--color-indigo',     text: '--color-frost-100' },
+  end:      { bg: '--color-bg-3', border: '--color-fg-3',     text: '--color-fg-4' },
+  ok:       { bg: '#065f46',     border: '--color-emerald',   text: '--color-white-pure' },
+  warn:     { bg: '#78350f',     border: '--color-amber-bright', text: '--color-white-pure' },
+  err:      { bg: '#7f1d1d',     border: '--color-err', text: '--color-white-pure' },
+  dim:      { bg: '--color-bg-3', border: '--color-line-1',     text: '--color-fg-3' },
 }
 
 const EDGE_COLOR_TOKENS: Record<string, string> = {
-  normal: '--slate-500',
-  error: '--color-status-err',
-  recovery: '--emerald',
-  cascade: '--amber-bright',
+  normal: '--color-fg-3',
+  error: '--color-err',
+  recovery: '--color-emerald',
+  cascade: '--color-amber-bright',
 }
 
 interface CytoscapeFsmProps {

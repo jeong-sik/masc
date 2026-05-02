@@ -220,16 +220,50 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
          ; path = "all credential host paths empty or missing"
          })
   else
-    let metadata = metadata_of_binding kb @ extra_metadata in
-    Ok
-      Credential_provider.
-        {
-          identity = kb.effective_github_identity;
-          env;
-          ro_mounts;
-          bootstrap = None;
-          metadata;
-        }
+    (* #12685: credential preflight — verify the bundle is actually
+       materialized before handing it to the sandbox.  Directory
+       presence alone is insufficient: a stale or corrupt hosts.yml
+       means gh/git inside docker will fail with opaque 401 errors.
+       Credential_materializer.verify_state runs gh auth status under
+       a bundle-scoped environment (no ambient GH_TOKEN leak) and
+       classifies the state as Materialized / Stale / Unmaterialized. *)
+    let credential_state =
+      Credential_materializer.verify_state ~gh_config_dir:kb.gh_config_dir
+    in
+    (match credential_state with
+    | Repo_manager_types.Materialized _ ->
+        let metadata = metadata_of_binding kb @ extra_metadata in
+        Ok
+          Credential_provider.
+            {
+              identity = kb.effective_github_identity;
+              env;
+              ro_mounts;
+              bootstrap = None;
+              metadata;
+            }
+    | Repo_manager_types.Stale { reason } ->
+        Error
+          (Credential_provider.Missing_bundle
+             { identity = keeper_name
+             ; path =
+                 Printf.sprintf
+                   "credential bundle %s is stale: %s. \
+                    Resolution: re-materialize via dashboard or \
+                    gh auth login into the bundle."
+                   kb.gh_config_dir reason
+             })
+    | Repo_manager_types.Unmaterialized ->
+        Error
+          (Credential_provider.Missing_bundle
+             { identity = keeper_name
+             ; path =
+                 Printf.sprintf
+                   "credential bundle %s is unmaterialized. \
+                    Resolution: materialize via dashboard or \
+                    gh auth login into the bundle."
+                   kb.gh_config_dir
+             }))
 
 let legacy_resolve ~config ~keeper_name =
   match Keeper_gh_env.keeper_binding config ~keeper_name with

@@ -1,21 +1,45 @@
 import { html } from 'htm/preact'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { dispatchKeeperInterjectAction } from '../../keeper-actions'
+import { activeKeeperName } from '../../keeper-state'
+import {
+  createInterjectStore,
+  type InterjectActionState,
+  type InterjectDispatchRequest,
+} from './interject-store'
 
-// PR-2 placeholder for the INTERJECT input. The real wiring (input
-// store + active-keeper resolution + Send/Approve/Pause/Drain action
-// dispatch through keeper-actions.ts) lands in Phase 2 PR-7.
+// The input and button states flow through the same store/dispatch boundary
+// that live active-keeper wiring uses. Send remains disabled until the global
+// keeper selection signal resolves to a concrete keeper.
 
-const ACTIONS: ReadonlyArray<{ id: string; label: string; primary: boolean }> = [
-  { id: 'send', label: 'Send', primary: true },
-  { id: 'approve', label: 'Approve', primary: false },
-  { id: 'pause', label: 'Pause', primary: false },
-  { id: 'drain', label: 'Drain', primary: false },
-]
+async function dispatchInterject(request: InterjectDispatchRequest): Promise<void> {
+  await dispatchKeeperInterjectAction({
+    kind: request.kind,
+    keeperName: request.keeper_id,
+    message: request.message,
+  })
+}
 
 export function IdeInterjectMock() {
+  const interjectStore = useMemo(() =>
+    createInterjectStore({
+      initialActiveKeeper: activeKeeperName.value,
+      dispatch: dispatchInterject,
+    }), [])
+  const [, forceRender] = useState(0)
+
+  useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])
+  useEffect(() => activeKeeperName.subscribe(name => {
+    interjectStore.setActiveKeeper(name)
+  }), [interjectStore])
+
+  const snapshot = interjectStore.snapshot()
+  const actions = interjectStore.actions()
+
   return html`
     <div
       role="region"
-      aria-label="INTERJECT (mock — PR-7 replaces with active-keeper wiring)"
+      aria-label="INTERJECT (interject store active keeper wiring)"
       style=${{
         display: 'grid',
         gridTemplateColumns: 'auto 1fr auto',
@@ -26,18 +50,29 @@ export function IdeInterjectMock() {
         alignItems: 'center',
       }}
     >
-      <span
+      <div
         style=${{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '2px',
           font: 'var(--type-eyebrow)',
           color: 'var(--color-fg-muted)',
           padding: '0 var(--sp-2)',
         }}
-      >INTERJECT</span>
+      >
+        <span>INTERJECT</span>
+        <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>
+          ${snapshot.active_keeper_id ?? 'No active keeper'}
+        </span>
+      </div>
       <input
         type="text"
         placeholder="Send message to active keeper..."
-        aria-label="Interject input (mock)"
-        readOnly
+        aria-label="Interject input"
+        value=${snapshot.message}
+        disabled=${snapshot.busy_action !== null}
+        onInput=${(event: Event) =>
+          interjectStore.setMessage((event.currentTarget as HTMLInputElement).value)}
         style=${{
           width: '100%',
           padding: 'var(--sp-2)',
@@ -49,24 +84,44 @@ export function IdeInterjectMock() {
         }}
       />
       <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-        ${ACTIONS.map(action => html`
-          <button
-            type="button"
-            disabled
-            aria-label=${`${action.label} (mock — PR-7 wires action)`}
-            style=${{
-              padding: '6px 12px',
-              background: action.primary ? 'var(--color-accent-fg)' : 'var(--color-bg-surface)',
-              color: action.primary ? 'var(--color-bg-page)' : 'var(--color-fg-secondary)',
-              border: action.primary ? 'none' : '1px solid var(--color-border-default)',
-              borderRadius: 'var(--r-1)',
-              font: 'var(--type-body)',
-              cursor: 'not-allowed',
-              opacity: 0.85,
-            }}
-          >${action.label}</button>
-        `)}
+        ${actions.map(action => InterjectButton(action, () => {
+          void interjectStore.submit(action.kind)
+        }))}
       </div>
+      ${snapshot.error
+        ? html`<span
+            role="status"
+            style=${{
+              gridColumn: '2 / 4',
+              color: 'var(--color-status-warn, var(--warn))',
+              fontSize: 'var(--fs-11)',
+            }}
+          >${snapshot.error}</span>`
+        : null}
     </div>
+  `
+}
+
+function InterjectButton(action: InterjectActionState, onClick: () => void) {
+  return html`
+    <button
+      type="button"
+      disabled=${!action.enabled}
+      aria-label=${action.disabled_reason
+        ? `${action.label} (${action.disabled_reason})`
+        : action.label}
+      title=${action.disabled_reason ?? action.label}
+      onClick=${onClick}
+      style=${{
+        padding: '6px 12px',
+        background: action.primary ? 'var(--color-accent-fg)' : 'var(--color-bg-surface)',
+        color: action.primary ? 'var(--color-bg-page)' : 'var(--color-fg-secondary)',
+        border: action.primary ? 'none' : '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-1)',
+        font: 'var(--type-body)',
+        cursor: action.enabled ? 'pointer' : 'not-allowed',
+        opacity: action.enabled ? 1 : 0.65,
+      }}
+    >${action.label}</button>
   `
 }

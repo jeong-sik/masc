@@ -9,7 +9,7 @@
   .dashboard-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 16px;
+    gap: var(--sp-4);
     padding: 16px;
     min-height: auto;
   }

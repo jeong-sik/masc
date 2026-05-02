@@ -98,7 +98,7 @@
 }
 .pane-body { flex: 1; min-height: 0; overflow: auto; background: var(--color-bg-page); }
 
-.top-tabs { display: flex; gap: 2px; }
+.top-tabs { display: flex; gap: var(--sp-0h); }
 .top-tabs button {
   background: transparent; border: none;
   border-bottom: 2px solid transparent;

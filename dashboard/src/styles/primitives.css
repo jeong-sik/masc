@@ -7,7 +7,7 @@
    Small inline capsule. Used for: tags, labels with value,
    anchored badges. Density over drama. */
 .chip {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--sp-1);
   height: 18px; padding: 0 7px;
   font-family: var(--font-mono);
   font-size: var(--fs-10);
@@ -36,8 +36,8 @@
 /* ════════ PILL ════════
    Like chip but rounder; used in state-y contexts (running, paused). */
 .pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 16px; padding: 0 8px;
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 16px; padding: 0 var(--sp-2);
   font-size: var(--fs-10);
   font-weight: var(--fw-med);
   letter-spacing: .04em;
@@ -58,7 +58,7 @@
    Progress bar — fill inside track. Used in tasks, goals, budgets. */
 .bar {
   display: inline-block;
-  height: 4px; width: 100%;
+  height: var(--sp-1); width: 100%;
   background: var(--color-bg-hover);
   border-radius: var(--r-0);
   overflow: hidden;
@@ -75,7 +75,7 @@
 
 /* bar with segments (a/b/c split — e.g. passing/failing/skipped) */
 .bar-seg {
-  display: flex; height: 4px; width: 100%;
+  display: flex; height: var(--sp-1); width: 100%;
   background: var(--color-bg-hover); border-radius: var(--r-0); overflow: hidden;
 }
 .bar-seg > span { display: block; height: 100%; }
@@ -119,7 +119,7 @@
   flex-shrink: 0;
 }
 .section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: var(--fw-med); }
-.section-head > .tail  { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.section-head > .tail  { margin-left: auto; display: flex; gap: var(--sp-1); align-items: center; }
 
 /* ════════ KV ROW ════════
    Label + value. Used in drawer details, inspector panels. */
@@ -127,7 +127,7 @@
   display: grid;
   grid-template-columns: 80px 1fr;
   gap: var(--sp-3);
-  padding: 4px 0;
+  padding: var(--sp-1) 0;
   font-size: var(--fs-11);
   align-items: baseline;
 }
@@ -160,7 +160,7 @@
 .btn.ghost { border-color: transparent; color: var(--color-fg-muted); }
 .btn.ghost:hover { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 
-.btn.sm { height: 20px; padding: 0 8px; font-size: var(--fs-10); }
+.btn.sm { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-10); }
 .btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-9); letter-spacing: .06em; }
 
 /* icon-only button — square */
@@ -173,7 +173,7 @@
 /* ════════ KEY CAPS ════════ */
 .kbd {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 16px; height: 16px; padding: 0 4px;
+  min-width: 16px; height: 16px; padding: 0 var(--sp-1);
   font-family: var(--font-mono); font-size: var(--fs-10);
   color: var(--color-fg-muted);
   background: var(--color-bg-hover);
@@ -203,7 +203,7 @@
 .tk {
   font-family: var(--font-mono);
   font-size: .92em;
-  padding: 0 4px;
+  padding: 0 var(--sp-1);
   border-radius: var(--r-0);
   background: var(--color-bg-hover);
   color: var(--color-fg-primary);
@@ -359,7 +359,7 @@ body[data-grid="1"]::before {
 .caret::after {
   content: "▌";
   display: inline-block;
-  margin-left: 2px;
+  margin-left: var(--sp-0h);
   color: var(--brass-1);
   animation: anim-blink 1s steps(1) infinite;
 }

@@ -37,7 +37,7 @@
 .drawer-tab {
   background: transparent; border: none;
   border-bottom: 2px solid transparent;
-  padding: 8px 12px; color: var(--color-fg-muted);
+  padding: var(--sp-2) var(--sp-3); color: var(--color-fg-muted);
   font-size: var(--fs-11); font-weight: var(--fw-semi);
   letter-spacing: .06em; text-transform: uppercase;
   cursor: pointer; border-radius: 0; position: relative;
@@ -53,7 +53,7 @@
   padding: var(--sp-3) var(--sp-4); font-size: var(--fs-12);
 }
 
-.chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: var(--sp-1) 0; }
 .chip {
   font-family: var(--font-mono); font-size: var(--fs-10);
   padding: 2px 6px; background: var(--color-bg-elevated);
@@ -71,7 +71,7 @@
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
   color: var(--color-fg-primary); background: var(--color-bg-page);
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);
-  padding: 8px 10px; overflow: auto; max-height: 280px;
+  padding: var(--sp-2) 10px; overflow: auto; max-height: 280px;
   white-space: pre-wrap; word-break: break-word; margin: 4px 0 8px;
 }
 .pre.is-raw { max-height: 360px; }
@@ -83,7 +83,7 @@
   background: var(--color-bg-elevated); overflow: hidden;
 }
 .tool-name {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--sp-2);
   padding: 6px 10px; background: var(--color-bg-hover);
   border-bottom: 1px solid var(--color-border-default); font-size: var(--fs-12);
 }
@@ -101,13 +101,13 @@
 .json-section .pre { margin: 0 10px 8px; max-height: 240px; }
 
 .fsm-lifeline {
-  display: flex; flex-wrap: wrap; gap: 2px;
+  display: flex; flex-wrap: wrap; gap: var(--sp-0h);
   padding: 6px; background: var(--color-bg-page);
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);
-  margin-top: 4px; max-height: 120px; overflow-y: auto;
+  margin-top: var(--sp-1); max-height: 120px; overflow-y: auto;
 }
 .fsm-lifeline .ll-cell { width: 8px; height: 14px; }
-.fsm-trans-list { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.fsm-trans-list { display: flex; flex-direction: column; gap: var(--sp-0h); margin-top: var(--sp-1); }
 .fsm-trans {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 6px; border-radius: var(--r-1); font-size: var(--fs-11);
@@ -128,7 +128,7 @@
 .bar-fill.k-error { background: var(--err); }
 
 /* ── Domain-detail drawer (tasks/goals/memory) ── */
-.dd-tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.dd-tag-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: 10px; }
 .dd-section { margin-bottom: 14px; }
 .dd-section .label {
   font-size: var(--fs-10); color: var(--color-fg-muted);
@@ -140,10 +140,10 @@
   white-space: pre-wrap; word-break: break-word;
 }
 .dd-text.muted { color: var(--color-fg-secondary); }
-.dd-goal-stack { display: flex; flex-direction: column; gap: 4px; }
+.dd-goal-stack { display: flex; flex-direction: column; gap: var(--sp-1); }
 .dd-goal-row {
   display: grid; grid-template-columns: 48px 1fr;
-  gap: 8px; align-items: start;
+  gap: var(--sp-2); align-items: start;
   padding: 6px 8px; border-radius: var(--r-1);
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
   font-size: var(--fs-12);

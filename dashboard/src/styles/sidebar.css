@@ -11,7 +11,7 @@
   background: transparent; border: none; border-right: 1px solid var(--color-border-default);
   border-bottom: 2px solid transparent;
   padding: 8px 4px 6px; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-0h);
   color: var(--color-fg-muted);
 }
 .sb-railtab:last-child { border-right: none; }
@@ -39,7 +39,7 @@
 .sb-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--sp-2);
   padding: 6px 10px;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -99,8 +99,8 @@
   font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted);
 }
 .sb-filter {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
-  padding: 0 8px 6px; border-bottom: 1px solid var(--color-border-default); flex-shrink: 0;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-0h);
+  padding: 0 var(--sp-2) 6px; border-bottom: 1px solid var(--color-border-default); flex-shrink: 0;
 }
 .sb-tab {
   background: var(--color-bg-elevated);
@@ -126,7 +126,7 @@
 .sidebar-list { flex: 1; min-height: 0; padding: 0 0 8px; overflow-y: auto; }
 .keeper-row {
   display: grid; grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center; gap: 8px;
+  align-items: center; gap: var(--sp-2);
   padding: 6px 12px 6px 10px; cursor: pointer;
   border-left: 2px solid transparent;
   font-size: var(--fs-12); min-width: 0;

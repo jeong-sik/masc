@@ -36,7 +36,7 @@
   flex-shrink: 0;
   margin: 0 2px;
 }
-.sl-tb-toggles { display: inline-flex; gap: 8px; flex-shrink: 0; }
+.sl-tb-toggles { display: inline-flex; gap: var(--sp-2); flex-shrink: 0; }
 .sl-toolbar .pane-meta {
   color: var(--color-fg-secondary);
   font-family: var(--font-mono); font-size: var(--fs-10);
@@ -52,7 +52,7 @@
 .sl-range b { color: var(--color-fg-secondary); font-weight: var(--fw-med); }
 
 .sl-toggle {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--sp-1);
   font: var(--fs-10)/1 var(--font-mono); color: var(--color-fg-muted);
   cursor: pointer; user-select: none;
   letter-spacing: .04em;

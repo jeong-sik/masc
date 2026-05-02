@@ -28,7 +28,7 @@
 .wf-bar.s-noop { background: var(--idle); opacity: .4; }
 .wf-bar:hover { outline: 1px solid var(--color-fg-primary); z-index: 2; }
 
-.wf-scale-ctrl { display: flex; gap: 2px; margin-left: auto; }
+.wf-scale-ctrl { display: flex; gap: var(--sp-0h); margin-left: auto; }
 .wf-scale-ctrl button {
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
   color: var(--color-fg-muted); font: var(--fs-10)/1 var(--font-mono);

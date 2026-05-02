@@ -160,7 +160,7 @@
   border: 1px solid var(--elev-4-border);
   box-shadow: var(--elev-4-shadow);
   border-radius: var(--r-1);
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   font: var(--type-caption);
   color: var(--color-fg-primary);
   white-space: nowrap;
@@ -244,5 +244,5 @@
   color: var(--color-fg-muted);
   font-family: var(--font-mono);
 }
-.ll-legend .lg { display: flex; align-items: center; gap: 4px; }
+.ll-legend .lg { display: flex; align-items: center; gap: var(--sp-1); }
 .ll-legend .sw { width: 8px; height: 8px; border-radius: 1px; }

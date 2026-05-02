@@ -41,13 +41,13 @@
 @utility tool-metrics-sections {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 @utility tool-bar-row {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   font-size: var(--fs-sm);
 }

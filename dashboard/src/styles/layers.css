@@ -56,7 +56,7 @@
 
 .layer-opacity {
   display: none;
-  align-items: center; gap: 4px;
+  align-items: center; gap: var(--sp-1);
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -81,8 +81,8 @@
 }
 
 .layer-explode {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 20px; padding: 0 8px;
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 20px; padding: 0 var(--sp-2);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
   background: var(--color-bg-elevated);
@@ -331,7 +331,7 @@ body[data-explode="1"] .lyr::before {
 .note-pin .np-head .np-ts { margin-left: auto; color: var(--color-fg-disabled); }
 .note-pin .np-body { line-height: 1.4; color: var(--color-fg-primary); font-size: var(--fs-11); }
 .note-pin .np-actions {
-  display: flex; gap: 4px; margin-top: 6px;
+  display: flex; gap: var(--sp-1); margin-top: 6px;
   font-size: var(--fs-9);
   color: var(--color-fg-disabled);
   font-family: var(--font-mono);

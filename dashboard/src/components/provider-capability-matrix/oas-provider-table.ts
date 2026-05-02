@@ -1,6 +1,7 @@
 // OasProviderTable — Runtime provider kind definitions from sec02 Table 1.
 
 import { html } from 'htm/preact'
+import { StatusDot } from '../common/status-dot'
 import {
   OAS_PROVIDER_CAPS,
   CAP_BOOLEAN_FIELDS,
@@ -20,11 +21,11 @@ export function OasProviderTable() {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-3 text-[10px] font-mono text-[var(--color-fg-muted)]">
         <span class="flex items-center gap-1">
-          <span class="inline-block size-2 rounded-full bg-[#22c55e]"></span>
+          <${StatusDot} size="sm" class="bg-[var(--color-status-ok)]" />
           Direct API (${isDirectApi})
         </span>
         <span class="flex items-center gap-1">
-          <span class="inline-block size-2 rounded-full bg-[#eab308]"></span>
+          <${StatusDot} size="sm" class="bg-[var(--color-status-warn)]" />
           CLI Wrapper (${isCliWrapper})
         </span>
       </div>
@@ -47,13 +48,13 @@ export function OasProviderTable() {
             ${OAS_PROVIDER_CAPS.map((prov, i) => {
               const isCli = prov.usage === 'strip'
               const rowBg = isCli
-                ? 'bg-[rgba(234,179,8,0.04)]'
+                ? 'bg-[var(--warn-10)]'
                 : i % 2 === 0 ? '' : 'bg-[var(--white-2)]'
               return html`
                 <tr key=${prov.id} class="${rowBg}">
                   <td class="sticky left-0 z-10 ${rowBg || 'bg-[var(--shell-rail-bg)]'} border-r border-[var(--color-border-default)] px-2 py-1.5 font-medium text-[var(--color-fg-primary)]">
                     <div class="flex items-center gap-1.5">
-                      <span class="size-1.5 rounded-full ${isCli ? 'bg-[#eab308]' : 'bg-[#22c55e]'}"></span>
+                      <${StatusDot} size="xs" class=${isCli ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'} />
                       ${prov.label}
                     </div>
                   </td>
@@ -66,8 +67,8 @@ export function OasProviderTable() {
                       <td key=${String(f.key)} class="border-r border-[var(--color-border-default)] px-1 py-0.5 text-center">
                         <span class="inline-block w-full rounded px-1 py-0.5 text-[10px] font-mono font-bold ${
                           val
-                            ? 'bg-[rgba(34,197,94,0.15)] text-[#22c55e]'
-                            : 'bg-[rgba(239,68,68,0.1)] text-[#ef4444]'
+                            ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+                            : 'bg-[var(--bad-10)] text-[var(--bad-light)]'
                         }">
                           ${val ? 'O' : 'X'}
                         </span>
@@ -77,8 +78,8 @@ export function OasProviderTable() {
                   <td class="px-2 py-0.5 text-center">
                     <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${
                       isCli
-                        ? 'bg-[rgba(234,179,8,0.15)] text-[#eab308]'
-                        : 'bg-[rgba(34,197,94,0.15)] text-[#22c55e]'
+                        ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+                        : 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
                     }">
                       ${prov.usage}
                     </span>

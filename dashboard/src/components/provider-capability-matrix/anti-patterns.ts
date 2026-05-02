@@ -50,9 +50,9 @@ export function AntiPatternList() {
           `)}
         </div>
         <div class="flex gap-2 text-[10px] font-mono text-[var(--color-fg-muted)]">
-          <span>C:<strong class="text-[#ef4444]">${riskCounts.C}</strong></span>
-          <span>H:<strong class="text-[#ef4444]">${riskCounts.H}</strong></span>
-          <span>M:<strong class="text-[#eab308]">${riskCounts.M}</strong></span>
+          <span>C:<strong class="text-[var(--color-status-err)]">${riskCounts.C}</strong></span>
+          <span>H:<strong class="text-[var(--color-status-err)]">${riskCounts.H}</strong></span>
+          <span>M:<strong class="text-[var(--color-status-warn)]">${riskCounts.M}</strong></span>
           <span>L:<strong class="text-[var(--color-fg-muted)]">${riskCounts.L}</strong></span>
         </div>
       </div>

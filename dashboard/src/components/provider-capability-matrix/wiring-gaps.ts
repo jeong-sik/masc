@@ -29,17 +29,16 @@ export function WiringGaps() {
             </tr>
           </thead>
           <tbody>
-            ${WIRING_GAPS.map((gap, i) => {
-              const isCorrect = gap.impact === 'correct'
+            ${gaps.map((gap, i) => {
               return html`
-                <tr key=${gap.id} class="${isCorrect ? 'opacity-60' : i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+                <tr key=${gap.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.id}</td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-medium text-[var(--color-fg-primary)]">${gap.provider}</td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.capability}</td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.oasDeclares}</td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.actualBehavior}</td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2">
-                    <${StatusChip} tone=${impactTone(gap.impact)}>${isCorrect ? 'OK' : gap.impact.toUpperCase()}<//>
+                    <${StatusChip} tone=${impactTone(gap.impact)}>${gap.impact.toUpperCase()}<//>
                   </td>
                 </tr>
               `

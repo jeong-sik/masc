@@ -40,7 +40,7 @@ export function BfclRankings() {
                     ${hasV3 ? html`<span class="font-bold">${entry.bfclV3}</span>` : entry.bfclV3}
                   </td>
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-right font-mono ${
-                    hasV4 ? 'text-[#22c55e] font-bold' : 'text-[var(--color-fg-muted)]'
+                    hasV4 ? 'text-[var(--color-status-ok)] font-bold' : 'text-[var(--color-fg-muted)]'
                   }">
                     ${hasV4 ? html`<span class="font-bold">${entry.bfclV4}</span>` : entry.bfclV4}
                   </td>
@@ -48,7 +48,7 @@ export function BfclRankings() {
                   <td class="border-b border-[var(--color-border-default)] px-3 py-2">
                     <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${
                       entry.license === '오픈웨이트' || entry.license === 'Apache 2.0' || entry.license === 'Modified MIT'
-                        ? 'bg-[rgba(34,197,94,0.12)] text-[#22c55e]'
+                        ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
                         : 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
                     }">
                       ${entry.license}

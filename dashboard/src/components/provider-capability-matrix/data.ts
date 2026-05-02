@@ -320,9 +320,9 @@ export const ANTI_PATTERNS: AntiPattern[] = [
 
 export function supportCellClass(v: FeatureSupport): string {
   switch (v) {
-    case '●': return 'bg-[rgba(34,197,94,0.15)] text-[#22c55e]'
-    case '◐': return 'bg-[rgba(234,179,8,0.15)] text-[#eab308]'
-    case '○': return 'bg-[rgba(239,68,68,0.1)] text-[#ef4444]'
+    case '●': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case '◐': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case '○': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
     case '—': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
   }
 }
@@ -365,24 +365,91 @@ export function categoryLabel(cat: AntiPatternCategory): string {
 
 export function categoryColor(cat: AntiPatternCategory): string {
   switch (cat) {
-    case 'silent-failure': return 'bg-[rgba(239,68,68,0.12)] text-[#f87171] border-[rgba(239,68,68,0.25)]'
-    case 'fake-fallback': return 'bg-[rgba(249,115,22,0.12)] text-[#fb923c] border-[rgba(249,115,22,0.25)]'
-    case 'string-match': return 'bg-[rgba(234,179,8,0.12)] text-[#facc15] border-[rgba(234,179,8,0.25)]'
-    case 'hardcoding': return 'bg-[rgba(99,102,241,0.12)] text-[#818cf8] border-[rgba(99,102,241,0.25)]'
+    case 'silent-failure': return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
+    case 'fake-fallback': return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
+    case 'string-match': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
+    case 'hardcoding': return 'bg-[var(--white-4)] text-[var(--color-status-info)] border-[var(--color-border-default)]'
   }
 }
 
-export function runtimeKindToMatrixId(kind: string | null | undefined): string | null {
-  if (!kind) return null
-  const lower = kind.toLowerCase()
-  if (lower.includes('anthropic') || lower.includes('claude')) return 'claude'
-  if (lower.includes('openai_compat') || lower.includes('openai')) return 'openai'
-  if (lower.includes('gemini')) return 'gemini'
-  if (lower.includes('glm')) return 'glm'
-  if (lower.includes('ollama')) return 'ollama'
-  if (lower.includes('kimi')) return 'kimi'
-  if (lower.includes('dashscope') || lower.includes('qwen')) return 'qwen35'
-  if (lower.includes('codex_cli')) return 'codex_cli'
-  if (lower.includes('gemini_cli')) return 'gemini_cli'
+function normalizeRuntimeKey(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return normalized === '' ? null : normalized ?? null
+}
+
+const PROVIDER_TO_MATRIX_ID: Record<string, string> = {
+  anthropic: 'claude',
+  claude: 'claude',
+  claude_code: 'claude',
+  codex: 'codex_cli',
+  codex_api: 'openai',
+  codex_cli: 'codex_cli',
+  dashscope: 'qwen35',
+  gemini: 'gemini_cli',
+  gemini_api: 'gemini',
+  gemini_cli: 'gemini_cli',
+  glm: 'glm',
+  glm_api: 'glm',
+  kimi: 'kimi',
+  kimi_api: 'kimi',
+  kimi_cli: 'kimi',
+  llama: 'llamacpp',
+  llama_cpp: 'llamacpp',
+  llamacpp: 'llamacpp',
+  ollama: 'ollama',
+  openai: 'openai',
+  openai_chat: 'openai',
+  openai_compat: 'openai',
+  openai_ext: 'openai',
+  qwen: 'qwen35',
+  qwen35: 'qwen35',
+  zai: 'glm',
+  zhipu: 'glm',
+}
+
+const RUNTIME_KIND_TO_MATRIX_ID: Record<string, string> = {
+  ...PROVIDER_TO_MATRIX_ID,
+  gemini: 'gemini',
+}
+
+function inferMatrixId(key: string): string | null {
+  if (key.includes('codex_api')) return 'openai'
+  if (key.includes('codex_cli') || key.includes('codex')) return 'codex_cli'
+  if (key.includes('gemini_api')) return 'gemini'
+  if (key.includes('gemini_cli')) return 'gemini_cli'
+  if (key.includes('gemini')) return 'gemini'
+  if (key.includes('anthropic') || key.includes('claude')) return 'claude'
+  if (key.includes('openai_compat') || key.includes('openai')) return 'openai'
+  if (key.includes('glm') || key.includes('zai') || key.includes('zhipu')) return 'glm'
+  if (key.includes('ollama')) return 'ollama'
+  if (key.includes('kimi')) return 'kimi'
+  if (key.includes('llama_cpp') || key.includes('llamacpp') || key === 'llama') return 'llamacpp'
+  if (key.includes('dashscope') || key.includes('qwen')) return 'qwen35'
   return null
+}
+
+export function runtimeProviderToMatrixId(
+  provider: string | null | undefined,
+  runtimeKind?: string | null,
+): string | null {
+  const providerKey = normalizeRuntimeKey(provider)
+  if (providerKey !== null) {
+    const exact = PROVIDER_TO_MATRIX_ID[providerKey]
+    if (exact !== undefined) return exact
+    const inferred = inferMatrixId(providerKey)
+    if (inferred !== null) return inferred
+  }
+
+  const kindKey = normalizeRuntimeKey(runtimeKind)
+  if (kindKey !== null) {
+    const exact = RUNTIME_KIND_TO_MATRIX_ID[kindKey]
+    if (exact !== undefined) return exact
+    return inferMatrixId(kindKey)
+  }
+
+  return null
+}
+
+export function runtimeKindToMatrixId(kind: string | null | undefined): string | null {
+  return runtimeProviderToMatrixId(null, kind)
 }

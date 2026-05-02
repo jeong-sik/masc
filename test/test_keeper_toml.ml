@@ -1663,6 +1663,20 @@ let test_unknown_toml_warning_key_normalizes_unknown_order () =
     (KTP.warn_unknown_keeper_toml_keys_once ~path
        [ "keeper.alpha"; "keeper.zeta" ])
 
+let test_unknown_toml_warning_key_full_path_not_basename () =
+  (* Two files that share the same basename but live in different directories
+     must each emit their own warning — using only the basename would incorrectly
+     suppress the second warning as a duplicate. *)
+  let suffix =
+    Printf.sprintf "keeper-warning-path-%06x.toml" (Random.bits ())
+  in
+  let path_a = "/tmp/dir-a/" ^ suffix in
+  let path_b = "/tmp/dir-b/" ^ suffix in
+  check bool "first file (dir-a) emits warning" true
+    (KTP.warn_unknown_keeper_toml_keys_once ~path:path_a [ "keeper.typo_x" ]);
+  check bool "second file (dir-b) also emits warning (different full path)" true
+    (KTP.warn_unknown_keeper_toml_keys_once ~path:path_b [ "keeper.typo_x" ])
+
 let string_starts_with ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len
@@ -1796,6 +1810,8 @@ let () =
             test_load_keeper_toml_captures_unknown_keys_on_profile;
           test_case "unknown TOML warning key normalizes order" `Quick
             test_unknown_toml_warning_key_normalizes_unknown_order;
+          test_case "unknown TOML warning key uses full path not basename" `Quick
+            test_unknown_toml_warning_key_full_path_not_basename;
           test_case "unknown TOML warning key cache is bounded" `Quick
             test_unknown_toml_warning_key_cache_is_bounded;
         ] );

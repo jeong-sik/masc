@@ -197,11 +197,12 @@ let test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap () =
       ]
   in
   check (list (pair string string)) "selected mixed wakeups"
-    [ "a", "board_activity"; "b", "thread_reply_after_self_comment" ]
+    [ "b", "thread_reply_after_self_comment"; "a", "board_activity" ]
     selected;
   check int "dropped generic wakeups" 1 dropped
 
 let test_board_wakeup_selection_caps_total_non_explicit () =
+  (* Non-generic reasons are prioritized over board_activity before total cap *)
   let selected, dropped =
     KKS.select_board_wakeup_candidates
       ~generic_limit:4
@@ -214,9 +215,28 @@ let test_board_wakeup_selection_caps_total_non_explicit () =
       ]
   in
   check (list (pair string string)) "selected total wakeups"
-    [ "a", "board_activity"; "b", "thread_reply_after_self_comment" ]
+    [ "b", "thread_reply_after_self_comment"; "d", "thread_reply_after_self_comment" ]
     selected;
   check int "dropped total wakeups" 2 dropped
+
+let test_board_wakeup_selection_total_limit_prefers_non_generic () =
+  (* A late non-generic entry must survive when a generic entry would displace it
+     under candidate order alone.  After prioritization the two non-generic items
+     fill the cap and the generic one is dropped instead. *)
+  let selected, dropped =
+    KKS.select_board_wakeup_candidates
+      ~generic_limit:5
+      ~total_limit:2
+      [
+        "a", Some "board_activity";
+        "b", Some "board_activity";
+        "c", Some "thread_reply_after_self_comment";
+      ]
+  in
+  check (list (pair string string)) "non-generic survives cap"
+    [ "c", "thread_reply_after_self_comment"; "a", "board_activity" ]
+    selected;
+  check int "dropped generic" 1 dropped
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
@@ -351,6 +371,8 @@ let () =
         `Quick test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap;
       test_case "total non-explicit fanout is capped"
         `Quick test_board_wakeup_selection_caps_total_non_explicit;
+      test_case "total limit prefers non-generic over board_activity"
+        `Quick test_board_wakeup_selection_total_limit_prefers_non_generic;
     ];
     "missed_wakeup_gap", [
       test_case "Skip_idle + Woken -> resumes (MissedWakeup spec gap)"

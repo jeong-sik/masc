@@ -217,8 +217,17 @@ let select_board_wakeup_candidates
       |> fun (selected_rev, _generic_seen, generic_dropped) ->
       List.rev selected_rev, generic_dropped
     in
-    let selected = take total_limit selected_by_reason in
-    let total_dropped = List.length selected_by_reason - List.length selected in
+    let prioritized =
+      let non_generic =
+        List.filter (fun (_, r) -> r <> "board_activity") selected_by_reason
+      in
+      let generic =
+        List.filter (fun (_, r) -> r = "board_activity") selected_by_reason
+      in
+      non_generic @ generic
+    in
+    let selected = take total_limit prioritized in
+    let total_dropped = List.length prioritized - List.length selected in
     selected, generic_dropped + total_dropped
 ;;
 

@@ -913,17 +913,18 @@ let sweep_and_recover (ctx : _ context) =
     Log.Keeper.warn
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name msg;
-    ignore (Keeper_registry.try_resolve_done entry (`Crashed msg));
-    ignore
-      (Keeper_registry.dispatch_event_and_log
-         ~base_path entry.name
-         (Keeper_state_machine.Fiber_terminated { outcome = msg }));
-    let ts = Time_compat.now () in
-    Keeper_registry.record_crash ~base_path entry.name ts msg;
-    Keeper_registry.record_error ~base_path entry.name msg;
-    match Keeper_registry.get ~base_path entry.name with
-    | Some updated -> queue_crashed_entry updated msg
-    | None -> ()
+    if Keeper_registry.try_resolve_done entry (`Crashed msg) then begin
+      ignore
+        (Keeper_registry.dispatch_event_and_log
+           ~base_path entry.name
+           (Keeper_state_machine.Fiber_terminated { outcome = msg }));
+      let ts = Time_compat.now () in
+      Keeper_registry.record_crash ~base_path entry.name ts msg;
+      Keeper_registry.record_error ~base_path entry.name msg;
+      match Keeper_registry.get ~base_path entry.name with
+      | Some updated -> queue_crashed_entry updated msg
+      | None -> ()
+    end
   in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match entry.phase with

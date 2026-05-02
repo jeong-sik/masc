@@ -1079,7 +1079,7 @@ let normalize_unknown_keeper_toml_keys unknown =
 let warn_unknown_keeper_toml_keys_once ~path unknown =
   let normalized_unknown = normalize_unknown_keeper_toml_keys unknown in
   let warning_key =
-    Filename.basename path ^ "\x1f" ^ String.concat "," normalized_unknown
+    path ^ "\x1f" ^ String.concat "," normalized_unknown
   in
   let rec loop () =
     let seen = Atomic.get unknown_keeper_toml_warning_keys in

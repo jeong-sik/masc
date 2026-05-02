@@ -121,7 +121,7 @@ function LoopSelector() {
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">실행자 필터</label>
         <select
           aria-label="실행자 필터"
-          class="bg-card border border-card-border text-[var(--color-fg-secondary)] text-xs rounded-[var(--r-1)] px-2 py-1 outline-none focus:border-accent"
+          class="bg-card border border-card-border text-[var(--color-fg-secondary)] text-xs rounded-[var(--r-1)] px-2 py-1 outline-none focus:border-accent-fg"
           value=${authorFilter.value}
           onChange=${(e: Event) => {
             const target = e.target as HTMLSelectElement

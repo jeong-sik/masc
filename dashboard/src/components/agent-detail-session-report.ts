@@ -221,7 +221,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
         aria-expanded=${expanded}
       >
         <div class="flex items-center gap-2">
-          <span class="size-2 rounded-[var(--r-0)] ${index === 0 ? 'bg-accent' : 'bg-[var(--color-bg-hover)]'}"></span>
+          <span class="size-2 rounded-[var(--r-0)] ${index === 0 ? 'bg-accent-fg' : 'bg-[var(--color-bg-hover)]'}"></span>
           <${TimeAgo} timestamp=${report.ts} />
         </div>
         ${isLong ? html`

@@ -473,7 +473,7 @@ export function KeeperRepoMapping() {
                       <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
                         <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
                         <select
-                          class="rounded-[var(--r-1)] border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent"
+                          class="rounded-[var(--r-1)] border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent-fg"
                           value=${draftCredentialId ?? ''}
                           onChange=${(event: Event) => {
                             const target = event.currentTarget as HTMLSelectElement

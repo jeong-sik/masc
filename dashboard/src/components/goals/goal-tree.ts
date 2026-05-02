@@ -1255,7 +1255,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

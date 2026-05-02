@@ -13,7 +13,7 @@ import { bucketTelemetryEntries, entryTimestampMs, useTrackBucketCount } from '.
 
 function sourceColor(source: string | undefined): string {
   switch (source) {
-    case 'oas_event': return 'bg-accent'
+    case 'oas_event': return 'bg-accent-fg'
     case 'agent_event': return 'bg-[var(--ok-10)]'
     case 'tool_call_io': return 'bg-[var(--accent-10)]'
     case 'tool_usage': return 'bg-[var(--accent-10)]'

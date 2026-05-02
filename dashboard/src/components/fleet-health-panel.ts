@@ -12,10 +12,11 @@ import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { GovernanceMonitor } from './governance-monitor'
 import { AttributionPanel } from './attribution-panel'
+import { KeeperReactivityMonitor } from './keeper-reactivity-monitor'
 
-type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance' | 'attribution'
+type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance' | 'attribution' | 'keeper-health'
 
-const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance', 'attribution']
+const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance', 'attribution', 'keeper-health']
 
 function isFleetView(v: string | undefined): v is FleetHealthView {
   return !!v && (FLEET_VIEWS as string[]).includes(v)
@@ -30,12 +31,13 @@ const activeView = computed<FleetHealthView>(() => {
 })
 
 const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
-  { key: 'default',      label: '개요' },
-  { key: 'event-log',    label: '이벤트 로그' },
-  { key: 'comparison',   label: 'Keeper 비교' },
-  { key: 'tool-quality', label: '도구 품질' },
-  { key: 'governance',   label: '거버넌스' },
-  { key: 'attribution',  label: 'Attribution' },
+  { key: 'default',        label: '개요' },
+  { key: 'event-log',      label: '이벤트 로그' },
+  { key: 'comparison',     label: 'Keeper 비교' },
+  { key: 'tool-quality',   label: '도구 품질' },
+  { key: 'governance',     label: '거버넌스' },
+  { key: 'attribution',    label: 'Attribution' },
+  { key: 'keeper-health',  label: '반응성 모니터' },
 ]
 
 function updateViewParam(view: FleetHealthView) {
@@ -89,6 +91,8 @@ export function FleetHealthPanel() {
           ? html`<${ToolQualityPanel} />`
         : view === 'governance'
           ? html`<${GovernanceMonitor} />`
+        : view === 'keeper-health'
+          ? html`<${KeeperReactivityMonitor} />`
         : html`<${AttributionPanel} />`}
       </div>
     </div>

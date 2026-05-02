@@ -25,6 +25,16 @@ describe('paginationItems', () => {
     expect(paginationItems({ page: 99, totalPages: 4 })).toEqual([1, 2, 3, 4])
   })
 
+  it('respects boundaryCount=0 (sliding window only, no boundary pages)', () => {
+    expect(paginationItems({ page: 9, totalPages: 18, boundaryCount: 0 })).toEqual([
+      'ellipsis-start',
+      8,
+      9,
+      10,
+      'ellipsis-end',
+    ])
+  })
+
   it('falls back to a single page for non-finite totals and counts', () => {
     expect(paginationItems({ page: 2, totalPages: Number.NaN })).toEqual([1])
     expect(paginationItems({ page: 2, totalPages: Number.POSITIVE_INFINITY })).toEqual([1])
@@ -91,6 +101,13 @@ describe('Pagination', () => {
     expect((container.querySelector('[aria-label="Next page"]') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('applies active classes to the current page button', () => {
+    const container = document.createElement('div')
+    render(h(Pagination, { totalPages: 5, page: 3 }), container)
+    const current = container.querySelector('[aria-current="page"]') as HTMLButtonElement
+    expect(current.className).toContain('bg-[var(--button-primary-bg)]')
+  })
+
   it('applies testId and custom aria label', () => {
     const container = document.createElement('div')
     render(h(Pagination, { totalPages: 3, ariaLabel: 'Task pages', testId: 'pager' }), container)
@@ -127,6 +144,14 @@ describe('CursorPagination', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(onPrevious).toHaveBeenCalledTimes(1)
     expect(onNext).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables directions when handlers are not provided', () => {
+    const container = document.createElement('div')
+    render(h(CursorPagination, { hasPrevious: true, hasNext: true }), container)
+    const buttons = container.querySelectorAll('button')
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(true)
+    expect((buttons[1] as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('disables unavailable cursor directions', async () => {

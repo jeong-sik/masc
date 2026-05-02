@@ -6,8 +6,9 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChild } from 'preact'
-import { useCallback, useMemo, useState } from 'preact/hooks'
+import { useCallback, useMemo } from 'preact/hooks'
 import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-preact'
+import { useControllableState } from './use-controllable-state'
 
 type PageItem = number | 'ellipsis-start' | 'ellipsis-end'
 
@@ -49,8 +50,10 @@ const PAGE_BUTTON_CLS = [
   'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
   'disabled:cursor-not-allowed disabled:text-[var(--color-fg-disabled)] disabled:hover:bg-[var(--color-bg-surface)]',
-  'aria-current:bg-[var(--button-primary-bg)] aria-current:border-[var(--button-primary-border)]',
-  'aria-current:text-[var(--button-primary-fg)]',
+].join(' ')
+const PAGE_BUTTON_ACTIVE_CLS = [
+  'bg-[var(--button-primary-bg)] border-[var(--button-primary-border)]',
+  'text-[var(--button-primary-fg)]',
 ].join(' ')
 const CURSOR_NAV_CLS = [
   'inline-flex items-center gap-2 rounded border border-[var(--color-border-default)]',
@@ -100,7 +103,7 @@ export function paginationItems({
   const total = positiveInteger(totalPages)
   const current = clampPage(page, total)
   const siblings = Math.max(0, finiteInteger(siblingCount, 1))
-  const boundaries = positiveInteger(boundaryCount)
+  const boundaries = Math.max(0, finiteInteger(boundaryCount, 1))
   const visibleWithoutEllipsis = boundaries * 2 + siblings * 2 + 3
 
   if (total <= visibleWithoutEllipsis) return range(1, total)
@@ -150,11 +153,12 @@ export function Pagination({
   testId,
 }: PaginationProps) {
   const total = positiveInteger(totalPages)
-  const [uncontrolledPage, setUncontrolledPage] = useState(() =>
-    clampPage(defaultPage, total),
-  )
-  const isControlled = controlledPage !== undefined
-  const page = clampPage(isControlled ? controlledPage! : uncontrolledPage, total)
+  const [rawPage, setRawPage] = useControllableState<number>({
+    prop: controlledPage !== undefined ? clampPage(controlledPage, total) : undefined,
+    defaultProp: clampPage(defaultPage, total),
+    onChange: onPageChange,
+  })
+  const page = clampPage(rawPage ?? 1, total)
   const items = useMemo(
     () => paginationItems({ page, totalPages: total, siblingCount, boundaryCount }),
     [page, total, siblingCount, boundaryCount],
@@ -162,19 +166,18 @@ export function Pagination({
 
   const setPage = useCallback(
     (next: number) => {
-      const clamped = clampPage(next, total)
-      if (!isControlled) setUncontrolledPage(clamped)
-      if (clamped !== page) onPageChange?.(clamped)
+      setRawPage(clampPage(next, total))
     },
-    [isControlled, onPageChange, page, total],
+    [setRawPage, total],
   )
 
   const button = (target: number, label: string, child: ComponentChild) => {
     const current = target === page
+    const cls = current ? `${PAGE_BUTTON_CLS} ${PAGE_BUTTON_ACTIVE_CLS}` : PAGE_BUTTON_CLS
     return html`
       <button
         type="button"
-        class=${PAGE_BUTTON_CLS}
+        class=${cls}
         aria-label=${current ? `${label}, current page` : label}
         aria-current=${current ? 'page' : undefined}
         disabled=${disabled || current}
@@ -246,8 +249,8 @@ export function CursorPagination({
   class: cx,
   testId,
 }: CursorPaginationProps) {
-  const previousDisabled = disabled || !hasPrevious
-  const nextDisabled = disabled || !hasNext
+  const previousDisabled = disabled || !hasPrevious || onPrevious === undefined
+  const nextDisabled = disabled || !hasNext || onNext === undefined
 
   return html`
     <nav

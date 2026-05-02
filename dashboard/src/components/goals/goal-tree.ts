@@ -827,15 +827,17 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const trust = keeper.runtime_trust
   const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
   const trustSummary =
-    trust?.attention_reason
-    ?? trust?.disposition_reason
-    ?? trust?.execution_summary?.mutation_guard_summary
-    ?? trust?.execution_summary?.sandbox_summary
-    ?? null
+    trust?.attention_reason?.trim()
+    || trust?.disposition_reason?.trim()
+    || trust?.execution_summary?.mutation_guard_summary?.trim()
+    || trust?.execution_summary?.sandbox_summary?.trim()
+    || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
   const latestNextAction = trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = trust?.operator_disposition_reason?.trim() || null
+  const shouldShowOperatorDispositionReason =
+    operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
 
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -889,11 +891,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${latestNextAction ? html`
               <span>권장 ${latestNextAction}</span>
             ` : null}
-            ${/* Show operator_disposition_reason only when trustSummary is absent to avoid
-               repeating the root-cause twice. trustSummary coalesces attention_reason,
-               disposition_reason, sandbox_summary, and mutation_guard_summary — any of
-               those already convey the stopped-reaction context. */
-              operatorDispositionReason && !trustSummary ? html`
+            ${/* Show receipt-level operator cause when it adds detail beyond trustSummary. */
+              shouldShowOperatorDispositionReason ? html`
               <span>운영자 ${operatorDispositionReason}</span>
             ` : null}
           </div>

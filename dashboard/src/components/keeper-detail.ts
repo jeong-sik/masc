@@ -226,6 +226,8 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
   const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
+  const shouldShowOperatorDispositionReason =
+    operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
   const runtimeProofStatus =
     executionSummary?.runtime_proof_status?.trim()
@@ -448,12 +450,8 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${latestNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
           : null}
-        ${/* Show operator_disposition_reason only when trustSummary is absent to avoid
-             repeating the same root-cause text twice. trustSummary coalesces
-             attention_reason, disposition_reason, and mutation_guard_summary — any of
-             those already convey the stopped-reaction context that operator_disposition_reason
-             would otherwise supply. */
-          operatorDispositionReason && !trustSummary
+        ${/* Show receipt-level operator cause when it adds detail beyond trustSummary. */
+          shouldShowOperatorDispositionReason
           ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
           : null}
         ${trustDisposition

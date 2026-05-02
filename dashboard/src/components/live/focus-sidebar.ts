@@ -55,9 +55,9 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                   ${agent.emoji ? html`<span class="text-[0.95rem]">${agent.emoji}</span>` : null}
                   ${agent.koreanName ?? agent.name}
                 </span>
-                <span class="focus-pressure-badge rounded ${pressureClass(agent.pressure)}">
+                <span class="focus-pressure-badge rounded-[var(--r-1)] ${pressureClass(agent.pressure)}">
                   ${pressureLabel(agent.pressure)}
-                  ${agent.assignedCount > 0 ? html` <span class="bg-[var(--white-10)] px-1 text-[0.6rem] rounded">${agent.assignedCount}</span>` : null}
+                  ${agent.assignedCount > 0 ? html` <span class="bg-[var(--white-10)] px-1 text-[0.6rem] rounded-[var(--r-1)]">${agent.assignedCount}</span>` : null}
                 </span>
               </div>
               ${agent.currentTask

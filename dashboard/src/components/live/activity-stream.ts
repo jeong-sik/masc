@@ -33,7 +33,7 @@ function FilterBar() {
           key=${opt.kind}
           variant="ghost"
           size="sm"
-          class="!rounded-sm !px-3 !py-1.5"
+          class="!rounded-[var(--r-0)] !px-3 !py-1.5"
           pressed=${active.has(opt.kind)}
           ariaLabel=${`activity stream filter ${opt.label}`}
           onClick=${() => toggleLiveFilter(opt.kind)}

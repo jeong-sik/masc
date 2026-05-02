@@ -329,7 +329,7 @@ export function LiveTopologyMap() {
       <div class="absolute bottom-2 right-2 flex flex-wrap gap-2.5 text-3xs text-[var(--color-fg-muted)]">
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)]"></span>Keeper</span>
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--cyan)]"></span>에이전트</span>
-        <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-sm bg-[var(--warn-fg)]"></span>작업</span>
+        <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-[var(--r-0)] bg-[var(--warn-fg)]"></span>작업</span>
       </div>
     </div>
   `

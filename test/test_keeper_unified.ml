@@ -1194,6 +1194,7 @@ let test_min_interval_fires_without_work_signal () =
             { minimal_meta.runtime with
               proactive_rt =
                 { minimal_meta.runtime.proactive_rt with
+                  (* 1000s > 900s min_interval, so the elapsed condition triggers *)
                   last_ts = Time_compat.now () -. 1000.0;
                 };
             };
@@ -1225,6 +1226,7 @@ let test_min_interval_does_not_fire_before_elapsed () =
             { minimal_meta.runtime with
               proactive_rt =
                 { minimal_meta.runtime.proactive_rt with
+                  (* 500s < 900s min_interval, so not-yet-elapsed condition holds *)
                   last_ts = Time_compat.now () -. 500.0;
                 };
             };

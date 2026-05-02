@@ -120,7 +120,7 @@
 .editor-lines-wrap {
   position: relative;
   transform-style: preserve-3d;
-  transition: transform var(--t-slow) var(--var(--ease-out));
+  transition: transform var(--t-slow) var(--ease-out);
   will-change: transform;
 }
 /* exploded state — lift each layer out of the plane */
@@ -133,7 +133,7 @@ body[data-explode="1"] .editor-lines-wrap {
   position: absolute; inset: 0;
   pointer-events: none;
   transform-origin: 50% 0%;
-  transition: opacity var(--t-med) var(--ease), transform var(--t-slow) var(--var(--ease-out));
+  transition: opacity var(--t-med) var(--ease), transform var(--t-slow) var(--ease-out);
   will-change: transform, opacity;
 }
 .lyr.is-off { opacity: 0 !important; }
@@ -164,7 +164,7 @@ body[data-explode="1"] .lyr::before {
   border-radius: 1px;
   background: var(--warn);
   opacity: 0;
-  transition: opacity var(--t-med) var(--ease), top var(--t-slow) var(--var(--ease-out)), height var(--t-slow) var(--var(--ease-out));
+  transition: opacity var(--t-med) var(--ease), top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
 }
 .time-stripe.age-recent   { opacity: 1;   background: var(--warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
 .time-stripe.age-near     { opacity: .7;  background: var(--warn); }
@@ -221,7 +221,7 @@ body[data-explode="1"] .lyr::before {
   position: absolute; left: 16px;
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   font-family: var(--font-mono);
-  transition: top var(--t-slow) var(--var(--ease-out));
+  transition: top var(--t-slow) var(--ease-out);
   pointer-events: auto;
 }
 .tool-mark .tool-icon {
@@ -253,7 +253,7 @@ body[data-explode="1"] .lyr::before {
   border-radius: var(--r-0);
   display: flex; align-items: center; justify-content: flex-end;
   padding-right: 24px;
-  transition: top var(--t-slow) var(--var(--ease-out)), height var(--t-slow) var(--var(--ease-out));
+  transition: top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
 }
 .approve-stamp.k-approve {
   background: rgb(var(--ok-glow) / .05);
@@ -303,7 +303,7 @@ body[data-explode="1"] .lyr::before {
   color: var(--color-fg-secondary);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  transition: top var(--t-slow) var(--var(--ease-out)), transform var(--t-fast) var(--ease);
+  transition: top var(--t-slow) var(--ease-out), transform var(--t-fast) var(--ease);
 }
 .note-pin:hover { transform: translateY(-1px); border-color: rgb(var(--stalled-glow) / .6); }
 .note-pin::before {

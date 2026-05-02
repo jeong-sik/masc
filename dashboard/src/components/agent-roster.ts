@@ -741,7 +741,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
                   <div class="min-w-0 flex-1 py-0.5">
                     <div class="flex flex-wrap items-center gap-2">
-                      <strong class="min-w-0 overflow-hidden text-[17px] font-semibold leading-[1.3] text-[var(--color-fg-secondary)] transition-colors group-hover:text-[var(--color-accent-fg)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
+                      <strong class="min-w-0 overflow-hidden text-lg font-semibold leading-[1.3] text-[var(--color-fg-secondary)] transition-colors group-hover:text-[var(--color-accent-fg)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
                       ${agent.synthetic ? html`
                         <span class="inline-flex items-center rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] bg-[var(--white-6)] px-2 py-0.5 text-3xs italic text-[var(--color-fg-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
                           파생

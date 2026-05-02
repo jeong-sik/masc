@@ -4931,14 +4931,14 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~is_retry:false ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000 ~max_turns:4
-      ~remaining_turn_budget_s:1200.0
+      ~remaining_turn_budget_s:500.0
   with
   | Some budget ->
       check (float 0.01)
         "first attempt keeps half the usable turn budget for fallback"
-        592.5 budget.effective_timeout_sec;
+        242.5 budget.effective_timeout_sec;
       check (float 0.01) "remaining budget records raw wall-clock remaining"
-        1200.0 budget.remaining_turn_budget_sec;
+        500.0 budget.remaining_turn_budget_sec;
       check string "source records retry reserve"
         "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
@@ -5005,7 +5005,6 @@ let oas_timeout_budget_error () =
 let test_degraded_retry_budget_gate_allows_remaining_budget () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~is_retry:false
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
       ~tool_requirement:"optional"
@@ -5027,14 +5026,13 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
 let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~is_retry:false
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
       ~tool_requirement:"optional"
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
-      ~remaining_turn_budget_s:20.0
+      ~remaining_turn_budget_s:0.0
       (oas_timeout_budget_error ())
   with
   | UT.Degraded_retry_budget_exhausted retry ->

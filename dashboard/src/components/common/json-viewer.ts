@@ -80,7 +80,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
       </button>
 
       ${!collapsed && html`
-        <div class="pl-4 ml-1.5 border-l border-[var(--white-4)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
+        <div class="pl-4 ml-1.5 border-l border-[var(--color-border-divider)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${isArray
             ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
             : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)

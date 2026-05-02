@@ -706,7 +706,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
         <button type="button"
-          class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
+          class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
@@ -1098,7 +1098,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${runtimeHasChanges ? html`
         <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-[var(--r-1)] border border-accent/30 bg-accent/5">
           <button type="button"
-            class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
+            class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>

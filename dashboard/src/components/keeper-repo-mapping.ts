@@ -458,7 +458,7 @@ export function KeeperRepoMapping() {
                     ` : null}
                     <button
                       type="button"
-                      class="${btnBase} bg-[var(--color-status-ok)] text-[#000] py-1 px-3 text-2xs"
+                      class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs"
                       onClick=${() => handleSave(keeperId)}
                       disabled=${isSaving || !changed}
                     >

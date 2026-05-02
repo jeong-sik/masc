@@ -426,6 +426,7 @@
      reach into the raw --{kind}-glow triplet directly.  Idle has no
      glow (silent state, no chrome). */
   --color-status-ok-glow:      var(--ok-glow);
+  --color-fg-on-ok:            var(--ok-on);
   --color-status-warn-glow:    var(--warn-glow);
   --color-status-err-glow:     var(--err-glow);
   --color-status-info-glow:    var(--info-glow);

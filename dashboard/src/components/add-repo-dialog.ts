@@ -295,7 +295,7 @@ export function AddRepoDialog() {
           </button>
           <button
             type="button"
-            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[#000] hover:opacity-90 transition-opacity disabled:opacity-50"
+            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] hover:opacity-90 transition-opacity disabled:opacity-50"
             onClick=${() => void submitAddRepo()}
             disabled=${formSubmitting.value}
           >

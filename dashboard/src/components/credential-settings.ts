@@ -437,7 +437,7 @@ export function CredentialSettings() {
             <div class="flex gap-2 mt-1">
               <button
                 type="button"
-                class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
+                class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
                 onClick=${handleSave}
                 disabled=${isSaving}
               >

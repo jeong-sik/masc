@@ -120,7 +120,11 @@ preferred over both Base and raw Stdlib when they already exist.
 These counters are recorded in `.ci/health-baseline.json` and reported
 by `scripts/health_snapshot.sh`.  A PR that increases either counter
 above the baseline fails the gate when the audit is run with
-`--fail-on-regression`:
+`base-policy-audit.sh --fail-on-regression`;
+CI also includes them in the `health_snapshot.sh --fail-on-lib-regression`
+ratchet.  When a baseline ref predates these counters, the audit treats
+the first measured value as the bootstrap baseline rather than a
+regression.
 
 ```sh
 bash scripts/base-policy-audit.sh --fail-on-regression

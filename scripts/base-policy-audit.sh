@@ -74,25 +74,27 @@ fi
 
 # ── Counting helpers ────────────────────────────────────────────────
 
-# Number of .mli files in lib/ that contain the `open Base` directive
-# (anchored to avoid matching comments/docstrings).
+OPEN_BASE_DIRECTIVE_RE='^[[:space:]]*open[[:space:]]+Base([[:space:]]|$)'
+STDLIB_LIST_SHADOW_RE='^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([[:space:]]|$)'
+
+# Number of .mli files in lib/ that contain an actual "open Base" directive.
 count_mli_open_base() {
   local count=0
   while IFS= read -r _file; do
     count=$((count + 1))
-  done < <(rg --engine auto -l '^[ \t]*open[ \t]+Base\b' lib/ -g '*.mli' 2>/dev/null)
+  done < <(rg -l "$OPEN_BASE_DIRECTIVE_RE" lib/ -g '*.mli' 2>/dev/null)
   printf '%s' "$count"
 }
 
-# Number of .ml files in lib/ that contain both the `open Base` directive
-# AND the Stdlib-shadow anti-pattern (`module List = Stdlib.List`).
+# Number of .ml files in lib/ that contain both an actual "open Base"
+# directive and the Stdlib-shadow anti-pattern.
 count_ml_base_stdlib_shadow() {
   local count=0
   while IFS= read -r file; do
-    if rg -q "module List = Stdlib\.List" "$file" 2>/dev/null; then
+    if rg -q "$STDLIB_LIST_SHADOW_RE" "$file" 2>/dev/null; then
       count=$((count + 1))
     fi
-  done < <(rg --engine auto -l '^[ \t]*open[ \t]+Base\b' lib/ -g '*.ml' 2>/dev/null)
+  done < <(rg -l "$OPEN_BASE_DIRECTIVE_RE" lib/ -g '*.ml' 2>/dev/null)
   printf '%s' "$count"
 }
 
@@ -100,19 +102,20 @@ count_ml_base_stdlib_shadow() {
 extract_baseline_value() {
   local file="$1"
   local key="$2"
+  local default_value="$3"
   if [ ! -f "$file" ]; then
-    echo 0
+    echo "$default_value"
     return
   fi
-  python3 - "$file" "$key" <<'PY'
+  python3 - "$file" "$key" "$default_value" <<'PY'
 import json, sys
-path, key = sys.argv[1], sys.argv[2]
+path, key, default_value = sys.argv[1], sys.argv[2], int(sys.argv[3])
 try:
     with open(path) as f:
         data = json.load(f)
-    print(int(data.get("counts", {}).get(key, 0)))
+    print(int(data.get("counts", {}).get(key, default_value)))
 except Exception:
-    print(0)
+    print(default_value)
 PY
 }
 
@@ -141,8 +144,8 @@ fi
 mli_open_base="$(count_mli_open_base)"
 ml_base_stdlib_shadow="$(count_ml_base_stdlib_shadow)"
 
-baseline_mli_open_base="$(extract_baseline_value "$BASELINE_FILE" "mli_open_base")"
-baseline_ml_base_stdlib_shadow="$(extract_baseline_value "$BASELINE_FILE" "ml_base_stdlib_shadow")"
+baseline_mli_open_base="$(extract_baseline_value "$BASELINE_FILE" "mli_open_base" "$mli_open_base")"
+baseline_ml_base_stdlib_shadow="$(extract_baseline_value "$BASELINE_FILE" "ml_base_stdlib_shadow" "$ml_base_stdlib_shadow")"
 
 # ── Report ───────────────────────────────────────────────────────────
 

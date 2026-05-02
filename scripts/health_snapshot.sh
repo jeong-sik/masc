@@ -249,6 +249,8 @@ fi
 
 mli_open_base="$(extract_json_top_int "$base_policy_json" "mli_open_base")"
 ml_base_stdlib_shadow="$(extract_json_top_int "$base_policy_json" "ml_base_stdlib_shadow")"
+baseline_mli_open_base="$(extract_json_field "$base_policy_json" baseline mli_open_base)"
+baseline_ml_base_stdlib_shadow="$(extract_json_field "$base_policy_json" baseline ml_base_stdlib_shadow)"
 rm -f "$base_policy_json"
 
 lib_failwith="$(count_pattern lib 'failwith')"
@@ -324,6 +326,8 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
   [ "$lib_list_tl" -gt "$baseline_lib_list_tl" ] && regressions+=("lib_list_tl ${baseline_lib_list_tl}->${lib_list_tl}")
   [ "$lib_option_get" -gt "$baseline_lib_option_get" ] && regressions+=("lib_option_get ${baseline_lib_option_get}->${lib_option_get}")
   [ "$lib_obj_magic" -gt "$baseline_lib_obj_magic" ] && regressions+=("lib_obj_magic ${baseline_lib_obj_magic}->${lib_obj_magic}")
+  [ "$mli_open_base" -gt "$baseline_mli_open_base" ] && regressions+=("mli_open_base ${baseline_mli_open_base}->${mli_open_base}")
+  [ "$ml_base_stdlib_shadow" -gt "$baseline_ml_base_stdlib_shadow" ] && regressions+=("ml_base_stdlib_shadow ${baseline_ml_base_stdlib_shadow}->${ml_base_stdlib_shadow}")
 
   if [ "${#regressions[@]}" -eq 0 ]; then
     ratchet_status="pass"
@@ -422,7 +426,9 @@ json_payload="$(cat <<EOF
       "lib_list_hd": ${baseline_lib_list_hd},
       "lib_list_tl": ${baseline_lib_list_tl},
       "lib_option_get": ${baseline_lib_option_get},
-      "lib_obj_magic": ${baseline_lib_obj_magic}
+      "lib_obj_magic": ${baseline_lib_obj_magic},
+      "mli_open_base": ${baseline_mli_open_base},
+      "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow}
     }
   },
   "ratchet": {

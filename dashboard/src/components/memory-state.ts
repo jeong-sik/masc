@@ -155,7 +155,7 @@ export function categoryBadgeColor(cat: ContentCategory): string {
     case 'article': return 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
     case 'review': return 'bg-[var(--purple-10)] text-[var(--purple)] border-[var(--purple-20)]'
     case 'notice': return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
-    case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--color-border-default)]'
+    case 'system': return 'bg-[var(--color-bg-panel-alt)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
     default: return 'bg-[var(--white-8)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
   }
 }
@@ -254,7 +254,7 @@ export function kindBadgeColor(kind: string): string {
   switch (kind) {
     case 'direct': return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
     case 'automation': return 'bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]'
-    case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--color-border-default)]'
+    case 'system': return 'bg-[var(--color-bg-panel-alt)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
     default: return 'bg-[var(--white-8)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
   }
 }

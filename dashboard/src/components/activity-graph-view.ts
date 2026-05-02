@@ -42,7 +42,7 @@ export function edgeColor(kind: string, active: boolean): string {
     case 'governs': return 'var(--warn-fg)'
     case 'operates_on': return 'var(--ok-border)'
     case 'participates_in': return 'var(--warn-soft)'
-    case 'belongs_to': return 'var(--slate-gray-12)'
+    case 'belongs_to': return 'var(--color-border-default)'
     default: return 'var(--color-border-default)'
   }
 }
@@ -266,32 +266,32 @@ export function GraphView({ data }: GraphViewProps) {
     ${selectedNode ? html`
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 mt-2">
         <div class="flex items-center gap-3 mb-3">
-          <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
-          <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>
-          <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
+          <strong class="text-lg text-[var(--color-fg-primary)]">${selectedNode.label}</strong>
+          <span class="py-0.5 px-2 bg-[var(--color-bg-panel-alt)] text-2xs text-[var(--color-fg-muted)] rounded">${kindLabel(selectedNode.kind)}</span>
+          <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-fg-secondary)] bg-[var(--color-bg-panel-alt)]'}">${statusLabel(selectedNode.status)}</span>
           <${ActionButton} variant="subtle" size="sm" class="ml-auto" onClick=${() => { selectedNodeId.value = null }} ariaLabel="패널 닫기">닫기<//>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">중요도</div>
-            <div class="text-xl font-bold text-[var(--text-near-white)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-primary)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
           </div>
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">빈도</div>
-            <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${selectedNode.weight}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-secondary)] tabular-nums">${selectedNode.weight}</div>
           </div>
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">연결</div>
-            <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${connectedEdges.length}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-secondary)] tabular-nums">${connectedEdges.length}</div>
           </div>
         </div>
         ${connectedEdges.length > 0 ? html`
-          <div class="border-t border-[var(--slate-gray-10)] pt-3">
+          <div class="border-t border-[var(--color-bg-panel-alt)] pt-3">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[var(--color-bg-surface)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
-                  <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
+                  <span class="text-[var(--color-fg-secondary)]">${otherLabel}</span>
                   <span class="text-2xs text-[var(--color-fg-muted)]">${edgeKindLabel(edge.kind)}</span>
                   ${edge.active ? html`<${StatusDot} size="xs" class="bg-[var(--color-status-ok)]" />` : null}
                 </div>

@@ -105,8 +105,8 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      ${statCard('노드', s.node_count ?? 0, [], 'var(--slate-400)')}
-      ${statCard('엣지', s.edge_count ?? 0, [], 'var(--slate-500)')}
+      ${statCard('노드', s.node_count ?? 0, [], 'var(--color-fg-muted)')}
+      ${statCard('엣지', s.edge_count ?? 0, [], 'var(--color-fg-muted)')}
       ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, 'var(--color-status-ok)', true)}
       ${statCard('작업', s.task_count ?? 0, tdSeries, 'var(--color-status-warn)')}
       ${statCard('이벤트', s.event_count ?? 0, evSeries, 'var(--purple)')}
@@ -305,18 +305,18 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
         const pct = maxScore > 0 ? (score / maxScore) * 100 : 0
         return html`
           <div class="flex items-center gap-2.5 py-2 px-3 rounded-[10px] bg-[var(--color-bg-surface)] border border-solid border-[var(--color-border-default)]" key=${node.id}>
-            <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
+            <span class="w-[22px] text-center text-sm font-bold text-[var(--color-fg-muted)]">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
+                <span class="text-base font-semibold text-[var(--color-fg-primary)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
                 <span class="text-2xs text-[var(--color-fg-muted)]">${node.weight}회</span>
               </div>
-              <div class="h-1 rounded-sm bg-[var(--slate-gray-10)] overflow-hidden">
+              <div class="h-1 rounded-sm bg-[var(--color-bg-panel-alt)] overflow-hidden">
                 <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="text-sm font-semibold text-text-slate-light min-w-8 text-right">${score.toFixed(1)}</span>
-            <span class="text-2xs py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-sm font-semibold text-[var(--color-fg-muted)]-light min-w-8 text-right">${score.toFixed(1)}</span>
+            <span class="text-2xs py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}

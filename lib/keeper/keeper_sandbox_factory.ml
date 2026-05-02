@@ -4,7 +4,7 @@ type t = {
   default_network_override : Keeper_types.network_mode option;
   cache :
     ((bool * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
-  mutex : Mutex.t;
+  mutex : Eio.Mutex.t;
 }
 
 let create ?default_network_override
@@ -14,14 +14,11 @@ let create ?default_network_override
     meta;
     default_network_override;
     cache = Hashtbl.create 4;
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
   }
 
 let with_lock (t : t) f =
-  Mutex.lock t.mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock t.mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true t.mutex f
 
 let strip_trailing_slashes path =
   let rec loop i =

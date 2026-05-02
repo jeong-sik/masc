@@ -435,6 +435,7 @@ let test_keeper_sandbox_start_status_stop_with_fake_docker () =
            (final_sandbox |> member "why_no_container" |> to_string_option)))
 
 let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let keeper_name = "sandbox-docker-cache" in
   Fun.protect

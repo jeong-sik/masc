@@ -45,23 +45,24 @@ function yjsWebsocketUrl(): string | null {
 /** Cached CSS custom property resolver for Canvas 2D. Invalidated on theme change. */
 const cssVarCache = new Map<string, string>()
 
-function cssVar(prop: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback
+function cssVar(prop: string): string {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return 'CanvasText'
   const cached = cssVarCache.get(prop)
   if (cached !== undefined) return cached
-  const value = getComputedStyle(document.documentElement).getPropertyValue(prop).trim() || fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(prop).trim()
+  if (!value) {
+    console.warn(`WorldVisualizer missing CSS token ${prop}; using CanvasText fallback`)
+    cssVarCache.set(prop, 'CanvasText')
+    return 'CanvasText'
+  }
   cssVarCache.set(prop, value)
   return value
-}
-
-if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') {
-  new MutationObserver(() => { cssVarCache.clear() })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] })
 }
 
 export function WorldVisualizer() {
   const [keepers, setKeepers] = useState<KeeperState[]>([])
   const [traces, setTraces] = useState<Trace[]>([])
+  const [paletteVersion, setPaletteVersion] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const providerRef = useRef<WebsocketProvider | null>(null)
 
@@ -104,16 +105,34 @@ export function WorldVisualizer() {
   }, [])
 
   useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
+      return undefined
+    }
+
+    const refreshPalette = () => {
+      cssVarCache.clear()
+      setPaletteVersion(version => version + 1)
+    }
+
+    const observer = new MutationObserver(refreshPalette)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
     // Resolve design tokens for canvas rendering (Cockpit SPEC compliance)
-    const activeColor = cssVar('--color-status-ok', '#6b9e6b')
-    const pausedColor = cssVar('--color-status-err', '#c46a5a')
-    const traceColor = cssVar('--agent-working', '#7ae09a')
-    const textColor = cssVar('--fg-1', '#f0e9dc')
+    const activeColor = cssVar('--color-status-ok')
+    const pausedColor = cssVar('--color-status-err')
+    const traceColor = cssVar('--agent-working')
+    const textColor = cssVar('--fg-1')
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -162,7 +181,7 @@ export function WorldVisualizer() {
         ctx.globalAlpha = 1.0
       })
     })
-  }, [keepers, traces])
+  }, [keepers, traces, paletteVersion])
 
   return html`
     <div style=${{ padding: '20px', background: 'var(--bg-0)', color: 'var(--fg-1)', borderRadius: '8px', marginBottom: '20px' }}>

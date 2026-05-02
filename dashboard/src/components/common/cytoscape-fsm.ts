@@ -68,8 +68,8 @@ function resolveCssVar(token: string): string {
 }
 
 // Color palette using Cockpit Design System tokens. Values are resolved
-// lazily inside buildStylesheet so that token changes (theme switch)
-// propagate on next render.
+// when building the Cytoscape stylesheet because Cytoscape does not
+// accept `var(...)` color strings.
 const NODE_COLOR_TOKENS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
   state:    { bg: '--color-bg-2', border: '--color-line-3', text: '--color-fg-1' },
   active:   { bg: '--color-bg-2', border: '--color-status-ok', text: '--color-fg-1' },
@@ -329,6 +329,29 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
       }
     }
   }, []) // mount only
+
+  // Cytoscape keeps resolved literal colors after initialization, so
+  // refresh the stylesheet when root theme/token attributes change.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
+      return undefined
+    }
+
+    const refreshStylesheet = () => {
+      const cy = cyRef.current
+      if (!cy) return
+      cy.style()
+        .fromJson(buildStylesheet() as cytoscape.StylesheetJsonBlock[])
+        .update()
+    }
+
+    const observer = new MutationObserver(refreshStylesheet)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    })
+    return () => observer.disconnect()
+  }, [])
 
   // Update elements when spec changes (without full re-init)
   useEffect(() => {

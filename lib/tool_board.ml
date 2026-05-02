@@ -813,7 +813,7 @@ let tool_post_list : Types.tool_schema = {
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
-      ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a indicator")]);
+      ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show an activity indicator")]);
       ("compact", `Assoc [("type", `String "boolean"); ("default", `Bool true); ("description", `String "Compact one-line per post. Set false for full body/TTL/visibility")]);
     ]);
   ];

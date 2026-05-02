@@ -62,7 +62,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  padding: 0 var(--sp-3);
   background: transparent;
   border: none;
   border-right: 1px solid var(--color-border-default);
@@ -103,7 +103,7 @@
   padding: 0 5px;
   border-radius: var(--r-3);
   font-variant-numeric: tabular-nums;
-  margin-left: 2px;
+  margin-left: var(--sp-0h);
 }
 .dr-tab.on .ct {
   color: var(--brass-1, #f0c674);
@@ -113,8 +113,8 @@
 .dr-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
   flex: 0 0 auto;
 }
 .dr-act {
@@ -195,7 +195,7 @@
 .dr-cost-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
   padding: 6px 14px;
   background: var(--color-bg-surface);
   border-bottom: 1px solid var(--color-border-default);
@@ -237,7 +237,7 @@
 .dr-out-l {
   display: grid;
   grid-template-columns: 56px 50px 1fr;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: baseline;
 }
 .dr-out-l .t  { color: var(--color-fg-disabled); font-size: var(--fs-9); }
@@ -266,7 +266,7 @@
   padding: 8px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .dr-empty {
   color: var(--color-fg-disabled);
@@ -286,7 +286,7 @@
   gap: 10px;
   align-items: center;
   font-size: var(--fs-11);
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 .dr-csc-h .id { color: var(--color-fg-disabled); font-size: var(--fs-9); letter-spacing: .04em; }
 .dr-csc-h .prompt {
@@ -314,7 +314,7 @@
 .dr-csc-hops .hop {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   padding: 2px 6px;
   background: var(--color-bg-panel-alt);
   border: 1px solid var(--color-border-default);
@@ -355,7 +355,7 @@
   grid-template-columns: 70px 110px 70px 1fr 200px;
   gap: 10px;
   align-items: baseline;
-  padding: 4px 0;
+  padding: var(--sp-1) 0;
   border-bottom: 1px solid var(--color-border-default);
   font-size: var(--fs-11);
 }
@@ -419,7 +419,7 @@
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 .dr-cost-bars {
   display: flex;
@@ -429,7 +429,7 @@
 .dr-cost-row {
   display: grid;
   grid-template-columns: 90px 1fr 70px 80px 90px;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
   font-size: var(--fs-11);
 }

@@ -282,7 +282,7 @@ function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
       : fsm.state_kind === 'blocked'
         ? 'border-bad/35 bg-bad/10 text-bad'
         : fsm.state_kind === 'verification_gate' || fsm.state_kind === 'approval_gate'
-          ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+          ? 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
           : 'border-card-border/60 bg-[var(--white-4)] text-text-body'
   return html`
     <span
@@ -356,7 +356,7 @@ function verificationStatusClass(
   isOpen: boolean,
 ) {
   if (!request) return 'border-card-border/60 bg-[var(--white-4)] text-text-muted'
-  if (isOpen) return 'border-amber-400/25 bg-amber-400/10 text-amber-100'
+  if (isOpen) return 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
   switch (request.status) {
     case 'approved': return 'border-ok/25 bg-ok/10 text-ok'
     case 'rejected': return 'border-bad/25 bg-bad/10 text-bad'
@@ -381,7 +381,7 @@ function GoalVerificationEvidencePanel({
   const statusClass = verificationStatusClass(request, isOpen)
   const votes = request?.votes ?? []
   const panelClass = compact
-    ? 'ml-6 rounded-sm border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
+    ? 'ml-6 rounded-sm border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn-fg)]'
     : CARD_BOX
 
   return html`
@@ -393,7 +393,7 @@ function GoalVerificationEvidencePanel({
         </span>
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-secondary)]">
-        <span class="rounded-sm border border-amber-400/20 bg-amber-400/8 px-1.5 py-0.5 text-amber-100">
+        <span class="rounded-sm border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-1.5 py-0.5 text-[var(--color-warn-fg)]">
           quorum ${summary.approve_count}/${requiredVerdicts}
         </span>
         <span>reject ${summary.reject_count}</span>
@@ -512,7 +512,7 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const clamped = Math.max(0, Math.min(100, pct))
   const barColor =
     clamped >= 80 ? 'var(--color-status-ok)'
-    : clamped >= 50 ? 'var(--amber-bright)'
+    : clamped >= 50 ? 'var(--color-amber-bright)'
     : clamped >= 20 ? 'var(--color-orange-400)'
     : 'var(--color-status-err)'
 
@@ -559,9 +559,9 @@ function TreeSummary({
         <div class="mt-1 ${DECK_LABEL}">승인 대기</div>
       </div>
       ${goalVerificationCount > 0 ? html`
-        <div class="rounded-sm border border-amber-400/30 bg-amber-400/10 p-3 text-center">
-          <div class="font-mono text-xl font-semibold text-amber-200 tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-amber-100/80">Goal 검증 대기</div>
+        <div class="rounded-sm border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-3 text-center">
+          <div class="font-mono text-xl font-semibold text-[var(--color-warn-fg)] tabular-nums">${goalVerificationCount}</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-warn-fg)]">Goal 검증 대기</div>
         </div>
       ` : null}
       ${awaitingVerificationCount > 0 ? html`
@@ -687,7 +687,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               ` : null
             })()}
             ${node.pending_verification_count > 0 ? html`
-              <span class="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-3xs font-medium text-amber-200">
+              <span class="rounded border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-2 py-0.5 text-3xs font-medium text-[var(--color-warn-fg)]">
                 Goal 검증 대기 ${node.pending_verification_count}
               </span>
             ` : null}

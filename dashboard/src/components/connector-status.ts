@@ -474,7 +474,7 @@ export function connectorCardBorderClass(label: string): string {
     case 'connected':
       return 'border-l-4 border-l-emerald-500'
     case 'stale':
-      return 'border-l-4 border-l-amber-500'
+      return 'border-l-4 border-l-[var(--color-warn)]'
     case 'disconnected':
       return 'border-l-4 border-l-rose-500'
     case 'offline':
@@ -966,7 +966,7 @@ function ConnectorLivePanel({
       ${keeperDirectoryError && keepers.length === 0
         ? html`
             <div
-              class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
+              class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
               data-keeper-directory-error-panel
             >
               <span
@@ -992,7 +992,7 @@ function ConnectorLivePanel({
       ${showNoKeeperEmpty
         ? html`
             <div
-              class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
+              class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-3 text-xs"
               data-no-keepers-empty-panel
             >
               <div class="mb-1 flex items-center gap-2">
@@ -1032,7 +1032,7 @@ function ConnectorLivePanel({
             // on the outer card for vertical scannability.
             return html`
               <div
-                class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
+                class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-3 text-xs"
                 data-sidecar-not-started-panel
               >
                 <div class="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

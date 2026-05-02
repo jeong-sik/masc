@@ -164,7 +164,7 @@ describe('dotStateBg', () => {
   })
 
   it('returns gray bg for offline state', () => {
-    expect(dotStateBg('mission-state-offline')).toBe('bg-[#555]')
+    expect(dotStateBg('mission-state-offline')).toBe('bg-[var(--color-state-offline)]')
   })
 
   it('returns empty string for alive state', () => {

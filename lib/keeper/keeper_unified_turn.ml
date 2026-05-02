@@ -35,6 +35,45 @@ let registry_failure_reason_of_terminal_reason
            { code = terminal_reason.code; detail })
   | _ -> None
 
+let record_streaming_cancelled_observation
+    ~(config : Coord.config)
+    ~(run_meta : keeper_meta)
+    ~(run_generation : int)
+    ~(cascade_name : Keeper_execution_receipt.cascade_name)
+    ~(keeper_turn_id : int)
+    () : unit =
+  let fiber_stop_set =
+    match Keeper_registry.get ~base_path:config.base_path run_meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  if fiber_stop_set then
+    (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
+       turn about to cancel cooperatively. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:run_meta.name ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      Keeper_turn_fsm.Streaming;
+  let terminal_reason_code =
+    if fiber_stop_set then "supervisor_stop" else "external_cancel"
+  in
+  record_pre_dispatch_terminal_observation
+    ~config
+    ~meta:run_meta
+    ~generation:run_generation
+    ~cascade_name
+    ~outcome:"cancelled"
+    ~terminal_reason_code
+    ~activity_kind:"keeper.turn_cancelled"
+    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~keeper_turn_id
+    ();
+  (* FSM: HonorStopSignal — cooperative cancel. *)
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:run_meta.name ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
@@ -855,37 +894,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      [fiber_stop] is false and we skip straight to
                      HonorStopSignal with the same conservative cancel
                      reason. *)
-                  let fiber_stop_set =
-                    match Keeper_registry.get
-                            ~base_path:config.base_path run_meta.name with
-                    | Some entry -> Atomic.get entry.fiber_stop
-                    | None -> false
-                  in
-                  if fiber_stop_set then
-                    (* FSM: SupervisorRequestsStop — stop signal confirmed
-                       while streaming; turn about to cancel cooperatively *)
-                    Keeper_turn_fsm.emit_transition
-                      ~keeper_name:meta.name ~turn_id:keeper_turn_id
-                      ~prev:Keeper_turn_fsm.Streaming
-                      Keeper_turn_fsm.Streaming;
-                  record_pre_dispatch_terminal_observation
+                  record_streaming_cancelled_observation
                     ~config
-                    ~meta:run_meta
-                    ~generation:run_generation
+                    ~run_meta
+                    ~run_generation
                     ~cascade_name:execution.cascade_name
-                    ~outcome:"cancelled"
-                    ~terminal_reason_code:"external_cancel"
-                    ~activity_kind:"keeper.turn_cancelled"
-                    ~trajectory_outcome:
-                      (Trajectory.Gated "external_cancel")
                     ~keeper_turn_id
                     ();
-                  (* FSM: HonorStopSignal — cooperative cancel *)
-                  Keeper_turn_fsm.emit_transition
-                    ~keeper_name:meta.name ~turn_id:keeper_turn_id
-                    ~prev:Keeper_turn_fsm.Streaming
-                    (Keeper_turn_fsm.Cancelled
-                       Keeper_turn_fsm.Cancelled_supervisor_stop);
                   raise e)
           in
           let fail_open_rotation_cascades =

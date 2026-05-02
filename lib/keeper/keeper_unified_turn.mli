@@ -214,6 +214,18 @@ val next_fail_open_cascade_for_turn :
   Agent_sdk.Error.sdk_error ->
   Keeper_error_classify.degraded_retry option
 
+(** Record the streaming-cancel observation shared by the Eio.Cancel handler.
+    Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
+    a live provider cancellation. *)
+val record_streaming_cancelled_observation :
+  config:Coord.config ->
+  run_meta:Keeper_types.keeper_meta ->
+  run_generation:int ->
+  cascade_name:Keeper_execution_receipt.cascade_name ->
+  keeper_turn_id:int ->
+  unit ->
+  unit
+
 val run_keeper_cycle :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

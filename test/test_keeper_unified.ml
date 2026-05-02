@@ -3448,6 +3448,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "done");
+          ("action", "PhaseGateSkip");
           ("keeper", meta.name);
         ]
       in
@@ -3455,6 +3456,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "cancelled:phase_gate_close");
+          ("action", "HonorStopSignal");
           ("keeper", meta.name);
         ]
       in
@@ -3546,6 +3548,88 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
             Yojson.Safe.Util.(
               trajectory_summary |> member "outcome" |> member "reason"
               |> to_string))
+
+let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      KR.clear ();
+      let meta = make_meta "streaming-supervisor-stop-keeper" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let entry = KR.register ~base_path:base_dir meta.name meta in
+      Atomic.set entry.fiber_stop true;
+      let supervisor_request_labels =
+        [
+          ("from", "streaming");
+          ("to", "streaming");
+          ("action", "SupervisorRequestsStop");
+          ("keeper", meta.name);
+        ]
+      in
+      let honor_stop_labels =
+        [
+          ("from", "streaming");
+          ("to", "cancelled:supervisor_stop");
+          ("action", "HonorStopSignal");
+          ("keeper", meta.name);
+        ]
+      in
+      let supervisor_request_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:supervisor_request_labels
+          ()
+      in
+      let honor_stop_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:honor_stop_labels
+          ()
+      in
+      UT.record_streaming_cancelled_observation
+        ~config
+        ~run_meta:meta
+        ~run_generation:meta.runtime.generation
+        ~cascade_name:
+          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+             meta.cascade_name)
+        ~keeper_turn_id:meta.runtime.usage.total_turns
+        ();
+      let supervisor_request_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:supervisor_request_labels
+          ()
+      in
+      let honor_stop_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:honor_stop_labels
+          ()
+      in
+      check (float 0.0)
+        "streaming supervisor stop emits SupervisorRequestsStop"
+        (supervisor_request_before +. 1.0)
+        supervisor_request_after;
+      check (float 0.0)
+        "streaming supervisor stop emits HonorStopSignal"
+        (honor_stop_before +. 1.0)
+        honor_stop_after;
+      match Masc_mcp.Keeper_execution_receipt.latest_json config meta.name with
+      | None -> fail "expected streaming cancel execution receipt"
+      | Some receipt ->
+          check string "streaming cancel receipt outcome" "receipt_cancelled"
+            Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+          check string "streaming cancel terminal reason" "supervisor_stop"
+            Yojson.Safe.Util.(
+              receipt |> member "terminal_reason_code" |> to_string))
 
 let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "keeper cycle creates trajectory accumulator" true
@@ -7339,6 +7423,8 @@ let () =
         [
           test_case "run_keeper_cycle skips paused keeper" `Quick
             test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "streaming cancel records supervisor stop" `Quick
+            test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set;
           test_case "run_keeper_cycle records trajectory contract" `Quick
             test_run_keeper_cycle_records_trajectory_source_contract;
           test_case "pre-tool gates record durable attempt telemetry" `Quick

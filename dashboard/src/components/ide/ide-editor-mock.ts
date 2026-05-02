@@ -25,6 +25,26 @@ interface IdeEditorMockProps {
   readonly children?: ComponentChildren
 }
 
+type DiffTone = 'context' | 'add' | 'delete'
+
+interface UnifiedDiffRow {
+  readonly kind: DiffTone
+  readonly oldLine: number | null
+  readonly newLine: number | null
+  readonly text: string
+}
+
+interface SplitDiffCell {
+  readonly line: number | null
+  readonly text: string
+  readonly kind: DiffTone
+}
+
+interface SplitDiffRow {
+  readonly before: SplitDiffCell | null
+  readonly after: SplitDiffCell | null
+}
+
 const EDITOR_FILE = 'runtime/cascade/router.ts'
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
 const LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'explode'] as const
@@ -70,6 +90,55 @@ const MOCK_SOURCE = [
   '  return req',
   '}',
 ].join('\n')
+
+const UNIFIED_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = [
+  { kind: 'context', oldLine: 16, newLine: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
+  { kind: 'delete', oldLine: 17, newLine: null, text: '  if (req.tools === undefined) {' },
+  { kind: 'delete', oldLine: 18, newLine: null, text: '    return req' },
+  { kind: 'delete', oldLine: 19, newLine: null, text: '  }' },
+  { kind: 'add', oldLine: null, newLine: 17, text: '  // strip empty tools array' },
+  { kind: 'add', oldLine: null, newLine: 18, text: '  if (req.tools && req.tools.length === 0) {' },
+  { kind: 'add', oldLine: null, newLine: 19, text: '    const { tools, tool_choice, ...rest } = req' },
+  { kind: 'add', oldLine: null, newLine: 20, text: '    return rest as CascadeReq' },
+  { kind: 'add', oldLine: null, newLine: 21, text: '  }' },
+  { kind: 'context', oldLine: 20, newLine: 22, text: '  return req' },
+  { kind: 'context', oldLine: 21, newLine: 23, text: '}' },
+]
+
+const SPLIT_DIFF_ROWS: ReadonlyArray<SplitDiffRow> = [
+  {
+    before: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
+    after: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
+  },
+  {
+    before: { kind: 'delete', line: 17, text: '  if (req.tools === undefined) {' },
+    after: { kind: 'add', line: 17, text: '  // strip empty tools array' },
+  },
+  {
+    before: { kind: 'delete', line: 18, text: '    return req' },
+    after: { kind: 'add', line: 18, text: '  if (req.tools && req.tools.length === 0) {' },
+  },
+  {
+    before: { kind: 'delete', line: 19, text: '  }' },
+    after: { kind: 'add', line: 19, text: '    const { tools, tool_choice, ...rest } = req' },
+  },
+  {
+    before: null,
+    after: { kind: 'add', line: 20, text: '    return rest as CascadeReq' },
+  },
+  {
+    before: null,
+    after: { kind: 'add', line: 21, text: '  }' },
+  },
+  {
+    before: { kind: 'context', line: 20, text: '  return req' },
+    after: { kind: 'context', line: 22, text: '  return req' },
+  },
+  {
+    before: { kind: 'context', line: 21, text: '}' },
+    after: { kind: 'context', line: 23, text: '}' },
+  },
+]
 
 const MOCK_OWNERSHIP_EVENTS: ReadonlyArray<KeeperEdit> = [
   {
@@ -152,24 +221,199 @@ export function IdeEditorMock({
       ${activeLayerKinds.length > 0
         ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
         : null}
-      <ol
+      ${EditorViewport(activeView, lines, ownership, highlightedLines, activeLayerKinds, keepers)}
+    </div>
+  `
+}
+
+function EditorViewport(
+  activeView: IdeEditorView,
+  lines: ReadonlyArray<CodeDocumentLine>,
+  ownership: ReadonlyMap<number, LineOwnership>,
+  highlightedLines: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<string>,
+  keepers: ReadonlyArray<string>,
+) {
+  if (activeView === 'split-diff') return SplitDiffView()
+  if (activeView === 'unified') return UnifiedDiffView()
+  if (activeView === 'blame') {
+    return html`
+      <div style=${{ display: 'grid', gridTemplateRows: 'auto 1fr', minHeight: 0 }}>
+        <${BlameTimeline} ownership=${ownership} keepers=${keepers} />
+        ${SourceRows(lines, ownership, highlightedLines, activeLayerKinds, 'Blame editor view')}
+      </div>
+    `
+  }
+  return SourceRows(lines, ownership, highlightedLines, activeLayerKinds, 'Source editor view')
+}
+
+function SourceRows(
+  lines: ReadonlyArray<CodeDocumentLine>,
+  ownership: ReadonlyMap<number, LineOwnership>,
+  highlightedLines: ReadonlyArray<string>,
+  activeLayerKinds: ReadonlyArray<string>,
+  ariaLabel: string,
+) {
+  return html`
+    <ol
+      aria-label=${ariaLabel}
+      style=${{
+        listStyle: 'none',
+        padding: 'var(--sp-2) 0',
+        margin: 0,
+        overflow: 'auto',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--fs-13)',
+        lineHeight: 1.6,
+      }}
+    >
+      ${lines.map(line => MockEditorRow(
+        line,
+        ownership.get(line.num),
+        highlightedLines[line.num - 1],
+        activeLayerKinds,
+      ))}
+    </ol>
+  `
+}
+
+function BlameTimeline({
+  ownership,
+  keepers,
+}: {
+  readonly ownership: ReadonlyMap<number, LineOwnership>
+  readonly keepers: ReadonlyArray<string>
+}) {
+  const latestEdit = latestEditMs(ownership)
+  return html`
+    <div
+      role="status"
+      aria-label="Blame timeline"
+      style=${{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        padding: 'var(--sp-2) var(--sp-3)',
+        borderBottom: '1px solid var(--color-border-divider)',
+        color: 'var(--color-fg-muted)',
+        background: 'var(--color-bg-surface)',
+        fontSize: 'var(--fs-11)',
+      }}
+    >
+      <span style=${{ font: 'var(--type-eyebrow)', color: 'var(--color-fg-primary)' }}>Blame timeline</span>
+      <span>${keepers.join(' / ')}</span>
+      <span style=${{ marginLeft: 'auto', color: 'var(--color-fg-secondary)' }}>
+        latest ${latestEdit === null ? 'no edits' : formatTime(latestEdit)}
+      </span>
+    </div>
+  `
+}
+
+function UnifiedDiffView() {
+  return html`
+    <ol
+      aria-label="Unified diff preview"
+      style=${{
+        listStyle: 'none',
+        padding: 'var(--sp-2) 0',
+        margin: 0,
+        overflow: 'auto',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--fs-13)',
+        lineHeight: 1.6,
+      }}
+    >
+      ${UNIFIED_DIFF_ROWS.map(row => html`
+        <li
+          style=${{
+            display: 'grid',
+            gridTemplateColumns: '32px 40px 40px minmax(0, 1fr)',
+            gap: 'var(--sp-2)',
+            alignItems: 'center',
+            padding: '0 var(--sp-3)',
+            background: diffBackground(row.kind),
+            color: row.kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
+          }}
+        >
+          <span style=${{ color: diffMarkerColor(row.kind), textAlign: 'center' }}>${diffMarker(row.kind)}</span>
+          <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.oldLine ?? ''}</span>
+          <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.newLine ?? ''}</span>
+          <span style=${{ whiteSpace: 'pre', minWidth: 0 }}>${row.text}</span>
+        </li>
+      `)}
+    </ol>
+  `
+}
+
+function SplitDiffView() {
+  return html`
+    <div
+      aria-label="Split diff preview"
+      style=${{
+        display: 'grid',
+        gridTemplateRows: 'auto 1fr',
+        minHeight: 0,
+        overflow: 'hidden',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--fs-13)',
+        lineHeight: 1.6,
+      }}
+    >
+      <div
         style=${{
-          listStyle: 'none',
-          padding: 'var(--sp-2) 0',
-          margin: 0,
-          overflow: 'auto',
-          fontFamily: 'var(--font-mono)',
-          fontSize: 'var(--fs-13)',
-          lineHeight: 1.6,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          borderBottom: '1px solid var(--color-border-divider)',
+          font: 'var(--type-eyebrow)',
+          color: 'var(--color-fg-muted)',
+          background: 'var(--color-bg-surface)',
         }}
       >
-        ${lines.map(line => MockEditorRow(
-          line,
-          ownership.get(line.num),
-          highlightedLines[line.num - 1],
-          activeLayerKinds,
-        ))}
-      </ol>
+        <span style=${{ padding: 'var(--sp-2) var(--sp-3)' }}>BEFORE</span>
+        <span style=${{ padding: 'var(--sp-2) var(--sp-3)', borderLeft: '1px solid var(--color-border-divider)' }}>AFTER</span>
+      </div>
+      <div style=${{ overflow: 'auto' }}>
+        ${SPLIT_DIFF_ROWS.map(row => html`
+          <div
+            style=${{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+            }}
+          >
+            <${SplitDiffCellView} cell=${row.before} />
+            <${SplitDiffCellView} cell=${row.after} framed=${true} />
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function SplitDiffCellView({
+  cell,
+  framed = false,
+}: {
+  readonly cell: SplitDiffCell | null
+  readonly framed?: boolean
+}) {
+  const kind = cell?.kind ?? 'context'
+  return html`
+    <div
+      style=${{
+        display: 'grid',
+        gridTemplateColumns: '40px 24px minmax(0, 1fr)',
+        gap: 'var(--sp-2)',
+        alignItems: 'center',
+        minHeight: '24px',
+        padding: '0 var(--sp-3)',
+        borderLeft: framed ? '1px solid var(--color-border-divider)' : undefined,
+        background: cell ? diffBackground(kind) : 'var(--color-bg-muted)',
+        color: kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
+      }}
+    >
+      <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${cell?.line ?? ''}</span>
+      <span style=${{ color: diffMarkerColor(kind), textAlign: 'center' }}>${cell ? diffMarker(kind) : ''}</span>
+      <span style=${{ whiteSpace: 'pre', minWidth: 0 }}>${cell?.text ?? ''}</span>
     </div>
   `
 }
@@ -237,6 +481,24 @@ function MockEditorRow(
       </span>
     </li>
   `
+}
+
+function diffMarker(kind: DiffTone): string {
+  if (kind === 'add') return '+'
+  if (kind === 'delete') return '-'
+  return ' '
+}
+
+function diffBackground(kind: DiffTone): string {
+  if (kind === 'add') return 'var(--color-status-ok-bg, var(--color-bg-surface))'
+  if (kind === 'delete') return 'var(--color-status-danger-bg, var(--color-bg-surface))'
+  return 'transparent'
+}
+
+function diffMarkerColor(kind: DiffTone): string {
+  if (kind === 'add') return 'var(--color-status-ok, var(--ok))'
+  if (kind === 'delete') return 'var(--color-status-danger, var(--danger))'
+  return 'var(--color-fg-disabled)'
 }
 
 function activeLayersInDisplayOrder(activeLayers: ReadonlySet<string>): ReadonlyArray<string> {

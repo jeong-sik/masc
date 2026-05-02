@@ -18,8 +18,8 @@
 }
 
 .pipeline-stage-node.active.stage-idle .pipeline-stage-dot {
-  background: rgba(148, 163, 184, 0.6);
-  border-color: rgba(148, 163, 184, 0.8);
+  background: rgb(var(--color-fg-muted-rgb, 148 163 184) / 0.6);
+  border-color: rgb(var(--color-fg-muted-rgb, 148 163 184) / 0.8);
 }
 
 .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot {
@@ -50,8 +50,8 @@
 }
 
 .pipeline-stage-node.active.stage-offline .pipeline-stage-dot {
-  background: rgba(75, 75, 85, 0.6);
-  border-color: rgba(75, 75, 85, 0.8);
+  background: rgb(var(--color-fg-disabled-rgb, 75 75 85) / 0.6);
+  border-color: rgb(var(--color-fg-disabled-rgb, 75 75 85) / 0.8);
 }
 
 /* Transient runtime states (failing, crashed, draining, paused, restarting) */
@@ -87,7 +87,7 @@
 
 /* ── Pipeline stage badge variants ── */
 @utility pipeline-stage-badge {
-  &.stage-offline { color: rgba(100, 100, 110, 0.85); background: rgba(100, 100, 110, 0.12); border-color: rgba(100, 100, 110, 0.2); }
+  &.stage-offline { color: var(--color-fg-muted); background: rgb(var(--color-accent-glow) / 0.04); border-color: var(--color-border-default); }
   &.stage-failing, &.stage-crashed { color: rgb(var(--err-glow) / .85); background: rgb(var(--err-glow) / .12); border-color: rgb(var(--err-glow) / .2); }
   &.stage-draining { color: rgb(var(--warn-glow) / .85); background: rgb(var(--warn-glow) / .12); border-color: rgb(var(--warn-glow) / .2); }
   &.stage-restarting { color: rgb(var(--info-glow) / .85); background: rgb(var(--info-glow) / .12); border-color: rgb(var(--info-glow) / .2); }

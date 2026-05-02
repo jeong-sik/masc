@@ -5,6 +5,7 @@ import { IdeEditorMock, type IdeEditorView } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
+import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { navigate, route } from '../../router'
 import {
@@ -106,7 +107,7 @@ export function IdeShell() {
       >
         <span style=${{ color: 'var(--color-fg-secondary)' }}>코드 IDE</span>
         <span>·</span>
-        <span>* runtime / main / nick0cave@dkr-a1 / improver@wt-run-47</span>
+        <${IdePresenceStrip} />
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
       </header>
       <${IdeToolbar}

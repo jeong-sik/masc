@@ -112,6 +112,7 @@ type turn_reason =
   | Task_backlog of { unclaimed : int; failed : int }
   | Task_reactive_cooldown_elapsed
   | Never_started
+  | Min_interval_elapsed
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =

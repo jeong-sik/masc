@@ -578,6 +578,7 @@ let surfaces =
         "keeper.proactive.warmup_sec";
         "keeper.proactive.stagger_step_sec";
         "keeper.proactive.min_cooldown_sec";
+        "keeper.proactive.min_interval_sec";
         "keeper.proactive.task_cooldown_divisor";
         "keeper.proactive.task_min_cooldown_sec";
       ];

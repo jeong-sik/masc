@@ -61,6 +61,7 @@ let test_turn_reason_to_string_coverage () =
     WO.Task_backlog { unclaimed = 3; failed = 1 };
     WO.Task_reactive_cooldown_elapsed;
     WO.Never_started;
+    WO.Min_interval_elapsed;
   ] in
   List.iter (fun v ->
     let s = WO.turn_reason_to_string v in

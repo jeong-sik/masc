@@ -65,6 +65,7 @@ type turn_reason =
   | Task_backlog of { unclaimed : int; failed : int }
   | Task_reactive_cooldown_elapsed
   | Never_started
+  | Min_interval_elapsed
 
 type skip_reason =
   | Keeper_paused
@@ -89,6 +90,7 @@ let turn_reason_to_string = function
   | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
+  | Min_interval_elapsed -> "min_interval_elapsed"
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
@@ -1106,6 +1108,31 @@ let keeper_cycle_decision
         let proactive_work_ready =
           proactive_work_signal_present ~meta observation
         in
+        (* Phase 1 — Bootstrap bypass: keeper has never completed a scheduled
+           autonomous turn (last_ts <= 0.0, so since_last = max_int). Fire
+           immediately without requiring work signals or time gates, so a
+           fresh keeper always gets at least one warm-up turn regardless of
+           observable backlog state.  This breaks the "no signal → no turn →
+           no signal" bootstrap deadlock. *)
+        let is_bootstrap = since_last_scheduled_autonomous = max_int in
+        (* Phase 2 — Minimum proactive cadence: even with no observable work
+           signals, fire a housekeeping turn once the minimum interval has
+           elapsed.  Default: 900s (15 min).  Prevents permanent silence when
+           external events never arrive and decouples liveness from signal
+           availability.  Controlled by MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
+           / keeper.proactive.min_interval_sec. *)
+        let proactive_min_interval_sec =
+          Keeper_config.keeper_proactive_min_interval_sec ()
+        in
+        let min_interval_elapsed =
+          (* Exclude the bootstrap case: when is_bootstrap is true, the bootstrap
+             bypass already fires the turn and emits Never_started.  Using
+             min_interval_elapsed here would also set Min_interval_elapsed on a
+             bootstrap turn, which is misleading — the two paths are mutually
+             exclusive by design. *)
+          not is_bootstrap
+          && since_last_scheduled_autonomous >= proactive_min_interval_sec
+        in
         (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
            has elapsed, skip the idle_gate check. task_reactive_cooldown is
            already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
@@ -1113,10 +1140,12 @@ let keeper_cycle_decision
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
         let should_run =
-          proactive_work_ready
-          && (backlog_fresh
-              || backlog_elapsed
-              || (idle_gate_elapsed && cooldown_elapsed))
+          is_bootstrap
+          || min_interval_elapsed
+          || (proactive_work_ready
+              && (backlog_fresh
+                  || backlog_elapsed
+                  || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let provider_cooldown_remaining_sec =
           if should_run
@@ -1150,8 +1179,10 @@ let keeper_cycle_decision
             let run_reasons =
               [
                 Some Scheduled_autonomous_turn;
-                (if since_last_scheduled_autonomous = max_int
+                (if is_bootstrap
                  then Some Never_started else None);
+                (if min_interval_elapsed
+                 then Some Min_interval_elapsed else None);
                 (if idle_gate_elapsed
                  then Some (Idle_cooldown_elapsed
                               { idle_sec = observation.idle_seconds;

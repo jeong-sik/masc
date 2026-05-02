@@ -42,7 +42,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
         ${worker.related_session_id ? html`
           <${WorkerInfoRow}>
             <${DetailLabel}>세션</${DetailLabel}>
-            <span class="font-mono truncate" style="font-size: 11px" title=${worker.related_session_id}>${worker.related_session_id}</span>
+            <span class="font-mono truncate text-[var(--fs-11)]" title=${worker.related_session_id}>${worker.related_session_id}</span>
             <${CopyIdButton} value=${worker.related_session_id} label="session_id" size=${10} />
           </${WorkerInfoRow}>
         ` : null}

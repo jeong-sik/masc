@@ -212,7 +212,7 @@ export function horizonColor(h: string): string {
     case 'short': return 'var(--color-status-ok)'
     case 'mid': return 'var(--amber-bright)'
     case 'long': return 'var(--indigo)'
-    default: return '#888'
+    default: return 'var(--color-fg-muted)'
   }
 }
 

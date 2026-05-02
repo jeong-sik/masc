@@ -4,6 +4,11 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { CytoscapeFsm } from './cytoscape-fsm'
 
+const mockStyleApi = {
+  fromJson: vi.fn(() => mockStyleApi),
+  update: vi.fn(),
+}
+
 const mockCyInstance = {
   destroy: vi.fn(),
   elements: vi.fn(() => ({ remove: vi.fn() })),
@@ -12,6 +17,7 @@ const mockCyInstance = {
   layout: vi.fn(() => ({ run: vi.fn() })),
   on: vi.fn(),
   fit: vi.fn(),
+  style: vi.fn(() => mockStyleApi),
 }
 
 vi.mock('cytoscape', () => ({
@@ -28,6 +34,11 @@ describe('CytoscapeFsm', () => {
     mockCyInstance.layout.mockClear()
     mockCyInstance.on.mockClear()
     mockCyInstance.fit.mockClear()
+    mockCyInstance.style.mockClear()
+    mockStyleApi.fromJson.mockClear()
+    mockStyleApi.update.mockClear()
+    document.documentElement.removeAttribute('data-theme')
+    document.documentElement.removeAttribute('style')
   })
 
   const baseSpec = {
@@ -103,5 +114,34 @@ describe('CytoscapeFsm', () => {
     )
     await new Promise((r) => setTimeout(r, 10))
     expect(mockCyInstance.elements).toHaveBeenCalled()
+  })
+
+  it('passes resolved token colors to cytoscape', async () => {
+    document.documentElement.style.setProperty('--color-fg-1', 'rgb(1, 2, 3)')
+    document.documentElement.style.setProperty('--color-bg-2', 'rgb(4, 5, 6)')
+
+    const container = document.createElement('div')
+    render(h(CytoscapeFsm, { spec: baseSpec }), container)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const cytoscape = (await import('cytoscape')).default
+    const options = cytoscape.mock.calls.at(-1)?.[0]
+    const nodeStyle = options.style.find((block) => block.selector === 'node').style
+    expect(nodeStyle.color).toBe('rgb(1, 2, 3)')
+    expect(nodeStyle['background-color']).toBe('rgb(4, 5, 6)')
+    expect(nodeStyle['border-color']).toBe('#4a4137')
+  })
+
+  it('refreshes stylesheet when root theme attributes change', async () => {
+    const container = document.createElement('div')
+    render(h(CytoscapeFsm, { spec: baseSpec }), container)
+    await new Promise((r) => setTimeout(r, 10))
+
+    document.documentElement.setAttribute('data-theme', 'high-contrast')
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(mockCyInstance.style).toHaveBeenCalled()
+    expect(mockStyleApi.fromJson).toHaveBeenCalled()
+    expect(mockStyleApi.update).toHaveBeenCalled()
   })
 })

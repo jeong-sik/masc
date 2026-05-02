@@ -32,52 +32,71 @@ export interface FsmGraphSpec {
 // Cytoscape's style parser does not resolve CSS variables — `var(--x)`
 // strings are rejected. Resolve once per render against `:root` and
 // pass literal hex/rgb values into the stylesheet.
+// Fallback values mirror the Cockpit Design System defaults from
+// tokens.generated.css so SSR / missing-CSS degrades gracefully.
 const TOKEN_FALLBACKS: Record<string, string> = {
-  '--slate-800': '#1e293b',
-  '--slate-600': '#475569',
-  '--slate-500': '#64748b',
-  '--slate-400': '#94a3b8',
-  '--frost-100': '#e2e8f0',
-  '--emerald': '#22c55e',
-  '--amber-bright': '#f59e0b',
-  '--color-status-err': '#ef4444',
-  '--white-pure': '#ffffff',
-  '--panel-dark': '#0f172a',
+  '--color-bg-0': '#0c0b08',
+  '--color-bg-1': '#141210',
+  '--color-bg-2': '#1a1815',
+  '--color-bg-3': '#211e1a',
+  '--color-bg-4': '#2a2621',
+  '--color-line-1': '#2a2520',
+  '--color-line-2': '#3a332c',
+  '--color-line-3': '#4a4137',
+  '--color-fg-1': '#f0e9dc',
+  '--color-fg-2': '#b8ad9a',
+  '--color-fg-3': '#7a7065',
+  '--color-fg-4': '#4a453e',
+  '--color-status-ok': '#6b9e6b',
+  '--color-status-err': '#c46a5a',
+  '--color-status-warn': '#c9a24a',
+  '--color-status-info': '#6a8eb0',
+  '--color-status-idle': '#6a6a6a',
+  '--color-brass-1': '#d4a14a',
 }
 
-function resolveCssVar(token: string): string {
-  // token may be the bare name "--frost-100" or a "var(--frost-100)" wrapper.
-  const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
-  const name = m ? m[1] : token.startsWith('--') ? token : null
-  if (!name) return token
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return TOKEN_FALLBACKS[name] ?? token
+function createCssVarResolver(): (token: string) => string {
+  const computedStyle =
+    typeof window === 'undefined' || typeof document === 'undefined'
+      ? null
+      : getComputedStyle(document.documentElement)
+  const cache = new Map<string, string>()
+
+  return (token: string): string => {
+    // token may be the bare name "--frost-100" or a "var(--frost-100)" wrapper.
+    const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
+    const name = m ? m[1] : token.startsWith('--') ? token : null
+    if (!name) return token
+    const cached = cache.get(name)
+    if (cached !== undefined) return cached
+    const v = computedStyle?.getPropertyValue(name).trim()
+    const resolved = v || TOKEN_FALLBACKS[name] || token
+    cache.set(name, resolved)
+    return resolved
   }
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return v || TOKEN_FALLBACKS[name] || token
 }
 
-// Color palette matching dashboard dark theme. Values are resolved
-// lazily inside buildStylesheet/buildNodeColors so that token changes
-// (theme switch) propagate on next render.
+// Color palette using Cockpit Design System tokens. Values are resolved
+// when building the Cytoscape stylesheet because Cytoscape does not
+// accept `var(...)` color strings.
 const NODE_COLOR_TOKENS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
-  state:    { bg: '--slate-800', border: '--slate-600', text: '--frost-100' },
-  active:   { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
-  buffer:   { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
-  terminal: { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
-  start:    { bg: '--slate-800', border: '#6366f1',     text: '#c7d2fe' },
-  end:      { bg: '--slate-800', border: '#6b7280',     text: '#9ca3af' },
-  ok:       { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
-  warn:     { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
-  err:      { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
-  dim:      { bg: '--slate-800', border: '#374151',     text: '#6b7280' },
+  state:    { bg: '--color-bg-2', border: '--color-line-3', text: '--color-fg-1' },
+  active:   { bg: '--color-bg-2', border: '--color-status-ok', text: '--color-fg-1' },
+  buffer:   { bg: '--color-bg-2', border: '--color-status-warn', text: '--color-fg-1' },
+  terminal: { bg: '--color-bg-2', border: '--color-status-err', text: '--color-fg-1' },
+  start:    { bg: '--color-bg-2', border: '--color-status-info', text: '--color-fg-1' },
+  end:      { bg: '--color-bg-2', border: '--color-status-idle', text: '--color-fg-3' },
+  ok:       { bg: '--color-bg-2', border: '--color-status-ok', text: '--color-fg-1' },
+  warn:     { bg: '--color-bg-2', border: '--color-status-warn', text: '--color-fg-1' },
+  err:      { bg: '--color-bg-2', border: '--color-status-err', text: '--color-fg-1' },
+  dim:      { bg: '--color-bg-2', border: '--color-line-1', text: '--color-fg-3' },
 }
 
 const EDGE_COLOR_TOKENS: Record<string, string> = {
-  normal: '--slate-500',
+  normal: '--color-fg-3',
   error: '--color-status-err',
-  recovery: '--emerald',
-  cascade: '--amber-bright',
+  recovery: '--color-status-ok',
+  cascade: '--color-status-warn',
 }
 
 interface CytoscapeFsmProps {
@@ -147,6 +166,7 @@ function nodeHeight(ele: { data: (key: string) => unknown }): number {
 }
 
 function buildStylesheet() {
+  const resolveCssVar = createCssVarResolver()
   const styles: Array<{ selector: string; style: Record<string, unknown> }> = [
     {
       selector: 'node',
@@ -156,10 +176,10 @@ function buildStylesheet() {
         'text-halign': 'center',
         'font-size': '11px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: resolveCssVar('--frost-100'),
-        'background-color': resolveCssVar('--slate-800'),
+        color: resolveCssVar('--color-fg-1'),
+        'background-color': resolveCssVar('--color-bg-2'),
         'border-width': 2,
-        'border-color': resolveCssVar('--slate-600'),
+        'border-color': resolveCssVar('--color-line-3'),
         shape: 'roundrectangle',
         width: nodeWidth,
         height: nodeHeight,
@@ -173,16 +193,16 @@ function buildStylesheet() {
       style: {
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
-        'target-arrow-color': resolveCssVar('--slate-500'),
-        'line-color': resolveCssVar('--slate-500'),
+        'target-arrow-color': resolveCssVar('--color-fg-3'),
+        'line-color': resolveCssVar('--color-fg-3'),
         width: 1.5,
         label: 'data(label)',
         'font-size': '9px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: resolveCssVar('--slate-400'),
+        color: resolveCssVar('--color-fg-3'),
         'text-rotation': 'autorotate',
         'text-margin-y': -8,
-        'text-background-color': resolveCssVar('--panel-dark'),
+        'text-background-color': resolveCssVar('--color-bg-0'),
         'text-background-opacity': 0.85,
         'text-background-padding': '2px',
         'text-background-shape': 'roundrectangle',
@@ -191,15 +211,15 @@ function buildStylesheet() {
     {
       selector: ':parent',
       style: {
-        'background-color': resolveCssVar('--panel-dark'),
-        'border-color': '#334155',
+        'background-color': resolveCssVar('--color-bg-1'),
+        'border-color': resolveCssVar('--color-line-2'),
         'border-width': 1,
         'border-style': 'dashed',
         'text-valign': 'top',
         'text-halign': 'center',
         padding: '16px',
         'font-size': '10px',
-        color: resolveCssVar('--slate-500'),
+        color: resolveCssVar('--color-fg-3'),
       },
     },
   ]
@@ -223,7 +243,7 @@ function buildStylesheet() {
     selector: 'node[nodeType="active"]',
     style: {
       'border-width': 4,
-      'overlay-color': resolveCssVar('--emerald'),
+      'overlay-color': resolveCssVar('--color-status-ok'),
       'overlay-opacity': 0.18,
       'overlay-padding': 6,
     },
@@ -319,6 +339,29 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
       }
     }
   }, []) // mount only
+
+  // Cytoscape keeps resolved literal colors after initialization, so
+  // refresh the stylesheet when root theme/token attributes change.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') {
+      return undefined
+    }
+
+    const refreshStylesheet = () => {
+      const cy = cyRef.current
+      if (!cy) return
+      cy.style()
+        .fromJson(buildStylesheet() as cytoscape.StylesheetJsonBlock[])
+        .update()
+    }
+
+    const observer = new MutationObserver(refreshStylesheet)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    })
+    return () => observer.disconnect()
+  }, [])
 
   // Update elements when spec changes (without full re-init)
   useEffect(() => {

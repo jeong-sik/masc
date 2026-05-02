@@ -146,14 +146,14 @@ export function KeeperDetailMissingState({
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
       <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
         <${SectionLabel}>키퍼 상세</${SectionLabel}>
-        <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
+        <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
           ${explanation}
         </p>
         <div class="mt-4">
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
+            class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
             onClick=${onClose}
           >
             목록으로 돌아가기
@@ -180,7 +180,7 @@ export function KeeperDetailHeaderInfo({
       <button
         type="button"
         onClick=${onClose}
-        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
+        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
       >
         <span aria-hidden="true">←</span>
         목록
@@ -189,7 +189,7 @@ export function KeeperDetailHeaderInfo({
       <div class="flex flex-col gap-0.5">
         <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
-          <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
+          <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
           <${KeeperModelChip} keeper=${keeper} />
           <${KeeperCascadeSelector} keeper=${keeper} />
@@ -264,7 +264,7 @@ function KeeperDetailQuickFact({
   return html`
     <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
       <${SectionLabel}>${label}</${SectionLabel}>
-      <div class="mt-1 text-sm font-medium leading-snug text-[var(--text-strong)]">${children}</div>
+      <div class="mt-1 text-sm font-medium leading-snug text-[var(--color-fg-primary)]">${children}</div>
     </div>
   `
 }
@@ -320,7 +320,7 @@ export function KeeperDetailOverviewSidebar({
                 class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
                 onClick=${() => scrollToKeeperDetailSection(section.id)}
               >
-                <div class="text-sm font-medium text-[var(--text-strong)]">${section.label}</div>
+                <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
                 <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${section.summary}</div>
               </button>
             `)}
@@ -354,7 +354,7 @@ export function KeeperDetailSection({
         <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--color-fg-muted)]">${eyebrow}</div>
         <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h3 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${title}</h3>
+            <h3 class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
             <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">${description}</p>
           </div>
         </div>

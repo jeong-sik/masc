@@ -48,24 +48,24 @@
    ──────────────────────────────────────────────────────────── */
 
 @utility card {
-  background: var(--card);
-  border: 1px solid var(--card-border);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   padding: var(--spacing-card);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.02);
   transition: border-color 0.15s, background 0.15s;
-  &:hover { border-color: var(--border-strong); background: var(--bg-panel-hover); }
+  &:hover { border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
 }
 
 @utility monitor-headline {
   font: var(--type-title);
   font-weight: 650;
-  color: var(--text-strong);
+  color: var(--color-fg-primary);
   letter-spacing: var(--track-normal);
   line-height: 1.25;
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: 1px solid var(--color-border-default);
 }
 
 @utility monitor-subheadline {
@@ -76,9 +76,9 @@
 }
 
 @utility monitor-surface-card {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
-  background: var(--card);
+  background: var(--color-bg-surface);
 }
 
 @utility monitor-surface-card-strong {
@@ -90,9 +90,9 @@
 }
 
 @utility monitor-muted-panel {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
-  background: color-mix(in srgb, var(--color-bg-2) 72%, transparent);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
 }
 
 /* ── Section header (reusable pattern) ─────────────────────── */
@@ -100,11 +100,11 @@
 @utility section-header {
   font: var(--type-label);
   font-weight: 650;
-  color: var(--text-strong);
+  color: var(--color-fg-primary);
   text-transform: uppercase;
   letter-spacing: var(--track-caps);
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: 1px solid var(--color-border-default);
   margin-bottom: 8px;
 }
 
@@ -117,7 +117,7 @@
   align-items: center;
   gap: 4px;
   padding: 2px 7px;
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   font-size: var(--fs-xs);
   font-weight: 650;
@@ -149,16 +149,16 @@
 
 @utility control-textarea {
   padding: 6px 8px;
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
-  background: color-mix(in srgb, var(--color-bg-2) 72%, transparent);
-  color: var(--text-body);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
+  color: var(--color-fg-secondary);
   font-size: var(--fs-sm);
   line-height: 1.4;
   transition: border-color 0.15s;
   resize: vertical;
   min-height: 64px;
-  &:focus { outline: none; border-color: var(--border-strong); }
+  &:focus { outline: none; border-color: var(--color-border-strong); }
 }
 
 
@@ -178,27 +178,27 @@ thead th {
   color: var(--color-fg-muted);
   text-transform: uppercase;
   letter-spacing: var(--track-caps);
-  border-bottom: 1px solid var(--card-border);
-  background: color-mix(in srgb, var(--color-bg-2) 76%, transparent);
+  border-bottom: 1px solid var(--color-border-default);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 76%, transparent);
 }
 
 tbody td {
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-body);
+  border-bottom: 1px solid var(--color-border-default);
+  color: var(--color-fg-secondary);
   vertical-align: top;
 }
 
 tbody tr:nth-child(even) {
-  background: var(--white-2);
+  background: rgb(255 255 255 / 0.02);
 }
 
 tbody tr:hover {
-  background: var(--white-5);
+  background: rgb(255 255 255 / 0.05);
 }
 
 #app > div > header {
-  border-color: var(--card-border);
+  border-color: var(--color-border-default);
   padding-block: 6px;
   box-shadow: inset 0 -1px 0 rgb(var(--brass-glow) / 0.08);
 }
@@ -210,7 +210,7 @@ tbody tr:hover {
 
 #dashboard-side-rail,
 #main-content {
-  border-color: var(--card-border);
+  border-color: var(--color-border-default);
   border-radius: var(--r-1);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.015);
 }

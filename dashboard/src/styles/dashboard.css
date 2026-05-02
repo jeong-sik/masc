@@ -10,7 +10,7 @@
 }
 
 .overview-section-collapsible > summary:hover {
-  background: var(--white-4);
+  background: var(--bg-3);
 }
 
 .overview-section-collapsible > summary::before {
@@ -18,7 +18,7 @@
   font-size: var(--fs-xs);
   transition: transform 0.15s;
   display: inline-block;
-  color: var(--text-slate);
+  color: var(--fg-3);
 }
 
 .overview-section-collapsible[open] > summary::before {
@@ -72,14 +72,14 @@
 }
 /* ── Agent card hover ── */
 .agent-card:hover {
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--brass-1);
   transform: none;
-  border-color: var(--accent-30);
+  border-color: rgb(var(--brass-glow) / 0.30);
 }
 
-@utility logs-refresh-btn { &:hover { border-color: var(--accent); } }
+@utility logs-refresh-btn { &:hover { border-color: var(--brass-1); } }
 
-@utility logs-row { &:hover { background: var(--white-3); } }
+@utility logs-row { &:hover { background: var(--bg-2); } }
 
 /* ── Board (Posts) ─────────────────────────────────────────── */
 
@@ -88,7 +88,7 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
   transition: border-color 0.15s, background 0.15s;
-  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: none; }
+  &:hover { border-color: rgb(var(--brass-glow) / 0.30); background: var(--bg-3); transform: none; }
 }
 
 /* Vote column */
@@ -156,7 +156,7 @@
 
 .swimlane-vis-container .vis-item.activity-swimlane-item {
   border-color: transparent;
-  color: var(--text-body);
+  color: var(--fg-2);
 }
 
 .swimlane-vis-container .vis-item.activity-swimlane-item--presence {
@@ -164,19 +164,19 @@
 }
 
 .swimlane-vis-container .vis-time-axis .vis-text {
-  color: var(--slate-400);
+  color: var(--fg-4);
   font-size: 10px;
 }
 
 .swimlane-vis-container .vis-labelset .vis-label {
-  color: var(--text-slate-light);
+  color: var(--fg-3);
   font-size: 11px;
-  border-bottom: 1px solid rgba(100, 116, 139, 0.12);
+  border-bottom: 1px solid var(--line-1);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted,
 .swimlane-vis-container .vis-center .vis-group.activity-swimlane-group-highlighted {
-  background: rgba(251, 191, 36, 0.08);
+  background: rgb(var(--brass-glow) / 0.08);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted {
@@ -188,18 +188,18 @@
 .swimlane-vis-container .vis-panel.vis-right,
 .swimlane-vis-container .vis-panel.vis-top,
 .swimlane-vis-container .vis-panel.vis-bottom {
-  border-color: rgba(100, 116, 139, 0.12);
+  border-color: var(--line-1);
 }
 
 .swimlane-vis-container .vis-current-time {
-  background-color: var(--rose);
+  background-color: var(--err);
 }
 
 .swimlane-vis-container .vis-tooltip {
-  background-color: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(100, 116, 139, 0.3);
+  background-color: color-mix(in srgb, var(--bg-0) 95%, black);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-1);
-  color: var(--frost-100);
+  color: var(--fg-1);
   font-size: 11px;
   padding: 6px 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.24);
@@ -209,7 +209,7 @@
 .swimlane-vis-container .vis-item.vis-selected {
   border-color: var(--warn);
   border-width: 2px;
-  box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
+  box-shadow: 0 0 5px rgb(var(--brass-glow) / 0.5);
   z-index: 10;
 }
 
@@ -220,8 +220,8 @@
 }
 
 .card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-panel-hover);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
 }
 
 /* ── Custom Webkit Scrollbar ── */

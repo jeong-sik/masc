@@ -301,7 +301,7 @@ export function PrometheusMetrics() {
         <div class="flex items-center gap-3">
           ${lastUpdated.value && html`<span class="text-xs text-[var(--color-fg-muted)]">${lastUpdated.value}</span>`}
           <button
-            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
+            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -351,7 +351,7 @@ export function PrometheusMetrics() {
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">
-                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--color-fg-muted)]'}">${expanded ? '▼' : '▶'}</span>
+                <span class="text-xs font-mono ${expanded ? 'text-[var(--color-fg-secondary)]' : 'text-[var(--color-fg-muted)]'}">${expanded ? '▼' : '▶'}</span>
                 <span class="font-medium text-[var(--text-heading)]">${meta.label}</span>
                 <span class="text-xs text-[var(--color-fg-muted)]">${meta.description}</span>
               </div>
@@ -382,7 +382,7 @@ export function PrometheusMetrics() {
                       m.samples.length === 0
                         ? [html`
                             <tr key="${m.name}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
-                              <td class="py-1.5 font-mono text-[var(--text-body)]">
+                              <td class="py-1.5 font-mono text-[var(--color-fg-secondary)]">
                                 ${m.name}
                                 <div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>
                               </td>
@@ -392,7 +392,7 @@ export function PrometheusMetrics() {
                           `]
                         : m.samples.map((s, i) => html`
                             <tr key="${s.name}-${i}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
-                              <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--text-body)]' : 'text-[var(--color-fg-muted)]'}">
+                              <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--color-fg-secondary)]' : 'text-[var(--color-fg-muted)]'}">
                                 ${s.name}${labelPills(s.labels)}
                                 ${i === 0 && html`<div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>`}
                               </td>

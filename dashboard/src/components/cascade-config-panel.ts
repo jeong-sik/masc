@@ -318,8 +318,8 @@ export function keepersWithUnknownCanonical(
 function KeeperChip({ row }: { row: KeeperCascadeRow }) {
   const base = 'rounded border px-2 py-0.5 text-xs flex items-center gap-1'
   const borderTone = row.drift
-    ? 'border-[var(--color-status-warn)] text-[var(--text-strong)]'
-    : 'border-[var(--color-border-default)] text-[var(--text-strong)]'
+    ? 'border-[var(--color-status-warn)] text-[var(--color-fg-primary)]'
+    : 'border-[var(--color-border-default)] text-[var(--color-fg-primary)]'
   return html`
     <span
       class=${`${base} ${borderTone}`}
@@ -376,7 +376,7 @@ function ProfileCard({
   return html`
     <article class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
-        <span class="font-semibold text-[var(--text-strong)]">${profile.name}</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
           ${sourceLabel(profile.source)}
         <//>
@@ -407,7 +407,7 @@ function ProfileCard({
             onSubmit=${handleAssignKeeper}
           >
             <div class="flex items-center gap-2 flex-wrap mb-2">
-              <span class="text-xs font-medium text-[var(--text-strong)]">키퍼 할당</span>
+              <span class="text-xs font-medium text-[var(--color-fg-primary)]">키퍼 할당</span>
               <span class="text-xs text-[var(--color-fg-muted)]">
                 current profile로 keeper를 이동합니다.
               </span>
@@ -417,7 +417,7 @@ function ProfileCard({
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
                     aria-label="키퍼 선택"
-                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)]"
+                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}
                     onChange=${(event: Event) => {
@@ -476,7 +476,7 @@ function ProfileCard({
                 <//>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <code class="text-[var(--text-strong)]">${displayModel}</code>
+                    <code class="text-[var(--color-fg-primary)]">${displayModel}</code>
                     ${displayProvider
                       ? html`<span class="text-[var(--color-fg-muted)]">${displayProvider}</span>`
                       : null}
@@ -512,7 +512,7 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
   if (orphans.length === 0) return null
   return html`
     <div class="rounded border border-[var(--color-status-warn)] bg-[var(--color-bg-page)] p-3 text-xs">
-      <div class="font-semibold text-[var(--text-strong)] mb-1">
+      <div class="font-semibold text-[var(--color-fg-primary)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
       <div class="text-[var(--color-fg-muted)] mb-2">
@@ -521,7 +521,7 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
       <ul class="flex flex-col gap-1">
         ${orphans.map(o => html`
           <li class="flex gap-2">
-            <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>
+            <span class="font-semibold text-[var(--color-fg-primary)]">${o.keeper}</span>
             <code>${o.cascade_name}</code>
             <span class="text-[var(--color-fg-muted)]">→</span>
             <code class="text-[var(--color-status-warn)]">${o.canonical}</code>
@@ -539,7 +539,7 @@ function InvalidProfileSummary({
   const extraErrors = Math.max(0, invalidProfile.errors.length - 1)
   return html`
     <li class="flex flex-wrap items-start gap-2">
-      <code class="text-[var(--text-strong)]">${invalidProfile.name}</code>
+      <code class="text-[var(--color-fg-primary)]">${invalidProfile.name}</code>
       <span class="text-[var(--color-fg-muted)]">${firstError}</span>
       ${extraErrors > 0
         ? html`<span class="text-[var(--color-fg-muted)]">+${extraErrors} more</span>`
@@ -565,7 +565,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
           · 에러 ${config.validation_errors.length}개
         </span>
       </div>
-      <div class="text-[var(--text-strong)] mb-2">
+      <div class="text-[var(--color-fg-primary)] mb-2">
         ${validationDescription(config.validation_status)}
       </div>
       ${visibleErrors.length > 0
@@ -577,7 +577,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
         : null}
       ${visibleProfiles.length > 0
         ? html`
-          <div class="text-[var(--text-strong)] mb-1">거부된 프로파일</div>
+          <div class="text-[var(--color-fg-primary)] mb-1">거부된 프로파일</div>
           <ul class="flex flex-col gap-1 text-[var(--color-fg-muted)]">
             ${visibleProfiles.map(invalidProfile => html`
               <${InvalidProfileSummary} invalidProfile=${invalidProfile} />
@@ -770,7 +770,7 @@ function HealthTable({
               <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
                 <td class="py-1">
-                  <code class="text-[var(--text-strong)]">${p.provider_key}</code>
+                  <code class="text-[var(--color-fg-primary)]">${p.provider_key}</code>
                   ${orphaned
                     ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
@@ -960,7 +960,7 @@ function StrategyTraceTable({
           return html`
           <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
             <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.cascade_name}</code></td>
+            <td class="py-1"><code class="text-[var(--color-fg-primary)]">${e.cascade_name}</code></td>
             <td class="py-1 text-[var(--color-fg-muted)]">${e.strategy}</td>
             <${NumCell}>${e.cycle}</${NumCell}>
             <${NumCell}>${e.candidates_in}/${e.candidates_out}</${NumCell}>
@@ -996,7 +996,7 @@ function ClientCapacityHistoryTable({
           <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
             <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1"><code class="text-[var(--color-fg-primary)]">${e.key}</code></td>
             <${NumCell}>${e.active_after}</${NumCell}>
           </tr>
         `})}
@@ -1028,7 +1028,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
           <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
             <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
             <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1"><code class="text-[var(--color-fg-primary)]">${e.key}</code></td>
             <${NumCell}>${e.active}</${NumCell}>
             <${NumCell}>${e.available}</${NumCell}>
             <${NumCell}>${e.total}</${NumCell}>
@@ -1146,7 +1146,7 @@ function CascadeRawConfigEditor({
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
             aria-label="설정 편집기"
-            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
             spellcheck="false"
             readonly=${!sourceEditable}
             value=${editorText.value}
@@ -1205,7 +1205,7 @@ function CascadeRawConfigEditor({
         ${mode.previewTitle
           ? html`
             <div class="flex flex-col gap-2">
-              <div class="text-xs font-medium text-[var(--text-strong)]">
+              <div class="text-xs font-medium text-[var(--color-fg-primary)]">
                 ${mode.previewTitle}
               </div>
               <div class="text-xs text-[var(--color-fg-muted)]">
@@ -1213,7 +1213,7 @@ function CascadeRawConfigEditor({
               </div>
               <textarea
                 aria-label="설정 미리보기"
-                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
                 spellcheck="false"
                 readonly
                 value=${raw?.raw_json ?? ''}

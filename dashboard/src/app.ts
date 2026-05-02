@@ -69,7 +69,7 @@ const LazyRemoteWarningBanner = lazy(async () => ({
 function authStatusFallback() {
   return html`
     <span
-      class="flex h-[22px] w-[4.5rem] items-center gap-1.5 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] px-2"
+      class="flex h-[22px] w-[4.5rem] items-center gap-1.5 rounded border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] px-2"
       aria-hidden="true"
     >
       <span class="size-[7px] rounded-sm bg-[var(--white-15)]"></span>

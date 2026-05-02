@@ -62,7 +62,7 @@ export function SidebarRow(props: SidebarRowProps): VNode {
     gap: '6px',
     padding: `4px var(--spacing-element)`,
     borderRadius: '3px',
-    background: props.selected ? 'var(--bg-panel-hover)' : 'transparent',
+    background: props.selected ? 'var(--color-bg-elevated)' : 'transparent',
     border: `1px solid ${props.selected ? 'var(--color-accent-brass)' : 'transparent'}`,
     cursor: interactive ? 'pointer' : 'default',
     fontFamily: MONO_STACK,

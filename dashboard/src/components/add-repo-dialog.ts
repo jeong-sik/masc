@@ -287,7 +287,7 @@ export function AddRepoDialog() {
         <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--white-10)]">
           <button
             type="button"
-            class="px-4 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--text-body)] hover:bg-[var(--white-15)] transition-colors"
+            class="px-4 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-[var(--color-fg-secondary)] hover:bg-[var(--white-15)] transition-colors"
             onClick=${closeAddRepoDialog}
             disabled=${formSubmitting.value}
           >

@@ -458,10 +458,10 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
     <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
+        <span class="text-xs font-medium text-[var(--color-fg-primary)]">${meta.label}</span>
       </div>
       ${meta.sublabel ? html`<div class="text-3xs text-[var(--color-fg-disabled)] mb-1">${meta.sublabel}</div>` : null}
-      <div class="text-2xl font-bold ${hasData ? 'text-[var(--text-strong)]' : 'text-[var(--color-fg-muted)]'}">
+      <div class="text-2xl font-bold ${hasData ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-muted)]'}">
         ${src.entry_count.toLocaleString()}
       </div>
       ${src.keeper_count != null ? html`
@@ -514,7 +514,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${success ? 'O' : 'X'}
             </span>
           ` : html`<span class="w-4"></span>`}
-          <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>
+          <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>
             ${entryPreview(entry)}
           </span>
           ${scopeBadges.length > 0 ? html`
@@ -585,7 +585,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             ${timeAgoSafe(item.latestTs)}
           </span>
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-disabled)]">~</span>
-          <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
+          <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
             ${meta.label} · ${item.label} · ${item.count} events
           </span>
           ${sourceIcons.length > 0 ? html`
@@ -612,7 +612,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'}>
         ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--color-fg-disabled)]">
-            Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
+            Latest: <span class="font-mono text-[var(--color-fg-primary)]">${latestPreview}</span>
           </div>
           ${item.entries.map((entry, index) => {
             const entryMeta = sourceMeta(entry.source)
@@ -621,7 +621,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
               <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
                 <span class="font-mono text-[var(--color-fg-disabled)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
-                <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
+                <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `
           })}
@@ -808,7 +808,7 @@ export function TelemetryUnified() {
     <div class="flex flex-col gap-4">
       <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
-        <div class="mt-1 text-base leading-relaxed text-[var(--text-body)]">
+        <div class="mt-1 text-base leading-relaxed text-[var(--color-fg-secondary)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
@@ -825,7 +825,7 @@ export function TelemetryUnified() {
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
         <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
           <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">전체</div>
-          <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
+          <div class="text-2xl font-bold text-[var(--color-fg-primary)]">${totalEntries.toLocaleString()}</div>
         </div>
       </div>
 
@@ -859,7 +859,7 @@ export function TelemetryUnified() {
       <div class="flex items-center gap-3 flex-wrap">
         <select
           aria-label="텔레메트리 소스 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
@@ -870,7 +870,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="키퍼 이름..."
           aria-label="키퍼 이름 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
         />
@@ -878,7 +878,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="session_id"
           aria-label="session_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${sessionFilter.value}
           onInput=${(e: Event) => { sessionFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -886,7 +886,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="operation_id"
           aria-label="operation_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${operationFilter.value}
           onInput=${(e: Event) => { operationFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -894,7 +894,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="worker_run_id"
           aria-label="worker_run_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-40 font-mono"
           value=${workerRunFilter.value}
           onInput=${(e: Event) => { workerRunFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -902,13 +902,13 @@ export function TelemetryUnified() {
           type="search"
           placeholder="엔트리 검색..."
           aria-label="엔트리 텍스트 검색"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)] w-48"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)] w-48"
           value=${entrySearch.value}
           onInput=${(e: Event) => { entrySearch.value = (e.target as HTMLInputElement).value }}
         />
         <select
           aria-label="표시 개수 제한"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-primary)]"
           value=${String(limit.value)}
           onChange=${(e: Event) => { limit.value = Number((e.target as HTMLSelectElement).value) }}
         >

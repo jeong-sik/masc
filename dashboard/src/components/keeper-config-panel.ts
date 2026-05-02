@@ -711,7 +711,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
         <button type="button"
-          class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
+          class="${btnBase} bg-[var(--white-10)] text-[var(--color-fg-secondary)]"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >취소</button>
@@ -936,10 +936,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         />
         <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
+            <span class="text-xs text-[var(--color-fg-secondary)]">allowed_paths</span>
             <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
+          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded px-2 py-1.5 text-[var(--color-fg-secondary)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
@@ -1035,7 +1035,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             ${goalOptions.map((goal) => {
               const checked = rd.active_goal_ids.includes(goal.id)
               return html`
-                <label class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--text-body)]">
+                <label class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
                   <input
                     type="checkbox"
                     checked=${checked}
@@ -1103,7 +1103,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
+            class="${btnBase} bg-[var(--white-10)] text-[var(--color-fg-secondary)]"
             onClick=${resetRuntimeDraft}
           >초기화</button>
           <span class="text-3xs text-accent">변경된 설정이 있습니다</span>
@@ -1124,7 +1124,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0

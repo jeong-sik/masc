@@ -132,6 +132,15 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          meta.name
          (Keeper_state_machine.transition_error_to_string err));
   fork_stale_watchdog ctx meta reg;
+  (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
+     and break the initial proactive deadlock. *)
+  let bootstrap_signal : Keeper_event_queue.stimulus = {
+    post_id = "bootstrap";
+    urgency = Keeper_event_queue.Normal;
+    arrived_at = Unix.gettimeofday ();
+    payload = "Keeper bootstrap signal";
+  } in
+  Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =

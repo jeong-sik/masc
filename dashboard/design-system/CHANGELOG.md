@@ -51,6 +51,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `design-system/headless-core/keeper-line-ownership.ts` implements RFC 0019's line-range accumulator and deterministic keeper hue mapping.
   - `src/components/ide/keeper-line-ownership-store.ts` publishes dashboard snapshots for the IDE blame gutter; the editor mock now consumes the store instead of hardcoded row ownership.
 
+- **Anchored thread rail substrate**
+  - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus coordination.
+  - `src/components/ide/anchored-thread-rail-store.ts` publishes dashboard snapshots for the CONVERSATION rail; the rail mock now consumes the store instead of hardcoded card fields.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

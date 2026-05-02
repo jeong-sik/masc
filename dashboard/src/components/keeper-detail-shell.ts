@@ -22,7 +22,7 @@ function KeeperModelChip({ keeper }: { keeper: Keeper }) {
   if (!display) return null
   return html`
     <span
-      class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
+      class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
       title=${`${display.label}: ${display.value}`}
     >${display.value}</span>
   `
@@ -77,7 +77,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     <div class="flex items-center gap-1.5">
       <select
         aria-label="Cascade 프로필 선택"
-        class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)] cursor-pointer"
+        class="py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)] cursor-pointer"
         title=${invalidProfiles.length > 0
           ? `Cascade 프로필\n\n비활성화된 잘못된 프로필:\n${invalidSummary}`
           : 'Cascade 프로필'}
@@ -115,7 +115,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
       ${invalidProfiles.length > 0
         ? html`
             <span
-              class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-10)] text-[var(--rose-light)] border border-[var(--bad-30)]"
+              class="inline-flex items-center py-0.5 px-1.5 rounded-[var(--r-1)] text-3xs font-semibold bg-[var(--bad-10)] text-[var(--rose-light)] border border-[var(--bad-30)]"
               title=${invalidSummary}
             >${invalidProfiles.length} invalid</span>
           `
@@ -262,7 +262,7 @@ function KeeperDetailQuickFact({
   children: ComponentChildren
 }) {
   return html`
-    <div class="rounded-2xl border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
+    <div class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
       <${SectionLabel}>${label}</${SectionLabel}>
       <div class="mt-1 text-sm font-medium leading-snug text-[var(--color-fg-primary)]">${children}</div>
     </div>
@@ -311,13 +311,13 @@ export function KeeperDetailOverviewSidebar({
           <//>
         </div>
 
-        <div class="rounded-2xl border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] p-3.5">
+        <div class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--color-bg-panel-alt)] p-3.5">
           <${SectionLabel}>빠른 이동</${SectionLabel}>
           <div class="mt-3 flex flex-col gap-2">
             ${KEEPER_DETAIL_SECTIONS.map((section) => html`
               <button
                 type="button"
-                class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
+                class="rounded-[var(--r-5)] border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
                 onClick=${() => scrollToKeeperDetailSection(section.id)}
               >
                 <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>

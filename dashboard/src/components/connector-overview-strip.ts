@@ -525,7 +525,7 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
     chip border/bg tones. Returns muted token for empty/sparse
     series so a new connector doesn't leak a stale hue. */
 function deriveTrendColor(series: readonly number[]): string {
-  if (series.length === 0) return 'var(--white-15)'
+  if (series.length === 0) return 'var(--color-fg-disabled)'
   const last = series[series.length - 1]!
   if (last >= 99) return 'var(--color-emerald)'
   if (last >= 95) return 'var(--color-status-warn)'

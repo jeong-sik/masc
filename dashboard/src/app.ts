@@ -69,11 +69,11 @@ const LazyRemoteWarningBanner = lazy(async () => ({
 function authStatusFallback() {
   return html`
     <span
-      class="flex h-[22px] w-[4.5rem] items-center gap-1.5 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] px-2"
+      class="flex h-[22px] w-[4.5rem] items-center gap-1.5 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2"
       aria-hidden="true"
     >
-      <span class="size-[7px] rounded-[var(--r-0)] bg-[var(--white-15)]"></span>
-      <span class="h-2.5 w-9 rounded-[var(--r-1)] bg-[var(--white-10)]"></span>
+      <span class="size-[7px] rounded-[var(--r-0)] bg-[var(--color-fg-disabled)]"></span>
+      <span class="h-2.5 w-9 rounded-[var(--r-1)] bg-[var(--color-fg-disabled)]"></span>
     </span>
   `
 }
@@ -207,7 +207,7 @@ export function App() {
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
             <div class="flex min-w-0 shrink-0 items-center gap-2.5 max-[520px]:w-full">
               <button type="button"
-                class=${`hidden max-[768px]:flex size-8 items-center justify-center rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] cursor-pointer transition-colors hover:bg-[var(--white-5)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+                class=${`hidden max-[768px]:flex size-8 items-center justify-center rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? 'Close navigation' : 'Open navigation'}
                 aria-controls="dashboard-side-rail"
@@ -215,7 +215,7 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)]">
+              <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
                 <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-mono text-3xs font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
                   MASC
                 </div>
@@ -237,7 +237,7 @@ export function App() {
             </div>
 
             <nav class="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full" aria-label="Dashboard surfaces">
-              <div class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-0.5">
+              <div class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-0.5">
                 ${topbarNavItems.map(item => {
                   const active = item.id === currentTab
                   return html`
@@ -249,7 +249,7 @@ export function App() {
                       class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
                         active
                           ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)] shadow-[inset_0_-1px_0_var(--brass-3)]'
-                          : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-secondary)]'
+                          : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)]'
                       }`}
                     >
                       <${SurfaceIcon} icon=${item.icon} size=${13} />

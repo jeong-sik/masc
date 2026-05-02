@@ -200,7 +200,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                       />
                       <label
                         for=${`setup-step-${connectorId}-${idx}`}
-                        class=${`min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--white-10)]' : ''}`}
+                        class=${`min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--color-fg-disabled)]' : ''}`}
                       >
                         <span>${step.text}</span>
                         ${step.link

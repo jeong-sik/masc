@@ -247,7 +247,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
             : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
           ${shouldCollapse ? html`
-            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
+            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--color-bg-surface)]'} to-transparent pointer-events-none"></div>
           ` : null}
         </div>
         ${needsCollapse ? html`

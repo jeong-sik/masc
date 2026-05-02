@@ -101,7 +101,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     text: 'text-[var(--color-fg-disabled)]',
     dot: 'bg-[var(--color-bg-hover)]',
     icon: '·',
-    gradient: 'bg-gradient-to-b from-[var(--white-4)] to-[var(--white-2)]',
+    gradient: 'bg-gradient-to-b from-[var(--color-bg-elevated)] to-[var(--color-bg-surface)]',
   },
 }
 

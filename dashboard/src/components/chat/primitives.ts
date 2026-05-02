@@ -323,7 +323,7 @@ export function ChatTranscript({
 
   return html`
     <div
-      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--white-3)] ${
+      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--color-border-default)] shadow-[inset_0_1px_0_var(--color-border-default)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'

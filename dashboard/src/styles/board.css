@@ -7,7 +7,7 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
   transition: border-color var(--t-med), transform var(--t-med), background var(--t-med);
-  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: translateY(-1px); }
+  &:hover { border-color: var(--accent-30); background: var(--color-bg-hover); transform: translateY(-1px); }
 }
 
 /* Vote column */

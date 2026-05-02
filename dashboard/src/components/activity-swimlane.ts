@@ -81,7 +81,7 @@ const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
   task:      { bg: 'var(--color-status-warn)', text: 'var(--panel-dark)' },
   operation: { bg: 'var(--color-status-ok)', text: 'var(--panel-dark)' },
   autonomy:  { bg: 'var(--cyan)', text: 'var(--panel-dark)' },
-  presence:  { bg: 'var(--white-12)', text: 'var(--frost-100)' },
+  presence:  { bg: 'var(--color-bg-hover)', text: 'var(--frost-100)' },
 }
 const SPAN_DEFAULT = { bg: 'var(--color-fg-muted)', text: 'var(--panel-dark)' } as const
 

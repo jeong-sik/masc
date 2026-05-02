@@ -344,7 +344,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
           const pct = Math.round(s.weight * 100)
           const active = isActivePair(s.from_agent, s.to_agent)
           return html`
-            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}">
+            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] ${active ? 'ring-1 ring-[var(--color-border-default)] bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}">
               <button
                 type="button"
                 class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-right ${ringFocusClasses()}`}

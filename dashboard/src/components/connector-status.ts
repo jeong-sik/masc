@@ -479,7 +479,7 @@ export function connectorCardBorderClass(label: string): string {
       return 'border-l-4 border-l-rose-500'
     case 'offline':
     default:
-      return 'border-l-4 border-l-[var(--white-10)]'
+      return 'border-l-4 border-l-[var(--color-border-default)]'
   }
 }
 

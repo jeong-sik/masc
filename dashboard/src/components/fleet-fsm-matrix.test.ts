@@ -462,7 +462,7 @@ describe('fleetCellPresentation', () => {
 
     expect(cell.runtimePhaseConflict).toBe(false)
     expect(cell.label).toBe('대기')
-    expect(cell.className).toContain('var(--white-5)')
+    expect(cell.className).toContain('var(--color-bg-elevated)')
   })
 })
 

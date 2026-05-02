@@ -603,7 +603,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
               <span>이름 / model / 작업</span>
               <${TextInput}
-                class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
+                class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--color-border-default)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 · 모델 · 작업 검색"
                 autoComplete="off"
@@ -775,7 +775,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ` : null}
 
               ${isKeeper && (monitoringEvidence?.phase || monitoringEvidence?.stage) ? html`
-                <div class="rounded-2xl border border-[var(--color-border-divider)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
+                <div class="rounded-2xl border border-[var(--color-border-divider)] bg-[linear-gradient(180deg,var(--color-bg-surface),var(--color-bg-page))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     ${monitoringEvidence?.phase && fsmPhaseKey
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`

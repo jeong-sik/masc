@@ -28,7 +28,7 @@ export function nodeColor(kind: string, status: string): string {
 }
 
 export function edgeColor(kind: string, active: boolean): string {
-  if (!active) return 'var(--white-10)'
+  if (!active) return 'var(--color-fg-disabled)'
   switch (kind) {
     case 'works_on': return 'var(--warn-border)'
     case 'creates': return 'var(--ok-border)'

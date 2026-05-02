@@ -227,7 +227,7 @@
 @layer utilities {
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: var(--white-10) transparent;
+    scrollbar-color: var(--color-border-default) transparent;
   }
   
   .custom-scrollbar::-webkit-scrollbar {
@@ -240,12 +240,12 @@
   }
   
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--white-10);
+    background: var(--color-border-default);
     border-radius: var(--r-1);
   }
-  
+
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: var(--white-20);
+    background: var(--color-fg-disabled);
   }
 }
 

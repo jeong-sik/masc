@@ -35,7 +35,7 @@ const TRANSITIONS: LifecycleTransition[] = [
 
 function nodeClass(isCurrent: boolean): string {
   const base =
-    'transition-all duration-[var(--t-slow)]'
+    'transition-[background-color,border-color,box-shadow,opacity] duration-[var(--t-slow)]'
   if (isCurrent) {
     return `${base} r-6 stroke-[var(--accent-9)] stroke-2 fill-[var(--accent-3)]`
   }

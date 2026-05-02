@@ -84,7 +84,7 @@ export function RecoveryWizard({
         aria-label="복구 진행률"
       >
         <div
-          class="h-full rounded-full bg-[var(--color-accent)] transition-all duration-[var(--t-xslow)]"
+          class="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-[var(--t-xslow)]"
           style=${{ width: `${progressPercent}%` }}
         ></div>
       </div>

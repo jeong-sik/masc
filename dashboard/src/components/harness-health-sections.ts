@@ -259,7 +259,7 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
           <span class="w-20 text-right font-mono text-xs text-[var(--color-fg-muted)]">${gate}</span>
           <div class="h-4 flex-1 overflow-hidden rounded-[var(--r-1)] bg-[var(--color-bg-hover)]">
             <div
-              class="h-full rounded-[var(--r-1)] opacity-80 transition-all"
+              class="h-full rounded-[var(--r-1)] opacity-80 transition-[width]"
               style=${{ width: `${(count / max) * 100}%`, background: 'var(--color-accent-fg)' }}
             />
           </div>

@@ -285,7 +285,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
                 ${normalizeToolName(stat.name)}
               </div>
               <div class="flex-1 h-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] overflow-hidden">
-                <div class="h-full rounded-[var(--r-1)] transition-all duration-[var(--t-slow)]"
+                <div class="h-full rounded-[var(--r-1)] transition-[width] duration-[var(--t-slow)]"
                   style="width: ${barWidth}%; background: ${stat.failure_count > 0 ? 'var(--color-status-warn)' : 'var(--color-accent-fg)'}; opacity: 0.7">
                 </div>
               </div>

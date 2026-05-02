@@ -735,7 +735,7 @@ function StatusBar({
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
-            class=${`text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-all ${
+            class=${`text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-[background-color,border-color] ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
                 : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'

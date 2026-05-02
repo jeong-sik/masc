@@ -193,7 +193,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
           />
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1.5 text-2xs transition-all duration-[var(--t-med)] ${showLifecycle.value
+            class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1.5 text-2xs transition-colors duration-[var(--t-med)] ${showLifecycle.value
               ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
               : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
@@ -241,13 +241,13 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="flex items-center gap-2">
                     ${group.actor ? html`
                       <a
-                        class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--color-accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-all duration-[var(--t-med)] hover:bg-[var(--accent-10)]"
+                        class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--color-accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-colors duration-[var(--t-med)] hover:bg-[var(--accent-10)]"
                         href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
                       >이 keeper로 보기</a>
                     ` : null}
                     <button
                       type="button"
-                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-all duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)]"
+                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
                       aria-expanded=${expanded}
                     >

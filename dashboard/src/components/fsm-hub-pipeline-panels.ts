@@ -311,7 +311,7 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded-[var(--r-1)] border p-5 transition-all duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
+    <div class=${`rounded-[var(--r-1)] border p-5 transition-[background-color,border-color,box-shadow] duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >
@@ -404,7 +404,7 @@ export function PipelineStep({
     <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
       title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
-      <div class=${`flex-1 rounded-[var(--r-1)] border px-3 py-2 transition-all duration-[var(--t-xslow)] ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
+      <div class=${`flex-1 rounded-[var(--r-1)] border px-3 py-2 transition-[background-color,border-color,opacity] duration-[var(--t-xslow)] ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}

@@ -66,7 +66,7 @@ export function AgentTrust({ metrics, testId }: AgentTrustProps) {
         aria-valuenow=${clampedScore}
       >
         <div
-          class="h-full rounded-full ${barClass} transition-all duration-[var(--t-xslow)]"
+          class="h-full rounded-full ${barClass} transition-[width] duration-[var(--t-xslow)]"
           style=${{ width: `${clampedScore}%` }}
         ></div>
       </div>

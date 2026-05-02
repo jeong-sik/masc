@@ -159,7 +159,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
         data-setup-progress-bar
       >
         <div
-          class=${`h-full transition-all duration-[var(--t-slow)] ${progressBarToneClass}`}
+          class=${`h-full transition-[width] duration-[var(--t-slow)] ${progressBarToneClass}`}
           style=${`width: ${pct}%`}
           data-setup-progress-bar-fill
         ></div>

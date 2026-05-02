@@ -721,7 +721,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-card p-4 text-left transition-all duration-[var(--t-med)] cursor-pointer hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:-translate-y-0.5 contain-content"
+              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-card p-4 text-left transition-[background-color,border-color,transform] duration-[var(--t-med)] cursor-pointer hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:-translate-y-0.5 contain-content"
               key=${agent.name}
               aria-label=${detailLabel}
               onClick=${openDetail}

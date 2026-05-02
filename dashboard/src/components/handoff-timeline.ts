@@ -372,7 +372,7 @@ export function HandoffTimeline({
                         const task = chip.taskId ? ` · ${chip.taskId}` : ''
                         return html`
                           <span
-                            class="absolute top-1 bottom-1 w-[2px] ${cls} hover:w-1 transition-all cursor-default"
+                            class="absolute top-1 bottom-1 w-[2px] ${cls} hover:w-1 transition-[width] cursor-default"
                             style=${`left: ${pct}%;`}
                             title=${`${new Date(chip.ts).toLocaleTimeString()} · ${chip.eventType}${peer}${task}`}
                           ></span>

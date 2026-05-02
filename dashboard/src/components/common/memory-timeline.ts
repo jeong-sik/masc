@@ -56,7 +56,7 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
           h => html`
             <div
               key=${h.hour}
-              class="flex-1 rounded-t transition-all"
+              class="flex-1 rounded-t transition-[background-color,opacity]"
               style=${{
                 opacity: 0.1 + h.intensity * 0.9,
                 height: `${20 + h.intensity * 80}%`,

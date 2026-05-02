@@ -141,7 +141,7 @@ export function CommandBar({
         ? html`
             <ul
               id=${listId}
-              class="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
+              class="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-1 shadow-[var(--shadow-panel)]"
               role="listbox"
             >
               ${filtered.map((action, index) => {

@@ -23,7 +23,7 @@ const TRACK_CLS =
   'relative rounded-full bg-[var(--white-4)] cursor-pointer '
 
 const THUMB_CLS =
-  'absolute rounded-full bg-[var(--color-accent-fg)] shadow-md '
+  'absolute rounded-full bg-[var(--color-accent-fg)] shadow-[var(--shadow-1)] '
 
 export const Slider: FunctionComponent<SliderProps> = ({
   min = 0,

@@ -200,7 +200,7 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
-      <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-[var(--r-2)] focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--color-fg-secondary)] focus:shadow-lg focus:ring-2 focus:ring-[var(--select-20)]">Skip to main content</a>
+      <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-[var(--r-2)] focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--color-fg-secondary)] focus:shadow-[var(--shadow-panel)] focus:ring-2 focus:ring-[var(--select-20)]">Skip to main content</a>
       <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">

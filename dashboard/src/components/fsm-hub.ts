@@ -729,7 +729,7 @@ function StatusBar({
 
   const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class=${`sticky top-0 z-20 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-lg ${containerPadding}`}>
+    <div class=${`sticky top-0 z-20 rounded-[var(--r-1)] border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[var(--shadow-panel)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>

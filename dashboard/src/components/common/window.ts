@@ -45,7 +45,7 @@ export function Window({ children, open, onClose, 'aria-label': ariaLabel, class
         aria-label=${ariaLabel}
         aria-modal="true"
         tabindex="-1"
-        class=${`rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-lg ${cx ?? ''}`}
+        class=${`rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-panel)] ${cx ?? ''}`}
         onKeyDown=${handleKeyDown}
       >
         ${children}

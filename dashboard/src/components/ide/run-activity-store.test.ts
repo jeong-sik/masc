@@ -34,8 +34,23 @@ describe('createRunActivityStore', () => {
     const s = createRunActivityStore(runId)
     expect(s.append(event({ id: '' }))).toBe(false)
     expect(s.append(event({ keeper_id: '' }))).toBe(false)
+    expect(s.append({ ...event({}), keeper_id: null })).toBe(false)
+    expect(s.append({ ...event({}), verb: 'deleted' })).toBe(false)
     expect(s.append(event({ timestamp_ms: Number.NaN }))).toBe(false)
     expect(s.append(event({ id: 'ok' }))).toBe(true)
+    expect(s.events().map(item => item.id)).toEqual(['ok'])
+  })
+
+  it('filters malformed seeded public input', () => {
+    const s = createRunActivityStore(runId)
+    s.seed([
+      null,
+      event({ id: 'ok' }),
+      { ...event({ id: 'missing-keeper' }), keeper_id: null },
+      { ...event({ id: 'bad-verb' }), verb: 'deleted' },
+      { ...event({ id: 'bad-detail' }), detail: { lines: 3 } },
+    ])
+
     expect(s.events().map(item => item.id)).toEqual(['ok'])
   })
 
@@ -66,5 +81,25 @@ describe('createRunActivityStore', () => {
     ])
 
     expect(s.events().map(item => item.id)).toEqual(['c', 'b'])
+  })
+
+  it('bounds appended active-run history in sorted order', () => {
+    const s = createRunActivityStore(runId, { maxEvents: 2 })
+    expect(s.append(event({ id: 'a', timestamp_ms: 1 }))).toBe(true)
+    expect(s.append(event({ id: 'c', timestamp_ms: 3 }))).toBe(true)
+    expect(s.append(event({ id: 'b', timestamp_ms: 2 }))).toBe(true)
+
+    expect(s.events().map(item => item.id)).toEqual(['c', 'b'])
+  })
+
+  it('falls back to the default cap for invalid maxEvents values', () => {
+    const s = createRunActivityStore(runId, { maxEvents: -1 })
+    s.seed([
+      event({ id: 'a', timestamp_ms: 1 }),
+      event({ id: 'b', timestamp_ms: 2 }),
+      event({ id: 'c', timestamp_ms: 3 }),
+    ])
+
+    expect(s.events().map(item => item.id)).toEqual(['c', 'b', 'a'])
   })
 })

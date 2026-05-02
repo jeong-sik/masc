@@ -8,16 +8,21 @@
 
 import { signal } from '@preact/signals'
 
-export type RunActivityVerb =
-  | 'flagged'
-  | 'edited'
-  | 'commented on'
-  | 'approved'
-  | 'noted'
-  | 'suggested on'
-  | 'committed'
-  | 'refactored'
-  | 'asked on'
+const DEFAULT_MAX_EVENTS = 200
+const RUN_ACTIVITY_VERBS = [
+  'flagged',
+  'edited',
+  'commented on',
+  'approved',
+  'noted',
+  'suggested on',
+  'committed',
+  'refactored',
+  'asked on',
+] as const
+const RUN_ACTIVITY_VERB_SET = new Set<string>(RUN_ACTIVITY_VERBS)
+
+export type RunActivityVerb = (typeof RUN_ACTIVITY_VERBS)[number]
 
 export interface RunActivityEvent {
   readonly id: string
@@ -31,8 +36,8 @@ export interface RunActivityEvent {
 
 export interface RunActivityStore {
   readonly runId: () => string
-  readonly seed: (events: ReadonlyArray<RunActivityEvent>) => void
-  readonly append: (event: RunActivityEvent) => boolean
+  readonly seed: (events: ReadonlyArray<unknown>) => void
+  readonly append: (event: unknown) => boolean
   readonly events: () => ReadonlyArray<RunActivityEvent>
   readonly eventsForKeeper: (keeperId: string) => ReadonlyArray<RunActivityEvent>
   readonly knownKeepers: () => ReadonlyArray<string>
@@ -44,30 +49,30 @@ export function createRunActivityStore(
   initialRunId: string,
   opts: { readonly maxEvents?: number } = {},
 ): RunActivityStore {
-  const maxEvents = opts.maxEvents ?? 200
+  const maxEvents = normalizeMaxEvents(opts.maxEvents)
   const activeRunId = signal(initialRunId)
   const allEvents = signal<ReadonlyArray<RunActivityEvent>>([])
   const visibleEvents = signal<ReadonlyArray<RunActivityEvent>>([])
   const keepers = signal<ReadonlyArray<string>>([])
 
   const publish = (): void => {
-    const visible = allEvents.value
-      .filter(event => validEventForRun(event, activeRunId.value))
-      .slice()
-      .sort(compareEvents)
-      .slice(0, maxEvents)
-    visibleEvents.value = visible
-    keepers.value = sortedKeepers(visible)
+    visibleEvents.value = allEvents.value
+    keepers.value = sortedKeepers(allEvents.value)
   }
 
-  const seed = (events: ReadonlyArray<RunActivityEvent>): void => {
-    allEvents.value = [...events]
+  const seed = (events: ReadonlyArray<unknown>): void => {
+    allEvents.value = events
+      .filter((event): event is RunActivityEvent =>
+        validEventForRun(event, activeRunId.value),
+      )
+      .sort(compareEvents)
+      .slice(0, maxEvents)
     publish()
   }
 
-  const append = (event: RunActivityEvent): boolean => {
+  const append = (event: unknown): boolean => {
     if (!validEventForRun(event, activeRunId.value)) return false
-    allEvents.value = [...allEvents.value, event]
+    allEvents.value = insertEvent(allEvents.value, event, maxEvents)
     publish()
     return true
   }
@@ -105,12 +110,47 @@ export function createRunActivityStore(
   }
 }
 
-function validEventForRun(event: RunActivityEvent, runId: string): boolean {
+type UnknownRecord = Record<string, unknown>
+
+function normalizeMaxEvents(value: number | undefined): number {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value
+  return DEFAULT_MAX_EVENTS
+}
+
+function validEventForRun(event: unknown, runId: string): event is RunActivityEvent {
+  if (!isRecord(event)) return false
   if (event.run_id !== runId) return false
-  if (event.id.trim() === '') return false
-  if (event.keeper_id.trim() === '') return false
-  if (event.target.trim() === '') return false
+  if (!hasNonEmptyString(event, 'id')) return false
+  if (!hasNonEmptyString(event, 'keeper_id')) return false
+  if (!hasNonEmptyString(event, 'target')) return false
+  if (!isRunActivityVerb(event.verb)) return false
+  if (event.detail !== undefined && typeof event.detail !== 'string') return false
   return Number.isFinite(event.timestamp_ms)
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasNonEmptyString(record: UnknownRecord, key: string): boolean {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+function isRunActivityVerb(value: unknown): value is RunActivityVerb {
+  return typeof value === 'string' && RUN_ACTIVITY_VERB_SET.has(value)
+}
+
+function insertEvent(
+  events: ReadonlyArray<RunActivityEvent>,
+  event: RunActivityEvent,
+  maxEvents: number,
+): ReadonlyArray<RunActivityEvent> {
+  const next = [...events]
+  const index = next.findIndex(existing => compareEvents(event, existing) < 0)
+  if (index === -1) next.push(event)
+  else next.splice(index, 0, event)
+  return next.slice(0, maxEvents)
 }
 
 function compareEvents(a: RunActivityEvent, b: RunActivityEvent): number {

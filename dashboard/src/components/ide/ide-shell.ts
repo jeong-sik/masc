@@ -5,8 +5,12 @@ import { IdeEditorMock } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
-import { IdeToolbar } from './ide-toolbar'
+import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { navigate, route } from '../../router'
+import {
+  parseActive,
+  serializeActive,
+} from '../../../design-system/headless-core/layered-overlay'
 
 // PR-3: 4-pane CODE mode shell with editor toolbar (view tabs + LAYERS
 // toggle, RFC 0020 controller). Layout matches the cockpit IdePlane
@@ -25,6 +29,7 @@ import { navigate, route } from '../../router'
 //   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
 
 type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
+const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
   const normalized = raw
@@ -37,8 +42,28 @@ function viewFromRoute(raw: string | null | undefined): ViewTab {
   return 'source'
 }
 
+function layersFromRoute(raw: string | null | undefined): ReadonlySet<string> {
+  return parseActive(raw ?? '', IDE_LAYER_KINDS)
+}
+
+function paramsWithLayers(
+  params: Record<string, string>,
+  view: ViewTab,
+  activeLayers: ReadonlySet<string>,
+): Record<string, string> {
+  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
+  const serialized = serializeActive(activeLayers)
+  if (serialized) {
+    next.layers = serialized
+  } else {
+    delete next.layers
+  }
+  return next
+}
+
 export function IdeShell() {
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+  const activeLayers = layersFromRoute(route.value.params.layers)
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)
@@ -48,6 +73,10 @@ export function IdeShell() {
   const handleViewChange = (next: ViewTab) => {
     setActiveView(next)
     navigate('code', { ...route.value.params, section: 'ide-shell', view: next })
+  }
+
+  const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
+    navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
   }
 
   return html`
@@ -80,7 +109,12 @@ export function IdeShell() {
         <span>* runtime / main / nick0cave@dkr-a1 / improver@wt-run-47</span>
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
       </header>
-      <${IdeToolbar} activeView=${activeView} onViewChange=${handleViewChange} />
+      <${IdeToolbar}
+        activeView=${activeView}
+        activeLayers=${activeLayers}
+        onViewChange=${handleViewChange}
+        onLayersChange=${handleLayersChange}
+      />
       <div
         class="ide-plane-grid"
         role="presentation"

@@ -34,6 +34,7 @@ export interface LayeredOverlayController {
   readonly layers: ReadonlyArray<OverlayLayer>
   readonly active: () => ReadonlySet<string>
   readonly toggle: (kind: string) => void
+  readonly setActive: (active: ReadonlySet<string>) => void
   readonly clear: () => void
   readonly isActive: (kind: string) => boolean
   readonly subscribe: (listener: (active: ReadonlySet<string>) => void) => () => void
@@ -59,6 +60,25 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
   }
 
   const isExclusive = (kind: string): boolean => layerByKind.get(kind)?.mutuallyExclusive === true
+
+  const sameActive = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
+    if (left.size !== right.size) return false
+    for (const kind of left) {
+      if (!right.has(kind)) return false
+    }
+    return true
+  }
+
+  const normalizeActive = (active: ReadonlySet<string>): Set<string> => {
+    const requested = new Set([...active].filter(kind => layerByKind.has(kind)))
+    const exclusive = layers.find(layer => layer.mutuallyExclusive === true && requested.has(layer.kind))
+    if (exclusive) return new Set([exclusive.kind])
+    const next = new Set<string>()
+    for (const layer of layers) {
+      if (requested.has(layer.kind)) next.add(layer.kind)
+    }
+    return next
+  }
 
   const hasExclusiveActive = (): string | null => {
     for (const kind of activeSet) {
@@ -89,6 +109,13 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
     emit()
   }
 
+  const setActive = (active: ReadonlySet<string>): void => {
+    const next = normalizeActive(active)
+    if (sameActive(activeSet, next)) return
+    activeSet = next
+    emit()
+  }
+
   const clear = (): void => {
     if (activeSet.size === 0) return
     activeSet = new Set()
@@ -105,7 +132,7 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
     }
   }
 
-  return { layers, active, toggle, clear, isActive, subscribe }
+  return { layers, active, toggle, setActive, clear, isActive, subscribe }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import {
   createLayeredOverlay,
   type OverlayLayer,
@@ -22,7 +22,7 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
   { id: 'blame', label: 'BLAME' },
 ]
 
-const LAYERS: ReadonlyArray<OverlayLayer> = [
+export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
   { kind: 'tools', label: 'Tools', description: 'MCP tool 호출' },
@@ -33,12 +33,27 @@ const LAYERS: ReadonlyArray<OverlayLayer> = [
 
 interface IdeToolbarProps {
   readonly activeView: ViewTab
+  readonly activeLayers: ReadonlySet<string>
   readonly onViewChange: (id: ViewTab) => void
+  readonly onLayersChange: (active: ReadonlySet<string>) => void
 }
 
-export function IdeToolbar({ activeView, onViewChange }: IdeToolbarProps) {
-  const controller = useMemo(() => createLayeredOverlay(LAYERS), [])
-  const { active, toggle, isActive } = useLayeredOverlay(controller)
+export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersChange }: IdeToolbarProps) {
+  const controller = useMemo(() => {
+    const next = createLayeredOverlay(IDE_LAYERS)
+    next.setActive(activeLayers)
+    return next
+  }, [])
+  const { active, isActive } = useLayeredOverlay(controller)
+
+  useEffect(() => {
+    controller.setActive(activeLayers)
+  }, [controller, activeLayers])
+
+  const handleLayerToggle = (kind: string) => {
+    controller.toggle(kind)
+    onLayersChange(controller.active())
+  }
 
   return html`
     <div
@@ -86,11 +101,11 @@ export function IdeToolbar({ activeView, onViewChange }: IdeToolbarProps) {
         }}
       >
         <span>LAYERS</span>
-        ${LAYERS.map(layer => html`
+        ${IDE_LAYERS.map(layer => html`
           <button
             type="button"
             aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
-            onClick=${() => toggle(layer.kind)}
+            onClick=${() => handleLayerToggle(layer.kind)}
             title=${layer.description}
             style=${{
               padding: '2px 8px',

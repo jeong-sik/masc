@@ -71,6 +71,10 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/common/shiki-highlighter.ts` promotes the markdown Shiki loader/sanitizer into a shared dashboard boundary with block and line-level highlighting APIs.
   - `src/components/ide/ide-code-renderer.ts` renders read-only editor rows from sanitized Shiki line HTML while preserving the code document and RFC 0019 ownership contracts.
 
+- **IDE LAYERS deep-link substrate**
+  - `design-system/headless-core/layered-overlay.ts` now accepts external active-layer snapshots for URL hydration while preserving RFC 0020 exclusive-layer semantics.
+  - `src/components/ide/ide-shell.ts` persists the LAYERS bar to the route `layers=` param, so editor overlay state survives deep links and view-tab changes.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

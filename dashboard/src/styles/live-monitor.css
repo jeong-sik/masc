@@ -3,7 +3,7 @@
 /* ── Live Monitor (merged from live.css) ───────────────── */
 
 @utility pulse-bubble {
-  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  transition: border-color var(--t-med), background var(--t-med), box-shadow var(--t-med);
   &:hover { background: var(--color-bg-hover); }
 }
 
@@ -19,7 +19,7 @@
 }
 
 @utility activity-item {
-  transition: background 0.15s;
+  transition: background var(--t-fast);
   &:hover { background: var(--color-bg-hover); }
   &.live-event-broadcast { border-left-color: var(--color-accent-fg); }
   &.live-event-task { border-left-color: var(--color-status-ok); }
@@ -32,7 +32,7 @@
 }
 
 @utility focus-agent-card {
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--t-fast), border-color var(--t-fast);
   &:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
 }
 

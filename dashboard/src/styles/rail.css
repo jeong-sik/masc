@@ -124,7 +124,7 @@
   top: 50%; transform: translate(-50%, -50%);
   cursor: pointer;
   border: 1px solid rgb(0 0 0 / 0.3);
-  transition: transform .1s;
+  transition: transform var(--t-fast);
 }
 .tl-dot:hover { transform: translate(-50%, -50%) scale(1.6); z-index: 2; }
 .tl-dot.is-err {

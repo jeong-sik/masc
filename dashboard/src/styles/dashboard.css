@@ -6,7 +6,7 @@
 
 /* ── Collapsible Sections ── */
 .overview-section-collapsible > summary {
-  transition: background 0.15s;
+  transition: background var(--t-fast);
 }
 
 .overview-section-collapsible > summary:hover {
@@ -16,7 +16,7 @@
 .overview-section-collapsible > summary::before {
   content: '\25B8';
   font-size: var(--fs-xs);
-  transition: transform 0.15s;
+  transition: transform var(--t-fast);
   display: inline-block;
   color: var(--color-fg-muted);
 }
@@ -87,13 +87,12 @@
   border-color: var(--color-border-default);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
-  transition: border-color 0.15s, background 0.15s;
-  &:hover { border-color: rgb(var(--brass-glow) / 0.30); background: var(--color-bg-hover); transform: none; }
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
 
 /* Vote column */
 @utility vote-btn {
-  transition: color 0.2s;
+  transition: color var(--t-med);
   &:hover { color: var(--vote-hover); }
   &.upvote:hover, &.upvote.active { color: var(--vote-up); }
   &.downvote:hover, &.downvote.active { color: var(--vote-down); }
@@ -102,7 +101,7 @@
 
 /* Board comments: compound selector, kept as raw CSS */
 .board-comment .comment-text {
-  transition: max-height 0.3s ease;
+  transition: max-height var(--t-slow) var(--ease);
 }
 .board-comment .comment-text.expanded { max-height: none; }
 .board-comment .comment-expand-btn:hover { text-decoration: underline; }
@@ -216,7 +215,7 @@
 
 /* ── Card Subtle Hover Lift ── */
 .card {
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
 
 .card:hover {

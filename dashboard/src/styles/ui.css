@@ -97,7 +97,7 @@ button.agent-card {
 /* button.monitor-alert/row: element+class selector, kept as raw CSS */
 button.monitor-alert,
 button.monitor-row {
-  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  transition: border-color var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-med) var(--ease);
   &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: var(--white-5); }
   &.ok { border-color: rgb(var(--ok-glow) / .18); }
   &.warn { border-color: rgb(var(--warn-glow) / .28); }
@@ -121,7 +121,7 @@ button.monitor-row {
 }
 
 @utility agent-runtime-ctx-fill {
-  transition: width 0.3s ease;
+  transition: width var(--t-slow) var(--ease);
   &.warn { background: var(--warn); }
   &.bad { background: var(--err); }
 }
@@ -140,7 +140,7 @@ button.monitor-row {
 
 /* ── Micro-Interactions (Task 289) ── */
 @utility pressable {
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease-out;
+  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease-out);
   &:active:not(:disabled) {
     transform: scale(0.97);
     opacity: 0.9;
@@ -148,14 +148,14 @@ button.monitor-row {
 }
 
 @utility hover-lift {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease-out, background-color 0.2s ease-out;
+  transition: transform var(--t-med) var(--ease), border-color var(--t-med) var(--ease-out), background-color var(--t-med) var(--ease-out);
   &:hover:not(:disabled) {
     transform: translateY(-2px);
   }
 }
 
 @utility micro-fade {
-  transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  transition: opacity var(--t-med) var(--ease-inout), background-color var(--t-med) var(--ease-inout), color var(--t-med) var(--ease-inout), border-color var(--t-med) var(--ease-inout);
 }
 
 /* ── Automatic Global Micro-Interactions (Task 289) ── */

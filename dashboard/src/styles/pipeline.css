@@ -3,7 +3,7 @@
 /* ═══ OAS Pipeline ═══ */
 
 /* ── Pipeline Stage Indicator ── */
-@utility pipeline-stage-label { transition: color 0.3s ease; }
+@utility pipeline-stage-label { transition: color var(--t-slow) var(--ease); }
 
 /* pipeline-stage-node: compound selectors with descendant combinator, kept as raw CSS */
 .pipeline-stage-node.active .pipeline-stage-dot {

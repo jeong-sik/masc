@@ -295,7 +295,7 @@ export function AttributionPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-1">
-        <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Attribution — gate chain 관찰
         </div>
         <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-muted)]">
@@ -345,7 +345,7 @@ export function AttributionPanel() {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <${SurfaceCard} variant="light">
           <div class="flex flex-col">
-            <div class="px-3 py-2 border-b border-[var(--color-border-default)] text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+            <div class="px-3 py-2 border-b border-[var(--color-border-default)] text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               최근 이벤트 (${isFiltering
                 ? `${visibleEvents.length}/${gateFiltered.length}`
                 : gateFiltered.length})

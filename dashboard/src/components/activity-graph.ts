@@ -96,7 +96,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   function statCard(label: string, value: number, series: number[], color: string, highlight = false) {
     return html`
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-[15px] px-3.5">
-        <div class="text-3xs text-[var(--color-fg-muted)] tracking-1 uppercase font-medium">${label}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] tracking-[var(--track-caps)] uppercase font-medium">${label}</div>
         <div class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums ${highlight ? 'text-[var(--color-status-ok)]' : ''}">${value}</div>
         ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
       </div>
@@ -215,7 +215,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${actionCategoryClass(group)}">
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${actionCategoryClass(group)}">
                         ${categoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-2xs font-medium text-[var(--color-fg-primary)]">${group.actor}</span>` : null}

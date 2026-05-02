@@ -101,7 +101,7 @@ export function ErrorRecoverable({
     >
       <div class="flex items-center gap-2">
         <${AlertTriangle} size=${16} class="shrink-0 text-[var(--warn-bright)]" aria-hidden="true" />
-        <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--warn-bright)]">
+        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">
           복구 가능
         </span>
         ${onRetry ? html`
@@ -153,7 +153,7 @@ export function ErrorFatal({
     >
       <div class="flex items-center gap-2">
         <${AlertOctagon} size=${16} class="shrink-0 text-[var(--bad-light)]" aria-hidden="true" />
-        <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--bad-light)]">
+        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--bad-light)]">
           치명적
         </span>
         ${onReload ? html`

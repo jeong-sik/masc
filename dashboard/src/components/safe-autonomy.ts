@@ -394,7 +394,7 @@ export function SafeAutonomyPanel() {
               <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-4">
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
-                    <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+                    <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                       Advisory Truth Layer
                     </div>
                     <div class="mt-2 flex items-center gap-2">

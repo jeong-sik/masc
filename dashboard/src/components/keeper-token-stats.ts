@@ -50,7 +50,7 @@ export function KeeperTokenStats() {
         class="monitor-muted-panel p-4 text-xs text-[var(--color-fg-muted)]"
         aria-label="키퍼 토큰 사용량 집계"
       >
-        <header class="mb-1 text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <header class="mb-1 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           키퍼 토큰 사용량 (집계)
         </header>
         <p>아직 토큰을 소비한 키퍼가 없습니다.</p>
@@ -68,7 +68,7 @@ export function KeeperTokenStats() {
       aria-label="키퍼 토큰 사용량 집계"
     >
       <header class="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 class="text-xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           키퍼 토큰 사용량 (집계)
         </h3>
         <span class="text-2xs text-[var(--color-fg-disabled)]">
@@ -78,7 +78,7 @@ export function KeeperTokenStats() {
       <div class="overflow-x-auto">
         <table class="w-full font-mono text-xs">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-left text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">
+            <tr class="border-b border-[var(--color-border-default)] text-left text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               <th class="py-1 pr-2">keeper</th>
               <th class="py-1 px-2 text-right">turns</th>
               <th class="py-1 px-2 text-right">total tokens</th>
@@ -112,7 +112,7 @@ export function KeeperTokenStats() {
             `)}
           </tbody>
           <tfoot>
-            <tr class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">
+            <tr class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               <td class="pt-2 pr-2">total</td>
               <td class="pt-2 px-2 text-right">${totalTurns.toLocaleString()}</td>
               <td class="pt-2 px-2 text-right">${totalTokens.toLocaleString()}</td>

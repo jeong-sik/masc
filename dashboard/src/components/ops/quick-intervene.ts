@@ -98,7 +98,7 @@ export function QuickIntervene() {
       ${showAdvanced
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
-              <label class="block text-2xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]" for="quick-intervene-actor">
+              <label class="block text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]" for="quick-intervene-actor">
                 Actor
               </label>
               <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">Interventions and approval requests are recorded with this name.</p>

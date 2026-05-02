@@ -283,7 +283,7 @@ function StatCell({
       : 'text-text-strong'
   return html`
     <div class="flex flex-col gap-0.5 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-      <span class="text-2xs uppercase tracking-1 text-text-muted">${label}</span>
+      <span class="text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${label}</span>
       <span class="text-lg font-semibold ${toneClass}">${value}</span>
       ${sub ? html`<span class="text-2xs text-text-disabled">${sub}</span>` : null}
     </div>
@@ -437,12 +437,12 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
   return html`
     <section class="flex flex-col gap-2" aria-label="Provider × Model cost matrix">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">provider × model · $ spent</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">provider × model · $ spent</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Provider by model cost matrix">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left"></th>
               ${modelIds.map(mid => html`<th scope="col" class="px-2 py-1.5 text-left font-mono text-xs">${mid}</th>`)}
             </tr>
@@ -508,7 +508,7 @@ function CostLatency({ buckets, p50, p95 }: {
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Latency distribution · ${total} calls`}>
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">latency distribution · ${total} calls</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">latency distribution · ${total} calls</span>
         <div class="flex gap-3 font-mono text-2xs">
           <span class="text-text-muted">p50 · <span class="text-[var(--color-accent-fg)]">${p50 == null ? '—' : `${Math.round(p50)}ms`}</span></span>
           <span class="text-text-muted">p95 · <span class="text-[var(--color-status-err)]">${p95 == null ? '—' : `${Math.round(p95)}ms`}</span></span>
@@ -529,7 +529,7 @@ function CostLatency({ buckets, p50, p95 }: {
       <div class="grid grid-cols-4 gap-px rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
         ${bands.map(b => html`
           <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%)`}>
-            <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">${b.label}</span>
+            <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${b.label}</span>
             <span class="font-mono text-sm font-semibold ${b.color}">
               ${b.count}<span class="ml-1 text-2xs font-normal text-text-muted">· ${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%</span>
             </span>
@@ -551,13 +551,13 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Heuristic events">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">module</th>
               <th scope="col" class="px-2 py-1.5 text-left">site</th>
@@ -624,13 +624,13 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Stress board · ${events.length} events`}>
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">stress board · ${events.length} events</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${events.length} events</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Stress events">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">agent</th>
               <th scope="col" class="px-2 py-1.5 text-left">room</th>
@@ -670,7 +670,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
   return html`
     <section class="flex flex-col gap-2" aria-label="Heuristic by module">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.unique_decision_tuples} unique tuples</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.unique_decision_tuples} unique tuples</span>
       </div>
       <div class="flex flex-col gap-2">
         ${sortedModules.map(([moduleName, sites]) => {
@@ -685,7 +685,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
               <div class="overflow-x-auto">
                 <table class="w-full" aria-label=${`Heuristic sites for ${moduleName}`}>
                   <thead>
-                    <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-1 text-text-muted">
+                    <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
                       <th scope="col" class="px-2 py-1 text-left">site</th>
                       <th scope="col" class="px-2 py-1 text-right">count</th>
                       <th scope="col" class="px-2 py-1 text-right">triggered</th>
@@ -722,13 +722,13 @@ function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: nu
   return html`
     <section class="flex flex-col gap-4" aria-label="Audit ledger">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">audit ledger · ${count} entries</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries</span>
       </div>
 
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Audit ledger entries">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">actor</th>
               <th scope="col" class="px-2 py-1.5 text-left">kind</th>
@@ -763,13 +763,13 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
   return html`
     <section class="flex flex-col gap-4" aria-label="Keeper decisions">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">keeper decisions · ${events.length} events · limit ${limit}</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">keeper decisions · ${events.length} events · limit ${limit}</span>
       </div>
 
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Keeper decision events">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
               <th scope="col" class="px-2 py-1.5 text-left">event</th>
@@ -925,7 +925,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
             <table class="w-full" aria-label=${`${data.length}개 ${viewMode.value === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
               <thead>
-                <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+                <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
                   <th scope="col" class="px-2 py-1.5 text-left">${viewMode.value === 'model' ? 'model' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>

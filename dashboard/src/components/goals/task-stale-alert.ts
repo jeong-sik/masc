@@ -62,7 +62,7 @@ export function TaskStaleAlert() {
       aria-label="오래된 태스크 점유"
     >
       <header class="mb-2 flex items-baseline justify-between gap-2">
-        <h3 class="text-xs font-semibold uppercase tracking-1 text-warn">
+        <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-warn">
           오래 점유 중인 태스크 (${entries.length})
         </h3>
         <span class="text-2xs text-text-muted">

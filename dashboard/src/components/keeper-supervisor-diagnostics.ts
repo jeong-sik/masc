@@ -58,7 +58,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
     .filter(([, count]) => count > 0)
   return html`
     <div>
-      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
       <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--white-5)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
@@ -90,7 +90,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   const entries = sp_events.slice(0, 10) as SpEventLike[]
   return html`
     <div>
-      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--purple-12)]">
@@ -171,7 +171,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           return html`
             <div>
               <div class="flex items-center justify-between mb-2">
-                <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)]">장애 이력</div>
+                <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
                     class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"

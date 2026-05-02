@@ -70,7 +70,7 @@ export function TaskWall() {
       aria-label="키퍼별 태스크 월"
     >
       <header class="mb-2 flex items-baseline justify-between">
-        <h3 class="text-xs font-semibold uppercase tracking-1 text-text-muted">
+        <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">
           키퍼별 태스크 월
         </h3>
         <span class="text-2xs text-text-muted">

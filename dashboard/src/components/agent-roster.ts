@@ -594,13 +594,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
-                <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">디렉터리 필터</span>
+                <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">디렉터리 필터</span>
                 <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-180 text-sm leading-loose text-[var(--color-fg-primary)]">${pageDescription}</p>
             </div>
 
-            <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-1 text-[var(--color-fg-muted)] uppercase">
+            <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
               <span>이름 / model / 작업</span>
               <${TextInput}
                 class="rounded-[var(--r-1)] bg-[var(--white-3)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
@@ -617,7 +617,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
-                <div class="text-2xs font-semibold tracking-1 text-[var(--color-fg-secondary)] uppercase">운영 상태</div>
+                <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">운영 상태</div>
                 <p class="m-0 text-xs leading-normal text-[var(--color-fg-muted)]">live runtime 신호로 먼저 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
               </div>
               <${FilterChips}

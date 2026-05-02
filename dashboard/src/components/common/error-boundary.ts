@@ -68,7 +68,7 @@ export class ErrorBoundary extends Component<Props, State> {
               <${AlertTriangle} size=${18} />
             </div>
             <div class="min-w-0 flex-1">
-              <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-warn)]">
+              <h3 class="mb-1 text-xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]">
                 recoverable · ${this.props.label ?? '컴포넌트'}
               </h3>
               <pre class="overflow-x-auto whitespace-pre-wrap rounded-[var(--r-1)] bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
@@ -96,7 +96,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <${AlertOctagon} size=${18} />
           </div>
           <div class="min-w-0 flex-1">
-            <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-err)]">${this.props.label ?? 'Component'} 렌더링 오류</h3>
+            <h3 class="mb-1 text-xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-err)]">${this.props.label ?? 'Component'} 렌더링 오류</h3>
             <pre class="overflow-x-auto whitespace-pre-wrap rounded-[var(--r-1)] bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
             <div class="mt-3 flex flex-wrap gap-2">
               <button

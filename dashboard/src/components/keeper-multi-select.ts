@@ -60,7 +60,7 @@ export function KeeperMultiSelect({
       aria-label=${label}
     >
       <header class="mb-2 flex flex-wrap items-baseline gap-2">
-        <span class="text-2xs font-semibold uppercase tracking-1 text-text-muted">
+        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">
           ${label}
         </span>
         <span class="text-2xs text-text-disabled" aria-live="polite">

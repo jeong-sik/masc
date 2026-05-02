@@ -35,7 +35,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
   const m = snapshot.measurement
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
-      <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
         측정
       </div>
       ${m.captured && m.auto_rules ? html`
@@ -119,7 +119,7 @@ export function InvariantsPanel({
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Safety
         </div>
         <span

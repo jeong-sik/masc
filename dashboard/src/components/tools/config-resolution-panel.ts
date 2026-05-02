@@ -177,7 +177,7 @@ function ConfigRow({
   return html`
     <${ConfigCard} class="px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${label}</div>
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
         ${showSourceBadge
           ? html`
@@ -216,7 +216,7 @@ function WarningBlock({
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
-      <div class="mb-2 text-2xs uppercase tracking-1 text-[var(--yellow-100)]">${title}</div>
+      <div class="mb-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--yellow-100)]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
           <div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${warning}</div>
@@ -235,7 +235,7 @@ function RuntimeMetaRow({
 }) {
   return html`
     <${ConfigCard} class="flex items-center justify-between gap-3 px-3 py-2">
-      <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${label}</div>
+      <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
       <div class="break-all text-right font-mono text-xs text-[var(--color-fg-primary)]">${value}</div>
     <//>
   `
@@ -344,7 +344,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">keeper runtime limits</div>
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">keeper runtime limits</div>
         ${tomlCount > 0 ? html`
           <${StatusChip} tone=${sourceTone('toml')}>${tomlCount} TOML<//>
         ` : null}
@@ -361,7 +361,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
           if (!field) return null
           return html`
             <div class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-6)] px-3 py-2">
-              <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${row.label}</div>
+              <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
                 <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${sourceTone(field.source)}">${field.source}</span>
@@ -411,7 +411,7 @@ function RuntimeProbePanel() {
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">ollama warm / kv probe</div>
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
@@ -626,7 +626,7 @@ export function ConfigResolutionPanel({
 
               <div class="mt-4">
                 <div class="mb-2 flex items-center justify-between gap-2">
-                  <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">
+                  <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                     recent diagnostics
                   </div>
                   ${runtimeResolution.diagnostics.length > 0

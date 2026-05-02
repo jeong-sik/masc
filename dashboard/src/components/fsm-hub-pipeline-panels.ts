@@ -117,7 +117,7 @@ export function OperationalMeaningPanel({
       </div>
 
       <div class="mt-4 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           관찰 레인
         </div>
         <${TextInput}
@@ -137,7 +137,7 @@ export function OperationalMeaningPanel({
             ${visibleLanes.map(lane => html`
               <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${lane.field}</span>
+                  <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${lane.field}</span>
                   <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
@@ -437,7 +437,7 @@ export function TurnPipelineStrip({
   // the signal and is not re-rendered by 5 s ticks.
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+      <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">

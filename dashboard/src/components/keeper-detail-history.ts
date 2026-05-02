@@ -230,7 +230,7 @@ export function KeeperCheckpointPanel({
 
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2">
-          <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             OAS Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
               ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--color-fg-disabled)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`

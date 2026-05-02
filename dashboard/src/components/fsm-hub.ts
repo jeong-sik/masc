@@ -599,7 +599,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
-          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
             Compound Graph — 5 sub-FSMs (Cytoscape)
           </summary>
           <div class="px-3 pb-3">
@@ -1001,7 +1001,7 @@ function CollapsibleZone({
         aria-expanded=${!collapsed}
         aria-controls=${`zone-${id}`}
       >
-        <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${zoneTitle}</span>
+        <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${zoneTitle}</span>
         <span class=${`text-3xs text-[var(--color-fg-disabled)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`} aria-hidden="true">▾</span>
       </button>
       ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}

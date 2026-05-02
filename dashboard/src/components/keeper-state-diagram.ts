@@ -242,7 +242,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
           </div>
           <${FilterChips}
@@ -304,7 +304,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">관측된 전이</div>
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">

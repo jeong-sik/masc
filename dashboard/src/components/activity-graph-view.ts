@@ -287,7 +287,7 @@ export function GraphView({ data }: GraphViewProps) {
         </div>
         ${connectedEdges.length > 0 ? html`
           <div class="border-t border-[var(--color-bg-panel-alt)] pt-3">
-            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-[var(--track-caps)] mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>

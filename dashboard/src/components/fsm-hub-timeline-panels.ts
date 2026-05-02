@@ -173,7 +173,7 @@ export function SwimlaneTimeline({
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           상태 타임라인
         </div>
         <div class="flex items-center gap-1 flex-wrap">
@@ -397,7 +397,7 @@ export function TransitionTrail({
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
         </div>
         <${TextInput}
@@ -469,7 +469,7 @@ export function TopTransitionsPanel({
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         Top Transitions (${transitions.length})
       </div>
       <div class="flex flex-col gap-0.5">
@@ -544,7 +544,7 @@ export function DwellHistogramPanel({
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         State Dwell Time
       </div>
       <div class="flex flex-col gap-2">

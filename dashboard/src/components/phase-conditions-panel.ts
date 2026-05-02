@@ -82,7 +82,7 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
     >
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div id="phase-conditions-title" class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div id="phase-conditions-title" class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             Phase conditions
           </div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">

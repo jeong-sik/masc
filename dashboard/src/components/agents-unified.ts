@@ -96,14 +96,14 @@ export function AgentsUnified() {
 
       ${configuredKeeperDelta > 0 ? html`
         <div class="monitor-muted-panel flex w-fit flex-wrap items-center gap-2 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">runtime truth</span>
+          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">runtime truth</span>
           <span>live runtime ${keeperCount} · configured keeper ${runtimeCounts.configuredKeepers} · 일시정지/미기동 ${configuredKeeperDelta}</span>
         </div>
       ` : null}
 
       ${currentView !== 'fsm' ? html`
         <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--color-fg-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">이 화면 밖</span>
+          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">이 화면 밖</span>
           <span>cached 조율 스냅샷, 이벤트 로그, 도구 품질, 거버넌스</span>
           <${RouteLink}
             tab="monitoring"

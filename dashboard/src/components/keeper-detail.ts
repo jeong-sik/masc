@@ -614,7 +614,7 @@ function KeeperClearContextDialog({
         </div>
 
         <label class="flex flex-col gap-2">
-          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">사유</span>
+          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">사유</span>
           <${TextArea}
             inputRef=${reasonRef}
             class="!bg-[var(--white-3)] !min-h-[112px] !text-sm leading-paragraph"
@@ -1209,16 +1209,16 @@ export function KeeperDetailPage() {
             description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >
             <details class="mt-0">
-          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <${StatusDot} size="xs" class="bg-[var(--color-fg-disabled)]" />
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
-            <div class="p-5 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm">
+            <div class="p-5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] backdrop-blur-sm">
               <${SectionHeader} size="xs" class="mb-3">저널</${SectionHeader}>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
-            <div class="p-5 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm">
+            <div class="p-5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] backdrop-blur-sm">
               <${SectionHeader} size="xs" class="mb-3">원시 데이터</${SectionHeader}>
               <${RawDataDebug} keeper=${keeper} />
             </div>

@@ -151,7 +151,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (loading && !data) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse" role="status">데이터 로딩 중...</div>
       </div>
     `
@@ -160,7 +160,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (error && !data) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 데이터 없음</div>
       </div>
     `
@@ -169,7 +169,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (!data || data.count === 0) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
@@ -190,7 +190,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">평가 품질</span>
+          <span class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">평가 품질</span>
           <${StatusChip} tone=${evalPassTone(allPassed)} class="font-semibold">${evalPassLabel(allPassed)}</${StatusChip}>
           ${baseline
             ? html`<${StatusChip} tone=${baseline.tone} uppercase=${false} class="font-medium">${baseline.text}</${StatusChip}>`

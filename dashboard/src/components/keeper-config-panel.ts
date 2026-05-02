@@ -354,7 +354,7 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
+    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
       <${StatusDot} size="xs" class="bg-accent/50 shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
       ${title}
     </div>
@@ -376,7 +376,7 @@ function Callout({
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
     <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-[var(--shadow-1)] ${toneClass}">
-      <div class="text-2xs font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
+      <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-text-muted mb-1">${title}</div>
       <div class="text-xs leading-relaxed">${body}</div>
     </div>
   `
@@ -1063,7 +1063,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
       ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">검증자</span>
+        <span class="rounded-[var(--r-1)] border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}

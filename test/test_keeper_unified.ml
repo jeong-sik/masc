@@ -3448,6 +3448,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "done");
+          ("action", "PhaseGateSkip");
           ("keeper", meta.name);
         ]
       in
@@ -3455,6 +3456,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "cancelled:phase_gate_close");
+          ("action", "HonorStopSignal");
           ("keeper", meta.name);
         ]
       in

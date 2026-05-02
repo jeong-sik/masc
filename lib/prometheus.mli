@@ -315,8 +315,10 @@ val metric_keeper_fsm_edge_transitions : string
     Bumped once per [Keeper_turn_fsm.emit_transition] call so
     operators can chart turn-state distribution per keeper.
     Labels:
-    - [from] — previous [turn_state_label] ("-" if absent)
-    - [to]   — new [turn_state_label]
+    - [from]   — previous [turn_state_label] ("-" if absent)
+    - [to]     — new [turn_state_label]
+    - [action] — TLA+ action name (e.g. "PhaseGateSkip", "ContractOk");
+                 "unknown" when the edge is not in [classify_transition].
     - [keeper] — keeper name
 
     Distinct from [metric_keeper_fsm_edge_transitions], which

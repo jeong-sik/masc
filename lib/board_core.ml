@@ -278,7 +278,8 @@ let rewrite_posts store =
     let path = persist_path () in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (pst : post) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
+      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
+      Buffer.add_char buf '\n'
     ) store.posts;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()
@@ -291,7 +292,8 @@ let rewrite_comments store =
     let path = comments_path () in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (cmt : comment) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
+      Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+      Buffer.add_char buf '\n'
     ) store.comments;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()

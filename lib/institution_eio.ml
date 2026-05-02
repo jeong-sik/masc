@@ -608,7 +608,9 @@ let format_for_welcome (inst : institution) : string =
     if mission = "" then "(not defined)"
     else String_util.utf8_safe ~max_bytes:80 ~suffix:"..." mission |> String_util.to_string
   in
-  Buffer.add_string buf ("🏛️ Mission: " ^ mission_short ^ "\n");
+  Buffer.add_string buf "🏛️ Mission: ";
+  Buffer.add_string buf mission_short;
+  Buffer.add_char buf '\n';
 
   (* Top 3 values - compact *)
   if inst.culture <> [] then begin
@@ -617,13 +619,19 @@ let format_for_welcome (inst : institution) : string =
       |> List.filteri (fun i _ -> i < 3)
     in
     let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
-    Buffer.add_string buf ("💎 Values: " ^ String.concat ", " value_names ^ "\n")
+    Buffer.add_string buf "💎 Values: ";
+    Buffer.add_string buf (String.concat ", " value_names);
+    Buffer.add_char buf '\n'
   end;
 
   (* One procedural tip - pattern match for safety *)
   (match List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural with
    | best :: _ ->
-       Buffer.add_string buf ("💡 Tip: " ^ best.name ^ " → " ^ best.trigger ^ "\n")
+       Buffer.add_string buf "💡 Tip: ";
+       Buffer.add_string buf best.name;
+       Buffer.add_string buf " → ";
+       Buffer.add_string buf best.trigger;
+       Buffer.add_char buf '\n'
    | [] -> ());
 
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";

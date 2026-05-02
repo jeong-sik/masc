@@ -106,11 +106,11 @@ let parse_verdict (text : string) : (verdict, string) result =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
   let len = String.length upper in
-  if len >= 4 && String.sub upper 0 4 = "PASS" && has_keyword_boundary upper 4 then
+  if Base.String.is_prefix upper ~prefix:"PASS" && has_keyword_boundary upper 4 then
     Ok Pass
-  else if len >= 4 && String.sub upper 0 4 = "WARN" && has_keyword_boundary upper 4 then
+  else if Base.String.is_prefix upper ~prefix:"WARN" && has_keyword_boundary upper 4 then
     Ok (Warn (extract_reason trimmed 4 "unspecified concern"))
-  else if len >= 4 && String.sub upper 0 4 = "FAIL" && has_keyword_boundary upper 4 then
+  else if Base.String.is_prefix upper ~prefix:"FAIL" && has_keyword_boundary upper 4 then
     Ok (Fail (extract_reason trimmed 4 "action did not achieve goal"))
   else if len = 0 then
     Error "empty verifier output"

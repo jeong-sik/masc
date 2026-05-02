@@ -38,7 +38,7 @@ let domain_allowed policy domain =
   in
   List.exists (fun pattern ->
     if String.length pattern > 2 &&
-       String.sub pattern 0 2 = "*." then begin
+       Base.String.is_prefix pattern ~prefix:"*." then begin
       let suffix = String.sub pattern 2 (String.length pattern - 2) in
       suffix_match ~suffix d
     end else

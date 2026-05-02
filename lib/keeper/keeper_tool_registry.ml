@@ -190,11 +190,11 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
                  method_tok <> "get"
                | [] -> true (* flag with no value — conservative: mutating *))
             else if (String.length tok > 3
-                     && String.sub tok 0 3 = "-x=") then
+                     && Base.String.is_prefix tok ~prefix:"-x=") then
               let method_val = String.sub tok 3 (String.length tok - 3) in
               method_val <> "get"
             else if (String.length tok > 9
-                     && String.sub tok 0 9 = "--method=") then
+                     && Base.String.is_prefix tok ~prefix:"--method=") then
               let method_val = String.sub tok 9 (String.length tok - 9) in
               method_val <> "get"
             else check rest_toks
@@ -204,9 +204,9 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
       let has_field_flag =
         List.exists (fun tok ->
           tok = "-f" || tok = "-ff"
-          || String.length tok > 3 && String.sub tok 0 3 = "-f="
+          || String.length tok > 3 && Base.String.is_prefix tok ~prefix:"-f="
           || tok = "--field" || tok = "--raw-field"
-          || String.length tok > 8 && String.sub tok 0 8 = "--field="
+          || String.length tok > 8 && Base.String.is_prefix tok ~prefix:"--field="
         ) tokens
       in
       not has_method_flag && not has_field_flag
@@ -265,13 +265,11 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
     let cmd = gh_effective_cmd input in
     let cmd_lower = String.lowercase_ascii cmd in
     if cmd_lower = "" then false
-    else if String.length cmd_lower >= 3
-            && String.sub cmd_lower 0 3 = "api" then
+    else if Base.String.is_prefix cmd_lower ~prefix:"api" then
       is_gh_api_read_only cmd_lower
     else
       List.exists (fun prefix ->
-        String.length cmd_lower >= String.length prefix
-        && String.sub cmd_lower 0 (String.length prefix) = prefix
+        Base.String.is_prefix cmd_lower ~prefix
       ) gh_read_only_prefixes
   | Some (Masc Code_git) ->
     if is_effectively_read_only_tool tool_name then true

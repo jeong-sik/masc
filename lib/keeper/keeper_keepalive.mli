@@ -67,6 +67,7 @@ val autonomous_waiter_snapshot_for_test : unit -> string list
 (** Test-only snapshots of the current semaphore availability. *)
 val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
+val reactive_turn_semaphore_value_for_test : unit -> int
 
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int

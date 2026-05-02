@@ -1063,14 +1063,49 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
        not (List.mem key known) && not (starts_with_oas_env key))
   |> dedupe_keep_order
 
+let unknown_keeper_toml_warning_key_limit = 256
+let unknown_keeper_toml_warning_keys : string list Atomic.t = Atomic.make []
+
+let rec take_warning_keys n keys =
+  match n, keys with
+  | n, _ when n <= 0 -> []
+  | _, [] -> []
+  | n, key :: rest -> key :: take_warning_keys (n - 1) rest
+
+let normalize_unknown_keeper_toml_keys unknown =
+  List.sort_uniq String.compare unknown
+;;
+
+let warn_unknown_keeper_toml_keys_once ~path unknown =
+  let normalized_unknown = normalize_unknown_keeper_toml_keys unknown in
+  let warning_key =
+    path ^ "\x1f" ^ String.concat "," normalized_unknown
+  in
+  let rec loop () =
+    let seen = Atomic.get unknown_keeper_toml_warning_keys in
+    if List.mem warning_key seen then
+      false
+    else
+      let next =
+        take_warning_keys unknown_keeper_toml_warning_key_limit (warning_key :: seen)
+      in
+      if Atomic.compare_and_set unknown_keeper_toml_warning_keys seen next then
+        true
+      else
+        loop ()
+  in
+  loop ()
+
 let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
   match detect_unknown_keeper_toml_keys doc with
   | [] -> ()
   | unknown ->
-    Log.Keeper.warn
-      "keeper TOML %s has unknown keys: %s"
-      path
-      (String.concat ", " unknown)
+    let unknown = normalize_unknown_keeper_toml_keys unknown in
+    if warn_unknown_keeper_toml_keys_once ~path unknown then
+      Log.Keeper.warn
+        "keeper TOML %s has unknown keys: %s"
+        path
+        (String.concat ", " unknown)
 
 let load_keeper_toml (path : string)
     : (string * keeper_profile_defaults, string) result =

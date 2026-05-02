@@ -776,6 +776,16 @@ let test_fiber_health_crashed () =
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for crashed"
 
+let test_try_resolve_done_wins_once () =
+  R.clear ();
+  let entry = R.register ~base_path:bp "resolve-once" (make_meta "resolve-once") in
+  check bool "first resolve wins" true (R.try_resolve_done entry `Stopped);
+  check bool "second resolve loses" false
+    (R.try_resolve_done entry (`Crashed "late crash"));
+  match Eio.Promise.await entry.done_p with
+  | `Stopped -> ()
+  | `Crashed reason -> fail ("expected stopped, got crashed: " ^ reason)
+
 let test_fiber_health_crashed_state_without_done_signal () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fh3-state" (make_meta "fh3-state") in
@@ -1131,8 +1141,14 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
         in
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
         check bool "opted-in keeper woken" true (Atomic.get entry_a.fiber_wakeup);
+        check int "opted-in keeper queued board stimulus" 1
+          (R.event_queue_snapshot ~base_path:base_dir "opted-in"
+           |> Masc_mcp.Keeper_event_queue.length);
         check bool "defaulted keeper stays asleep" false
-          (Atomic.get entry_b.fiber_wakeup)))
+          (Atomic.get entry_b.fiber_wakeup);
+        check int "defaulted keeper has no stimulus" 0
+          (R.event_queue_snapshot ~base_path:base_dir "defaulted"
+           |> Masc_mcp.Keeper_event_queue.length)))
 
 let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
   R.clear ();
@@ -1193,8 +1209,14 @@ let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
         check bool "participant keeper woken" true
           (Atomic.get entry_a.fiber_wakeup);
+        check int "participant keeper queued board stimulus" 1
+          (R.event_queue_snapshot ~base_path:base_dir "participant"
+           |> Masc_mcp.Keeper_event_queue.length);
         check bool "bystander keeper stays asleep" false
-          (Atomic.get entry_b.fiber_wakeup)))
+          (Atomic.get entry_b.fiber_wakeup);
+        check int "bystander keeper has no stimulus" 0
+          (R.event_queue_snapshot ~base_path:base_dir "bystander"
+           |> Masc_mcp.Keeper_event_queue.length)))
 
 let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
   R.clear ();
@@ -1319,6 +1341,7 @@ let () =
           eio_test "fiber_health unknown" test_fiber_health_unknown;
           eio_test "fiber_health stopped" test_fiber_health_stopped;
           eio_test "fiber_health crashed" test_fiber_health_crashed;
+          eio_test "try_resolve_done wins once" test_try_resolve_done_wins_once;
           eio_test "fiber_health explicit crashed state" test_fiber_health_crashed_state_without_done_signal;
           eio_test "fiber_health dead state" test_fiber_health_dead_state;
           eio_test "shared refs" test_shared_refs;

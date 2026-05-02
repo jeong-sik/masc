@@ -110,6 +110,67 @@ let test_applies_multiple_overrides () =
     (Some "20")
     (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
 
+let test_applies_sleep_and_throttle_overrides () =
+  let doc = parse_or_fail
+    "[bootstrap]\n\
+     autoboot_max = 6\n\
+     [autonomous]\n\
+     concurrency = 2\n\
+     slot_wait_timeout_sec = 45\n\
+     fairness_cooldown_sec = 3\n\
+     [reactive]\n\
+     concurrency = 4\n\
+     [heartbeat]\n\
+     sleep_chunk_sec = 1.5\n\
+     board_debounce_sec = 30\n\
+     board_generic_wakeup_limit = 5\n\
+     board_wakeup_max = 6\n\
+     [turn]\n\
+     admission_wait_timeout_sec = 20\n\
+     batch_limit = 9\n\
+     board_event_limit = 7\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied sleep/throttle overrides" 12 count;
+  check (option string) "autoboot max canonical env"
+    (Some "6")
+    (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
+  check (option string) "autonomous concurrency"
+    (Some "2")
+    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" overrides);
+  check (option string) "autonomous slot wait"
+    (Some "45")
+    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "autonomous fairness cooldown"
+    (Some "3")
+    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);
+  check (option string) "reactive concurrency"
+    (Some "4")
+    (List.assoc_opt "MASC_KEEPER_REACTIVE_CONCURRENCY" overrides);
+  check (option string) "sleep chunk"
+    (Some "1.5")
+    (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
+  check (option string) "board debounce"
+    (Some "30")
+    (List.assoc_opt "MASC_KEEPER_BOARD_DEBOUNCE_SEC" overrides);
+  check (option string) "board generic wakeup limit"
+    (Some "5")
+    (List.assoc_opt "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT" overrides);
+  check (option string) "board wakeup max"
+    (Some "6")
+    (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides);
+  check (option string) "admission wait"
+    (Some "20")
+    (List.assoc_opt "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "batch limit"
+    (Some "9")
+    (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides);
+  check (option string) "board event limit"
+    (Some "7")
+    (List.assoc_opt "MASC_KEEPER_BOARD_EVENT_LIMIT" overrides)
+
 let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
@@ -443,6 +504,7 @@ let () =
         ; test_case "missing file keeps cost gate disabled by default" `Quick test_missing_file_keeps_cost_gate_disabled_by_default
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
+        ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies watchdog overrides" `Quick test_applies_watchdog_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides

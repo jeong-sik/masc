@@ -642,6 +642,50 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       check bool "registry entry unregistered after OAS budget loop pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "unresolved-watchdog-stopped" in
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Atomic.set reg.fiber_stop true;
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true after unresolved watchdog stop"
+             true m.paused
+       | Ok None -> fail "meta missing after unresolved watchdog stop"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "unresolved watchdog-stopped entry reaped"
+        false (Reg.is_registered ~base_path:config.base_path name))
+
 (* Regression guard: a `Crashed entry whose last_failure_reason is NOT a
    storm must still flow through the existing restart-or-mark-dead branch.
    Verifies the new gate is variant-specific, not a blanket short-circuit. *)
@@ -759,6 +803,8 @@ let () =
         test_stale_storm_pause_skips_restart;
       test_case "Oas_timeout_budget_loop skips restart, persists paused, increments counter" `Quick
         test_oas_timeout_budget_loop_pause_skips_restart;
+      test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
+        test_unresolved_watchdog_stopped_budget_loop_is_reaped;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
     ];

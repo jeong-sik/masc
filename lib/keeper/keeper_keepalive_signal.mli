@@ -58,11 +58,16 @@ val board_reactive_debounce_sec : float
 
 val board_reactive_generic_wakeup_limit : int
 
+val board_reactive_wakeup_max : int
+
 val board_reactive_wakeup_allowed :
   base_path:string -> keeper_name:string -> post_id:string -> bool
 
 val select_board_wakeup_candidates :
-  ?generic_limit:int -> ('a * string option) list -> ('a * string) list * int
+  ?generic_limit:int ->
+  ?total_limit:int ->
+  ('a * string option) list ->
+  ('a * string) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Coord.config -> Board_dispatch.keeper_board_signal -> unit

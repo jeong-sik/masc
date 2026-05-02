@@ -164,6 +164,11 @@ let board_reactive_generic_wakeup_limit =
     ~max_v:20
 ;;
 
+let board_reactive_wakeup_max =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
+;;
+
 let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
   Keeper_registry.board_wakeup_allowed
     ~base_path
@@ -172,7 +177,18 @@ let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
-let select_board_wakeup_candidates ?(generic_limit = board_reactive_generic_wakeup_limit)
+let take n xs =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] n xs
+;;
+
+let select_board_wakeup_candidates
+    ?(generic_limit = board_reactive_generic_wakeup_limit)
+    ?(total_limit = board_reactive_wakeup_max)
     candidates =
   let explicit =
     candidates
@@ -184,7 +200,7 @@ let select_board_wakeup_candidates ?(generic_limit = board_reactive_generic_wake
   match explicit with
   | _ :: _ -> explicit, 0
   | [] ->
-    let selected_rev, generic_seen, generic_dropped =
+    let selected_by_reason, generic_dropped =
       List.fold_left
         (fun (selected, generic_seen, generic_dropped) (item, reason) ->
           match reason with
@@ -198,8 +214,50 @@ let select_board_wakeup_candidates ?(generic_limit = board_reactive_generic_wake
           | Some reason -> (item, reason) :: selected, generic_seen, generic_dropped)
         ([], 0, 0)
         candidates
+      |> fun (selected_rev, _generic_seen, generic_dropped) ->
+      List.rev selected_rev, generic_dropped
     in
-    List.rev selected_rev, generic_dropped
+    let prioritized =
+      let non_generic =
+        List.filter (fun (_, r) -> r <> "board_activity") selected_by_reason
+      in
+      let generic =
+        List.filter (fun (_, r) -> r = "board_activity") selected_by_reason
+      in
+      non_generic @ generic
+    in
+    let selected = take total_limit prioritized in
+    let total_dropped = List.length prioritized - List.length selected in
+    selected, generic_dropped + total_dropped
+;;
+
+let board_signal_kind_to_string = function
+  | Board_dispatch.Board_post_created -> "post_created"
+  | Board_dispatch.Board_comment_added -> "comment_added"
+;;
+
+let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_board_signal) =
+  let payload =
+    `Assoc
+      [ "source", `String "board_signal"
+      ; "kind", `String (board_signal_kind_to_string signal.kind)
+      ; "post_id", `String signal.post_id
+      ; "author", `String signal.author
+      ; "title", `String signal.title
+      ; "content", `String signal.content
+      ; "hearth", (match signal.hearth with Some v -> `String v | None -> `Null)
+      ; "wake_reason", `String reason
+      ]
+    |> Yojson.Safe.to_string
+  in
+  { Keeper_event_queue.post_id = signal.post_id
+  ; urgency =
+      (if String.equal reason "explicit_mention"
+       then Keeper_event_queue.Immediate
+       else Keeper_event_queue.Normal)
+  ; arrived_at = Time_compat.now ()
+  ; payload
+  }
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -232,21 +290,25 @@ let wakeup_relevant_keeper_for_board_signal
         ~keeper_name:meta.name
         ~post_id:signal.post_id
     then (
-      wakeup_keeper ~base_path:config.base_path meta.name;
+      wakeup_keeper
+        ~base_path:config.base_path
+        ~stimulus:(board_signal_stimulus ~reason signal)
+        meta.name;
       Log.Keeper.info
         "board signal wakeup: keeper=%s reason=%s post=%s"
         meta.name
         reason
         signal.post_id)
   in
-  let selected, generic_dropped = select_board_wakeup_candidates candidates in
+  let selected, dropped = select_board_wakeup_candidates candidates in
   selected |> List.iter (fun (meta, reason) -> wake_meta meta reason);
-  if generic_dropped > 0 then
-    Log.Keeper.info
-      "board signal wakeup capped: dropped_generic=%d post=%s limit=%d"
-      generic_dropped
+  if dropped > 0 then
+    Log.Keeper.warn
+      "board signal wakeup capped: dropped=%d post=%s generic_limit=%d total_limit=%d"
+      dropped
       signal.post_id
       board_reactive_generic_wakeup_limit
+      board_reactive_wakeup_max
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

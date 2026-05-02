@@ -21,7 +21,7 @@ import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-
 import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { TimeAgo } from './common/time-ago'
-import { LoadingState, ErrorState } from './common/feedback-state'
+import { LoadingState, ErrorRecoverable } from './common/feedback-state'
 import { EmptyState } from './common/empty-state'
 import { FilterChips } from './common/filter-chips'
 import type { Keeper } from '../types'
@@ -149,8 +149,8 @@ export function extractProactiveSkips(
  *
  * `masc_keeper_stale_termination_batch_total` is emitted as a single
  * unlabeled time-series (no per-keeper or per-reason labels). Returns an
- * empty array when the metric is absent, or a single row with key
- * `'fleet'` and the total count when it is present.
+ * empty array when the metric is absent or the total is zero, or a single row
+ * with key `'fleet'` and the total count when it is present.
  */
 export function extractBatchTerminations(
   metrics: ParsedMetric[],
@@ -646,7 +646,11 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
       />
 
       ${metricsError.value && isNonLifecycle ? html`
-        <${ErrorState} message=${metricsError.value} onRetry=${loadMetrics} />
+        <${ErrorRecoverable}
+          title="Prometheus 메트릭을 불러오지 못했습니다"
+          detail=${metricsError.value}
+          onRetry=${() => { void loadMetrics() }}
+        />
       ` : metricsLoading.value && parsedMetrics.value.length === 0 && isNonLifecycle ? html`
         <${LoadingState}>Prometheus 메트릭 불러오는 중...<//>
       ` : html`

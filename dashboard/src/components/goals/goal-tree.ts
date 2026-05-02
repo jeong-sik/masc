@@ -655,7 +655,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded-md border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
+              class="shrink-0 rounded-md border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)]"
               style="color:${horizonColor(node.horizon)}"
             >
               ${horizonLabel(node.horizon)}
@@ -765,7 +765,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
             <div class="ml-6 flex flex-col gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
-              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-dim">연결된 태스크</div>
               ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>
           ` : null}
@@ -797,7 +797,7 @@ function DetailMetric({
           : 'text-text-strong'
   return html`
     <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-      <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">${label}</div>
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">${label}</div>
       <div class="mt-2 text-lg font-semibold tabular-nums ${toneClass}">${value}</div>
     </div>
   `
@@ -865,7 +865,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-3">
-          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
           ` : null}
@@ -885,7 +885,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       ${latestEvent ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최근 키퍼 이벤트</div>
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">최근 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">
               <${TimeAgo} timestamp=${latestEvent.ts} />
             </div>
@@ -966,7 +966,7 @@ function GoalDetailPanel({
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
-            <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
+            <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)]" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
             ${selectedNode.metric ? html`
@@ -1043,7 +1043,7 @@ function GoalDetailPanel({
         ${selectedNode.blocking_source !== 'none' ? html`
           <div class=${CARD_BOX}>
             <div class="mb-2 flex flex-wrap items-center gap-2">
-              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">차단 맥락</span>
+              <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">차단 맥락</span>
               <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
                 ${blockerSourceLabel(selectedNode.blocking_source)}
               </span>
@@ -1077,7 +1077,7 @@ function GoalDetailPanel({
 
         ${selectedNode.badges.length > 0 ? html`
           <div class=${CARD_BOX}>
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">배지</div>
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">배지</div>
             <${GoalBadges} badges=${selectedNode.badges} />
           </div>
         ` : null}
@@ -1085,7 +1085,7 @@ function GoalDetailPanel({
         <div class=${CARD_BOX}>
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal 범위 태스크</div>
+              <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal 범위 태스크</div>
               <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
             </div>
           </div>
@@ -1111,7 +1111,7 @@ function GoalDetailPanel({
             <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
 
             <div class=${CARD_BOX}>
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비 상태</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">키퍼 준비 상태</div>
               ${detail ? (
                 detail.linked_keepers.length > 0
                   ? html`
@@ -1124,7 +1124,7 @@ function GoalDetailPanel({
             </div>
 
             <div class=${CARD_BOX}>
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">승인 대기</div>
               ${detail ? (
                 detail.approvals.length > 0
                   ? html`
@@ -1146,7 +1146,7 @@ function GoalDetailPanel({
           </div>
 
           <div class=${CARD_BOX}>
-            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">통합 타임라인</div>
+            <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">통합 타임라인</div>
             ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
           </div>
         </div>

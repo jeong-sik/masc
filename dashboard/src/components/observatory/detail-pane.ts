@@ -69,7 +69,7 @@ export function DetailPane() {
     <div class="rounded-[var(--r-1)] border border-accent/30 bg-bg-0/60 shadow-[var(--shadow-1)]" role="region" aria-label="선택 항목 상세">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
-          <span class="text-3xs uppercase tracking-widest text-accent font-semibold">상세</span>
+          <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent font-semibold">상세</span>
           <span class="text-xs font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
             <span class="rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">

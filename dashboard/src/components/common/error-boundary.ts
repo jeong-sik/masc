@@ -60,24 +60,24 @@ export class ErrorBoundary extends Component<Props, State> {
       if (severity === 'recoverable') {
         return html`
           <div
-            class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/10 p-5 shadow-[var(--shadow-1)]"
+            class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/12 px-3.5 py-3 font-mono shadow-[var(--shadow-1)]"
             style="border-left: 3px solid var(--color-status-warn);"
             role="alert"
           >
             <div class="mt-0.5 shrink-0 text-[var(--color-status-warn)]">
-              <${AlertTriangle} size=${24} />
+              <${AlertTriangle} size=${18} />
             </div>
             <div class="min-w-0 flex-1">
-              <h3 class="mb-1 text-2xs font-semibold uppercase tracking-1 text-[var(--color-status-warn)]">
+              <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-warn)]">
                 recoverable · ${this.props.label ?? '컴포넌트'}
               </h3>
-              <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-sm text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
+              <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
               <button
                 type="button"
-                class="mt-3 inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/10 px-3 py-1.5 text-sm text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn)]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-warn)]"
+                class="mt-3 inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-transparent px-3 py-1 text-xs text-[var(--color-status-warn)] transition-colors hover:bg-[var(--color-status-warn)]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-warn)]"
                 onClick=${this.reset}
               >
-                <${RefreshCcw} size=${14} />
+                <${RefreshCcw} size=${12} />
                 다시 시도
               </button>
             </div>
@@ -85,34 +85,34 @@ export class ErrorBoundary extends Component<Props, State> {
         `
       }
 
-      // severity === 'fatal' — original tone + an explicit reload button
+      // severity === 'fatal' — spec G3: tinted bg, mono font, filled reload button
       return html`
         <div
-          class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--color-bg-elevated)] p-5 shadow-[var(--shadow-1)]"
+          class="error-card my-3 flex items-start gap-4 rounded-[var(--r-1)] border border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/12 px-3.5 py-3 font-mono shadow-[var(--shadow-1)]"
           style="border-left: 3px solid var(--color-status-err);"
           role="alert"
         >
           <div class="mt-0.5 shrink-0 text-[var(--color-status-err)]">
-            <${AlertOctagon} size=${24} />
+            <${AlertOctagon} size=${18} />
           </div>
           <div class="min-w-0 flex-1">
-            <h3 class="mb-1 text-base font-semibold tracking-tight text-[var(--color-status-err)]">${this.props.label ?? 'Component'} 렌더링 오류</h3>
-            <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-sm text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
+            <h3 class="mb-1 text-xs font-semibold uppercase tracking-1 text-[var(--color-status-err)]">${this.props.label ?? 'Component'} 렌더링 오류</h3>
+            <pre class="overflow-x-auto whitespace-pre-wrap rounded bg-[var(--black-20)] p-2 text-xs text-[var(--color-fg-primary)] opacity-80">${this.state.error.message}</pre>
             <div class="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
+                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-5)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--white-10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
                 onClick=${this.reset}
               >
-                <${RefreshCcw} size=${14} />
+                <${RefreshCcw} size=${12} />
                 다시 시도
               </button>
               <button
                 type="button"
-                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-status-err)]/50 bg-[var(--color-status-err)]/15 px-3 py-1.5 text-sm font-medium text-[var(--color-status-err)] transition-colors hover:bg-[var(--color-status-err)]/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
+                class="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-status-err)] bg-[var(--color-status-err)] px-3 py-1 text-xs font-semibold text-[var(--color-bg-page)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-status-err)]"
                 onClick=${this.reload}
               >
-                <${RotateCw} size=${14} />
+                <${RotateCw} size=${12} />
                 세션 리로드
               </button>
             </div>

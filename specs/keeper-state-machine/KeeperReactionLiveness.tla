@@ -194,13 +194,26 @@ Next ==
     \/ TimeoutEscalation
     \/ GoalFailed
 
-\* Fairness: all resolution actions are weakly fair.  The system is
-\* guaranteed to eventually make progress toward terminal states once the
-\* corresponding stimulus is pending.  This encodes the assumption that
-\* the keeper runtime is live (not indefinitely stopped or crashed).
+\* Fairness: all progress-driving actions are weakly fair.
+\*
+\* WF_vars(StartTurn) is required for L1 (BoardEnqueueLeadsToReceipt):
+\* without it, the model is allowed to stutter indefinitely in
+\* stimulus_state = "queued" without ever starting a turn, making the
+\* leads-to property unprovable on the clean model.  The WF obligation
+\* encodes the runtime assumption that a queued stimulus is always
+\* eventually picked up by the keeper keepalive loop.
+\*
+\* WF_vars(RequestVerification) is required for L2
+\* (VerificationLeadsToReaction): a task whose contract requires
+\* cross-keeper verification must eventually submit that request;
+\* without the WF obligation the model can stall indefinitely with
+\* verification_state = "idle" while a goal waits in
+\* "awaiting_verification", making both L2 and L3 unprovable.
 Fairness ==
+    /\ WF_vars(StartTurn)
     /\ WF_vars(IssueReceipt)
     /\ WF_vars(IssueTerminalReason)
+    /\ WF_vars(RequestVerification)
     /\ WF_vars(VerifierReaction)
     /\ WF_vars(TimeoutEscalation)
     /\ WF_vars(GoalFailed)

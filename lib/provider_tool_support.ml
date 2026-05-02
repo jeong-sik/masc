@@ -31,8 +31,8 @@ let normalize_cli_provider_caps
         caps with
         supports_tools = false;
         supports_tool_choice = false;
-        supports_runtime_mcp_tools = false;
-        supports_runtime_tool_events = false;
+        supports_runtime_mcp_tools = true;
+        supports_runtime_tool_events = true;
       }
   | _ -> caps
 

@@ -285,6 +285,7 @@ val metric_tool_call : string
 val metric_tool_call_duration : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
+val metric_llm_provider_capability_drops : string
 val metric_board_truncated_posts : string
 val metric_anti_rationalization_fallback : string
 val metric_anti_rationalization_excuse_pattern : string

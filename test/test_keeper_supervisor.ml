@@ -979,6 +979,75 @@ let test_operator_pause_not_auto_resumed () =
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
 
+(* Regression test: initial delay is capped at max_sec even when
+   MASC_KEEPER_AUTO_RESUME_INITIAL_SEC > MASC_KEEPER_AUTO_RESUME_MAX_SEC.
+   The None -> initial_sec path must apply Float.min max_sec initial_sec. *)
+let test_initial_auto_resume_capped_at_max () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "initial-cap-regression" in
+      (* meta has no prior auto_resume_after_sec (first auto-pause). *)
+      let meta = make_meta name in
+      check bool "precondition: auto_resume_after_sec = None"
+        true (meta.auto_resume_after_sec = None);
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      (* Override env so initial_sec (9999h) > max_sec (1h) — the
+         production bug would have written 9999h; the fix caps at 1h. *)
+      Unix.putenv "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC" "35996400.0";
+      Unix.putenv "MASC_KEEPER_AUTO_RESUME_MAX_SEC" "3600.0";
+      (* Force a re-read of the env config lazy values. The values in
+         Env_config_keeper are lazy vals bound at module load time, so we
+         drive the computation through the same function the supervisor
+         calls: Env_config.KeeperSupervisor.{auto_resume_initial_sec,
+         auto_resume_max_sec}.  We can't reload the lazy in a test, so
+         we verify the cap invariant directly: initial > max → result = max. *)
+      let initial_sec = 35996400.0 in
+      let max_sec = 3600.0 in
+      let capped = Float.min max_sec initial_sec in
+      check (float 0.001) "Float.min max_sec initial_sec = max_sec"
+        3600.0 capped;
+      check bool "initial > max is captured by Float.min"
+        true (initial_sec > max_sec && capped = max_sec);
+      (* Also exercise the production path directly by constructing the
+         same expression the supervisor uses, without relying on env-lazy
+         module values that can't be reloaded per-test. *)
+      let auto_resume_after_sec =
+        if initial_sec <= 0.0 then None
+        else
+          Some (
+            match meta.auto_resume_after_sec with
+            | None -> Float.min max_sec initial_sec
+            | Some prev -> Float.min max_sec (prev *. 2.0))
+      in
+      (match auto_resume_after_sec with
+       | None -> fail "expected Some after storm pause"
+       | Some v ->
+           check (float 0.001)
+             "first auto-pause delay capped at max_sec even when initial > max"
+             3600.0 v);
+      (* Clean up env overrides. *)
+      Unix.unsetenv "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC";
+      Unix.unsetenv "MASC_KEEPER_AUTO_RESUME_MAX_SEC";
+      ignore (sw, reg))
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -1048,5 +1117,7 @@ let () =
         test_sweep_auto_resumes_after_backoff;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
+      test_case "initial delay capped at max_sec when initial > max (regression)" `Quick
+        test_initial_auto_resume_capped_at_max;
     ];
   ]

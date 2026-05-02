@@ -812,7 +812,7 @@ let handle_crash_auto_pause (ctx : _ context)
          else
            Some (
              match meta.auto_resume_after_sec with
-             | None -> initial_sec
+             | None -> Float.min max_sec initial_sec
              | Some prev -> Float.min max_sec (prev *. 2.0))
        in
        (match

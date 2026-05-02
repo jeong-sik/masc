@@ -607,7 +607,7 @@ function KeeperClearContextDialog({
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
-          <h3 id=${titleId} class="m-0 text-[17px] font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
+          <h3 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
           <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--color-fg-muted)]">
             ${keeperName}의 checkpoint 대화와 continuity summary를 비웁니다. 사유는 감사 로그에 남습니다.
           </p>

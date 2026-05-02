@@ -20,7 +20,7 @@
 | `lib/keeper/`        |  0 |   0 |  0 |
 | `lib/exec/`          |  0 |   0 |  0 |
 | `lib/server/`        |  0 |   0 |  0 |
-| `lib/dashboard_utils/` | 0 |   1 |  0 |
+| `lib/dashboard_utils/` | 0 |   0 |  0 |
 | `lib/cascade/`       |  0 |   0 |  0 |
 | `lib/shared_audit/`  |  0 |   0 |  0 |
 | `lib/types/`         |  0 |   0 |  0 |
@@ -114,8 +114,8 @@ preferred over both Base and raw Stdlib when they already exist.
 
 | Counter | What it measures |
 |---|---|
-| `mli_open_base` | `.mli` files in `lib/` containing the `open Base` directive (anchored: `^[ \t]*open[ \t]+Base\b`, excludes comments/docstrings) |
-| `ml_base_stdlib_shadow` | `.ml` files in `lib/` that contain both the `open Base` directive and a Stdlib-shadow block (`module List = Stdlib.List`) |
+| `mli_open_base` | `.mli` files in `lib/` containing the `open Base` directive (anchored: `^[[:space:]]*open[[:space:]]+Base([^[:alnum:]_]|$)`, excludes comments/docstrings) |
+| `ml_base_stdlib_shadow` | `.ml` files in `lib/` that contain both the `open Base` directive and a Stdlib-shadow block (`^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([^[:alnum:]_]|$)`) |
 
 These counters are recorded in `.ci/health-baseline.json` and reported
 by `scripts/health_snapshot.sh`.  A PR that increases either counter

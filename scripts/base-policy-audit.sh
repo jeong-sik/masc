@@ -74,8 +74,8 @@ fi
 
 # ── Counting helpers ────────────────────────────────────────────────
 
-OPEN_BASE_DIRECTIVE_RE='^[[:space:]]*open[[:space:]]+Base([[:space:]]|$)'
-STDLIB_LIST_SHADOW_RE='^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([[:space:]]|$)'
+OPEN_BASE_DIRECTIVE_RE='^[[:space:]]*open[[:space:]]+Base([^[:alnum:]_]|$)'
+STDLIB_LIST_SHADOW_RE='^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([^[:alnum:]_]|$)'
 
 # Number of .mli files in lib/ that contain an actual "open Base" directive.
 count_mli_open_base() {
@@ -113,9 +113,22 @@ path, key, default_value = sys.argv[1], sys.argv[2], int(sys.argv[3])
 try:
     with open(path) as f:
         data = json.load(f)
-    print(int(data.get("counts", {}).get(key, default_value)))
-except Exception:
+except Exception as exc:
+    print(f"ERROR: failed to read baseline JSON {path}: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+counts = data.get("counts", {})
+if not isinstance(counts, dict):
+    print(f"ERROR: baseline JSON {path} has no object counts field", file=sys.stderr)
+    sys.exit(2)
+if key not in counts:
     print(default_value)
+    sys.exit(0)
+try:
+    print(int(counts[key]))
+except Exception as exc:
+    print(f"ERROR: baseline key {key} in {path} is not an integer: {exc}", file=sys.stderr)
+    sys.exit(2)
 PY
 }
 
@@ -135,7 +148,8 @@ if [ -n "$BASELINE_REF" ]; then
     printf '%s\n' "$ref_content" > "$BASELINE_TMP"
     BASELINE_FILE="$BASELINE_TMP"
   else
-    echo "WARN: could not read baseline from ref '${BASELINE_REF}:${BASELINE_FILE}'; falling back to --baseline-file" >&2
+    echo "ERROR: could not read baseline from ref '${BASELINE_REF}:${BASELINE_FILE}'" >&2
+    exit 2
   fi
 fi
 

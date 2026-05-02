@@ -31,18 +31,21 @@ let rec rm_rf path =
       Sys.remove path
 
 (** Create an isolated MASC base_path for the duration of [f].
-    Restores [MASC_BASE_PATH] afterwards so subsequent tests in the same
-    binary see the original value. *)
+    Restores [MASC_BASE_PATH] and [MASC_BASE_PATH_INPUT] afterwards so
+    subsequent tests in the same binary see the original value. *)
 let with_temp_base_path f =
   let dir = Filename.temp_dir "masc_dashboard_verify_test" "" in
-  let prior =
-    try Some (Unix.getenv "MASC_BASE_PATH") with Not_found -> None
+  let prior_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prior_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  let restore_env name = function
+    | Some v -> Unix.putenv name v
+    | None -> Unix.putenv name ""
   in
   Unix.putenv "MASC_BASE_PATH" dir;
+  Unix.putenv "MASC_BASE_PATH_INPUT" dir;
   let cleanup () =
-    (match prior with
-     | Some v -> Unix.putenv "MASC_BASE_PATH" v
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
+    restore_env "MASC_BASE_PATH" prior_base;
+    restore_env "MASC_BASE_PATH_INPUT" prior_input;
     rm_rf dir
   in
   Fun.protect ~finally:cleanup (fun () -> f dir)

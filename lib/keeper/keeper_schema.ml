@@ -532,7 +532,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_sandbox_stop";
-    description = "Stop keeper sandbox containers scoped to this base path. Defaults to managed containers; pass container_kind=turn or all to clean abandoned turn containers.";
+    description = "Stop keeper sandbox containers scoped to this base path. Defaults to managed containers; pass container_kind=turn or container_kind=all to clean abandoned turn containers.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

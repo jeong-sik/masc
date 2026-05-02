@@ -40,12 +40,12 @@ let resolve_api_key endpoint =
           else
             Error
               (Printf.sprintf
-                 "voice provider %s (endpoint %s) expects %s to be set"
+                 "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
                  adapter.canonical_name endpoint.id env_name)
       | None ->
           Error
             (Printf.sprintf
-               "voice provider %s (endpoint %s) expects %s to be set"
+               "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
                adapter.canonical_name endpoint.id env_name) )
   | None -> Ok ""
 

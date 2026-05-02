@@ -31,6 +31,14 @@ let cleanup_dir dir =
   in
   try rm_rf dir with _ -> ()
 
+let audit_path ~base_dir ~ts =
+  let tm = Unix.gmtime ts in
+  let yyyy_mm =
+    Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+  in
+  let dd = Printf.sprintf "%02d" tm.Unix.tm_mday in
+  Filename.concat (Filename.concat base_dir yyyy_mm) (dd ^ ".jsonl")
+
 (* ──────────────────────────────────────────────────────────── *)
 (* Envelope                                                      *)
 (* ──────────────────────────────────────────────────────────── *)
@@ -197,6 +205,21 @@ let test_store_resume_continues_chain () =
       "resumed chain: e2.prev_hash = hash of e1"
       (Some (Env.hash_for_chain e1)) e2.prev_hash)
 
+let test_store_skips_malformed_jsonl_lines () =
+  let dir = unique_temp_dir "audit_malformed" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let valid = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let path = audit_path ~base_dir:dir ~ts:valid.ts in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
+    output_string oc "{not json\n";
+    close_out oc;
+    let entries = Store.recent store ~n:10 in
+    check int "malformed line skipped" 1 (List.length entries);
+    match entries with
+    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
+    | _ -> fail "expected exactly one valid audit entry")
+
 let test_store_base_dir_inspector () =
   let dir = unique_temp_dir "audit_inspector" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -226,6 +249,7 @@ let () =
       test_case "verify_chain intact" `Quick test_store_verify_chain_intact;
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
+      test_case "skips malformed JSONL lines" `Quick test_store_skips_malformed_jsonl_lines;
       test_case "base_dir inspector" `Quick test_store_base_dir_inspector;
     ];
   ]

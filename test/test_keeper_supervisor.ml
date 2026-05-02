@@ -815,12 +815,13 @@ let test_storm_pause_sets_auto_resume_after_sec () =
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
-           let paused_ts =
-             Masc_mcp.Coord_resilience.Time.parse_iso8601_opt m.updated_at
-             |> Option.value ~default:0.0
-           in
-           check bool "updated_at refreshed on pause (within last 5s)"
-             true (paused_ts > 0.0 && Unix.time () -. paused_ts < 5.0)
+           (match Masc_mcp.Coord_resilience.Time.parse_iso8601_opt m.updated_at with
+            | None ->
+                fail (Printf.sprintf "updated_at not parseable as ISO-8601: %s"
+                        m.updated_at)
+            | Some paused_ts ->
+                check bool "updated_at refreshed on pause (within last 5s)"
+                  true (Unix.time () -. paused_ts < 5.0))
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err)))
 

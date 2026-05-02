@@ -83,7 +83,7 @@ const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
   autonomy:  { bg: 'var(--cyan)', text: 'var(--panel-dark)' },
   presence:  { bg: 'var(--white-12)', text: 'var(--frost-100)' },
 }
-const SPAN_DEFAULT = { bg: 'var(--slate-400)', text: 'var(--panel-dark)' } as const
+const SPAN_DEFAULT = { bg: 'var(--color-fg-muted)', text: 'var(--panel-dark)' } as const
 
 export function spanStyle(kind: string) {
   return SPAN_STYLES[kind] ?? SPAN_DEFAULT

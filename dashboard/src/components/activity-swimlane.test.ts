@@ -31,6 +31,6 @@ describe("spanStyle", () => {
     expect(spanStyle("presence")).toEqual({ bg: "rgba(148, 163, 184, 0.25)", text: "var(--frost-100)" })
   })
   it("returns default for unknown kind", () => {
-    expect(spanStyle("unknown")).toEqual({ bg: "var(--slate-400)", text: "var(--panel-dark)" })
+    expect(spanStyle("unknown")).toEqual({ bg: "var(--color-fg-muted)", text: "var(--panel-dark)" })
   })
 })

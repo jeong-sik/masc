@@ -105,7 +105,7 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   broadcast:  { icon: 'M', color: TRACE_TONE.brassText, label: '브로드캐스트' },
   task:       { icon: 'T', color: 'text-[var(--color-accent-fg)]', label: '태스크' },
   tool_call:  { icon: '>', color: 'text-[var(--color-status-ok)]', label: '도구 호출' },
-  heartbeat:  { icon: 'H', color: 'text-[var(--slate-400)]', label: '하트비트' },
+  heartbeat:  { icon: 'H', color: 'text-[var(--color-fg-muted)]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--color-status-warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: TRACE_TONE.infoText, label: '내부 사고' },
   oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
@@ -129,7 +129,7 @@ function durableStyle(kind: unknown): { icon: string; color: string } | null {
     case 'tool_called':      return { icon: 't', color: 'text-[var(--color-status-ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--color-status-ok)]' }
     case 'state_transition': return { icon: '>', color: 'text-[var(--color-accent-fg)]' }
-    case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--slate-400)]' }
+    case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--color-fg-muted)]' }
     case 'turn_started':     return { icon: 'r', color: 'text-[var(--color-status-warn)]' }
     default: return null
   }

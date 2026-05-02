@@ -63,8 +63,8 @@ const CTX_SEGMENT_COLORS: Record<string, string> = {
   history_assistant_text: 'var(--blue-400)',
   history_tool_use: 'var(--color-status-ok)',
   history_tool_result: 'var(--bad-light)',
-  history_other: 'var(--slate-400)',
-  unattributed: 'var(--slate-600)',
+  history_other: 'var(--color-fg-muted)',
+  unattributed: 'var(--color-border-default)',
 }
 
 export function ctxSegmentLabel(key: string): string {
@@ -72,7 +72,7 @@ export function ctxSegmentLabel(key: string): string {
 }
 
 export function ctxSegmentColor(key: string): string {
-  return CTX_SEGMENT_COLORS[key] ?? 'var(--slate-400)'
+  return CTX_SEGMENT_COLORS[key] ?? 'var(--color-fg-muted)'
 }
 
 /**

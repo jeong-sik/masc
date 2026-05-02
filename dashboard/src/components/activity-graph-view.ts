@@ -14,7 +14,7 @@ import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 const hoveredNodeId = signal<string | null>(null)
 
 export function nodeColor(kind: string, status: string): string {
-  if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
+  if (status === 'offline' || status === 'retired') return 'var(--color-fg-muted)'
   switch (kind) {
     case 'keeper': return 'var(--color-status-ok)'
     case 'agent': return 'var(--cyan)'
@@ -23,7 +23,7 @@ export function nodeColor(kind: string, status: string): string {
     case 'operation': return 'var(--color-status-ok)'
     case 'debate': return 'var(--color-orange-400)'
     case 'post': return 'var(--color-pink-400)'
-    default: return 'var(--slate-400)'
+    default: return 'var(--color-fg-muted)'
   }
 }
 
@@ -101,7 +101,7 @@ export function GraphView({ data }: GraphViewProps) {
         value: n.semantic_weight ?? n.weight,
         color: {
           background: color,
-          border: (n.status === 'offline' || n.status === 'retired') ? 'var(--slate-600)' : color,
+          border: (n.status === 'offline' || n.status === 'retired') ? 'var(--color-border-default)' : color,
           highlight: {
             background: color,
             border: 'var(--color-status-warn)'

@@ -163,7 +163,7 @@ const PHASE_BAR_FILL: Record<string, string> = {
   HandingOff: 'var(--purple)',
   Failing: 'var(--color-status-err)',
   Draining: 'var(--color-status-warn)',
-  Stable: 'var(--slate-500)',
+  Stable: 'var(--color-fg-muted)',
 }
 
 function PhaseSparkline({

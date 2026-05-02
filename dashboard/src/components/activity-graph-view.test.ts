@@ -11,9 +11,9 @@ describe("nodeColor", () => {
     ["operation", "active", "var(--color-status-ok)"],
     ["debate", "active", "#fb923c"],
     ["post", "active", "#f472b6"],
-    ["unknown", "active", "var(--slate-400)"],
-    ["keeper", "offline", "var(--slate-500)"],
-    ["keeper", "retired", "var(--slate-500)"],
+    ["unknown", "active", "var(--color-fg-muted)"],
+    ["keeper", "offline", "var(--color-fg-muted)"],
+    ["keeper", "retired", "var(--color-fg-muted)"],
   ] as const)("nodeColor(%s, %s) → %s", (kind, status, expected) => {
     expect(nodeColor(kind, status)).toBe(expected)
   })
@@ -38,7 +38,7 @@ describe("edgeColor", () => {
     ["governs", "rgba(251, 146, 60, 0.4)"],
     ["operates_on", "rgba(74, 222, 128, 0.45)"],
     ["participates_in", "rgba(251, 191, 36, 0.35)"],
-    ["belongs_to", "var(--slate-gray-12)"],
+    ["belongs_to", "var(--color-border-default)"],
     ["unknown", "rgba(148, 163, 184, 0.25)"],
   ] as const)("edgeColor(%s, true) → %s", (kind, expected) => {
     expect(edgeColor(kind, true)).toBe(expected)

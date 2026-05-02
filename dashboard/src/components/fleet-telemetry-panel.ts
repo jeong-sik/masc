@@ -100,7 +100,7 @@ function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
 }
 
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
-  if (direction === 'flat') return 'var(--slate-500)'
+  if (direction === 'flat') return 'var(--color-fg-muted)'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
   return bad ? 'var(--bad-light)' : 'var(--color-emerald)'
 }
@@ -336,7 +336,7 @@ function TrendCell({ name, metric, value, valueClass }: {
   const trend = getTrend(name, metric)
   const arrow = trend ? trendArrow(trend.direction) : ''
   const colorClass = trend ? trendColorClass(trend.direction, metric) : ''
-  const sColor = trend ? sparklineColor(metric, trend.direction) : 'var(--slate-500)'
+  const sColor = trend ? sparklineColor(metric, trend.direction) : 'var(--color-fg-muted)'
 
   return html`
     <td class="py-1.5 text-right">

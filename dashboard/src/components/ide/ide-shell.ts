@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { IdeExplorer } from './ide-explorer'
-import { IdeEditorMock } from './ide-editor-mock'
+import { IdeEditorMock, type IdeEditorView } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
@@ -28,7 +28,7 @@ import {
 // Audit reference:
 //   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
 
-type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
+type ViewTab = IdeEditorView
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
@@ -126,7 +126,7 @@ export function IdeShell() {
           <${IdeExplorer} />
         </div>
         <div class="ide-plane-editor" style=${{ minHeight: 0 }}>
-          <${IdeEditorMock} />
+          <${IdeEditorMock} activeView=${activeView} activeLayers=${activeLayers} />
         </div>
         <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>
           <${IdeConversationRailMock} />

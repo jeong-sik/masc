@@ -18,17 +18,19 @@ function getCytoscape(): Promise<typeof cytoscape> {
 // Cytoscape does not resolve CSS variables. Resolve once against :root
 // with fallback to literal hex values.
 const TOKEN_FALLBACKS: Record<string, string> = {
-  '--color-slate-900': '#0f172a',
-  '--color-slate-700': '#334155',
-  '--color-slate-600': '#475569',
-  '--color-slate-500': '#64748b',
-  '--color-slate-400': '#94a3b8',
-  '--color-slate-200': '#e2e8f0',
+  '--color-bg-3': '#211e1a',
+  '--color-bg-4': '#2a2621',
+  '--color-line-1': '#2a2520',
+  '--color-line-2': '#3a332c',
+  '--color-fg-3': '#7a7065',
+  '--color-fg-4': '#4a453e',
+  '--color-frost-100': '#e2e8f0',
+  '--color-white-pure': '#ffffff',
   '--color-status-err': '#ef4444',
   '--color-amber-bright': '#f59e0b',
   '--color-emerald': '#22c55e',
-  '--color-sky-400': '#38bdf8',
-  '--color-purple': '#a78bfa',
+  '--color-cyan': '#22d3ee',
+  '--color-indigo': '#818cf8',
 }
 
 function resolveCssVar(token: string): string {
@@ -46,7 +48,7 @@ export function borderForStatus(status: string): string {
   if (status === 'conflict') return resolveCssVar('--color-status-err')
   if (status === 'dirty') return resolveCssVar('--color-amber-bright')
   if (status === 'current') return resolveCssVar('--color-emerald')
-  return resolveCssVar('--color-slate-600')
+  return resolveCssVar('--color-line-2')
 }
 
 export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
@@ -64,7 +66,7 @@ export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinit
     data: {
       ...node,
       parent: node.agent_id ? `agent:${node.agent_id}` : undefined,
-      color: node.color ?? resolveCssVar('--color-slate-500'),
+      color: node.color ?? resolveCssVar('--color-fg-3'),
       borderColor: borderForStatus(node.status),
       title: node.detail ?? node.branch ?? node.sha ?? node.label,
     },
@@ -101,7 +103,7 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
         'background-color': 'data(color)',
         'border-color': 'data(borderColor)',
         'border-width': 2,
-        color: resolveCssVar('--color-slate-200'),
+        color: resolveCssVar('--color-frost-100'),
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
         'font-size': '10px',
         'text-wrap': 'wrap',
@@ -140,11 +142,11 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: ':parent',
       style: {
         label: 'data(label)',
-        'background-color': resolveCssVar('--color-slate-900'),
+        'background-color': resolveCssVar('--color-bg-3'),
         'border-color': 'data(borderColor)',
         'border-style': 'dashed',
         'border-width': 1,
-        color: resolveCssVar('--color-slate-400'),
+        color: resolveCssVar('--color-fg-4'),
         'font-size': '10px',
         'text-valign': 'top',
         'text-halign': 'center',
@@ -155,12 +157,12 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: 'edge',
       style: {
         width: 1.2,
-        'line-color': resolveCssVar('--color-slate-500'),
-        'target-arrow-color': resolveCssVar('--color-slate-500'),
+        'line-color': resolveCssVar('--color-fg-3'),
+        'target-arrow-color': resolveCssVar('--color-fg-3'),
         'target-arrow-shape': 'triangle',
         'curve-style': 'bezier',
         label: 'data(label)',
-        color: resolveCssVar('--color-slate-400'),
+        color: resolveCssVar('--color-fg-4'),
         'font-size': '9px',
       },
     },
@@ -168,15 +170,15 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: 'edge.checked_out',
       style: {
         'line-style': 'dashed',
-        'line-color': resolveCssVar('--color-sky-400'),
-        'target-arrow-color': resolveCssVar('--color-sky-400'),
+        'line-color': resolveCssVar('--color-cyan'),
+        'target-arrow-color': resolveCssVar('--color-cyan'),
       },
     },
     {
       selector: 'edge.points_to',
       style: {
-        'line-color': resolveCssVar('--color-purple'),
-        'target-arrow-color': resolveCssVar('--color-purple'),
+        'line-color': resolveCssVar('--color-indigo'),
+        'target-arrow-color': resolveCssVar('--color-indigo'),
       },
     },
   ]

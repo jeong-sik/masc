@@ -290,13 +290,13 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
             <table class="w-full text-xs" aria-label="자율 연구 사이클 목록">
               <thead>
                 <tr class="text-[var(--color-fg-muted)] text-3xs uppercase tracking-wider border-b border-[var(--white-10)]">
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">가설</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이전</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이후</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">변화</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-center py-2.5 px-3 font-medium">판정</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_var(--black-20)]">시간</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">가설</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이전</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이후</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">변화</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-center py-2.5 px-3 font-medium">판정</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--color-bg-surface)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_var(--black-20)]">시간</th>
                 </tr>
               </thead>
               <tbody>

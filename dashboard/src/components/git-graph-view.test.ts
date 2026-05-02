@@ -19,8 +19,8 @@ describe("borderForStatus", () => {
     ["conflict", "#ef4444"],
     ["dirty", "#f59e0b"],
     ["current", "#22c55e"],
-    ["unknown", "#475569"],
-    ["", "#475569"],
+    ["unknown", "#3a332c"],
+    ["", "#3a332c"],
   ] as const)("borderForStatus(%s) → %s", (status, expected) => {
     expect(borderForStatus(status)).toBe(expected)
   })
@@ -99,7 +99,7 @@ describe("buildElements", () => {
     const n1 = elements.find(el => el.data.id === "n1")
     const n2 = elements.find(el => el.data.id === "n2")
     expect(n1!.data.color).toBe("#00ff00")
-    expect(n2!.data.color).toBe("#64748b")
+    expect(n2!.data.color).toBe("#7a7065")
   })
 
   it("sets borderColor from node status via borderForStatus", () => {
@@ -232,7 +232,7 @@ describe("stylesheet", () => {
     const ss = stylesheet()
     const parent = styleBlock(ss, ":parent")
     expect(parent).toBeDefined()
-    expect(parent?.style?.["background-color"]).toBe("#0f172a")
+    expect(parent?.style?.["background-color"]).toBe("#211e1a")
     expect(parent?.style?.["border-style"]).toBe("dashed")
   })
 
@@ -255,6 +255,6 @@ describe("stylesheet", () => {
     const ss = stylesheet()
     const pt = styleBlock(ss, "edge.points_to")
     expect(pt).toBeDefined()
-    expect(pt?.style?.["line-color"]).toBe("#a78bfa")
+    expect(pt?.style?.["line-color"]).toBe("#818cf8")
   })
 })

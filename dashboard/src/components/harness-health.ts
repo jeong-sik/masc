@@ -43,12 +43,12 @@ export { resetHarnessHealthState, refreshHarnessSurface }
 // Mermaid classDef requires literal hex values — CSS vars are not resolved.
 // These constants map to design system token values for single-source truth.
 
-const M_SOURCE_FILL = '#0f172a'     // --color-slate-900
-const M_SOURCE_STROKE = '#475569'   // --color-slate-600
-const M_SOURCE_TEXT = '#cbd5e1'     // --color-slate-300
+const M_SOURCE_FILL = '#0f172a'     // --color-bg-3 (navy approx)
+const M_SOURCE_STROKE = '#475569'   // --color-line-2
+const M_SOURCE_TEXT = '#cbd5e1'     // --color-frost-100
 const M_HUB_FILL = '#111827'        // --color-bg-surface
-const M_HUB_STROKE = '#38bdf8'      // --color-sky-400
-const M_HUB_TEXT = '#e0f2fe'        // --color-sky-100
+const M_HUB_STROKE = '#38bdf8'      // --color-cyan
+const M_HUB_TEXT = '#e0f2fe'        // --color-frost-100
 const M_HEALTHY_FILL = '#082f1d'
 const M_HEALTHY_STROKE = '#4ade80'
 const M_HEALTHY_TEXT = '#dcfce7'
@@ -56,11 +56,11 @@ const M_WARN_FILL = '#3b2a07'
 const M_WARN_STROKE = '#fbbf24'
 const M_WARN_TEXT = '#fde68a'
 const M_STALE_FILL = '#1f2937'
-const M_STALE_STROKE = '#94a3b8'    // --color-slate-400
-const M_STALE_TEXT = '#e2e8f0'      // --color-slate-200
+const M_STALE_STROKE = '#94a3b8'    // --color-fg-4
+const M_STALE_TEXT = '#e2e8f0'      // --color-frost-100
 const M_IDLE_FILL = '#111827'       // --color-bg-surface
-const M_IDLE_STROKE = '#475569'     // --color-slate-600
-const M_IDLE_TEXT = '#94a3b8'       // --color-slate-400
+const M_IDLE_STROKE = '#475569'     // --color-line-2
+const M_IDLE_TEXT = '#94a3b8'       // --color-fg-4
 const M_ACTIVE_STROKE = '#7dd3fc'
 
 type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'

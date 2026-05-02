@@ -94,7 +94,7 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--color-bg-surface)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
         <${StatCard} value=${totalCount} label="전체 도구" />
         <${StatCard} value=${publicCount} label="MCP 공개" />

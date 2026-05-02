@@ -21,6 +21,10 @@ let rec mkdir_p dir =
 
 let ensure_dir_exists path = mkdir_p (Filename.dirname path)
 
+let parse_jsonl_line line =
+  try Yojson.Safe.from_string line |> Envelope.of_json with
+  | Yojson.Json_error msg -> Error msg
+
 let read_jsonl_file path =
   let ic = open_in path in
   Fun.protect
@@ -31,7 +35,7 @@ let read_jsonl_file path =
          while true do
            let line = input_line ic in
            if String.length line > 0 then
-             match Yojson.Safe.from_string line |> Envelope.of_json with
+             match parse_jsonl_line line with
              | Ok env -> entries := env :: !entries
              | Error _ -> ()
          done

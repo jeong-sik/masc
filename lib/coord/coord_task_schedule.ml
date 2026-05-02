@@ -715,6 +715,9 @@ let release_stale_claims config ~ttl_seconds =
     | Ok backlog ->
         let now_str = now_iso () in
         let now_f = Time_compat.now () in
+        let age_seconds_json ts =
+          `Float (max 0.0 (now_f -. ts))
+        in
         let stale_tasks = ref [] in
         let updated_tasks = List.map (fun (task : task) ->
           match task.task_status with
@@ -726,7 +729,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("type", `String "stale_claim_released");
                   ("task_id", `String task.id);
                   ("assignee", `String assignee);
-                  ("age_s", `Float (now_f -. ts));
+                  ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
                 { task with task_status = Todo }
@@ -739,7 +742,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("type", `String "stale_inprogress_released");
                   ("task_id", `String task.id);
                   ("assignee", `String assignee);
-                  ("age_s", `Float (now_f -. ts));
+                  ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
                 { task with task_status = Todo }

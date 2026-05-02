@@ -264,7 +264,7 @@ export function AgentDetailOverlay() {
                   <${StatusBadge} status=${unified.canonical} />
                   ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--color-bg-hover)] border border-[var(--color-border-divider)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--color-bg-hover)] border border-[var(--color-border-divider)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-1">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
@@ -273,9 +273,9 @@ export function AgentDetailOverlay() {
             </div>
             <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
               ${agent?.current_task || missionBrief?.current_work
-                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
+                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-1">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
-              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
+              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-1">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
@@ -303,7 +303,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="px-4 py-2 text-sm rounded-[var(--r-1)] bg-card/60 shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] bg-card/60 shadow-1"
               onClick=${() => { void refreshAgentDetail() }}
               disabled=${loading.value}
             >
@@ -312,7 +312,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="danger"
               size="lg"
-              class="px-4 py-2 text-sm rounded-[var(--r-1)] shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] shadow-1"
               onClick=${handlePurge}
               disabled=${purgePending.value}
             >
@@ -321,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class=${`px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--color-bg-hover)] text-text-strong hover:bg-[var(--color-bg-hover)] transition-colors duration-[var(--t-med)] shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+              class=${`px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--color-bg-hover)] text-text-strong hover:bg-[var(--color-bg-hover)] transition-colors duration-[var(--t-med)] shadow-1 ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기
@@ -409,7 +409,7 @@ export function AgentDetailOverlay() {
               <${ActionButton}
                 variant="primary"
                 size="lg"
-                class="px-5 py-2.5 text-sm shadow-sm shadow-accent/20"
+                class="px-5 py-2.5 text-sm shadow-1 shadow-accent-fg/20"
                 onClick=${() => { void submitMention() }}
                 disabled=${sendingMention.value || mentionText.value.trim() === ''}
               >

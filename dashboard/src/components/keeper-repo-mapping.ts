@@ -285,7 +285,7 @@ export function resetKeeperRepoMappings(): void {
 
 function RepoBadge({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-sm">
+    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1">
       ${name}
     </span>
   `

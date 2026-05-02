@@ -384,8 +384,8 @@ function Callout({
 
 function BoolBadge({ value }: { value: boolean }) {
   return value
-    ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)] shadow-sm">OFF</span>`
+    ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-1 shadow-ok/5">ON</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)] shadow-1">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -400,7 +400,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-sm hover:bg-[var(--accent-20)] transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1 hover:bg-[var(--accent-20)] transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
@@ -422,7 +422,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
         : 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
-  return html`<span class="text-3xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${tone} shadow-sm">${source.toUpperCase()}</span>`
+  return html`<span class="text-3xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${tone} shadow-1">${source.toUpperCase()}</span>`
 }
 
 function PromptBlock({
@@ -459,7 +459,7 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
         aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-[var(--r-0)] bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-3.5 w-3.5 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `

@@ -16,7 +16,7 @@ describe('idPillClasses (pure)', () => {
       'px-2.5',
       'rounded-[var(--r-1)]',
       'whitespace-nowrap',
-      'shadow-sm',
+      'shadow-1',
       'border',
       'border-[var(--accent-20)]',
       'bg-[var(--accent-10)]',

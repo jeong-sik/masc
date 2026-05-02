@@ -12,8 +12,8 @@
 // implementing the same accent-tinted identifier pill shape
 // (TaskSummary task.id, TaskHistoryPanel row.taskId, archived-
 // participant label). Subtle drift across them: lines 117/128
-// used `py-1 px-2.5 shadow-sm`, line 229 had drifted to `py-1
-// px-2` (tighter). Primitive normalises to px-2.5 + shadow-sm —
+// used `py-1 px-2.5 shadow-1`, line 229 had drifted to `py-1
+// px-2` (tighter). Primitive normalises to px-2.5 + shadow-1 —
 // 229 widens ~4px which the flex-wrap parent absorbs without
 // overflow. P4 of the 9-PR dashboard hygiene sweep.
 //
@@ -41,7 +41,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 const BASE =
-  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-sm border'
+  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-1 border'
 const TONE_ACCENT =
   'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
 const MONO_CLASS = 'font-mono'

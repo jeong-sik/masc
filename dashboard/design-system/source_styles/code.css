@@ -368,14 +368,14 @@ body[data-mode="split"] .zone-deck { display: none; }
 }
 
 /* —— syntax highlight —— */
-.tok-key    { color: #c195e8; }
-.tok-str    { color: #a8c97a; }
-.tok-num    { color: #d4a14a; }
+.tok-key    { color: var(--syn-key); }
+.tok-str    { color: var(--syn-str); }
+.tok-num    { color: var(--syn-num); }
 .tok-com    { color: var(--fg-4); font-style: italic; }
-.tok-fn     { color: #e8c976; }
+.tok-fn     { color: var(--syn-fn); }
 .tok-var    { color: var(--fg-1); }
-.tok-type   { color: #88b5d8; }
-.tok-prop   { color: #b8ad9a; }
+.tok-type   { color: var(--syn-type); }
+.tok-prop   { color: var(--syn-prop); }
 .tok-op     { color: var(--fg-3); }
 .tok-punct  { color: var(--fg-3); }
 

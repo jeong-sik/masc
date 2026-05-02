@@ -303,6 +303,14 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --state-disabled-fg:   var(--fg-4);
   --state-disabled-bg:   transparent;
 
+  /* Syntax highlight — editor token colors */
+  --syn-key:   #c195e8;
+  --syn-str:   #a8c97a;
+  --syn-num:   #d4a14a;
+  --syn-fn:    #e8c976;
+  --syn-type:  #88b5d8;
+  --syn-prop:  #b8ad9a;
+
   /* Divider alias — semantic pointer to the line you draw between panels.
      line-1 is the raw hairline; --divider is the role. */
   --divider:         var(--line-1);

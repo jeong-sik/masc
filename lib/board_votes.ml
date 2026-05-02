@@ -89,7 +89,8 @@ let vote_log_jsonl store =
             ("ts", `Float ts);
           ]
       in
-      Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
+      Buffer.add_string buf (Yojson.Safe.to_string json);
+      Buffer.add_char buf '\n')
     store.vote_log;
   Buffer.contents buf
 

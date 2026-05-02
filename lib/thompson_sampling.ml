@@ -316,12 +316,12 @@ let save_stats () =
        iteration. *)
     let content, count =
       with_ts_ro (fun () ->
-        let content =
-          Hashtbl.fold (fun _ s acc ->
-            acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
-          ) stats_table ""
-        in
-        (content, Hashtbl.length stats_table))
+        let buf = Buffer.create 4096 in
+        Hashtbl.iter (fun _ s ->
+          Buffer.add_string buf (Yojson.Safe.to_string (stats_to_json s));
+          Buffer.add_char buf '\n'
+        ) stats_table;
+        (Buffer.contents buf, Hashtbl.length stats_table))
     in
     Fs_compat.save_file path content;
     Log.Metrics.debug "thompson sampling saved stats for %d agents" count

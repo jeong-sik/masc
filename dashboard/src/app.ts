@@ -216,11 +216,11 @@ export function App() {
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
               <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)]">
-                <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-mono text-[10px] font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
+                <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-mono text-3xs font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
                   MASC
                 </div>
                 <div class="min-w-0 px-2.5 py-1">
-                  <div class="flex items-center gap-1.5 font-mono text-[9px] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+                  <div class="flex items-center gap-1.5 font-mono text-[var(--fs-9)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                     <span>${currentView?.label ?? 'Surface'}</span>
                     ${currentSection && currentSection.label !== currentView?.label
                       ? html`
@@ -246,7 +246,7 @@ export function App() {
                       params=${item.defaultParams}
                       ariaCurrent=${active ? 'page' : undefined}
                       title=${item.description}
-                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-[10px] uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
+                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
                         active
                           ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)] shadow-[inset_0_-1px_0_var(--brass-3)]'
                           : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-secondary)]'

@@ -39,7 +39,7 @@ let with_temp_base_path f =
   let prior_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let restore_env name = function
     | Some v -> Unix.putenv name v
-    | None -> Unix.putenv name ""
+    | None -> Unix.unsetenv name
   in
   Unix.putenv "MASC_BASE_PATH" dir;
   Unix.putenv "MASC_BASE_PATH_INPUT" dir;

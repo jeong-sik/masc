@@ -796,7 +796,7 @@ type codex_mcp_config_sync_status =
 
 let split_lines_with_trailing_newline content =
   let has_trailing_newline =
-    String.length content > 0 && content.[String.length content - 1] = '\n'
+    String.ends_with content ~suffix:"\n"
   in
   let lines = String.split_on_char '\n' content in
   let lines =

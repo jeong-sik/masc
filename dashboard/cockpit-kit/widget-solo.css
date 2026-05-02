@@ -34,7 +34,7 @@ body.widget-solo-mode #root { height: 100vh; }
 }
 .ws-name {
   color: var(--color-fg-primary);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .04em;
 }
 .ws-id {

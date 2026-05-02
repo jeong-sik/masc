@@ -93,7 +93,7 @@
   font-size: var(--fs-11);
   text-transform: uppercase;
   letter-spacing: .06em;
-  font-weight: 500;
+  font-weight: var(--fw-med);
 }
 .dr-tab .ct {
   font-size: var(--fs-9);
@@ -407,9 +407,9 @@
   min-height: 0;
 }
 .dr-cost-bar .big {
-  font-size: 22px;
+  font-size: var(--fs-22);
   color: var(--brass-1, #f0c674);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   font-variant-numeric: tabular-nums;
   letter-spacing: .02em;
 }

@@ -133,7 +133,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 .focus-menu-k {
   width: 10px;
   color: var(--color-fg-muted, #6b6258);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
 }
 .focus-menu-l {
   flex: 1;

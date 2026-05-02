@@ -143,7 +143,7 @@ button { font: inherit; }
 .tk-ev { display: inline-flex; align-items: center; gap: 8px; font: var(--fs-11)/1 var(--font-mono); color: var(--color-fg-secondary); }
 .tk-ev .t { color: var(--color-fg-disabled); }
 .tk-ev .n { color: var(--color-fg-primary); }
-.tk-ev .k { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--fs-9); padding: 2px 5px; border-radius: 2px; font-weight: 600; }
+.tk-ev .k { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--fs-9); padding: 2px 5px; border-radius: 2px; font-weight: var(--fw-semi); }
 .tk-ev .k.tool  { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.08); }
 .tk-ev .k.err   { color: var(--err-fg);  background: rgb(196 106 90 / .1); }
 .tk-ev .k.claim { color: var(--info-fg); background: rgb(106 142 176 / .1); }
@@ -543,7 +543,7 @@ button { font: inherit; }
 .activity .d.note  { background: var(--color-fg-muted); }
 .activity .tx { color: var(--color-fg-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .activity .tx .kn {
-  display: inline-block; font-weight: 600;
+  display: inline-block; font-weight: var(--fw-semi);
   margin-right: 5px;
 }
 .activity .tx .kn.brass   { color: var(--color-accent-fg); }
@@ -618,7 +618,7 @@ button { font: inherit; }
 }
 .tb-branch:hover { background: var(--color-bg-panel-alt); border-color: var(--color-border-divider); }
 .tb-branch::before { content: "⎇"; color: var(--color-fg-disabled); }
-.tb-branch .nm { color: var(--color-accent-fg); font-weight: 600; }
+.tb-branch .nm { color: var(--color-accent-fg); font-weight: var(--fw-semi); }
 .tb-branch .ahbh { display: inline-flex; gap: 4px; color: var(--color-fg-muted); font-size: var(--fs-10); }
 .tb-branch .ahbh .ah { color: var(--ok-fg); }
 .tb-branch .ahbh .bh { color: var(--warn-fg); }
@@ -735,7 +735,7 @@ button { font: inherit; }
   font-family: var(--font-mono);
   font-size: var(--fs-11);
 }
-.plane-hdr .ti { font-size: var(--fs-12); color: var(--color-fg-primary); font-weight: 600; }
+.plane-hdr .ti { font-size: var(--fs-12); color: var(--color-fg-primary); font-weight: var(--fw-semi); }
 .plane-hdr .sub { color: var(--color-fg-muted); font-size: var(--fs-10); }
 .plane-hdr .ctx {
   margin-left: auto;

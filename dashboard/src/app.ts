@@ -246,7 +246,7 @@ export function App() {
                       params=${item.defaultParams}
                       ariaCurrent=${active ? 'page' : undefined}
                       title=${item.description}
-                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[4px] border px-2 font-mono text-[10px] uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
+                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-[10px] uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
                         active
                           ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)] shadow-[inset_0_-1px_0_var(--brass-3)]'
                           : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-secondary)]'

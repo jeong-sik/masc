@@ -26,6 +26,7 @@ let schemas : Types.tool_schema list =
                   ("max_results", `Assoc [ ("type", `String "number") ]);
                 ] );
             ("required", `List [ `String "query" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -39,6 +40,7 @@ let schemas : Types.tool_schema list =
             ( "properties",
               `Assoc [ ("path", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "path" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -57,6 +59,7 @@ let schemas : Types.tool_schema list =
                   ("limit", `Assoc [ ("type", `String "number") ]);
                 ] );
             ("required", `List [ `String "path" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
   ]

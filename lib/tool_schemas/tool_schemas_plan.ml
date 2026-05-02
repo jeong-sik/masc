@@ -15,6 +15,7 @@ After masc_claim_next or masc_add_task; follow up with masc_plan_update to write
         ]);
       ]);
       ("required", `List [`String "task_id"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -35,6 +36,7 @@ After masc_plan_init creates the structure; pair with masc_plan_get to review.";
         ]);
       ]);
       ("required", `List [`String "task_id"; `String "content"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -51,6 +53,7 @@ After masc_plan_init; omit task_id if masc_plan_set_task was called.";
         ]);
       ]);
       ("required", `List []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -67,6 +70,7 @@ After masc_claim_next; auto-cleared on masc_leave.";
         ]);
       ]);
       ("required", `List [`String "task_id"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -78,6 +82,7 @@ Set via masc_plan_set_task. Auto-cleared on masc_leave.";
       ("type", `String "object");
       ("properties", `Assoc []);
       ("required", `List []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -89,6 +94,7 @@ Use masc_transition to change task status separately. Auto-called on masc_leave.
       ("type", `String "object");
       ("properties", `Assoc []);
       ("required", `List []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -107,6 +113,7 @@ Use masc_transition to change task status separately. Auto-called on masc_leave.
         ]);
       ]);
       ("required", `List [`String "task_id"; `String "note"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -129,6 +136,7 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
         ]);
       ]);
       ("required", `List [`String "task_id"; `String "content"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

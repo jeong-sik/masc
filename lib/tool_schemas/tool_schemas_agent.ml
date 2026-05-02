@@ -23,6 +23,7 @@ let schemas : tool_schema list = [
           ("default", `Int 20);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -46,6 +47,7 @@ let schemas : tool_schema list = [
           ("description", `String "Optional capability list (overwrites existing)");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -64,6 +66,7 @@ let schemas : tool_schema list = [
           ("default", `Int 7);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -83,6 +86,7 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "capabilities"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -105,6 +109,7 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 

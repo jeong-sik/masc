@@ -23,6 +23,7 @@ let schemas : Types.tool_schema list =
                   ("agent_name", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "task_id"; `String "agent_name" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -39,6 +40,7 @@ let schemas : Types.tool_schema list =
                   ("plan", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "task_id"; `String "plan" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -56,6 +58,7 @@ let schemas : Types.tool_schema list =
                   ("note", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "task_id"; `String "note" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -72,6 +75,7 @@ let schemas : Types.tool_schema list =
                   ("deliverable", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "task_id"; `String "deliverable" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -85,6 +89,7 @@ let schemas : Types.tool_schema list =
             ( "properties",
               `Assoc [ ("task_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "task_id" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -92,6 +97,10 @@ let schemas : Types.tool_schema list =
       description =
         "List all task runs with their current status (init, active, completed). Use when surveying execution state across tasks or finding abandoned runs to resume.";
       input_schema =
-        `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
+        `Assoc
+          [
+            ("type", `String "object"); ("properties", `Assoc []);
+            ("additionalProperties", `Bool false);
+          ];
     };
   ]

@@ -35,6 +35,7 @@ Pair with masc_subscription to receive session-scoped event notifications.";
         ]);
       ]);
       ("required", `List [`String "action"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -56,6 +57,7 @@ Requires the same privileged approval surface as resolving an approval.";
         ]);
       ]);
       ("required", `List [`String "id"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 
@@ -91,6 +93,7 @@ For llama, provide model explicitly. Pair with masc_add_task to create the task 
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "prompt"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

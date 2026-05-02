@@ -93,6 +93,7 @@ The response includes each goal's explicit lifecycle phase and verification poli
                   ("phase", enum_schema ~description:"Optional explicit Goal FSM phase filter" goal_phase_enum);
                   ("status", enum_schema ~description:"Optional legacy status filter" goal_status_enum);
                 ] );
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -121,6 +122,7 @@ Lifecycle status/phase fields are intentionally omitted here; use masc_goal_tran
                   ("verifier_policy", goal_verifier_policy_schema);
                   ("require_completion_approval", `Assoc [ ("type", `String "boolean") ]);
                 ] );
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -141,6 +143,7 @@ Use masc_goal_transition / masc_goal_verify for the full Goal FSM and quorum ver
                   ("note", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "goal_id"; `String "outcome" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -169,6 +172,7 @@ The actor field records who initiated the transition.";
                       ] );
                 ] );
             ("required", `List [ `String "goal_id"; `String "action"; `String "actor" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
     {
@@ -196,6 +200,7 @@ Supports mixed operator and keeper principals, one vote per principal, and N-of-
                       ] );
                 ] );
             ("required", `List [ `String "goal_id"; `String "principal"; `String "decision" ]);
+            ("additionalProperties", `Bool false);
           ];
     };
   ]

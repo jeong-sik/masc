@@ -522,6 +522,10 @@ let test_keeper_sandbox_stop_targets_turn_containers_with_kind () =
       Alcotest.(check bool) "invalid kind message actionable" true
         (contains_substring invalid_body
            "expected managed, turn, or all");
+      let invalid_json = parse_json_exn invalid_body in
+      Alcotest.(check string) "invalid kind typed validation error"
+        "validation_error"
+        (invalid_json |> member "error_code" |> to_string);
       let ok_turn, turn_body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_stop"
           ~args:
@@ -540,6 +544,13 @@ let test_keeper_sandbox_stop_targets_turn_containers_with_kind () =
       Alcotest.(check int) "turn stop removes turn container" 1
         (turn_json |> member "stop_result" |> member "removed" |> to_int);
       let log = read_file log_path in
+      Alcotest.(check bool) "turn stop filters by kind label" true
+        (contains_substring log "--filter label=masc.mcp.kind=turn");
+      Alcotest.(check bool) "turn stop filters by keeper label" true
+        (contains_substring log
+           ("--filter label=masc.mcp.keeper=" ^ keeper_name));
+      Alcotest.(check bool) "turn stop filters by base path hash label" true
+        (contains_substring log "--filter label=masc.mcp.base_path_hash=");
       Alcotest.(check bool) "turn container removed by id" true
         (contains_substring log "rm -f turn-1"))
 

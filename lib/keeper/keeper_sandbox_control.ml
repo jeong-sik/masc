@@ -10,6 +10,7 @@ open Keeper_types
 
 let managed_kind = "managed"
 let turn_kind = "turn"
+let all_kind = "all"
 
 type stop_scope =
   | Stop_managed
@@ -19,13 +20,14 @@ type stop_scope =
 let stop_scope_to_string = function
   | Stop_managed -> managed_kind
   | Stop_turn -> turn_kind
-  | Stop_all -> "all"
+  | Stop_all -> all_kind
 
 let parse_stop_scope raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "" | "managed" -> Ok Stop_managed
-  | "turn" -> Ok Stop_turn
-  | "all" -> Ok Stop_all
+  | "" -> Ok Stop_managed
+  | kind when String.equal kind managed_kind -> Ok Stop_managed
+  | kind when String.equal kind turn_kind -> Ok Stop_turn
+  | kind when String.equal kind all_kind -> Ok Stop_all
   | other ->
       Error
         (Printf.sprintf

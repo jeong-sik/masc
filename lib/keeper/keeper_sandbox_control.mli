@@ -4,6 +4,8 @@ val managed_kind : string
 
 val turn_kind : string
 
+val all_kind : string
+
 type stop_scope =
   | Stop_managed
   | Stop_turn

@@ -1162,7 +1162,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> (false, err)
+  | Error err -> error_result_typed ~code:Validation_error err
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers

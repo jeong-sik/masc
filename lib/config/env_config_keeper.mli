@@ -61,6 +61,8 @@ module KeeperSupervisor : sig
   val self_preservation_min_candidates : int
   val dead_ttl_sec : float
   val paused_cleanup_ttl_sec : float
+  val auto_resume_initial_sec : float
+  val auto_resume_max_sec : float
 end
 
 (** {1 Stale-turn watchdog} *)

@@ -51,6 +51,22 @@ let test_backoff_delay_cap () =
   let d10 = Sup.backoff_delay 10 in
   check (float 0.1) "attempt 10 capped at 300" 300.0 d10
 
+let test_auto_resume_first_delay_capped () =
+  let delay =
+    Sup.next_auto_resume_after_sec
+      ~initial_sec:7200.0 ~max_sec:3600.0 None
+  in
+  check (option (float 0.1)) "first delay capped at max"
+    (Some 3600.0) delay
+
+let test_auto_resume_disabled () =
+  let delay =
+    Sup.next_auto_resume_after_sec
+      ~initial_sec:0.0 ~max_sec:3600.0 (Some 1800.0)
+  in
+  check (option (float 0.1)) "initial <= 0 disables auto-resume"
+    None delay
+
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
 let test_keep_last_n_under_limit () =
@@ -1009,16 +1025,8 @@ let test_initial_auto_resume_capped_at_max () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
-      (* Override env so initial_sec (9999h) > max_sec (1h) — the
-         production bug would have written 9999h; the fix caps at 1h. *)
-      Unix.putenv "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC" "35996400.0";
-      Unix.putenv "MASC_KEEPER_AUTO_RESUME_MAX_SEC" "3600.0";
-      (* Force a re-read of the env config lazy values. The values in
-         Env_config_keeper are lazy vals bound at module load time, so we
-         drive the computation through the same function the supervisor
-         calls: Env_config.KeeperSupervisor.{auto_resume_initial_sec,
-         auto_resume_max_sec}.  We can't reload the lazy in a test, so
-         we verify the cap invariant directly: initial > max → result = max. *)
+      (* Use explicit values because Env_config values are module-level
+         bindings and cannot be reloaded per test. *)
       let initial_sec = 35996400.0 in
       let max_sec = 3600.0 in
       let capped = Float.min max_sec initial_sec in
@@ -1030,12 +1038,8 @@ let test_initial_auto_resume_capped_at_max () =
          same expression the supervisor uses, without relying on env-lazy
          module values that can't be reloaded per-test. *)
       let auto_resume_after_sec =
-        if initial_sec <= 0.0 then None
-        else
-          Some (
-            match meta.auto_resume_after_sec with
-            | None -> Float.min max_sec initial_sec
-            | Some prev -> Float.min max_sec (prev *. 2.0))
+        Sup.next_auto_resume_after_sec ~initial_sec ~max_sec
+          meta.auto_resume_after_sec
       in
       (match auto_resume_after_sec with
        | None -> fail "expected Some after storm pause"
@@ -1043,9 +1047,6 @@ let test_initial_auto_resume_capped_at_max () =
            check (float 0.001)
              "first auto-pause delay capped at max_sec even when initial > max"
              3600.0 v);
-      (* Clean up env overrides. *)
-      Unix.unsetenv "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC";
-      Unix.unsetenv "MASC_KEEPER_AUTO_RESUME_MAX_SEC";
       ignore (sw, reg))
 
 (* ── Test runner ────────────────────────────────────────── *)
@@ -1056,6 +1057,10 @@ let () =
       test_case "attempt 0 = base" `Quick test_backoff_delay_attempt_0;
       test_case "exponential growth" `Quick test_backoff_delay_exponential;
       test_case "cap at max" `Quick test_backoff_delay_cap;
+      test_case "first auto-resume delay capped at max" `Quick
+        test_auto_resume_first_delay_capped;
+      test_case "auto-resume disabled by zero initial delay" `Quick
+        test_auto_resume_disabled;
     ];
     "keep_last_n", [
       test_case "under limit" `Quick test_keep_last_n_under_limit;

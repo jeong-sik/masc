@@ -779,6 +779,14 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart
   end
 
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0 then None
+  else
+    Some (
+      match previous with
+      | None -> Float.min max_sec initial_sec
+      | Some prev -> Float.min max_sec (prev *. 2.0))
+
 (** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
     watchdog detected a termination storm (window count >= threshold).  The
     caller must skip enqueuing the entry into [to_restart] so the supervisor
@@ -808,12 +816,8 @@ let handle_crash_auto_pause (ctx : _ context)
        let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
        let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
        let auto_resume_after_sec =
-         if initial_sec <= 0.0 then None
-         else
-           Some (
-             match meta.auto_resume_after_sec with
-             | None -> Float.min max_sec initial_sec
-             | Some prev -> Float.min max_sec (prev *. 2.0))
+         next_auto_resume_after_sec ~initial_sec ~max_sec
+           meta.auto_resume_after_sec
        in
        (match
           write_meta_with_merge

@@ -3,6 +3,7 @@ import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
 } from './store-normalizers'
+import { normalizeKeeperTrust } from './keeper-store-normalize'
 import {
   normalizeAgentBrief,
   normalizeAttentionQueueItem,
@@ -184,6 +185,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model),
+    runtime_trust: normalizeKeeperTrust(raw.runtime_trust ?? raw.trust),
   }
 }
 

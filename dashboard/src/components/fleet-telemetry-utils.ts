@@ -38,6 +38,11 @@ export interface FleetRow {
   recent_tools: string[]
   runtime_blocker_class: Keeper['runtime_blocker_class'] | null
   runtime_blocker_summary: string | null
+  runtime_trust_attention?: boolean
+  runtime_trust_reason?: string | null
+  runtime_trust_next_action?: string | null
+  terminal_reason_code?: string | null
+  terminal_reason_severity?: string | null
   tool_audit_at: string | null
   goal_label: string | null
   goal_linked: boolean
@@ -318,6 +323,9 @@ export function fleetBand(row: FleetRow): FleetBand {
     isAttentionDiagnosticHealthState(diagnosticHealthState)
     || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
+    || row.runtime_trust_attention === true
+    || row.terminal_reason_severity === 'bad'
+    || row.terminal_reason_severity === 'warn'
     || row.context_ratio >= PRESSURE_WARN_RATIO
     || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
     || (row.tool_success_pct != null && row.tool_success_pct < 90)
@@ -338,6 +346,9 @@ export function fleetBandScore(row: FleetRow): number {
 export function rowUrgencyScore(row: FleetRow): number {
   let score = 0
   if (row.runtime_blocker_class != null) score += 100
+  if (row.runtime_trust_attention === true) score += 120
+  if (row.terminal_reason_severity === 'bad') score += 110
+  if (row.terminal_reason_severity === 'warn') score += 60
   if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 100
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
     score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
@@ -413,6 +424,22 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             runtime_blocker_class: keeper.runtime_blocker_class ?? null,
             runtime_blocker_summary:
               firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
+            runtime_trust_attention: keeper.trust?.needs_attention === true,
+            runtime_trust_reason:
+              firstNonEmptyString(
+                keeper.trust?.attention_reason,
+                keeper.trust?.latest_terminal_reason?.summary,
+                keeper.trust?.operator_disposition_reason,
+                keeper.trust?.disposition_reason,
+              ) ?? null,
+            runtime_trust_next_action:
+              firstNonEmptyString(
+                keeper.trust?.next_human_action,
+                keeper.trust?.latest_next_action,
+                keeper.trust?.latest_terminal_reason?.next_action,
+              ) ?? null,
+            terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
+            terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
             goal_label: keeperGoalLabel(keeper),
             goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0 || keeperGoalLabel(keeper) != null,
@@ -455,6 +482,11 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           recent_tools: [],
           runtime_blocker_class: null,
           runtime_blocker_summary: null,
+          runtime_trust_attention: false,
+          runtime_trust_reason: null,
+          runtime_trust_next_action: null,
+          terminal_reason_code: null,
+          terminal_reason_severity: null,
           tool_audit_at: null,
           goal_label: null,
           goal_linked: false,
@@ -505,6 +537,8 @@ export function statusClass(row: FleetRow): string {
     isAttentionDiagnosticHealthState(diagnosticHealthState)
     || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
+    || row.runtime_trust_attention === true
+    || row.terminal_reason_severity === 'bad'
   ) {
     return 'text-[var(--color-status-warn)]'
   }

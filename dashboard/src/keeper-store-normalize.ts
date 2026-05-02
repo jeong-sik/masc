@@ -167,48 +167,65 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
   }
 }
 
-function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
+function normalizeKeeperTrustTerminalReason(raw: unknown): NonNullable<Keeper['trust']>['latest_terminal_reason'] {
   if (!isRecord(raw)) return null
+  return {
+    code: asString(raw.code) ?? null,
+    source: asString(raw.source) ?? null,
+    severity: asString(raw.severity) ?? null,
+    summary: asString(raw.summary) ?? null,
+    next_action: asString(raw.next_action) ?? null,
+  }
+}
+
+export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
+  if (!isRecord(raw)) return null
+  const approvalRaw = isRecord(raw.approval_state) ? raw.approval_state : raw.approval
+  const executionRaw = isRecord(raw.execution_summary) ? raw.execution_summary : raw.execution
   return {
     disposition: asString(raw.disposition) ?? null,
     disposition_reason: asString(raw.disposition_reason) ?? null,
+    operator_disposition: asString(raw.operator_disposition) ?? null,
+    operator_disposition_reason: asString(raw.operator_disposition_reason) ?? null,
     needs_attention:
       typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
     attention_reason: asString(raw.attention_reason) ?? null,
     next_human_action: asString(raw.next_human_action) ?? null,
-    approval_state: isRecord(raw.approval_state)
+    approval_state: isRecord(approvalRaw)
       ? {
-          state: asString(raw.approval_state.state) ?? null,
-          summary: asString(raw.approval_state.summary) ?? null,
-          pending_count: asNumber(raw.approval_state.pending_count) ?? null,
+          state: asString(approvalRaw.state) ?? null,
+          summary: asString(approvalRaw.summary) ?? null,
+          pending_count: asNumber(approvalRaw.pending_count) ?? null,
         }
       : null,
-    execution_summary: isRecord(raw.execution_summary)
+    execution_summary: isRecord(executionRaw)
       ? {
-          tool_contract_result: asString(raw.execution_summary.tool_contract_result) ?? null,
-          runtime_proof_status: asString(raw.execution_summary.runtime_proof_status) ?? null,
-          required_tools: asStringArray(raw.execution_summary.required_tools) ?? [],
+          tool_contract_result: asString(executionRaw.tool_contract_result) ?? null,
+          runtime_proof_status: asString(executionRaw.runtime_proof_status) ?? null,
+          required_tools: asStringArray(executionRaw.required_tools) ?? [],
           missing_required_tools:
-            asStringArray(raw.execution_summary.missing_required_tools) ?? [],
-          requested_tools: asStringArray(raw.execution_summary.requested_tools) ?? [],
-          tools_used: asStringArray(raw.execution_summary.tools_used) ?? [],
+            asStringArray(executionRaw.missing_required_tools) ?? [],
+          requested_tools: asStringArray(executionRaw.requested_tools) ?? [],
+          tools_used: asStringArray(executionRaw.tools_used) ?? [],
           requested_tool_count:
-            asNumber(raw.execution_summary.requested_tool_count) ?? null,
-          tools_used_count: asNumber(raw.execution_summary.tools_used_count) ?? null,
+            asNumber(executionRaw.requested_tool_count) ?? null,
+          tools_used_count: asNumber(executionRaw.tools_used_count) ?? null,
           provider_attempt_count:
-            asNumber(raw.execution_summary.provider_attempt_count) ?? null,
+            asNumber(executionRaw.provider_attempt_count) ?? null,
           provider_fallback_applied:
-            asBoolean(raw.execution_summary.provider_fallback_applied) ?? null,
+            asBoolean(executionRaw.provider_fallback_applied) ?? null,
           provider_selected_model:
-            asString(raw.execution_summary.provider_selected_model) ?? null,
-          cascade_outcome: asString(raw.execution_summary.cascade_outcome) ?? null,
-          sandbox_summary: asString(raw.execution_summary.sandbox_summary) ?? null,
-          sandbox_root: asString(raw.execution_summary.sandbox_root) ?? null,
+            asString(executionRaw.provider_selected_model) ?? null,
+          cascade_outcome: asString(executionRaw.cascade_outcome) ?? null,
+          sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
+          sandbox_root: asString(executionRaw.sandbox_root) ?? null,
           mutation_guard_summary:
-            asString(raw.execution_summary.mutation_guard_summary) ?? null,
-          latest_receipt_at: asString(raw.execution_summary.latest_receipt_at) ?? null,
+            asString(executionRaw.mutation_guard_summary) ?? null,
+          latest_receipt_at: asString(executionRaw.latest_receipt_at) ?? null,
         }
       : null,
+    latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
+    latest_next_action: asString(raw.latest_next_action) ?? null,
     latest_causal_event: normalizeKeeperTrustLatestEvent(raw.latest_causal_event),
   }
 }
@@ -513,7 +530,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
         attention_reason: asString(row.attention_reason) ?? null,
         next_human_action: asString(row.next_human_action) ?? null,
-        trust: normalizeKeeperTrust(row.trust),
+        trust: normalizeKeeperTrust(row.runtime_trust ?? row.trust),
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,
         short_goal: asString(row.short_goal) ?? null,

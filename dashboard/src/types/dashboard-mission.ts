@@ -1,4 +1,4 @@
-import type { KeeperDiagnostic, Message } from './core'
+import type { KeeperDiagnostic, KeeperTrustSummary, Message } from './core'
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
 
 export interface DashboardMissionSummary {
@@ -395,6 +395,7 @@ export interface OperatorKeeperSnapshot {
   active_model?: string
   active_model_label?: string | null
   diagnostic?: Record<string, unknown>
+  runtime_trust?: KeeperTrustSummary | null
   recent_activity?: Record<string, unknown>[]
 }
 

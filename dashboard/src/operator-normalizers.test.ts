@@ -235,6 +235,44 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.generation).toBe(10)
   })
 
+  it('preserves keeper runtime_trust terminal reason fields', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'sangsu',
+          status: 'paused',
+          runtime_trust: {
+            needs_attention: true,
+            operator_disposition: 'pause_human',
+            execution: {
+              tool_contract_result: 'violated',
+              missing_required_tools: ['masc_board_post'],
+            },
+            latest_terminal_reason: {
+              code: 'required_tool_use_unsatisfied',
+              severity: 'bad',
+              summary: 'required keeper tool use was not satisfied',
+              next_action: 'inspect_provider_tool_contract',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(result.keepers[0]?.runtime_trust).toMatchObject({
+      needs_attention: true,
+      operator_disposition: 'pause_human',
+      execution_summary: {
+        tool_contract_result: 'violated',
+        missing_required_tools: ['masc_board_post'],
+      },
+      latest_terminal_reason: {
+        code: 'required_tool_use_unsatisfied',
+        severity: 'bad',
+      },
+    })
+  })
+
   it('preserves keeper context fields from nested context payloads', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [

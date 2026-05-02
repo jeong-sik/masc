@@ -13,6 +13,7 @@ import type {
   BoardSortMode,
   Goal,
   DashboardExecutionSessionBrief,
+  DashboardExecutionQueueItem,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
@@ -49,6 +50,7 @@ import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
+  normalizeExecutionQueueItem,
   normalizeExecutionWorkerSupportBrief,
   normalizeExecutionContinuityBrief,
   mergeMessages,
@@ -85,6 +87,7 @@ export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
+export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
 
@@ -741,6 +744,10 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .filter((row): row is Message => row !== null)
   messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
   keepers.value = normalizeKeepers(data.keepers)
+  const normalizedQueue = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
+    .map(normalizeExecutionQueueItem)
+    .filter((row): row is DashboardExecutionQueueItem => row !== null)
+  setArrayByKeyIfChanged(executionQueue, normalizedQueue, row => row.id)
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)

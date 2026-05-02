@@ -12,10 +12,6 @@
 
 const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef } = React;
 
-const _useTrayCockpitState = window.useCockpitState || function useFallbackTrayCockpitState() {
-  return _stUseState({ trayHidden: false });
-};
-
 function _useTrayPop() {
   const [open, setOpen] = _stUseState(null); // 'kpi' | 'life' | 'ticker' | 'keepers' | null
   const ref = _stUseRef(null);
@@ -37,38 +33,16 @@ function _useTrayPop() {
 
 function _kpiSpotlight(D) {
   const evs = (D && D.events) || [];
-  const fails = evs.filter(_isFailureEvent).length;
-  const cascades = evs.filter(_isCascadeEvent).length;
+  const fails = evs.filter(e => e.kind === "fail").length;
+  const cascades = evs.filter(e => e.kind === "cascade").length;
   if (fails >= 3) return { l: "Fails", v: fails, t: "err",  u: "/47", urgent: true };
   if (cascades >= 2) return { l: "Cascade", v: cascades, t: "info", u: "@step" };
   return { l: "tps", v: "1.24", t: "brass", u: "tps" };
 }
 
-function _eventText(e) {
-  return String((e && (e.text || e.summary || e.msg)) || "");
-}
-
-function _isFailureEvent(e) {
-  const kind = String((e && e.kind) || "").toLowerCase();
-  return kind === "fail" || kind === "err" || /\bfail(?:ed|ure|s)?\b|error/i.test(_eventText(e));
-}
-
-function _isCascadeEvent(e) {
-  const kind = String((e && e.kind) || "").toLowerCase();
-  return kind === "cascade" || /\bcascade\b|hit@step|step\s*[>=]/i.test(_eventText(e));
-}
-
-function _eventTone(e) {
-  if (_isFailureEvent(e)) return "err";
-  if (_isCascadeEvent(e)) return "info";
-  const kind = String((e && e.kind) || "").toLowerCase();
-  if (kind === "flag" || kind === "warn" || kind === "stalled") return "warn";
-  return "ok";
-}
-
 function StatusTray() {
   const D = window.MASC_DATA || {};
-  const [cs, setCs] = _useTrayCockpitState();
+  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{trayHidden:false}, ()=>{}]);
   const hidden = !!cs.trayHidden;
   const [open, setOpen, ref] = _useTrayPop();
   const spot = _kpiSpotlight(D);
@@ -121,10 +95,10 @@ function StatusTray() {
               <div className="st-list-h">recent activity</div>
               {(D.events || []).slice(-12).reverse().map((e, i) => (
                 <div className="st-list-row" key={i}>
-                  <span className={"st-dot k-" + _eventTone(e)}></span>
+                  <span className={"st-dot k-" + (e.kind === "fail" ? "err" : e.kind === "cascade" ? "info" : "ok")}></span>
                   <span className="st-list-keeper">{e.keeper || "system"}</span>
                   <span className="st-list-kind">{e.kind}</span>
-                  <span className="st-list-msg">{_eventText(e)}</span>
+                  <span className="st-list-msg">{e.summary || e.msg || ""}</span>
                 </div>
               ))}
             </div>

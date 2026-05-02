@@ -18,17 +18,17 @@
   & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
-    background: rgb(255 255 255 / .08);
+    background: var(--color-bg-elevated);
     color: var(--brass-1);
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-1);
     font-size: 0.9em;
   }
 
   & pre {
-    background: rgb(255 255 255 / .03);
+    background: var(--color-bg-panel-alt);
     padding: 12px 14px;
-    border-radius: 8px;
+    border-radius: var(--r-2);
     border: 1px solid var(--color-border-default);
     overflow-x: auto;
     font-size: var(--fs-sm);
@@ -46,7 +46,7 @@
   }
 
   & blockquote {
-    border-left: 3px solid rgb(var(--brass-glow) / .40);
+    border-left: 3px solid var(--brass-border);
     padding-left: 12px;
     color: var(--color-fg-muted);
     margin: 8px 0;
@@ -65,23 +65,23 @@
 
   & table { margin: 8px 0; }
 
-  & img { max-width: 100%; height: auto; border-radius: 8px; margin: 4px 0; }
+  & img { max-width: 100%; height: auto; border-radius: var(--r-2); margin: 4px 0; }
 }
 
 /* ── Mermaid rendered output ──────────────────────────────── */
 .mermaid-rendered {
-  border-radius: 8px;
+  border-radius: var(--r-2);
   padding: 16px;
   margin: 8px 0;
-  background: rgb(255 255 255 / .03);
+  background: var(--color-bg-panel-alt);
   border: 1px solid var(--color-border-default);
   overflow-x: auto;
 }
 
 /* ── Think Block (collapsible) ─────────────────────────────── */
 @utility think-block {
-  background: rgba(167, 139, 250, 0.12);
-  border: 1px solid rgba(167, 139, 250, 0.12);
+  background: var(--purple-12);
+  border: 1px solid var(--purple-12);
   padding: 10px 14px;
   margin: 8px 0;
   & summary { cursor: pointer; color: var(--color-purple); font-size: var(--fs-sm); }
@@ -91,14 +91,14 @@
 button.agent,
 button.agent-card {
   cursor: pointer;
-  &:hover { background: rgb(255 255 255 / .08); }
+  &:hover { background: var(--color-bg-elevated); }
 }
 
 /* button.monitor-alert/row: element+class selector, kept as raw CSS */
 button.monitor-alert,
 button.monitor-row {
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
-  &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: rgb(255 255 255 / .06); }
+  &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: var(--white-5); }
   &.ok { border-color: rgb(var(--ok-glow) / .18); }
   &.warn { border-color: rgb(var(--warn-glow) / .28); }
   &.bad { border-color: rgb(var(--err-glow) / .34); }
@@ -133,9 +133,9 @@ button.monitor-row {
 @utility agent-event-badge--lifecycle { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
 @utility agent-event-badge--keeper { background: rgb(var(--brass-glow) / .15); color: var(--brass-1); }
 @utility agent-event-badge--error { background: rgb(var(--err-glow) / .15); color: var(--err); }
-@utility agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--color-purple); }
+@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--color-purple); }
 @utility agent-event-badge--task { background: rgb(var(--warn-glow) / .12); color: var(--warn); }
-@utility agent-event-badge--board { background: rgba(34, 211, 238, 0.12); color: var(--color-cyan); }
+@utility agent-event-badge--board { background: var(--info-soft); color: var(--info-fg); }
 @utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-muted); }
 
 /* ── Micro-Interactions (Task 289) ── */
@@ -148,10 +148,9 @@ button.monitor-row {
 }
 
 @utility hover-lift {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease-out, border-color 0.2s ease-out, background-color 0.2s ease-out;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease-out, background-color 0.2s ease-out;
   &:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
   }
 }
 

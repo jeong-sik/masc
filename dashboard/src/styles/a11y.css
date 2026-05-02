@@ -74,7 +74,7 @@
   .pixel-avatar[data-status] { animation: none; }
   .pixel-avatar--has-blocker {
     animation: none;
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
+    box-shadow: 0 0 0 2px rgb(var(--err-glow) / .6);
   }
   .activity-dot--live-pulse { animation: none; }
   .pulse-working { animation: none; }

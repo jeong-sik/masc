@@ -328,8 +328,8 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
       let status_icon = Types.task_status_icon task.task_status in
       let assignee = Types.task_display_assignee task.task_status in
       let status_str = Types.string_of_task_status task.task_status in
-      Buffer.add_string buf (Printf.sprintf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title);
-      Buffer.add_string buf (Printf.sprintf "   └─ %s | %s\n" status_str assignee)
+      Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
+      Printf.bprintf buf "   └─ %s | %s\n" status_str assignee
     ) sorted;
 
     Buffer.contents buf

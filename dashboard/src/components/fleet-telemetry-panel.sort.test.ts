@@ -121,4 +121,47 @@ describe('buildFleetRows sort order', () => {
 
     expect(rows.map(row => row.name)).toEqual(['queue-blocked', 'healthy-busy'])
   })
+
+  it('treats runtime trust terminal reasons as fleet attention signals', () => {
+    const keepers = [
+      {
+        name: 'trust-blocked',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.1,
+        total_turns: 12,
+        trust: {
+          needs_attention: true,
+          latest_terminal_reason: {
+            code: 'required_tool_use_unsatisfied',
+            severity: 'bad',
+            summary: 'required keeper tool use was not satisfied',
+          },
+          latest_next_action: 'inspect_provider_tool_contract',
+        },
+      },
+      {
+        name: 'healthy-busy',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.4,
+        total_turns: 50,
+      },
+    ] satisfies Keeper[]
+
+    const rows = buildFleetRows(
+      keepers,
+      toolQualityByKeeper([
+        { name: 'trust-blocked', calls: 0, success_pct: 100 },
+        { name: 'healthy-busy', calls: 20, success_pct: 100 },
+      ]),
+    )
+
+    expect(rows.map(row => row.name)).toEqual(['trust-blocked', 'healthy-busy'])
+    expect(rows[0]).toMatchObject({
+      runtime_trust_attention: true,
+      terminal_reason_code: 'required_tool_use_unsatisfied',
+      runtime_trust_next_action: 'inspect_provider_tool_contract',
+    })
+  })
 })

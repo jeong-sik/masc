@@ -375,6 +375,66 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('accepts live runtime_trust payloads and preserves terminal reason fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'runtime-trust-keeper',
+        status: 'active',
+        runtime_trust: {
+          disposition: 'Pause',
+          operator_disposition: 'pause_human',
+          operator_disposition_reason: 'required_tool_use_unsatisfied',
+          needs_attention: true,
+          approval: {
+            state: 'ready',
+            summary: 'no pending approvals',
+            pending_count: 0,
+          },
+          execution: {
+            tool_contract_result: 'violated',
+            required_tools: ['masc_board_post'],
+            missing_required_tools: ['masc_board_post'],
+            provider_attempt_count: 2,
+            provider_fallback_applied: true,
+          },
+          latest_terminal_reason: {
+            code: 'required_tool_use_unsatisfied',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'required keeper tool use was not satisfied',
+            next_action: 'inspect_provider_tool_contract',
+          },
+          latest_next_action: 'inspect_provider_tool_contract',
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Pause',
+      operator_disposition: 'pause_human',
+      operator_disposition_reason: 'required_tool_use_unsatisfied',
+      needs_attention: true,
+      approval_state: {
+        state: 'ready',
+        summary: 'no pending approvals',
+        pending_count: 0,
+      },
+      execution_summary: {
+        tool_contract_result: 'violated',
+        required_tools: ['masc_board_post'],
+        missing_required_tools: ['masc_board_post'],
+        provider_attempt_count: 2,
+        provider_fallback_applied: true,
+      },
+      latest_terminal_reason: {
+        code: 'required_tool_use_unsatisfied',
+        severity: 'bad',
+        next_action: 'inspect_provider_tool_contract',
+      },
+      latest_next_action: 'inspect_provider_tool_contract',
+    })
+  })
+
   it('preserves runtime cascade identity and metric provider observations', () => {
     const [keeper] = normalizeKeepers([
       {

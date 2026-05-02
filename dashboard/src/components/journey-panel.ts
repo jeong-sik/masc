@@ -5,6 +5,7 @@ import { missionSnapshot } from '../mission-store'
 import { journal } from '../sse'
 import {
   executionContinuityBriefs,
+  executionQueue,
   executionSessionBriefs,
   executionWorkerSupportBriefs,
   keepers,
@@ -12,6 +13,7 @@ import {
 } from '../store'
 import type {
   DashboardExecutionContinuityBrief,
+  DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
   DashboardExecutionWorkerSupportBrief,
   JournalEntry,
@@ -510,6 +512,48 @@ function TileHint({ text }: { text: string }) {
   return html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${text}</div>`
 }
 
+function executionQueueTone(severity?: string | null): string {
+  if (severity === 'bad') return 'bad'
+  if (severity === 'warn') return 'warn'
+  if (severity === 'ok') return 'ok'
+  return 'neutral'
+}
+
+function ExecutionQueuePanel({ items }: { items: DashboardExecutionQueueItem[] }) {
+  if (items.length === 0) return null
+  return html`
+    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Execution Queue</div>
+        <${StatusChip} tone=${items.some(item => item.severity === 'bad') ? 'bad' : 'warn'} uppercase=${false}>${items.length}<//>
+      </div>
+      <div class="mt-3 grid gap-2 md:grid-cols-2">
+        ${items.slice(0, 6).map(item => html`
+          <div key=${item.id} class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-secondary)]">${item.target_id}</div>
+              <${StatusChip} tone=${executionQueueTone(item.severity)} uppercase=${false}>${item.kind}<//>
+            </div>
+            <div class="mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${trimText(item.summary, 120) ?? item.summary}</div>
+            ${item.terminal_reason_code || item.next_human_action
+              ? html`
+                <div class="mt-1 flex flex-wrap gap-1">
+                  ${item.terminal_reason_code
+                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-mono text-[var(--color-status-warn)]">${item.terminal_reason_code}</span>`
+                    : null}
+                  ${item.next_human_action
+                    ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${item.next_human_action}</span>`
+                    : null}
+                </div>
+              `
+              : null}
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
 function JourneyCard({ record }: { record: JourneyRecord }) {
   const task = record.task
   const keeper = record.keeper
@@ -779,6 +823,7 @@ export function JourneyPanel() {
     missionSessions,
     journalEntries: journal.value,
   })
+  const priorityItems = executionQueue.value.filter((item) => item.kind === 'keeper' || item.severity === 'bad')
   const visible = filterJourneyRecords(records, query.value)
   const taskCount = records.filter((record) => record.kind === 'task').length
   const keeperCount = records.filter((record) => record.kind === 'keeper').length
@@ -812,6 +857,8 @@ export function JourneyPanel() {
           <${MetricChip} label="blocked" value=${blockedCount} tone=${blockedCount > 0 ? 'bad' : 'ok'} />
           <${MetricChip} label="thinking/memory" value=${`${thinkingCount} / ${memoryHotCount}`} tone="warn" />
         </div>
+
+        <${ExecutionQueuePanel} items=${priorityItems} />
 
         <div class="flex flex-wrap items-center gap-3">
           <${TextInput}

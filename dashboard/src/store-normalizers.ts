@@ -1,4 +1,5 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { normalizeKeeperTrust } from './keeper-store-normalize'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -211,7 +212,7 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
   const summary = asString(raw.summary)
   const targetType = asString(raw.target_type)
   const targetId = asString(raw.target_id)
-  if (!id || !summary || !targetType || !targetId || (kind !== 'session' && kind !== 'operation')) {
+  if (!id || !summary || !targetType || !targetId || (kind !== 'session' && kind !== 'operation' && kind !== 'keeper')) {
     return null
   }
   return {
@@ -225,6 +226,10 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     linked_session_id: asString(raw.linked_session_id) ?? null,
     linked_operation_id: asString(raw.linked_operation_id) ?? null,
     last_seen_at: asString(raw.last_seen_at) ?? null,
+    attention_reason: asString(raw.attention_reason) ?? null,
+    next_human_action: asString(raw.next_human_action) ?? null,
+    terminal_reason_code: asString(raw.terminal_reason_code) ?? null,
+    runtime_trust: normalizeKeeperTrust(raw.runtime_trust ?? raw.trust),
     top_handoff: normalizeExecutionHandoff(raw.top_handoff),
     intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
     command_handoff: normalizeExecutionHandoff(raw.command_handoff),

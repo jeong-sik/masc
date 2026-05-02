@@ -1,4 +1,3 @@
-open Base
 
 (** Shared JSON Schema builder helpers for MCP tool definitions. *)
 

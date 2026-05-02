@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_deep_review — Adversarial code review with isolated context.
 

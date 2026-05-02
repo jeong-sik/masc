@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_registration_check — Startup validation of Tool_spec vs TOML coverage. *)
 

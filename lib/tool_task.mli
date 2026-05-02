@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_task - Core task CRUD operations *)
 

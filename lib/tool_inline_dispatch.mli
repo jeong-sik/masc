@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 

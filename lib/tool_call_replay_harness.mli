@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_call_replay_harness — JSONL snapshot loader + validation
     for tool-call replay scoring.

@@ -1,4 +1,3 @@
-open Base
 
 (** Board_core — in-memory board store, persistence, and
     canonical post / comment operations.

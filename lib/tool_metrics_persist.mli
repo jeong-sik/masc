@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_metrics_persist — JSONL disk persistence for tool metrics.
 

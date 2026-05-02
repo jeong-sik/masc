@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_call_quality_benchmark_render — JSON / CSV rendering for the
     tool-call quality benchmark.

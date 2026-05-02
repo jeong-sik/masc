@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime_bench — concurrency benchmark against the
     local runtime pool.

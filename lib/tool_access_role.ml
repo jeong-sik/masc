@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -59,7 +58,7 @@ let tools_for_required_role required_role =
          match Tool_permission_map.permission_for_tool tool_name with
          | None -> false
          | Some permission ->
-             Poly.equal (required_role_of_permission permission) required_role)
+             (=) (required_role_of_permission permission) required_role)
 
 (* ================================================================ *)
 (* Admin-only tools (CanInit + CanReset + CanAdmin)                 *)

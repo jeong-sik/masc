@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_access_role — Role-based tool access policy builder.
 

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_registry — in-memory call counters and usage statistics.
 

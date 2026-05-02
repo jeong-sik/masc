@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -69,12 +68,12 @@ let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
     match check.present with
     | None -> true
     | Some true -> (match actual with Some `Null | None -> false | Some _ -> true)
-    | Some false -> (match actual with Some value when not (Poly.equal value `Null) -> false | _ -> true)
+    | Some false -> (match actual with Some value when not ((=) value `Null) -> false | _ -> true)
   in
   let equals_ok =
     match check.equals with
     | None -> true
-    | Some expected -> Option.equal Poly.equal actual (Some expected)
+    | Some expected -> Option.equal (=) actual (Some expected)
   in
   let contains_ok =
     match check.contains with
@@ -206,7 +205,7 @@ let efficiency_score (benchmark_case : benchmark_case) (run : evidence_run) =
           (1.0 -. (Stdlib.Float.of_int over_limit /. Stdlib.Float.of_int benchmark_case.max_tool_calls))
 
 let score_run ~cases (run : evidence_run) =
-  if not (Poly.equal run.status Run_ok) then None
+  if not ((=) run.status Run_ok) then None
   else
     let cases_by_id =
       cases

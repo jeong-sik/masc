@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_usage_log -- Durable call logging for System_internal surface tools.
 

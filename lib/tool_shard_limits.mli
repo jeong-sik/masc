@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_shard_limits — SSOT integer constants shared between
     [Tool_shard] (the MCP tool surface) and [Keeper_exec_fs]

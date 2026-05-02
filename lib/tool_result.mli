@@ -1,4 +1,3 @@
-open Base
 
 (** Structured tool result type for MASC
 

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_coord — Coord management MCP tools (status / reset /
     init / workflow_guide / check / assertion).

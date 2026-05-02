@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime_http — curl-shelled HTTP helpers for local
     runtime probing.

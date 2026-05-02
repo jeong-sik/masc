@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_inline_dispatch_coord — room lifecycle tool handlers.
 

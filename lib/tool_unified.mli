@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_unified — Unified query interface across catalog, registry,
     and dispatch.

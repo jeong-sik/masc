@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_autoresearch_broadcast — SSE broadcast for autoresearch
     loop events.

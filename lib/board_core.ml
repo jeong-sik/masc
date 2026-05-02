@@ -1,4 +1,3 @@
-open Base
 module Hashtbl = Stdlib.Hashtbl
 module Option = Stdlib.Option
 module Result = Stdlib.Result
@@ -521,7 +520,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
     |> List.filteri (fun idx _ -> idx < scan_limit)
     |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
            Stdlib.incr scanned;
-           if Option.equal Poly.equal stored_kind (Some canonical_kind) then
+           if Option.equal (=) stored_kind (Some canonical_kind) then
              Stdlib.incr unchanged
            else begin
              Stdlib.incr changed;
@@ -572,7 +571,7 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
     (* Apply filters on the pre-sorted list *)
     let filtered = match visibility_filter with
       | None -> sorted_all
-      | Some v -> List.filter (fun (p : post) -> Poly.equal p.visibility v) sorted_all
+      | Some v -> List.filter (fun (p : post) -> (=) p.visibility v) sorted_all
     in
     let filtered = match hearth with
       | None -> filtered

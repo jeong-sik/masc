@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_suspend — agent suspension and circuit-breaker tools.
 

@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -128,7 +127,7 @@ let register (spec : t) =
     Tool_catalog_surfaces.is_on_surface System_internal spec.name
   in
   let effective_visibility =
-    if is_system_internal && Poly.equal spec.visibility Tool_catalog.Default
+    if is_system_internal && spec.visibility = Tool_catalog.Default
     then Tool_catalog.Hidden
     else spec.visibility
   in

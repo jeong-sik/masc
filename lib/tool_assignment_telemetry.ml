@@ -1,4 +1,3 @@
-open Base
 module Random = Stdlib.Random
 module Format = Stdlib.Format
 module Map = Stdlib.Map

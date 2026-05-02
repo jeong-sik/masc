@@ -1,4 +1,3 @@
-open Base
 
 (** Coord_status_rendering — rendering logic for [masc_status].
 

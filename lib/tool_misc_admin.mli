@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_misc_admin — auth, config, tool inventory, and feature
     flag handlers.

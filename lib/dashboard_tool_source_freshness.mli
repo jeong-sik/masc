@@ -1,4 +1,3 @@
-open Base
 
 (** Dashboard_tool_source_freshness — source-freshness metadata
     helpers for the dashboard tool-quality panel.

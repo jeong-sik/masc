@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -486,7 +485,7 @@ let handle_goal_transition (ctx : context) args =
       let note = get_string_opt args "note" in
       let override_note = get_string_opt args "override_note" in
       if actor_must_be_operator action
-         && not (Poly.equal actor.Goal_verification.kind Goal_verification.Operator)
+         && not ((=) actor.Goal_verification.kind Goal_verification.Operator)
       then
         error_result_typed ~code:Validation_error
           "actor.kind must be operator for this transition"
@@ -496,7 +495,7 @@ let handle_goal_transition (ctx : context) args =
         | Some goal ->
             begin
               match
-                if Poly.equal action Goal_phase.Request_complete then
+                if (=) action Goal_phase.Request_complete then
                   validate_goal_completion_ready ctx.config ~goal_id
                     ~override_note
                 else
@@ -636,7 +635,7 @@ let handle_goal_transition (ctx : context) args =
                       (match goal.active_verification_request_id, next_phase with
                        | Some request_id, Goal_phase.Dropped
                        | Some request_id, Goal_phase.Executing
-                         when Poly.equal goal.phase Goal_phase.Awaiting_verification ->
+                         when (=) goal.phase Goal_phase.Awaiting_verification ->
                            (match Goal_verification.cancel_request ctx.config ~request_id with
                             | Ok _ ->
                                 emit_goal_event ctx ~goal_id
@@ -656,7 +655,7 @@ let handle_goal_transition (ctx : context) args =
                       match
                         update_goal_phase ctx goal ~phase:next_phase ?note
                           ~clear_active_verification_request:
-                            (not (Poly.equal next_phase Goal_phase.Awaiting_verification))
+                            (not ((=) next_phase Goal_phase.Awaiting_verification))
                           ()
                       with
                       | Error msg -> error_result_typed ~code:Internal_error msg
@@ -668,8 +667,8 @@ let handle_goal_transition (ctx : context) args =
                                   ("phase", Goal_phase.to_yojson updated_goal.phase);
                                   ("actor", Goal_verification.goal_principal_to_yojson actor);
                                 ]);
-                          if Poly.equal action Goal_phase.Approve_completion
-                             || Poly.equal action Goal_phase.Reject_completion then
+                          if (=) action Goal_phase.Approve_completion
+                             || (=) action Goal_phase.Reject_completion then
                             emit_goal_event ctx ~goal_id
                               ~event_type:"goal_approval_resolved"
                               ~payload:
@@ -677,7 +676,7 @@ let handle_goal_transition (ctx : context) args =
                                   [
                                     ( "decision",
                                       `String
-                                        (if Poly.equal action Goal_phase.Approve_completion then
+                                        (if (=) action Goal_phase.Approve_completion then
                                            "approve"
                                          else
                                            "reject") );
@@ -797,7 +796,7 @@ let handle_goal_verify (ctx : context) args =
                               verification_summary_json ~latest_request:request
                                 updated_goal
                                 effective_policy
-                                (if Poly.equal updated_goal.phase Goal_phase.Awaiting_verification then
+                                (if (=) updated_goal.phase Goal_phase.Awaiting_verification then
                                    Some request
                                  else
                                    None) );

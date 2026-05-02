@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime_core — types, helpers, process discovery,
     and OpenAI-compatible model fetching for local llama-server

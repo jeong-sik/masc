@@ -1,4 +1,3 @@
-open Base
 
 (** Dashboard projection for cascade configuration and runtime health.
 

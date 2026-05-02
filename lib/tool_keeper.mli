@@ -1,4 +1,3 @@
-open Base
 
 (** Public facade for keeper MCP tools. *)
 

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_spec — Unified tool specification with compile-time safety.
 

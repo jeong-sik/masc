@@ -119,7 +119,7 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
         ${allAlerts.map(
           a => html`
             <li
-              class="flex items-start justify-between gap-4 cursor-pointer hover:bg-[var(--color-bg-secondary)]/50 p-1 -m-1 rounded transition-colors"
+              class="flex items-start justify-between gap-4 cursor-pointer hover:bg-[var(--color-bg-secondary)]/50 p-1 -m-1 rounded-[var(--r-1)] transition-colors"
               onClick=${() => {
                 if ('name' in a) openAgentDetail(a.name)
                 else openTaskDetail(a.task)

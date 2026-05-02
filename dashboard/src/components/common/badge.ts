@@ -14,7 +14,7 @@ const TONE_CLASSES: Record<BadgeTone, string> = {
   accent: 'bg-[var(--accent-12)] text-[var(--color-accent-fg)]',
 }
 
-const BASE = 'inline-flex items-center text-3xs px-1.5 py-px rounded tabular-nums font-medium'
+const BASE = 'inline-flex items-center text-3xs px-1.5 py-px rounded-[var(--r-1)] tabular-nums font-medium'
 
 interface CountBadgeProps {
   tone?: BadgeTone

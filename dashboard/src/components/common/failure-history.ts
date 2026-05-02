@@ -62,7 +62,7 @@ export function FailureHistory({
 
   return html`
     <div
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       role="region"
       aria-label="실패 이력"
       data-failure-history
@@ -82,7 +82,7 @@ export function FailureHistory({
                 ([type, count]) => html`
                   <span
                     key=${type}
-                    class="inline-flex items-center rounded bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]"
+                    class="inline-flex items-center rounded-[var(--r-1)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--color-fg-secondary)]"
                   >
                     ${ERROR_ICON[type] || ERROR_ICON.default}
                     <span class="ml-1">${type}</span>
@@ -104,7 +104,7 @@ export function FailureHistory({
             <div
               key=${f.id}
               role="listitem"
-              class="flex items-start gap-2 rounded border border-[var(--white-5)] p-2"
+              class="flex items-start gap-2 rounded-[var(--r-1)] border border-[var(--white-5)] p-2"
               data-failure-id=${f.id}
             >
               <span class="mt-0.5 text-xs" aria-hidden="true">${icon}</span>

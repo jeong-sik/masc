@@ -82,7 +82,7 @@ export function AgentFailure({
 
   return html`
     <div
-      class="flex items-start gap-2 rounded border p-2"
+      class="flex items-start gap-2 rounded-[var(--r-1)] border p-2"
       style="border-color: ${cfg.colorVar}; background-color: color-mix(in srgb, ${cfg.colorVar} 8%, transparent);"
       role="alert"
       data-agent-failure

@@ -106,7 +106,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
   }
 
   return html`
-    <div class="overflow-x-auto rounded border border-card-border/60">
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
         <thead class="bg-[var(--white-3)] text-text-muted">
           <tr>
@@ -147,7 +147,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
   }
 
   return html`
-    <div class="overflow-x-auto rounded border border-card-border/60">
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
         <thead class="bg-[var(--white-3)] text-text-muted">
           <tr>
@@ -200,8 +200,8 @@ export function CascadeInspector() {
   ]
 
   return html`
-    <div class="flex flex-col gap-5">
-      <section class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
+    <div class="flex flex-col gap-8">
+      <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Cascade 검사기</div>
@@ -215,7 +215,7 @@ export function CascadeInspector() {
         </div>
       </section>
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="전략 추적">
+      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="전략 추적">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">전략 추적</div>
@@ -237,7 +237,7 @@ export function CascadeInspector() {
         }
       </section>
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">
+      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">
         <div class="mb-3">
           <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">프로바이더</div>
           <h3 class="mt-1 text-md font-semibold text-text-strong">건강도 스냅숏</h3>

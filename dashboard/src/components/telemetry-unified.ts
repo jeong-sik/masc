@@ -519,7 +519,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
           </span>
           ${scopeBadges.length > 0 ? html`
             <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-              ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </span>
           ` : null}
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)]">${expanded.value ? '-' : '+'}</span>
@@ -537,10 +537,10 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         <div class="px-3 pb-3 flex flex-col gap-2">
           ${scopeBadges.length > 0 ? html`
             <div class="flex flex-wrap gap-1.5">
-              ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <div class="rounded bg-[var(--color-bg-surface)] p-2">
+          <div class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] p-2">
             <div class="mb-1.5 flex items-center justify-between gap-2">
               <span class="text-3xs font-medium text-[var(--color-fg-disabled)]">원본 JSON</span>
               <${CopyIdButton}
@@ -595,7 +595,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           ` : null}
           ${item.scopeBadges.length > 0 ? html`
             <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-              ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
+              ${item.scopeBadges.map(badge => html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono">${badge}</span>`)}
             </span>
           ` : null}
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)]">${expanded.value ? '-' : '+'}</span>
@@ -611,21 +611,21 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       </div>
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'}>
         ${expanded.value ? html`
-          <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--color-fg-disabled)]">
+          <div class="rounded-[var(--r-1)] bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--color-fg-disabled)]">
             Latest: <span class="font-mono text-[var(--color-fg-primary)]">${latestPreview}</span>
           </div>
           ${item.entries.map((entry, index) => {
             const entryMeta = sourceMeta(entry.source)
             const ts = entryTimestamp(entry)
             return html`
-              <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
+              <div class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
                 <span class="font-mono text-[var(--color-fg-disabled)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
                 <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `
           })}
-          <div class="rounded bg-[var(--black-20)] px-2 py-1.5">
+          <div class="rounded-[var(--r-1)] bg-[var(--black-20)] px-2 py-1.5">
             <div class="flex items-start justify-between gap-2">
               <details class="min-w-0 flex-1">
                 <summary class="cursor-pointer text-3xs text-[var(--color-fg-disabled)]">원본 JSON</summary>
@@ -812,10 +812,10 @@ export function TelemetryUnified() {
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
-          <span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
-          ${sessionFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
-          ${operationFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
-          ${workerRunFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
+          <span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
+          ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
+          ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
+          ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
         </div>
       </div>
 

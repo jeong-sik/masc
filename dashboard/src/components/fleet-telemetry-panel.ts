@@ -213,7 +213,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               <div class="mt-0.5 text-3xs leading-relaxed">${event.summary}</div>
             </div>
             ${event.requires_decision
-              ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
+              ? html`<span class="rounded-[var(--r-1)] bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
               : null}
           </div>
           ${event.recommended_action
@@ -412,8 +412,8 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 <div class="mt-1 flex max-w-60 flex-wrap gap-1">
                   <span
                     class=${row.goal_linked
-                      ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
+                      ? 'rounded-[var(--r-1)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
+                      : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
                   >
                     ${row.goal_label
@@ -422,14 +422,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   </span>
                   <span
                     class=${row.sandbox_profile
-                      ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
+                      ? 'rounded-[var(--r-1)] bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
+                      : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
                   ${row.decision_required
-                    ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
+                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
                     : null}
                 </div>
                 ${row.goal_label
@@ -482,14 +482,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
+                  ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
+                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
                     : html`<span class="text-3xs text-[var(--color-fg-disabled)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
+                  class="rounded-[var(--r-1)] min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -542,7 +542,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
         <div class="flex items-center gap-2 text-2xs">
           <div class="flex min-w-0 flex-1 items-center gap-1.5">
             <div
-              class="h-1.5 rounded-sm bg-[var(--bad-10)]"
+              class="h-1.5 rounded-[var(--r-0)] bg-[var(--bad-10)]"
               style="width: ${Math.max(6, (category.count / maxCount) * 100)}%"
             ></div>
             <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
@@ -708,10 +708,10 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-3xs">
-            ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
-            ${offlineCount > 0 ? html`<span class="rounded-sm bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -719,7 +719,7 @@ export function FleetTelemetryPanel() {
             ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
           </span>
           <button
-            class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+            class="rounded-[var(--r-1)] bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>

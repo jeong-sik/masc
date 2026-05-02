@@ -65,8 +65,17 @@ const CURSOR_BUTTON_CLS = [
   'disabled:cursor-not-allowed disabled:text-[var(--color-fg-disabled)] disabled:hover:bg-transparent',
 ].join(' ')
 
+function finiteInteger(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.trunc(value)
+}
+
+function positiveInteger(value: number, fallback = 1): number {
+  return Math.max(1, finiteInteger(value, fallback))
+}
+
 function clampPage(page: number, totalPages: number): number {
-  const total = Math.max(1, Math.trunc(totalPages))
+  const total = positiveInteger(totalPages)
   if (!Number.isFinite(page)) return 1
   return Math.min(total, Math.max(1, Math.trunc(page)))
 }
@@ -88,10 +97,10 @@ export function paginationItems({
   siblingCount?: number
   boundaryCount?: number
 }): PageItem[] {
-  const total = Math.max(1, Math.trunc(totalPages))
+  const total = positiveInteger(totalPages)
   const current = clampPage(page, total)
-  const siblings = Math.max(0, Math.trunc(siblingCount))
-  const boundaries = Math.max(1, Math.trunc(boundaryCount))
+  const siblings = Math.max(0, finiteInteger(siblingCount, 1))
+  const boundaries = positiveInteger(boundaryCount)
   const visibleWithoutEllipsis = boundaries * 2 + siblings * 2 + 3
 
   if (total <= visibleWithoutEllipsis) return range(1, total)
@@ -140,7 +149,7 @@ export function Pagination({
   class: cx,
   testId,
 }: PaginationProps) {
-  const total = Math.max(1, Math.trunc(totalPages))
+  const total = positiveInteger(totalPages)
   const [uncontrolledPage, setUncontrolledPage] = useState(() =>
     clampPage(defaultPage, total),
   )

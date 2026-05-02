@@ -24,6 +24,25 @@ describe('paginationItems', () => {
   it('clamps invalid current pages', () => {
     expect(paginationItems({ page: 99, totalPages: 4 })).toEqual([1, 2, 3, 4])
   })
+
+  it('falls back to a single page for non-finite totals and counts', () => {
+    expect(paginationItems({ page: 2, totalPages: Number.NaN })).toEqual([1])
+    expect(paginationItems({ page: 2, totalPages: Number.POSITIVE_INFINITY })).toEqual([1])
+    expect(paginationItems({
+      page: 9,
+      totalPages: 18,
+      siblingCount: Number.NaN,
+      boundaryCount: Number.NaN,
+    })).toEqual([
+      1,
+      'ellipsis-start',
+      8,
+      9,
+      10,
+      'ellipsis-end',
+      18,
+    ])
+  })
 })
 
 describe('Pagination', () => {
@@ -78,6 +97,13 @@ describe('Pagination', () => {
     const nav = container.querySelector('[data-testid="pager"]')
     expect(nav).not.toBeNull()
     expect(nav?.getAttribute('aria-label')).toBe('Task pages')
+  })
+
+  it('renders a safe fallback when totalPages is not finite', () => {
+    const container = document.createElement('div')
+    render(h(Pagination, { totalPages: Number.NaN, defaultPage: 2 }), container)
+    expect(container.textContent).toContain('page 1 / 1')
+    expect(container.querySelectorAll('[aria-current="page"]').length).toBe(1)
   })
 })
 

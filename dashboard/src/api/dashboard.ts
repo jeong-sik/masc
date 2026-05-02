@@ -10,6 +10,7 @@ import {
   normalizeKeeperApprovalQueueItem,
   normalizePendingConfirmation,
 } from './board'
+import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import {
   parseAgentRelationsResponse,
@@ -1353,12 +1354,16 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
   return {
     disposition: asNullableString(raw.disposition),
     disposition_reason: asNullableString(raw.disposition_reason),
+    operator_disposition: asNullableString(raw.operator_disposition),
+    operator_disposition_reason: asNullableString(raw.operator_disposition_reason),
     needs_attention:
       typeof raw.needs_attention === 'boolean'
         ? raw.needs_attention
         : null,
     attention_reason: asNullableString(raw.attention_reason),
     next_human_action: asNullableString(raw.next_human_action),
+    latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
+    latest_next_action: asNullableString(raw.latest_next_action),
     approval_state: decodeGoalKeeperTrustApprovalState(raw.approval_state ?? raw.approval),
     execution_summary:
       decodeGoalKeeperTrustExecutionSummary(raw.execution_summary ?? raw.execution),

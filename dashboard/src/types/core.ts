@@ -298,10 +298,10 @@ export interface KeeperTrustSummary {
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null
-  approval_state?: KeeperTrustApprovalState | null
-  execution_summary?: KeeperTrustExecutionSummary | null
   latest_terminal_reason?: KeeperTrustTerminalReason | null
   latest_next_action?: string | null
+  approval_state?: KeeperTrustApprovalState | null
+  execution_summary?: KeeperTrustExecutionSummary | null
   latest_causal_event?: KeeperTrustLatestEvent | null
 }
 

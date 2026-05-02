@@ -832,6 +832,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     ?? trust?.execution_summary?.mutation_guard_summary
     ?? trust?.execution_summary?.sandbox_summary
     ?? null
+  const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
+  const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
+  const latestNextAction = trust?.latest_next_action?.trim() || null
+  const operatorDispositionReason = trust?.operator_disposition_reason?.trim() || null
 
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -863,11 +867,14 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>결과</div>
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
-      ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
+      ${trustSummary || trust?.approval_state?.state || trust?.next_human_action || latestTerminalCode || latestNextAction ? html`
         <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
+          ` : null}
+          ${latestTerminalCode ? html`
+            <div class="mt-2 text-xs leading-relaxed text-text-body">종료: ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</div>
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
             ${trust?.approval_state?.state ? html`
@@ -878,6 +885,16 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${trust?.next_human_action ? html`
               <span>다음 ${trust.next_human_action}</span>
+            ` : null}
+            ${latestNextAction ? html`
+              <span>권장 ${latestNextAction}</span>
+            ` : null}
+            ${/* Show operator_disposition_reason only when trustSummary is absent to avoid
+               repeating the root-cause twice. trustSummary coalesces attention_reason,
+               disposition_reason, sandbox_summary, and mutation_guard_summary — any of
+               those already convey the stopped-reaction context. */
+              operatorDispositionReason && !trustSummary ? html`
+              <span>운영자 ${operatorDispositionReason}</span>
             ` : null}
           </div>
         </div>

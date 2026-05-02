@@ -288,6 +288,9 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model) ?? asString(raw.active_model) ?? asString(raw.primary_model),
+    needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
+    attention_reason: asString(raw.attention_reason) ?? null,
+    next_human_action: asString(raw.next_human_action) ?? null,
     runtime_trust: normalizeKeeperTrust(raw.runtime_trust ?? raw.trust),
   }
 }

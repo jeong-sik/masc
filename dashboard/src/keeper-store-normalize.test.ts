@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveLifecycleState, normalizeKeepers, toKeeperPhase } from './keeper-store-normalize'
+import { deriveLifecycleState, normalizeKeepers, normalizeKeeperTrustTerminalReason, toKeeperPhase } from './keeper-store-normalize'
 
 describe('toKeeperPhase — backend lowercase to PascalCase normalization', () => {
   it('maps lowercase backend phase strings to PascalCase KeeperPhase', () => {
@@ -375,6 +375,59 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('preserves stopped-reaction fields in trust summary', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'blocked-keeper',
+        status: 'active',
+        trust: {
+          disposition: 'Alert',
+          operator_disposition: 'pause_runtime',
+          operator_disposition_reason: 'timeout_budget_exhausted',
+          needs_attention: true,
+          attention_reason: 'timeout_budget_exhausted',
+          latest_terminal_reason: {
+            code: 'timeout_budget_exhausted',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'Turn budget exhausted after 15 turns',
+            next_action: 'inspect_timeout_budget',
+          },
+          latest_next_action: 'inspect_timeout_budget',
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Alert',
+      operator_disposition: 'pause_runtime',
+      operator_disposition_reason: 'timeout_budget_exhausted',
+      needs_attention: true,
+      attention_reason: 'timeout_budget_exhausted',
+      latest_terminal_reason: {
+        code: 'timeout_budget_exhausted',
+        source: 'execution_receipt',
+        severity: 'bad',
+        summary: 'Turn budget exhausted after 15 turns',
+        next_action: 'inspect_timeout_budget',
+      },
+      latest_next_action: 'inspect_timeout_budget',
+    })
+  })
+
+  it('returns null latest_terminal_reason when code is missing', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'no-code-keeper',
+        status: 'active',
+        trust: {
+          latest_terminal_reason: { source: 'execution_receipt' },
+        },
+      },
+    ])
+    expect(keeper?.trust?.latest_terminal_reason).toBeNull()
+  })
+
   it('accepts live runtime_trust payloads and preserves terminal reason fields', () => {
     const [keeper] = normalizeKeepers([
       {
@@ -735,5 +788,47 @@ describe('normalizeKeepers turn_budget', () => {
     ])
     expect(k?.turn_budget?.reactive.source).toBe('env')
     expect(k?.turn_budget?.scheduled_autonomous.source).toBe('override')
+  })
+})
+
+describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
+  it('returns null for non-record input', () => {
+    expect(normalizeKeeperTrustTerminalReason(null)).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason('string')).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason(42)).toBeNull()
+  })
+
+  it('returns null when code field is absent or empty', () => {
+    expect(normalizeKeeperTrustTerminalReason({})).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason({ code: null })).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason({ code: '' })).toBeNull()
+  })
+
+  it('returns a full terminal reason when code is present', () => {
+    const result = normalizeKeeperTrustTerminalReason({
+      code: 'timeout_budget_exhausted',
+      source: 'execution_receipt',
+      severity: 'bad',
+      summary: 'keeper timed out before completing the turn',
+      next_action: 'adjust_timeout_budget',
+    })
+    expect(result).toEqual({
+      code: 'timeout_budget_exhausted',
+      source: 'execution_receipt',
+      severity: 'bad',
+      summary: 'keeper timed out before completing the turn',
+      next_action: 'adjust_timeout_budget',
+    })
+  })
+
+  it('fills optional fields with null when absent', () => {
+    const result = normalizeKeeperTrustTerminalReason({ code: 'runtime_blocked' })
+    expect(result).toEqual({
+      code: 'runtime_blocked',
+      source: null,
+      severity: null,
+      summary: null,
+      next_action: null,
+    })
   })
 })

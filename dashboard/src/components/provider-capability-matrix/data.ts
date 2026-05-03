@@ -246,6 +246,79 @@ export const BFCL_RANKINGS: BfclEntry[] = [
   { rank: 10, model: 'Kimi K2.6',               bfclV3: '—',      bfclV4: '경쟁력',  feature: 'SWE-Bench Pro 58.6%, 256K 컨텍스트',    license: 'Modified MIT' },
 ]
 
+// ── BFCL V4 Category Breakdown ──────────────────────────────────
+
+export interface BfclV4Category {
+  id: string
+  label: string
+  description: string
+  weight: string
+}
+
+export const BFCL_V4_CATEGORIES: BfclV4Category[] = [
+  { id: 'simple',      label: 'Simple Function Calling',   description: '단일 함수 호출',                   weight: '기본' },
+  { id: 'parallel',    label: 'Parallel Function Calling', description: '다중 동시 함수 호출',               weight: '기본' },
+  { id: 'multi-select', label: 'Multiple Function Selection', description: '여러 옵션 중 정확한 도구 선택',   weight: '기본' },
+  { id: 'relevance',   label: 'Relevance Detection',       description: '함수를 호출하지 말아야 할 때 판별', weight: '10% (Irrelevance)' },
+  { id: 'multi-turn',  label: 'Multi-turn Interactions',   description: '맥락 유지 지속 대화',               weight: '30%' },
+  { id: 'agentic',     label: 'Agentic (Holistic)',        description: '전체 에이전트 평가',                 weight: '40%' },
+]
+
+type CategoryLevel = 'high' | 'mid' | 'low'
+
+export interface BfclModelCategoryBreakdown {
+  model: string
+  overall: string
+  simple: CategoryLevel
+  parallel: CategoryLevel
+  multiTurn: CategoryLevel
+  agentic: CategoryLevel
+}
+
+export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
+  { model: 'GLM-4.5',         overall: '70.85%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Opus 4.1', overall: '70.36%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Sonnet 4', overall: '70.29%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Haiku 4.5',overall: '80.6%',  simple: 'high', parallel: 'high', multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'GPT-5',           overall: '59.22%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
+  { model: 'GPT-4.1-mini',    overall: '78.8%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Qwen 3-Coder',    overall: '경쟁력', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'DeepSeek V3.1',   overall: '개선됨', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Gemma 4 27B',     overall: '76.9%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+]
+
+export function categoryLevelClass(level: CategoryLevel): string {
+  switch (level) {
+    case 'high': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'mid':  return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'low':  return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+  }
+}
+
+export function categoryLevelLabel(level: CategoryLevel): string {
+  switch (level) {
+    case 'high': return '높음'
+    case 'mid':  return '중간'
+    case 'low':  return '낮음'
+  }
+}
+
+// ── Function Calling Harness Case Study ──────────────────────────
+
+export interface HarnessModel {
+  id: string
+  params: string
+  compileRate: string
+}
+
+export const HARNESS_MODELS: HarnessModel[] = [
+  { id: 'qwen3.5-397b-a17b', params: '17B/397B MoE',  compileRate: '100%' },
+  { id: 'qwen3.5-122b-a10b', params: '10B/122B MoE',  compileRate: '100%' },
+  { id: 'qwen3.5-27b',       params: '27B Dense',     compileRate: '100%' },
+  { id: 'qwen3.5-35b-a3b',   params: '3B/35B MoE',    compileRate: '100%' },
+  { id: 'qwen3-coder-next',  params: '3B/80B Coding', compileRate: '100%' },
+]
+
 // ── OAS Provider Capabilities (sec02 Table 1) ──────────────────
 
 export type UsageBehavior = 'emit' | 'strip'

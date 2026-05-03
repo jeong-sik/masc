@@ -721,10 +721,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let meta =
         match Keeper_registry.get ~base_path:config.base_path meta.name with
         | Some entry ->
-          let _ =
-            write_meta_with_merge
+          let () =
+            match write_meta_with_merge
               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
               config entry.meta
+            with
+            | Ok () -> ()
+            | Error err ->
+                Log.Keeper.warn
+                  "%s: turn-start write_meta_with_merge failed: %s"
+                  entry.meta.name err
           in
           entry.meta
         | None -> meta

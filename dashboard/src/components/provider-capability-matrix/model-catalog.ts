@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import {
+  PROVIDER_IDS,
   PROVIDER_MODELS,
   PROVIDER_LABELS,
   PROVIDER_CATEGORY,
@@ -10,7 +11,13 @@ import {
   GLM_CODING_PLAN_MAP,
   GLM_WIRING_GAPS,
   modelTierStyle,
+  type ProviderModelGroup,
 } from './data'
+
+const MODEL_GROUPS_BY_PROVIDER = new Map(PROVIDER_MODELS.map(group => [group.providerId, group]))
+const MODEL_CATALOG_GROUPS: ProviderModelGroup[] = PROVIDER_IDS.map(providerId =>
+  MODEL_GROUPS_BY_PROVIDER.get(providerId) ?? { providerId, models: [] },
+)
 
 function tierLabel(tier: string): string {
   switch (tier) {
@@ -45,18 +52,24 @@ function ModelTable({ group }: { group: typeof PROVIDER_MODELS[number] }) {
           </tr>
         </thead>
         <tbody>
-          ${group.models.map((m, i) => html`
-            <tr key=${m.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[11px] font-medium text-[var(--color-fg-primary)]">${m.id}</td>
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center">
-                <span class="inline-block rounded px-1 py-px text-[9px] font-bold ${modelTierStyle(m.tier)}">${tierLabel(m.tier)}</span>
+          ${group.models.length === 0 ? html`
+            <tr>
+              <td class="border-b border-[var(--color-border-default)] px-2 py-2 text-[10px] text-[var(--color-fg-muted)]" colSpan=${6}>
+                공식 모델 카탈로그 미등록. Provider capability는 matrix/providers 탭에서 추적.
               </td>
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${m.context}</td>
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-right font-mono text-[11px]">${m.inputPrice ?? '—'}</td>
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-right font-mono text-[11px]">${m.outputPrice ?? '—'}</td>
-              <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-muted)]">${m.notes ?? ''}</td>
             </tr>
-          `)}
+          ` : group.models.map((m, i) => html`
+              <tr key=${m.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[11px] font-medium text-[var(--color-fg-primary)]">${m.id}</td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center">
+                  <span class="inline-block rounded px-1 py-px text-[9px] font-bold ${modelTierStyle(m.tier)}">${tierLabel(m.tier)}</span>
+                </td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${m.context}</td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-right font-mono text-[11px]">${m.inputPrice ?? '—'}</td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-right font-mono text-[11px]">${m.outputPrice ?? '—'}</td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-muted)]">${m.notes ?? ''}</td>
+              </tr>
+            `)}
         </tbody>
       </table>
     </div>
@@ -165,7 +178,7 @@ export function ModelCatalog() {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        ${PROVIDER_MODELS.map(g => html`
+        ${MODEL_CATALOG_GROUPS.map(g => html`
           <${ModelTable} key=${g.providerId} group=${g} />
         `)}
       </div>

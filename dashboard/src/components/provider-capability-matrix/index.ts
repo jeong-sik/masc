@@ -44,23 +44,40 @@ const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
   { key: 'anti-patterns', label: '안티패턴' },
 ]
 
+const PROVIDER_REFRESH_MS = 30_000
+
 export function ProviderCapabilityMatrix() {
   const activeView = useSignal<CapView>('matrix')
   const liveProviders = useSignal<DashboardRuntimeProviderSnapshot[]>([])
   const updatedLabel = useSignal<string | null>(null)
 
   useEffect(() => {
-    const ctrl = new AbortController()
-    void fetchRuntimeProviders({ signal: ctrl.signal })
-      .then(res => {
-        liveProviders.value = res.providers
-        updatedLabel.value = res.updated_at ?? null
-      })
-      .catch(err => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        console.warn('[capability-matrix] provider fetch failed', err instanceof Error ? err.message : err)
-      })
-    return () => { ctrl.abort() }
+    let disposed = false
+    let inFlight: AbortController | null = null
+
+    const refresh = () => {
+      inFlight?.abort()
+      const ctrl = new AbortController()
+      inFlight = ctrl
+      void fetchRuntimeProviders({ signal: ctrl.signal })
+        .then(res => {
+          if (disposed || ctrl.signal.aborted) return
+          liveProviders.value = res.providers
+          updatedLabel.value = res.updated_at ?? null
+        })
+        .catch(err => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          console.warn('[capability-matrix] provider fetch failed', err instanceof Error ? err.message : err)
+        })
+    }
+
+    refresh()
+    const timer = window.setInterval(refresh, PROVIDER_REFRESH_MS)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      inFlight?.abort()
+    }
   }, [])
 
   const updatedAt = updatedLabel.value

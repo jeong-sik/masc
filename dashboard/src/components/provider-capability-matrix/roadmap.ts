@@ -69,6 +69,15 @@ function DependencyGraph() {
   `
 }
 
+function parsePercentRatio(value: string): number {
+  const parsed = Number.parseFloat(value.replace('%', ''))
+  return Number.isFinite(parsed) ? parsed / 100 : 0
+}
+
+function formatFte(value: number): string {
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}인`
+}
+
 function Timeline() {
   return html`
     <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
@@ -104,6 +113,14 @@ function Timeline() {
 }
 
 function ResourceTable() {
+  const totalHeadcount = RESOURCE_ALLOCATION.reduce((sum, row) => sum + row.headcount, 0)
+  const phaseTotals = RESOURCE_ALLOCATION[0]?.pct.map((_, phaseIndex) =>
+    RESOURCE_ALLOCATION.reduce(
+      (sum, row) => sum + (row.headcount * parsePercentRatio(row.pct[phaseIndex] ?? '0%')),
+      0,
+    ),
+  ) ?? []
+
   return html`
     <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
       <table class="w-full text-xs border-collapse">
@@ -130,12 +147,11 @@ function ResourceTable() {
             </tr>
           `)}
           <tr class="bg-[var(--white-4)] font-medium">
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1" colSpan=${2}>합계</td>
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">4인</td>
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">330%</td>
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">340%</td>
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">310%</td>
-            <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">240%</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1" colSpan=${2}>합계 FTE</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${totalHeadcount}인</td>
+            ${phaseTotals.map((total, i) => html`
+              <td key=${i} class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">${formatFte(total)}</td>
+            `)}
           </tr>
         </tbody>
       </table>

@@ -823,7 +823,7 @@ export const PHASE_TIMELINE: PhaseMilestone[] = [
 export const PHASE_COLORS: Record<string, string> = {
   'Phase 1': 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
   'Phase 2': 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
-  'Phase 3': 'bg-[var(--info-10)] text-[var(--color-status-info)]',
+  'Phase 3': 'bg-[var(--info-soft)] text-[var(--color-status-info)]',
   'Phase 4': 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]',
 }
 

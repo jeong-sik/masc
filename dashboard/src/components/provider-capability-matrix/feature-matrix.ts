@@ -2,7 +2,7 @@
 // Features grouped by sec01 §1.3 categories (Tool Use, Thinking, etc.).
 
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import {
   FEATURES,
   PROVIDER_IDS,
@@ -18,7 +18,11 @@ import { StatTile } from '../common/stat-tile'
 import { HeartbeatStrip } from '../common/heartbeat-strip'
 import { statusLabel } from '../../lib/status-label'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
-import type { HeartbeatState } from '../../lib/heartbeat-history'
+import {
+  recordHeartbeat,
+  useHeartbeatHistory,
+  type HeartbeatState,
+} from '../../lib/heartbeat-history'
 
 type LiveStatus = 'ok' | 'bad' | 'warn' | 'neutral'
 
@@ -63,12 +67,15 @@ export function liveStatusDot(
 
 const HB_SLOTS = 12
 
-function statusToSlots(status: LiveStatus | null): HeartbeatState[] {
-  if (status === null || status === 'neutral') return Array<HeartbeatState>(HB_SLOTS).fill('unknown')
+function providerHeartbeatId(providerId: string): string {
+  return `provider-capability:${providerId}`
+}
+
+function statusToHeartbeatSample(status: LiveStatus | null): HeartbeatState {
+  if (status === null || status === 'neutral' || status === 'warn') return 'unknown'
   switch (status) {
-    case 'ok':   return Array<HeartbeatState>(HB_SLOTS).fill('up')
-    case 'bad':  return Array<HeartbeatState>(HB_SLOTS).fill('down')
-    case 'warn': return Array<HeartbeatState>(HB_SLOTS).fill('down')
+    case 'ok':  return 'up'
+    case 'bad': return 'down'
   }
 }
 
@@ -92,11 +99,35 @@ function providerCategoryLabel(cat: string): string {
 
 const featById = new Map(FEATURES.map(f => [f.id, f]))
 
+function ProviderHeartbeatCell({
+  providerId,
+  status,
+}: {
+  providerId: string
+  status: LiveStatus | null
+}) {
+  const history = useHeartbeatHistory(providerHeartbeatId(providerId))
+  const label = status
+    ? `${PROVIDER_LABELS[providerId] ?? providerId}: ${statusLabel(status)}`
+    : `${PROVIDER_LABELS[providerId] ?? providerId}: 데이터 없음`
+  return html`<${HeartbeatStrip} history=${history} slots=${HB_SLOTS} ariaLabel=${label} />`
+}
+
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
   const summary = useMemo(() => computeMatrixSummary(), [])
   const cloudCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cloud').length
   const localCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'local').length
   const cliCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cli').length
+
+  useEffect(() => {
+    const sampled = new Set<string>()
+    for (const p of liveProviders) {
+      const matrixId = runtimeProviderToMatrixId(p.provider, p.runtime_kind ?? p.kind)
+      if (!matrixId || sampled.has(matrixId)) continue
+      sampled.add(matrixId)
+      recordHeartbeat(providerHeartbeatId(matrixId), statusToHeartbeatSample(liveProviderStatus(p)))
+    }
+  }, [liveProviders])
 
   return html`
     <div class="flex flex-col gap-2">
@@ -134,11 +165,9 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
               <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)]"></th>
               ${PROVIDER_IDS.map(pid => {
                 const dot = liveStatusDot(pid, liveProviders)
-                const hb = statusToSlots(dot)
-                const label = dot ? `${PROVIDER_LABELS[pid] ?? pid}: ${statusLabel(dot)}` : `${PROVIDER_LABELS[pid] ?? pid}: 데이터 없음`
                 return html`
                   <th key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5">
-                    <${HeartbeatStrip} history=${hb} slots=${HB_SLOTS} ariaLabel=${label} />
+                    <${ProviderHeartbeatCell} providerId=${pid} status=${dot} />
                   </th>
                 `
               })}

@@ -453,7 +453,15 @@ let keepers_section now : section =
       e.name phase_str e.transition_seq since last_info
   in
   let content = List.map format_entry sorted in
-  { title = "Keepers"; content; empty_msg = "(no keepers registered)" }
+  let guard_violations =
+    Prometheus.metric_total "masc_fsm_guard_violation_total" |> int_of_float
+  in
+  let title =
+    if guard_violations > 0
+    then Printf.sprintf "Keepers (guard violations: %d)" guard_violations
+    else "Keepers"
+  in
+  { title; content; empty_msg = "(no keepers registered)" }
 
 (** Attention section: items requiring operator action *)
 let attention_section now (snapshots : room_snapshot list) : section =
@@ -573,6 +581,9 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         working_count idle_count stuck_count offline_count
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
-      Printf.sprintf "KEEPERS: %d running / %d dead / %d other"
-        k_running k_dead k_other;
+      let guard_violations =
+        Prometheus.metric_total "masc_fsm_guard_violation_total" |> int_of_float
+      in
+      Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d violations"
+        k_running k_dead k_other guard_violations;
     ]

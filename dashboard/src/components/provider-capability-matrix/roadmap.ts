@@ -57,7 +57,7 @@ function DependencyGraph() {
     <div class="flex items-center gap-1 t-micro t-mono flex-wrap">
       ${phases.map((p, i) => html`
         <span key=${p} class="inline-flex items-center gap-0.5">
-          ${i > 0 ? html`<span class="t-disabled px-0.5">→</span>` : null}
+          ${i > 0 ? html`<span class="t-dim px-0.5">→</span>` : null}
           <span class="chip sm ${phaseColor(p)}">${p}</span>
         </span>
       `)}

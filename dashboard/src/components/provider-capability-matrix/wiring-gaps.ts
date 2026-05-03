@@ -35,7 +35,7 @@ export function WiringGaps() {
         ${providerCounts.map(([prov, cnt]) => html`
           <span key=${prov} class="inline-flex items-center gap-1">
             <span class="t-semi t-meta">${prov}</span>
-            <span class="t-disabled">${cnt}건</span>
+            <span class="t-dim">${cnt}건</span>
           </span>
         `)}
       </div>

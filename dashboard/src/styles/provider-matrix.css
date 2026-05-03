@@ -26,6 +26,10 @@
 .pm-th--center { text-align: center; }
 .pm-th--right  { text-align: right; }
 
+.pm-th--right-border {
+  border-right: 1px solid var(--color-border-default);
+}
+
 .pm-th--sticky {
   position: sticky;
   left: 0;

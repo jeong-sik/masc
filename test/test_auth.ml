@@ -143,8 +143,8 @@ let test_sha256_hash () =
 
 let test_default_auth_config () =
   let cfg = Types.default_auth_config in
-  check bool "auth disabled by default" false cfg.enabled;
-  check bool "token not required by default" false cfg.require_token;
+  check bool "auth enabled by default" true cfg.enabled;
+  check bool "token required by default" true cfg.require_token;
   check int "24hr expiry by default" 24 cfg.token_expiry_hours
 
 let test_save_load_auth_config () =
@@ -815,7 +815,8 @@ let test_admin_permissions () =
 
 let test_auth_disabled_allows_all () =
   let dir = setup_test_room () in
-  (* Auth disabled by default *)
+  Auth.save_auth_config dir
+    { Types.default_auth_config with enabled = false; require_token = false };
   let result = Auth.check_permission dir ~agent_name:"anyone" ~token:None ~permission:Types.CanInit in
   cleanup_test_room dir;
   match result with
@@ -1012,13 +1013,13 @@ let test_declared_tool_permission_from_tool_spec () =
 
 let test_enable_disable_auth () =
   let dir = setup_test_room () in
-  let initially_disabled = not (Auth.is_auth_enabled dir) in
+  let initially_enabled = Auth.is_auth_enabled dir in
   let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
   let enabled = Auth.is_auth_enabled dir in
   Auth.disable_auth dir;
   let disabled_again = not (Auth.is_auth_enabled dir) in
   cleanup_test_room dir;
-  check bool "auth disabled initially" true initially_disabled;
+  check bool "auth enabled initially" true initially_enabled;
   check bool "auth enabled after enable" true enabled;
   check bool "auth disabled after disable" true disabled_again
 

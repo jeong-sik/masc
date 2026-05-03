@@ -36,7 +36,7 @@ jobs:
           ./scripts/perf-baseline.sh --dry-run > baseline-output.txt 2>&1
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-baseline-${{ github.run_id }}
           path: baseline-output.txt

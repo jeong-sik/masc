@@ -1276,13 +1276,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 let msg = Printf.sprintf "Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
                   worktree_path branch_name branch_status prune_status in
                 if branch_exit <> 0 || prune_exit <> 0 then
-<<<<<<< HEAD
-                  Error (IoError (msg ^ "\n   Post-processing had failures"))
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-                  Error (IoError (msg ^ "\n   ⚠️ Post-processing had failures"))
-=======
                   Error (System (System_error.IoError (msg ^ "\n   ⚠️ Post-processing had failures")))
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
                 else
                   Ok msg
               end

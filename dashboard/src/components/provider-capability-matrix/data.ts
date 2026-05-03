@@ -360,7 +360,6 @@ export interface CascadeTraceScenario {
   label: string
   tier: 'typical' | 'ideal' | 'worst' | 'cooldown'
   steps: CascadeStep[]
-  totalMs: number
 }
 
 export const CASCADE_TRACES: CascadeTraceScenario[] = [
@@ -373,7 +372,6 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
       { provider: 'OpenAI',    status: 'miss', ms: 540, reason: 'timeout' },
       { provider: 'Moonshot',  status: 'hit',  ms: 420, reason: 'ok' },
     ],
-    totalMs: 1780,
   },
   {
     id: 'ct-first-hit',
@@ -384,7 +382,6 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
       { provider: 'OpenAI',    status: 'skipped',  ms: 0,   reason: 'skipped' },
       { provider: 'Moonshot',  status: 'skipped',  ms: 0,   reason: 'skipped' },
     ],
-    totalMs: 380,
   },
   {
     id: 'ct-exhaustion',
@@ -396,7 +393,6 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
       { provider: 'Moonshot',  status: 'miss', ms: 650,  reason: 'auth_failure' },
       { provider: 'Ollama',    status: 'miss', ms: 320,  reason: 'model_unloaded' },
     ],
-    totalMs: 3190,
   },
   {
     id: 'ct-cooldown',
@@ -407,7 +403,6 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
       { provider: 'OpenAI',    status: 'hit',  ms: 460, reason: 'ok' },
       { provider: 'Moonshot',  status: 'skipped', ms: 0, reason: 'skipped' },
     ],
-    totalMs: 560,
   },
 ]
 

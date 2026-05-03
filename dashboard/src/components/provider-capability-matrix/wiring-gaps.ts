@@ -31,10 +31,10 @@ export function WiringGaps() {
         <${StatTile} label="정확" value=${correct.length} variant="gold" hint=${`${WIRING_GAPS.length} 중`} />
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap t-micro t-mono t-dim px-1">
+      <div class="flex items-center gap-2 flex-wrap t-micro mono t-dim px-1">
         ${providerCounts.map(([prov, cnt]) => html`
           <span key=${prov} class="inline-flex items-center gap-1">
-            <span class="t-semi t-meta">${prov}</span>
+            <span class="font-semibold t-meta">${prov}</span>
             <span class="t-dim">${cnt}건</span>
           </span>
         `)}
@@ -57,7 +57,7 @@ export function WiringGaps() {
               return html`
                 <tr key=${gap.id} class="pm-row-alt">
                   <td class="pm-td pm-td--mono t-dim">${gap.id}</td>
-                  <td class="pm-td t-semi">${gap.provider}</td>
+                  <td class="pm-td font-semibold">${gap.provider}</td>
                   <td class="pm-td t-meta">${gap.capability}</td>
                   <td class="pm-td pm-td--mono t-dim">${gap.oasDeclares}</td>
                   <td class="pm-td t-meta">${gap.actualBehavior}</td>

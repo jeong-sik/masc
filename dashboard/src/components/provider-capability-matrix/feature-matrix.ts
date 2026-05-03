@@ -184,10 +184,12 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
               </tr>
               ${catFeatures.map((feat, j) => {
                 if (!feat) return null
-                const stickyBg = j % 2 === 0 ? '' : 'pm-td--alt-bg'
+                const isAltRow = j % 2 !== 0
+                const rowClass = isAltRow ? 'pm-row--alt' : ''
+                const stickyBg = isAltRow ? 'pm-td--alt-bg' : ''
                 return html`
-                  <tr key=${feat.id} class="pm-row-alt">
-                    <td class="pm-th--sticky ${stickyBg} pm-td--indent">
+                  <tr key=${feat.id} class="${rowClass}">
+                    <td class="pm-td pm-td--sticky ${stickyBg} pm-td--indent">
                       ${feat.label}
                     </td>
                     ${PROVIDER_IDS.map(pid => {

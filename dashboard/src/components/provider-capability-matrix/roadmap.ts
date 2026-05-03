@@ -21,10 +21,10 @@ function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
     <div class="pm-card ${phaseColor(item.id)}">
       <div class="pm-card-head">
         <div class="flex items-center gap-2">
-          <span class="t-label t-bold t-mono">${item.id}</span>
+          <span class="t-label font-bold mono">${item.id}</span>
           <span class="t-label">${item.area}</span>
         </div>
-        <span class="t-micro t-mono t-dim">${item.timeline}</span>
+        <span class="t-micro mono t-dim">${item.timeline}</span>
       </div>
       <div class="px-3 py-2 bg-[var(--shell-rail-bg)]">
         <p class="t-caption mb-1.5">${item.goal}</p>
@@ -37,7 +37,7 @@ function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
           <span class="t-dim">참조:</span>
           <span class="t-meta">${item.reference}</span>
         </div>
-        <div class="mt-1 t-micro t-ok t-semi">${item.effect}</div>
+        <div class="mt-1 t-micro t-ok font-semibold">${item.effect}</div>
         ${item.deps.length > 0 ? html`
           <div class="mt-1 flex items-center gap-1 t-micro t-dim">
             <span>선행:</span>
@@ -54,7 +54,7 @@ function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
 function DependencyGraph() {
   const phases = ROADMAP_ITEMS.map(r => r.id)
   return html`
-    <div class="flex items-center gap-1 t-micro t-mono flex-wrap">
+    <div class="flex items-center gap-1 t-micro mono flex-wrap">
       ${phases.map((p, i) => html`
         <span key=${p} class="inline-flex items-center gap-0.5">
           ${i > 0 ? html`<span class="t-dim px-0.5">→</span>` : null}
@@ -98,7 +98,7 @@ function Timeline() {
                 </td>
                 <td class="pm-td pm-td--right-border t-caption">${row.work}</td>
                 <td class="pm-td pm-td--right-border t-meta">${row.deliverable}</td>
-                <td class="pm-td t-micro t-mono t-dim">${row.deps}</td>
+                <td class="pm-td t-micro mono t-dim">${row.deps}</td>
               </tr>
             `
           })}
@@ -134,7 +134,7 @@ function ResourceTable() {
         <tbody>
           ${RESOURCE_ALLOCATION.map((row, i) => html`
             <tr key=${i} class="pm-row-alt">
-              <td class="pm-td pm-td--right-border t-semi">${row.track}</td>
+              <td class="pm-td pm-td--right-border font-semibold">${row.track}</td>
               <td class="pm-td pm-td--right-border t-micro t-meta">${row.scope}</td>
               <td class="pm-td pm-td--right-border pm-td--center pm-td--mono">${row.headcount}인</td>
               ${row.pct.map((p, j) => html`
@@ -162,7 +162,7 @@ function SuccessMetrics() {
         <div key=${m.id} class="pm-card">
           <div class="pm-card-head">
             <div class="flex items-center gap-2">
-              <span class="t-label t-semi">${m.title}</span>
+              <span class="t-label font-semibold">${m.title}</span>
               <span class="chip sm is-ok">Target: ${m.target}</span>
             </div>
           </div>
@@ -189,12 +189,12 @@ function SuccessMetrics() {
 export function Roadmap() {
   return html`
     <div class="flex flex-col gap-4">
-      <div class="t-micro t-mono t-dim px-1">
+      <div class="t-micro mono t-dim px-1">
         <span>sec06–07 — P0–P7 순차-병렬 하이브리드 개선 계획 + 16주 구현 로드맵</span>
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">의존성 그래프</h4>
+        <h4 class="t-label font-semibold mb-2">의존성 그래프</h4>
         <${DependencyGraph} />
       </div>
 
@@ -205,7 +205,7 @@ export function Roadmap() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">Per-Provider 적용 매트릭스</h4>
+        <h4 class="t-label font-semibold mb-2">Per-Provider 적용 매트릭스</h4>
         <p class="t-micro t-dim mb-2">sec06 Table 6-2 — ✅ 직접 적용, ⚠️ 제한적, ❌ 불가, — 해당 없음</p>
         <div class="pm-scroll">
           <table class="pm-table">
@@ -220,7 +220,7 @@ export function Roadmap() {
             <tbody>
               ${ROADMAP_ITEMS.map((item, i) => html`
                 <tr key=${item.id} class="pm-row-alt">
-                  <td class="pm-td pm-th--sticky pm-td--mono t-bold">${item.id}</td>
+                  <td class="pm-td pm-td--sticky pm-td--mono font-bold">${item.id}</td>
                   ${PROVIDER_IDS.map(pid => {
                     const a = APPLICABILITY_MATRIX[item.id][pid] ?? 'na'
                     return html`
@@ -239,19 +239,19 @@ export function Roadmap() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">Phase별 구현 타임라인</h4>
+        <h4 class="t-label font-semibold mb-2">Phase별 구현 타임라인</h4>
         <p class="t-micro t-dim mb-2">sec07 Table 7-1 — 16주 4-Phase 순차-병렬 하이브리드 로드맵</p>
         <${Timeline} />
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">리소스 할당</h4>
+        <h4 class="t-label font-semibold mb-2">리소스 할당</h4>
         <p class="t-micro t-dim mb-2">sec07 Table 7-2 — 3 트랙 × 4 Phase 병렬 진행</p>
         <${ResourceTable} />
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">성공 지표</h4>
+        <h4 class="t-label font-semibold mb-2">성공 지표</h4>
         <p class="t-micro t-dim mb-2">sec07 §7.3 — 16주 로드맵 완료 판정 기준 (3개 교차 검증 지표)</p>
         <${SuccessMetrics} />
       </div>

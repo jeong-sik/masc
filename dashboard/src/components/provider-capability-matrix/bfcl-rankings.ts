@@ -25,11 +25,11 @@ function V4CategoryTable() {
         <tbody>
           ${BFCL_V4_CATEGORIES.map((cat, i) => html`
             <tr key=${cat.id} class="pm-row-alt">
-              <td class="pm-td t-semi">${cat.label}</td>
+              <td class="pm-td font-semibold">${cat.label}</td>
               <td class="pm-td t-meta">${cat.description}</td>
               <td class="pm-td pm-td--center pm-td--mono ${
-                cat.weight === '40%' ? 't-err t-bold'
-                : cat.weight === '30%' ? 't-warn t-bold'
+                cat.weight === '40%' ? 't-ok font-bold'
+                : cat.weight === '30%' ? 't-warn font-bold'
                 : 't-dim'
               }">
                 ${cat.weight}
@@ -59,8 +59,8 @@ function ModelBreakdownTable() {
         <tbody>
           ${BFCL_MODEL_BREAKDOWN.map((m, i) => html`
             <tr key=${m.model} class="pm-row-alt">
-              <td class="pm-td t-semi">${m.model}</td>
-              <td class="pm-td pm-td--center pm-td--mono t-bold">${m.overall}</td>
+              <td class="pm-td font-semibold">${m.model}</td>
+              <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
               ${([m.simple, m.parallel, m.multiTurn, m.agentic] as const).map((level, j) => html`
                 <td key=${j} class="pm-td pm-td--center">
                   <span class="pm-cell-badge ${categoryLevelClass(level)}">
@@ -81,13 +81,13 @@ function HarnessCaseStudy() {
     <div class="pm-card">
       <div class="pm-card-head">
         <div class="flex items-center gap-2">
-          <span class="t-label t-semi">Function Calling Harness</span>
+          <span class="t-label font-semibold">Function Calling Harness</span>
           <span class="t-micro t-dim">Sam Chon / Wrtn Technologies</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="pm-td--mono t-caption t-err">6.75%</span>
           <span class="t-micro t-dim">→</span>
-          <span class="pm-td--mono t-caption t-ok t-bold">100%</span>
+          <span class="pm-td--mono t-caption t-ok font-bold">100%</span>
         </div>
       </div>
       <div class="px-3 py-2 bg-[var(--shell-rail-bg)]">
@@ -107,9 +107,9 @@ function HarnessCaseStudy() {
             <tbody>
               ${HARNESS_MODELS.map((hm, i) => html`
                 <tr key=${hm.id} class="pm-row-alt">
-                  <td class="pm-td pm-td--mono t-semi">${hm.id}</td>
+                  <td class="pm-td pm-td--mono font-semibold">${hm.id}</td>
                   <td class="pm-td t-micro t-meta">${hm.params}</td>
-                  <td class="pm-td pm-td--center pm-td--mono t-ok t-bold">${hm.compileRate}</td>
+                  <td class="pm-td pm-td--center pm-td--mono t-ok font-bold">${hm.compileRate}</td>
                 </tr>
               `)}
             </tbody>
@@ -127,7 +127,7 @@ function HarnessCaseStudy() {
 export function BfclRankings() {
   return html`
     <div class="flex flex-col gap-4">
-      <div class="t-micro t-mono t-dim px-1">
+      <div class="t-micro mono t-dim px-1">
         <span>BFCL = 스키마 준수율 측정</span>
         <span class="text-[var(--color-border-default)] mx-2">|</span>
         <span>MCPMark = 작업 완료율 측정</span>
@@ -154,16 +154,16 @@ export function BfclRankings() {
               return html`
                 <tr key=${entry.model} class="pm-row-alt">
                   <td class="pm-td pm-td--center pm-td--mono t-dim">${entry.rank}</td>
-                  <td class="pm-td t-semi">${entry.model}</td>
+                  <td class="pm-td font-semibold">${entry.model}</td>
                   <td class="pm-td pm-td--right pm-td--mono ${
-                    hasV3 ? 't-bold' : 't-dim'
+                    hasV3 ? 'font-bold' : 't-dim'
                   }">
-                    ${hasV3 ? html`<span class="t-bold">${entry.bfclV3}</span>` : entry.bfclV3}
+                    ${hasV3 ? html`<span class="font-bold">${entry.bfclV3}</span>` : entry.bfclV3}
                   </td>
                   <td class="pm-td pm-td--right pm-td--mono ${
-                    hasV4 ? 't-ok t-bold' : 't-dim'
+                    hasV4 ? 't-ok font-bold' : 't-dim'
                   }">
-                    ${hasV4 ? html`<span class="t-bold">${entry.bfclV4}</span>` : entry.bfclV4}
+                    ${hasV4 ? html`<span class="font-bold">${entry.bfclV4}</span>` : entry.bfclV4}
                   </td>
                   <td class="pm-td t-meta">${entry.feature}</td>
                   <td class="pm-td">
@@ -183,7 +183,7 @@ export function BfclRankings() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">BFCL V4 카테고리 구성</h4>
+        <h4 class="t-label font-semibold mb-2">BFCL V4 카테고리 구성</h4>
         <p class="t-micro t-dim mb-2">
           Multi-turn(30%) + Agentic(40%) = 70%가 실제 에이전트 시나리오 평가. AST 기반 코드 수준 평가로 텍스트 매칭 한계 극복.
         </p>
@@ -191,7 +191,7 @@ export function BfclRankings() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">모델별 카테고리 성능 분포</h4>
+        <h4 class="t-label font-semibold mb-2">모델별 카테고리 성능 분포</h4>
         <p class="t-micro t-dim mb-2">
           상위 3개 모델(GLM-4.5, Claude Opus 4.1, Sonnet 4)은 모든 카테고리에서 '높음'.
           GPT-5는 Agentic에서만 '높음', Simple/Parallel은 '중간'.
@@ -200,7 +200,7 @@ export function BfclRankings() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">Harness 사례: 6.75% → 100%</h4>
+        <h4 class="t-label font-semibold mb-2">Harness 사례: 6.75% → 100%</h4>
         <p class="t-micro t-dim mb-2">
           검증-피드백-수정 루프(Typia)로 소형 모델도 복잡 스키마 100% 달성. P0 Verification Loop의 참조 구현.
         </p>

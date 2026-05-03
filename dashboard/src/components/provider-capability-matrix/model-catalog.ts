@@ -37,8 +37,8 @@ function ModelTable({ group }: { group: typeof PROVIDER_MODELS[number] }) {
   return html`
     <div class="pm-card">
       <div class="pm-card-head">
-        <span class="t-label t-semi">${PROVIDER_LABELS[group.providerId] ?? group.providerId}</span>
-        <span class="t-micro t-mono t-dim">${group.models.length} models · ${catBadge}</span>
+        <span class="t-label font-semibold">${PROVIDER_LABELS[group.providerId] ?? group.providerId}</span>
+        <span class="t-micro mono t-dim">${group.models.length} models · ${catBadge}</span>
       </div>
       <table class="pm-table">
         <thead class="pm-thead">
@@ -60,7 +60,7 @@ function ModelTable({ group }: { group: typeof PROVIDER_MODELS[number] }) {
             </tr>
           ` : group.models.map((m, i) => html`
               <tr key=${m.id} class="pm-row-alt">
-                <td class="pm-td pm-td--mono t-semi">${m.id}</td>
+                <td class="pm-td pm-td--mono font-semibold">${m.id}</td>
                 <td class="pm-td pm-td--center">
                   <span class="chip sm ${modelTierStyle(m.tier)}">${tierLabel(m.tier)}</span>
                 </td>
@@ -94,7 +94,7 @@ function CliTransportTable() {
         <tbody>
           ${CLI_TRANSPORTS.map((t, i) => html`
             <tr key=${t.providerId} class="pm-row-alt">
-              <td class="pm-td t-semi">${PROVIDER_LABELS[t.providerId] ?? t.providerId}</td>
+              <td class="pm-td font-semibold">${PROVIDER_LABELS[t.providerId] ?? t.providerId}</td>
               <td class="pm-td pm-td--mono">${t.binary}</td>
               <td class="pm-td pm-td--right pm-td--mono">${t.loc.toLocaleString()}</td>
               <td class="pm-td pm-td--center pm-td--mono">${t.promptMode}</td>
@@ -113,7 +113,7 @@ function GlmCodingPlanSection() {
   return html`
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div>
-        <h5 class="t-label t-semi mb-2">Claude Code → GLM Coding Plan 매핑</h5>
+        <h5 class="t-label font-semibold mb-2">Claude Code → GLM Coding Plan 매핑</h5>
         <div class="pm-scroll">
           <table class="pm-table">
             <thead class="pm-thead">
@@ -127,7 +127,7 @@ function GlmCodingPlanSection() {
               ${GLM_CODING_PLAN_MAP.map((m, i) => html`
                 <tr key=${i} class="pm-row-alt">
                   <td class="pm-td pm-td--mono t-micro">${m.envVar}</td>
-                  <td class="pm-td pm-td--mono t-semi">${m.glmModel}</td>
+                  <td class="pm-td pm-td--mono font-semibold">${m.glmModel}</td>
                   <td class="pm-td t-micro t-dim">${m.note}</td>
                 </tr>
               `)}
@@ -136,7 +136,7 @@ function GlmCodingPlanSection() {
         </div>
       </div>
       <div>
-        <h5 class="t-label t-semi mb-2">OAS vs 공식 문서 간격</h5>
+        <h5 class="t-label font-semibold mb-2">OAS vs 공식 문서 간격</h5>
         <div class="pm-scroll">
           <table class="pm-table">
             <thead class="pm-thead">
@@ -149,7 +149,7 @@ function GlmCodingPlanSection() {
             <tbody>
               ${GLM_WIRING_GAPS.map((g, i) => html`
                 <tr key=${i} class="pm-row-alt">
-                  <td class="pm-td t-caption t-semi">${g.area}</td>
+                  <td class="pm-td t-caption font-semibold">${g.area}</td>
                   <td class="pm-td pm-td--mono t-micro t-err">${g.oasCurrent}</td>
                   <td class="pm-td pm-td--mono t-micro t-ok">${g.official}</td>
                 </tr>
@@ -168,7 +168,7 @@ function GlmCodingPlanSection() {
 export function ModelCatalog() {
   return html`
     <div class="flex flex-col gap-4">
-      <div class="t-micro t-mono t-dim px-1">
+      <div class="t-micro mono t-dim px-1">
         <span>Provider별 공식 모델 카탈로그 + 가격 + Context 한계</span>
         <span class="text-[var(--color-border-default)] mx-2">|</span>
         <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-sm bg-[var(--ok-10)]"></span> Flagship</span>
@@ -184,13 +184,13 @@ export function ModelCatalog() {
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">CLI Transport 구현 비교</h4>
+        <h4 class="t-label font-semibold mb-2">CLI Transport 구현 비교</h4>
         <p class="t-micro t-dim mb-2">OAS CLI transport 계층의 구현 복잡도와 프로토콜 차이</p>
         <${CliTransportTable} />
       </div>
 
       <div>
-        <h4 class="t-label t-semi mb-2">GLM Coding Plan 특수 매핑</h4>
+        <h4 class="t-label font-semibold mb-2">GLM Coding Plan 특수 매핑</h4>
         <p class="t-micro t-dim mb-2">Claude Code 호환 엔드포인트를 통한 GLM 모델 매핑 + OAS wiring 간격</p>
         <${GlmCodingPlanSection} />
       </div>

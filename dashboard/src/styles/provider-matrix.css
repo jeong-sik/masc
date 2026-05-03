@@ -38,6 +38,15 @@
   border-right: 1px solid var(--color-border-default);
 }
 
+/* sticky td — inherits row background so alternating stripes show through */
+.pm-td--sticky {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: inherit;
+  border-right: 1px solid var(--color-border-default);
+}
+
 /* ════════ TABLE BODY ════════ */
 .pm-td {
   border-bottom: 1px solid var(--color-border-default);
@@ -58,6 +67,11 @@
 
 /* alternating row — apply to tr */
 .pm-row-alt:nth-child(even) {
+  background: var(--color-bg-hover);
+}
+
+/* explicit alt row — use when nth-child is unreliable (e.g. interleaved header rows) */
+.pm-row--alt {
   background: var(--color-bg-hover);
 }
 
@@ -162,8 +176,8 @@
 }
 
 /* ════════ CHIP EXTENSIONS ════════
-   Map to primitives.css .chip base for matrix-specific badges. */
-.chip.sm.is-ghost {
+   Scoped ghost chip override for provider-matrix cards only. */
+.pm-card .chip.sm.is-ghost {
   background: var(--white-4, var(--color-bg-hover));
   color: var(--color-fg-muted);
 }

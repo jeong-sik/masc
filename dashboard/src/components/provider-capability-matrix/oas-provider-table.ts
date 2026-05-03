@@ -49,7 +49,7 @@ export function OasProviderTable() {
               const isCli = prov.usage === 'strip'
               return html`
                 <tr key=${prov.id} class="pm-row-alt ${isCli ? 'pm-row--cli' : ''}">
-                  <td class="pm-th--sticky pm-td">
+                  <td class="pm-td pm-td--sticky">
                     <div class="flex items-center gap-1.5">
                       <${StatusDot} size="xs" class=${isCli ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'} />
                       ${prov.label}

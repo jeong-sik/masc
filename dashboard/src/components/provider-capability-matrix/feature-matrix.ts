@@ -14,6 +14,7 @@ import {
 import { StatusDot } from '../common/status-dot'
 import { StatTile } from '../common/stat-tile'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
+import type { HeartbeatState } from '../../lib/heartbeat-history'
 
 type LiveStatus = 'ok' | 'bad' | 'warn' | 'neutral'
 
@@ -56,6 +57,39 @@ export function liveStatusDot(
   return null
 }
 
+const HB_SLOTS = 12
+
+function mockHeartbeat(status: LiveStatus | null): HeartbeatState[] {
+  if (status === null) return Array(HB_SLOTS).fill('unknown')
+  switch (status) {
+    case 'ok':      return ['up','up','up','up','down','up','up','up','up','up','up','up']
+    case 'bad':     return ['down','down','down','up','down','down','down','down','down','down','down','down']
+    case 'warn':    return ['up','up','down','up','up','down','up','down','up','up','down','up']
+    case 'neutral': return Array(HB_SLOTS).fill('unknown')
+  }
+}
+
+const HB_COLOR: Record<HeartbeatState, string> = {
+  up: 'bg-[var(--ok-10)]',
+  down: 'bg-[var(--bad-10)]',
+  unknown: 'bg-[var(--white-8)]',
+}
+
+function MiniHeartbeat({ history }: { history: HeartbeatState[] }) {
+  const upCount = history.filter(h => h === 'up').length
+  const observed = history.filter(h => h !== 'unknown').length
+  const label = observed === 0
+    ? '상태 데이터 없음'
+    : `${upCount}/${observed} 정상`
+  return html`
+    <div class="flex items-end gap-px justify-center" title=${label}>
+      ${history.map((s, i) => html`
+        <span key=${i} class="w-0.5 h-1.5 rounded-sm ${HB_COLOR[s]}"></span>
+      `)}
+    </div>
+  `
+}
+
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
   const summary = useMemo(() => computeMatrixSummary(), [])
   const liveOk = liveProviders.filter(p => liveProviderStatus(p) === 'ok').length
@@ -87,6 +121,18 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
                       <span>${PROVIDER_LABELS[pid] ?? pid}</span>
                       ${kind === 'cli' ? html`<span class="text-[8px] font-mono text-[var(--color-fg-disabled)] uppercase">cli</span>` : null}
                     </div>
+                  </th>
+                `
+              })}
+            </tr>
+            <tr class="bg-[var(--white-4)]">
+              <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)]"></th>
+              ${PROVIDER_IDS.map(pid => {
+                const dot = liveStatusDot(pid, liveProviders)
+                const hb = mockHeartbeat(dot)
+                return html`
+                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5">
+                    <${MiniHeartbeat} history=${hb} />
                   </th>
                 `
               })}

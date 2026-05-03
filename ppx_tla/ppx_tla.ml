@@ -595,14 +595,19 @@ let _ : Deriving.t =
 
    becomes (conceptually):
      let start_turn state input =
-       assert (state.phase = `Idle && not state.stop_signaled);
+       Keeper_fsm_guard_runtime.wrap_unit
+         ~action:"start_turn"
+         ~stage:"guard"
+         (fun () -> assert (state.phase = `Idle && not state.stop_signaled));
        body
 
-   For curried definitions ([let f x y = body]) the assert is injected
-   into the innermost lambda body, so it fires per-application rather
-   than per-partial-application.
+   [wrap_unit] records guard assertion failures in the Prometheus FSM
+   guard counter and follows the runtime re-raise policy. For curried
+   definitions ([let f x y = body]) the wrapped assert is injected into
+   the innermost lambda body, so it fires per-application rather than
+   per-partial-application.
 
-   Constant ([non-lambda]) bindings get the assert evaluated at
+   Constant ([non-lambda]) bindings get the wrapped assert evaluated at
    binding-creation time (rare in practice for FSM transition tables).
 
    Honest about scope: this is a lightweight runtime check that only
@@ -649,9 +654,14 @@ let make_wrap_unit_call ~loc ~action_str thunk =
 let inject_wrapped_body ~action_str assert_expr expr =
   let loc = expr.pexp_loc in
   let wrap_assert_as_unit =
+    let unit_pat =
+      Ast_builder.Default.ppat_construct ~loc
+        (Loc.make ~loc (Longident.Lident "()"))
+        None
+    in
     let thunk =
       Ast_builder.Default.pexp_fun ~loc Asttypes.Nolabel None
-        (Ast_helper.Pat.any ~loc ()) assert_expr
+        unit_pat assert_expr
     in
     make_wrap_unit_call ~loc ~action_str thunk
   in
@@ -688,7 +698,9 @@ class fsm_guard_mapper =
           let action_str =
             match vb.pvb_pat.ppat_desc with
             | Ppat_var { txt } -> txt
-            | _ -> "_"
+            | _ ->
+                Location.raise_errorf ~loc:vb.pvb_pat.ppat_loc
+                  "[@@fsm_guard]: expected a simple let-binding name so the guard metric has a stable action label"
           in
           let new_expr = inject_wrapped_body ~action_str assert_expr vb.pvb_expr in
           { vb with pvb_expr = new_expr }

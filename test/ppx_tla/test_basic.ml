@@ -119,9 +119,9 @@ let test_classified_predicates () =
 
 (* Cycle 12 (PR #11450): [@@fsm_guard "expr"] runtime assertion injection.
    The guard is parsed as an OCaml boolean expression at PPX time and
-   injected as [assert (...)] into the function body. For curried
-   bindings the assert lands in the innermost lambda so it fires per
-   application, not per partial application. *)
+   injected through [Keeper_fsm_guard_runtime.wrap_unit] into the function
+   body. For curried bindings the wrapped assert lands in the innermost
+   lambda so it fires per application, not per partial application. *)
 
 let f_with_guard x = x + 1
 [@@fsm_guard "x >= 0"]

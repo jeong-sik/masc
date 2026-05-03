@@ -8,7 +8,7 @@
 
 let invocations : (string * string) list ref = ref []
 
-let wrap_unit ~action ~stage thunk =
+let wrap_unit ~(action : string) ~(stage : string) (thunk : unit -> unit) : unit =
   invocations := (action, stage) :: !invocations;
   thunk ()
 

@@ -355,7 +355,7 @@ export interface CascadeStep {
   reason: string
 }
 
-export interface CascadeTrace {
+export interface CascadeTraceScenario {
   id: string
   label: string
   tier: 'typical' | 'ideal' | 'worst' | 'cooldown'
@@ -363,7 +363,7 @@ export interface CascadeTrace {
   totalMs: number
 }
 
-export const CASCADE_TRACES: CascadeTrace[] = [
+export const CASCADE_TRACES: CascadeTraceScenario[] = [
   {
     id: 'ct-rate-limit',
     label: 'Rate-limit → Fallback',
@@ -419,7 +419,7 @@ export function cascadeStepColor(status: CascadeStepStatus): string {
   }
 }
 
-export function cascadeTierLabel(tier: CascadeTrace['tier']): string {
+export function cascadeTierLabel(tier: CascadeTraceScenario['tier']): string {
   switch (tier) {
     case 'typical':  return '일반'
     case 'ideal':    return '이상'
@@ -428,7 +428,7 @@ export function cascadeTierLabel(tier: CascadeTrace['tier']): string {
   }
 }
 
-export function cascadeTierStyle(tier: CascadeTrace['tier']): string {
+export function cascadeTierStyle(tier: CascadeTraceScenario['tier']): string {
   switch (tier) {
     case 'typical':  return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]'
     case 'ideal':    return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'

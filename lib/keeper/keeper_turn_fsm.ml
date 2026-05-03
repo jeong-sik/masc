@@ -22,18 +22,59 @@ type failure_reason =
       backtrace : string option;
     }
 
-type turn_state =
-  | Idle [@tla.idle]
-  | Phase_gating [@tla.active]
-  | Cascade_routing [@tla.active]
-  | Awaiting_provider [@tla.active]
-  | Streaming [@tla.active]
-  | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
-  | Completing [@tla.active]
-  | Done [@tla.terminal]
-  | Failed of failure_reason [@tla.terminal]
-  | Cancelled of cancel_reason [@tla.terminal]
-[@@deriving tla]
+type _ turn_state =
+  | Idle : [`Idle] turn_state [@tla.idle]
+  | Phase_gating : [`Phase_gating] turn_state [@tla.active]
+  | Cascade_routing : [`Cascade_routing] turn_state [@tla.active]
+  | Awaiting_provider : [`Awaiting_provider] turn_state [@tla.active]
+  | Streaming : [`Streaming] turn_state [@tla.active]
+  | Awaiting_tool_result : [`Awaiting_tool_result] turn_state [@tla.symbol "awaiting_tool"] [@tla.active]
+  | Completing : [`Completing] turn_state [@tla.active]
+  | Done : [`Done] turn_state [@tla.terminal]
+  | Failed : failure_reason -> [`Failed] turn_state [@tla.terminal]
+  | Cancelled : cancel_reason -> [`Cancelled] turn_state [@tla.terminal]
+
+let to_tla_symbol : type a. a turn_state -> string = function
+  | Idle -> "idle"
+  | Phase_gating -> "phase_gating"
+  | Cascade_routing -> "cascade_routing"
+  | Awaiting_provider -> "awaiting_provider"
+  | Streaming -> "streaming"
+  | Awaiting_tool_result -> "awaiting_tool"
+  | Completing -> "completing"
+  | Done -> "done"
+  | Failed _ -> "failed"
+  | Cancelled _ -> "cancelled"
+
+let all_symbols = [
+  "idle"; "phase_gating"; "cascade_routing"; "awaiting_provider";
+  "streaming"; "awaiting_tool"; "completing"; "done"; "failed"; "cancelled"
+]
+
+let active_symbols = [
+  "phase_gating"; "cascade_routing"; "awaiting_provider";
+  "streaming"; "awaiting_tool"; "completing"
+]
+
+let terminal_symbols = [
+  "done"; "failed"; "cancelled"
+]
+
+let idle_symbols = [ "idle" ]
+
+let is_active : type a. a turn_state -> bool = function
+  | Phase_gating | Cascade_routing | Awaiting_provider | Streaming | Awaiting_tool_result | Completing -> true
+  | _ -> false
+
+let is_terminal : type a. a turn_state -> bool = function
+  | Done | Failed _ | Cancelled _ -> true
+  | _ -> false
+
+let is_idle : type a. a turn_state -> bool = function
+  | Idle -> true
+  | _ -> false
+
+
 
 let cancel_reason_label = function
   | Cancelled_supervisor_stop -> "supervisor_stop"
@@ -50,7 +91,7 @@ let failure_reason_label = function
   | Failure_runtime_error _ -> "runtime_error"
   | Failure_unexpected_exception _ -> "unexpected_exception"
 
-let turn_state_label = function
+let turn_state_label : type a. a turn_state -> string = function
   | Failed reason ->
       to_tla_symbol (Failed reason) ^ ":" ^ failure_reason_label reason
   | Cancelled reason ->
@@ -80,7 +121,9 @@ let pp_failure_reason fmt = function
   | Failure_unexpected_exception { exn; _ } ->
       Format.fprintf fmt "unexpected_exception(%s)" exn
 
-let pp_turn_state fmt s =
+let to_tla_symbol = turn_state_label
+
+let pp_turn_state fmt (s : _ turn_state) =
   Format.pp_print_string fmt (turn_state_label s)
 
 type transition_action =
@@ -141,7 +184,13 @@ let same_tla_state a b =
 let same_observable_state a b =
   String.equal (turn_state_label a) (turn_state_label b)
 
-let classify_transition ?ctx ~from_state ~to_state () =
+
+type any_state = Any : _ turn_state -> any_state
+
+let any_state_label (Any s) = turn_state_label s
+let pp_any_state fmt (Any s) = pp_turn_state fmt s
+
+let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   let stop_signaled_before =
     match ctx with
     | None -> default_transition_context.stop_signaled_before
@@ -167,39 +216,39 @@ let classify_transition ?ctx ~from_state ~to_state () =
     | None -> true
     | Some _ -> stop_raised
   in
-  match from_state, to_state with
-  | Idle, Phase_gating when not stop_signaled_before ->
+  match Any from_state, Any to_state with
+  | Any Idle, Any Phase_gating when not stop_signaled_before ->
       Some StartTurn
-  | Phase_gating, Done when not stop_signaled_before ->
+  | Any Phase_gating, Any Done when not stop_signaled_before ->
       Some PhaseGateSkip
-  | Phase_gating, Cascade_routing when not stop_signaled_before ->
+  | Any Phase_gating, Any Cascade_routing when not stop_signaled_before ->
       Some PhaseGateOk
-  | Cascade_routing, Awaiting_provider when not stop_signaled_before ->
+  | Any Cascade_routing, Any Awaiting_provider when not stop_signaled_before ->
       Some CascadeRouted
-  | Cascade_routing, Failed (Failure_cascade_unavailable _)
+  | Any Cascade_routing, Any (Failed (Failure_cascade_unavailable _))
     when not stop_signaled_before ->
       Some CascadeUnavailable
-  | Awaiting_provider, Streaming when not stop_signaled_before ->
+  | Any Awaiting_provider, Any Streaming when not stop_signaled_before ->
       Some ProviderResponded
-  | Awaiting_provider, Cancelled Cancelled_provider_timeout
+  | Any Awaiting_provider, Any (Cancelled Cancelled_provider_timeout)
     when not stop_signaled_before ->
       Some ProviderTimeout
-  | Streaming, Awaiting_tool_result when not stop_signaled_before ->
+  | Any Streaming, Any Awaiting_tool_result when not stop_signaled_before ->
       Some StreamYieldsTool
-  | Awaiting_tool_result, Streaming when not stop_signaled_before ->
+  | Any Awaiting_tool_result, Any Streaming when not stop_signaled_before ->
       Some ToolReturned
-  | Streaming, Completing when not stop_signaled_before ->
+  | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
-  | Completing, Done when not stop_signaled_before ->
+  | Any Completing, Any Done when not stop_signaled_before ->
       Some ContractOk
-  | Completing, Failed (Failure_tool_contract_violation _)
+  | Any Completing, Any (Failed (Failure_tool_contract_violation _))
     when not stop_signaled_before ->
       Some ContractViolation
-  | Completing, Failed (Failure_receipt_lost _)
+  | Any Completing, Any (Failed (Failure_receipt_lost _))
     when not stop_signaled_before ->
       Some ReceiptLost
-  | _, Failed _ when is_active from_state -> Some GenericFail
-  | _, Cancelled _ when is_active from_state && honor_stop_signal_allowed ->
+  | _, Any (Failed _) when is_active from_state -> Some GenericFail
+  | _, Any (Cancelled _) when is_active from_state && honor_stop_signal_allowed ->
       Some HonorStopSignal
   | _, _
     when supervisor_requests_stop_allowed
@@ -214,7 +263,7 @@ let classify_transition ?ctx ~from_state ~to_state () =
       Some TerminalStutter
   | _ -> None
 
-let assert_transition_allowed ?ctx ~from_state ~to_state () =
+let assert_transition_allowed ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   match classify_transition ?ctx ~from_state ~to_state () with
   | Some action -> Ok action
   | None ->
@@ -287,6 +336,13 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
    already terminated must not re-enter execution paths — was previously
    only guarded by reviewer-eye inspection of call sites. *)
 
-let require_active_state s = s
+let require_active_state : type a. a turn_state -> (unit, Types.masc_error) result = fun s ->
+  match s with
+  | Done | Failed _ | Cancelled _ ->
+      Error
+        (Types.Task (Types.Task_error.InvalidState
+           (Printf.sprintf "Terminal state %s cannot re-enter active paths"
+              (turn_state_label s))))
+  | _ -> Ok ()
 [@@fsm_guard
   "match s with Done | Failed _ | Cancelled _ -> false | _ -> true"]

@@ -44,18 +44,18 @@ type failure_reason =
     [docs/keeper-turn-lifecycle.md]; the runtime [run_keeper_cycle]
     is currently implicit across multiple files and Step 4b will
     introduce explicit transitions. *)
-type turn_state =
-  | Idle [@tla.idle]
-  | Phase_gating [@tla.active]
-  | Cascade_routing [@tla.active]
-  | Awaiting_provider [@tla.active]
-  | Streaming [@tla.active]
-  | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
-  | Completing [@tla.active]
-  | Done [@tla.terminal]
-  | Failed of failure_reason [@tla.terminal]
-  | Cancelled of cancel_reason [@tla.terminal]
-[@@deriving tla]
+type _ turn_state =
+  | Idle : [`Idle] turn_state [@tla.idle]
+  | Phase_gating : [`Phase_gating] turn_state [@tla.active]
+  | Cascade_routing : [`Cascade_routing] turn_state [@tla.active]
+  | Awaiting_provider : [`Awaiting_provider] turn_state [@tla.active]
+  | Streaming : [`Streaming] turn_state [@tla.active]
+  | Awaiting_tool_result : [`Awaiting_tool_result] turn_state [@tla.symbol "awaiting_tool"] [@tla.active]
+  | Completing : [`Completing] turn_state [@tla.active]
+  | Done : [`Done] turn_state [@tla.terminal]
+  | Failed : failure_reason -> [`Failed] turn_state [@tla.terminal]
+  | Cancelled : cancel_reason -> [`Cancelled] turn_state [@tla.terminal]
+
 (** TLA+ symbol mapping derived by [ppx_tla].
 
     [to_tla_symbol] / [all_symbols] match [TurnStateSet], while
@@ -69,11 +69,12 @@ type turn_state =
 
 val cancel_reason_label : cancel_reason -> string
 val failure_reason_label : failure_reason -> string
-val turn_state_label : turn_state -> string
+val to_tla_symbol : _ turn_state -> string
+val turn_state_label : _ turn_state -> string
 
 val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
-val pp_turn_state : Format.formatter -> turn_state -> unit
+val pp_turn_state : Format.formatter -> _ turn_state -> unit
 
 type transition_action =
   | StartTurn
@@ -124,8 +125,8 @@ type transition_violation = {
 
 val classify_transition :
   ?ctx:transition_context ->
-  from_state:turn_state ->
-  to_state:turn_state ->
+  from_state:_ turn_state ->
+  to_state:_ turn_state ->
   unit ->
   transition_action option
 (** Return the TLA+ action represented by an OCaml state edge, if the
@@ -143,12 +144,12 @@ val classify_transition :
 
 val assert_transition_allowed :
   ?ctx:transition_context ->
-  from_state:turn_state ->
-  to_state:turn_state ->
+  from_state:_ turn_state ->
+  to_state:_ turn_state ->
   unit ->
   (transition_action, transition_violation) result
 
-val require_active_state : turn_state -> turn_state
+val require_active_state : _ turn_state -> (unit, Types.masc_error) result
 (** Identity on [s]; runtime-asserts that [s] is not a terminal state
     ([Done], [Failed _], [Cancelled _]).
 
@@ -162,8 +163,8 @@ val emit_transition :
   ?ctx:transition_context ->
   keeper_name:string ->
   turn_id:int ->
-  ?prev:turn_state ->
-  turn_state ->
+  ?prev:_ turn_state ->
+  _ turn_state ->
   unit
 (** Emit a structured FSM transition log line.
 
@@ -181,3 +182,16 @@ val emit_transition :
     emitted only when [?ctx] is provided.  Stable for operator
     regex parsing and pinned by the [test_keeper_turn_fsm_emit]
     sentinel so a future signature drift fails the build. *)
+
+type any_state = Any : _ turn_state -> any_state
+val any_state_label : any_state -> string
+val pp_any_state : Format.formatter -> any_state -> unit
+
+val all_symbols : string list
+val active_symbols : string list
+val terminal_symbols : string list
+val idle_symbols : string list
+
+val is_active : _ turn_state -> bool
+val is_terminal : _ turn_state -> bool
+val is_idle : _ turn_state -> bool

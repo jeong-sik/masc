@@ -41,17 +41,17 @@ let test_emit_transition_signature_stable () =
 (* ── Label coverage ────────────────────────────────────────── *)
 
 let test_turn_state_labels_cover_every_variant () =
-  let pairs : (F.turn_state * string) list =
-    [ F.Idle, "idle"
-    ; F.Phase_gating, "phase_gating"
-    ; F.Cascade_routing, "cascade_routing"
-    ; F.Awaiting_provider, "awaiting_provider"
-    ; F.Streaming, "streaming"
-    ; F.Awaiting_tool_result, "awaiting_tool"
-    ; F.Completing, "completing"
-    ; F.Done, "done"
-    ; F.Failed (F.Failure_runtime_error "x"), "failed:runtime_error"
-    ; F.Cancelled F.Cancelled_phase_gate_close, "cancelled:phase_gate_close"
+  let pairs : (F.any_state * string) list =
+    [ F.Any F.Idle, "idle"
+    ; F.Any F.Phase_gating, "phase_gating"
+    ; F.Any F.Cascade_routing, "cascade_routing"
+    ; F.Any F.Awaiting_provider, "awaiting_provider"
+    ; F.Any F.Streaming, "streaming"
+    ; F.Any F.Awaiting_tool_result, "awaiting_tool"
+    ; F.Any F.Completing, "completing"
+    ; F.Any F.Done, "done"
+    ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
+    ; F.Any (F.Cancelled F.Cancelled_phase_gate_close), "cancelled:phase_gate_close"
     ]
   in
   List.iter
@@ -59,7 +59,7 @@ let test_turn_state_labels_cover_every_variant () =
        Alcotest.(check string)
          ("turn_state_label " ^ expected)
          expected
-         (F.turn_state_label s))
+         (F.any_state_label s))
     pairs
 ;;
 

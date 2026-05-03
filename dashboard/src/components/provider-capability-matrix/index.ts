@@ -1,10 +1,12 @@
 // ProviderCapabilityMatrix — Feature × Provider matrix, OAS wiring gaps,
-// and anti-pattern registry. Static data from sec02/sec04/sec05 analysis
-// with live provider overlay from /api/v1/providers.
+// cascade routing traces, and anti-pattern registry. Static data from
+// sec02/sec03/sec04/sec05 analysis with live provider overlay from
+// /api/v1/providers.
 //
 // Sub-views (via FilterChips):
 //   providers    — OAS provider kind definitions (sec02 Table 1)
 //   matrix       — 15 features × 13 providers
+//   cascade      — OAS cascade routing trace scenarios (sec03)
 //   benchmarks   — BFCL V3/V4 rankings
 //   wiring       — OAS wiring mismatches vs official API
 //   anti-patterns — 32 anti-patterns (S/F/M/H categories)
@@ -20,15 +22,17 @@ import {
 } from '../../api/dashboard'
 import { FeatureMatrix, MatrixLegend } from './feature-matrix'
 import { BfclRankings } from './bfcl-rankings'
+import { CascadeTrace } from './cascade-trace'
 import { WiringGaps } from './wiring-gaps'
 import { AntiPatternList } from './anti-patterns'
 import { OasProviderTable } from './oas-provider-table'
 
-type CapView = 'providers' | 'matrix' | 'benchmarks' | 'wiring' | 'anti-patterns'
+type CapView = 'providers' | 'matrix' | 'cascade' | 'benchmarks' | 'wiring' | 'anti-patterns'
 
 const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
   { key: 'providers', label: 'OAS 프로바이더' },
   { key: 'matrix', label: '기능 매트릭스' },
+  { key: 'cascade', label: '캐스케이드 트레이스' },
   { key: 'benchmarks', label: 'BFCL 벤치마크' },
   { key: 'wiring', label: 'OAS 배선 갭' },
   { key: 'anti-patterns', label: '안티패턴' },
@@ -84,6 +88,16 @@ export function ProviderCapabilityMatrix() {
           <${MatrixLegend} />
           <${FeatureMatrix} liveProviders=${liveProviders.value} />
         </div>
+      ` : activeView.value === 'cascade' ? html`
+        <${Card}>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS Cascade 라우팅 트레이스</h3>
+          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+            sec03 분석 — Provider cascade 경로의 4가지 대표 시나리오.
+            Rate-limit/Timeout → Cooldown 게이트 → 다음 Provider 순차 시도.
+            Exhaustion 시 turn 실패로 보고.
+          </p>
+          <${CascadeTrace} />
+        <//>
       ` : activeView.value === 'benchmarks' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">BFCL Function Calling 순위</h3>

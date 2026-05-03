@@ -343,6 +343,100 @@ export const ANTI_PATTERNS: AntiPattern[] = [
   { id: 'H12', category: 'hardcoding', description: 'BFCL score threshold가 상수 아닌 리터럴', location: 'model_selector.ml', risk: 'L' },
 ]
 
+// ── Cascade Traces ────────────────────────────────────────────
+// OAS cascade routing trace scenarios. Source: sec03 cascade flow analysis.
+
+export type CascadeStepStatus = 'hit' | 'miss' | 'skipped'
+
+export interface CascadeStep {
+  provider: string
+  status: CascadeStepStatus
+  ms: number
+  reason: string
+}
+
+export interface CascadeTrace {
+  id: string
+  label: string
+  tier: 'typical' | 'ideal' | 'worst' | 'cooldown'
+  steps: CascadeStep[]
+  totalMs: number
+}
+
+export const CASCADE_TRACES: CascadeTrace[] = [
+  {
+    id: 'ct-rate-limit',
+    label: 'Rate-limit → Fallback',
+    tier: 'typical',
+    steps: [
+      { provider: 'Anthropic', status: 'miss', ms: 820, reason: 'rate-limit.soft' },
+      { provider: 'OpenAI',    status: 'miss', ms: 540, reason: 'timeout' },
+      { provider: 'Moonshot',  status: 'hit',  ms: 420, reason: 'ok' },
+    ],
+    totalMs: 1780,
+  },
+  {
+    id: 'ct-first-hit',
+    label: 'Primary Hit',
+    tier: 'ideal',
+    steps: [
+      { provider: 'Anthropic', status: 'hit',     ms: 380, reason: 'ok' },
+      { provider: 'OpenAI',    status: 'skipped',  ms: 0,   reason: 'skipped' },
+      { provider: 'Moonshot',  status: 'skipped',  ms: 0,   reason: 'skipped' },
+    ],
+    totalMs: 380,
+  },
+  {
+    id: 'ct-exhaustion',
+    label: '전체 Exhaustion',
+    tier: 'worst',
+    steps: [
+      { provider: 'Anthropic', status: 'miss', ms: 1240, reason: 'rate-limit.hard' },
+      { provider: 'OpenAI',    status: 'miss', ms: 980,  reason: 'server_error' },
+      { provider: 'Moonshot',  status: 'miss', ms: 650,  reason: 'auth_failure' },
+      { provider: 'Ollama',    status: 'miss', ms: 320,  reason: 'model_unloaded' },
+    ],
+    totalMs: 3190,
+  },
+  {
+    id: 'ct-cooldown',
+    label: 'Cooldown Bypass',
+    tier: 'cooldown',
+    steps: [
+      { provider: 'Anthropic', status: 'miss', ms: 100, reason: 'cooldown (30s remaining)' },
+      { provider: 'OpenAI',    status: 'hit',  ms: 460, reason: 'ok' },
+      { provider: 'Moonshot',  status: 'skipped', ms: 0, reason: 'skipped' },
+    ],
+    totalMs: 560,
+  },
+]
+
+export function cascadeStepColor(status: CascadeStepStatus): string {
+  switch (status) {
+    case 'hit':     return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
+    case 'miss':    return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
+    case 'skipped': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
+  }
+}
+
+export function cascadeTierLabel(tier: CascadeTrace['tier']): string {
+  switch (tier) {
+    case 'typical':  return '일반'
+    case 'ideal':    return '이상'
+    case 'worst':    return '최악'
+    case 'cooldown': return 'Cooldown'
+  }
+}
+
+export function cascadeTierStyle(tier: CascadeTrace['tier']): string {
+  switch (tier) {
+    case 'typical':  return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]'
+    case 'ideal':    return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'worst':    return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+    case 'cooldown': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+  }
+}
+
 // ── Shared helpers ──────────────────────────────────────────────
 
 export function supportCellClass(v: FeatureSupport): string {

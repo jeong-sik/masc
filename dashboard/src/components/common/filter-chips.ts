@@ -33,14 +33,14 @@ export function FilterChips<T extends string>({
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
-    ? 'inline-flex min-h-9 items-center gap-1.5 rounded border px-3 py-2 text-2xs font-medium'
-    : 'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[length:var(--fs-xs)]'
+    ? 'inline-flex min-h-9 items-center gap-1.5 rounded-[var(--r-1)] border px-3 py-2 text-2xs font-medium'
+    : 'inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-[length:var(--fs-xs)]'
   const activeToneClass = tone === 'accent'
     ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
     : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
   const idleToneClass = tone === 'accent'
-    ? 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
-    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'
+    ? 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-30)]'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">
@@ -50,7 +50,7 @@ export function FilterChips<T extends string>({
           title=${chip.title}
           role="tab"
           aria-selected=${activeKey === chip.key}
-          class="${chipClass} cursor-pointer transition-all duration-[var(--t-fast)] ${activeKey === chip.key
+          class="${chipClass} cursor-pointer transition-[background-color,border-color,box-shadow] duration-[var(--t-fast)] ${activeKey === chip.key
             ? activeToneClass
             : idleToneClass}"
           onClick=${() => {
@@ -61,7 +61,7 @@ export function FilterChips<T extends string>({
           ${chip.label}
           ${chip.count != null ? html`
             <${CountBadge} class=${activeKey === chip.key
-              ? 'bg-[rgba(255,255,255,0.12)] text-current'
+              ? 'bg-[var(--color-bg-hover)] text-current'
               : ''}>${chip.count}<//>
           ` : null}
         </button>

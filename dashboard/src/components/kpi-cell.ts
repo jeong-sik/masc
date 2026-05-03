@@ -68,7 +68,9 @@ export function KpiCell(props: KpiCellProps): VNode {
   }
 
   const labelStyle = {
-    fontSize: 'var(--font-size-3xs)',
+    fontSize: 'var(--fs-11)',
+    fontFamily: 'var(--font-sans)',
+    lineHeight: 'var(--lh-tight)',
     color: labelColor,
     letterSpacing: '0.08em',
     textTransform: 'uppercase' as const,
@@ -76,11 +78,12 @@ export function KpiCell(props: KpiCellProps): VNode {
   }
 
   const valueStyle = {
-    fontSize: variant === 'stacked' ? '24px' : variant === 'compact' ? 'var(--font-size-sm)' : '17px',
+    fontSize: variant === 'stacked' ? 'var(--fs-20)' : variant === 'compact' ? 'var(--fs-13)' : 'var(--fs-16)',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: 'var(--lh-tight)',
     color: valueColor,
     fontVariantNumeric: 'tabular-nums' as const,
     fontWeight: variant === 'stacked' ? 700 : 600,
-    lineHeight: 1.1,
   }
 
   // Progress bar swapped to atomic <Bar> primitive (#bar atom). Kind
@@ -104,7 +107,8 @@ export function KpiCell(props: KpiCellProps): VNode {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            fontSize: 'var(--font-size-3xs)',
+            fontSize: 'var(--fs-9)',
+            fontFamily: 'var(--font-mono)',
             color: captionColor,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',

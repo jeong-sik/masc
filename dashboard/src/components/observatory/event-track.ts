@@ -13,7 +13,7 @@ import { bucketTelemetryEntries, entryTimestampMs, useTrackBucketCount } from '.
 
 function sourceColor(source: string | undefined): string {
   switch (source) {
-    case 'oas_event': return 'bg-accent'
+    case 'oas_event': return 'bg-accent-fg'
     case 'agent_event': return 'bg-[var(--ok-10)]'
     case 'tool_call_io': return 'bg-[var(--accent-10)]'
     case 'tool_usage': return 'bg-[var(--accent-10)]'
@@ -54,7 +54,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
       </div>
       <div
         ref=${trackRef}
-        class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        class="relative flex-1 h-8 rounded-[var(--r-1)] bg-bg-1/40 border border-card-border/50 cursor-crosshair"
         role="group"
         aria-label="이벤트 타임라인 마커"
         onMouseMove=${(e: MouseEvent) => {
@@ -72,10 +72,10 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
               const isSelected = selected !== null
                 && selected.kind === 'event'
                 && selected.entry === entry
-              const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
+              const ringClass = isSelected ? 'ring-2 ring-accent-fg ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
-                  class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-all cursor-pointer ${ringClass}"
+                  class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-[width] cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
                   title=${`${new Date(ts).toLocaleTimeString()} · ${label}${count > 1 ? ` · ${count} events` : ''}`}
                   onClick=${(e: MouseEvent) => {
@@ -83,7 +83,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'event', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded-[var(--r-1)] bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
                     ${count}
                   </span>
                 ` : null}</span>

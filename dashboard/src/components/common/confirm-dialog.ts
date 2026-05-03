@@ -78,8 +78,8 @@ export function ConfirmDialogOverlay() {
     confirmBtnClass = 'bg-[var(--color-status-err)] text-white hover:bg-[var(--color-status-err)]/90'
     IconComponent = AlertCircle
   } else if (state.tone === 'info') {
-    iconColor = 'text-accent'
-    iconBg = 'bg-[var(--accent-10)] border-accent/20'
+    iconColor = 'text-accent-fg'
+    iconBg = 'bg-[var(--accent-10)] border-[var(--accent-20)]'
     confirmBtnClass = 'bg-[var(--color-accent-fg)] text-[var(--color-bg-page)] hover:bg-[var(--color-accent-fg)]/90'
     IconComponent = Info
   }
@@ -89,11 +89,11 @@ export function ConfirmDialogOverlay() {
       labelledBy="confirm-dialog-title"
       onClose=${handleClose}
       overlayClass="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      panelClass="w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-md border border-[var(--dialog-panel-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden"
+      panelClass="w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-[var(--r-2)] border border-[var(--dialog-panel-border)] shadow-[var(--shadow-raised)] overflow-hidden"
     >
       <div class="p-5">
         <div class="flex items-start gap-4">
-          <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">
+          <div class="shrink-0 size-10 rounded-[var(--r-0)] border flex items-center justify-center ${iconBg} ${iconColor}">
             <${IconComponent} size=${20} />
           </div>
           <div class="flex-1 min-w-0 pt-0.5">
@@ -108,7 +108,7 @@ export function ConfirmDialogOverlay() {
             onClick=${state.onCancel}
           >${state.cancelText}<//>
           <button type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
+            class="px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
             onClick=${state.onConfirm}
           >${state.confirmText}</button>
         </div>

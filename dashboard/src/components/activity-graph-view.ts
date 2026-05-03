@@ -14,36 +14,36 @@ import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 const hoveredNodeId = signal<string | null>(null)
 
 export function nodeColor(kind: string, status: string): string {
-  if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
+  if (status === 'offline' || status === 'retired') return 'var(--color-fg-muted)'
   switch (kind) {
     case 'keeper': return 'var(--color-status-ok)'
     case 'agent': return 'var(--cyan)'
     case 'task': return 'var(--color-status-warn)'
     case 'decision': return 'var(--purple)'
     case 'operation': return 'var(--color-status-ok)'
-    case 'debate': return '#fb923c'
-    case 'post': return '#f472b6'
-    default: return 'var(--slate-400)'
+    case 'debate': return 'var(--color-orange-400)'
+    case 'post': return 'var(--color-pink-400)'
+    default: return 'var(--color-fg-muted)'
   }
 }
 
 export function edgeColor(kind: string, active: boolean): string {
-  if (!active) return 'rgba(100, 116, 139, 0.15)'
+  if (!active) return 'var(--color-fg-disabled)'
   switch (kind) {
-    case 'works_on': return 'rgba(251, 191, 36, 0.5)'
-    case 'creates': return 'rgba(74, 222, 128, 0.4)'
-    case 'broadcasts': return 'rgba(34, 211, 238, 0.35)'
-    case 'mentions': return 'rgba(34, 211, 238, 0.55)'
+    case 'works_on': return 'var(--warn-border)'
+    case 'creates': return 'var(--ok-border)'
+    case 'broadcasts': return 'var(--info-border)'
+    case 'mentions': return 'var(--info-fg)'
     case 'hands_off_to': return 'var(--purple-50)'
-    case 'posts': return 'rgba(244, 114, 182, 0.4)'
-    case 'comments_on': return 'rgba(244, 114, 182, 0.3)'
-    case 'votes_on': return 'rgba(167, 139, 250, 0.35)'
-    case 'opens': return 'rgba(167, 139, 250, 0.4)'
-    case 'governs': return 'rgba(251, 146, 60, 0.4)'
-    case 'operates_on': return 'rgba(74, 222, 128, 0.45)'
-    case 'participates_in': return 'rgba(251, 191, 36, 0.35)'
-    case 'belongs_to': return 'var(--slate-gray-12)'
-    default: return 'rgba(148, 163, 184, 0.25)'
+    case 'posts': return 'var(--stalled-border)'
+    case 'comments_on': return 'var(--stalled-fg)'
+    case 'votes_on': return 'var(--purple-50)'
+    case 'opens': return 'var(--purple-50)'
+    case 'governs': return 'var(--warn-fg)'
+    case 'operates_on': return 'var(--ok-border)'
+    case 'participates_in': return 'var(--warn-soft)'
+    case 'belongs_to': return 'var(--color-border-default)'
+    default: return 'var(--color-border-default)'
   }
 }
 
@@ -101,7 +101,7 @@ export function GraphView({ data }: GraphViewProps) {
         value: n.semantic_weight ?? n.weight,
         color: {
           background: color,
-          border: (n.status === 'offline' || n.status === 'retired') ? 'var(--slate-600)' : color,
+          border: (n.status === 'offline' || n.status === 'retired') ? 'var(--color-border-default)' : color,
           highlight: {
             background: color,
             border: 'var(--color-status-warn)'
@@ -244,7 +244,7 @@ export function GraphView({ data }: GraphViewProps) {
   }
 
   return html`
-    <div class="relative w-full my-3 rounded border border-[var(--color-border-default)] bg-[#0f1117]">
+    <div class="relative w-full my-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div ref=${containerRef} class="w-full h-90" role="img" aria-label="에이전트 활동 네트워크 그래프"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
@@ -254,7 +254,7 @@ export function GraphView({ data }: GraphViewProps) {
         { label: '작업', color: 'var(--color-status-warn)' },
         { label: '결정', color: 'var(--purple)' },
         { label: '작전', color: 'var(--color-status-ok)' },
-        { label: '게시글', color: '#f472b6' },
+        { label: '게시글', color: 'var(--color-pink-400)' },
       ].map(({ label, color }) => html`
         <div class="flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]" key=${label}>
           <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>
@@ -264,34 +264,34 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
 
     ${selectedNode ? html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 mt-2">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 mt-2">
         <div class="flex items-center gap-3 mb-3">
-          <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
-          <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>
-          <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
+          <strong class="text-lg text-[var(--color-fg-primary)]">${selectedNode.label}</strong>
+          <span class="py-0.5 px-2 bg-[var(--color-bg-panel-alt)] text-2xs text-[var(--color-fg-muted)] rounded-[var(--r-1)]">${kindLabel(selectedNode.kind)}</span>
+          <span class="py-0.5 px-2 rounded-[var(--r-1)] text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-fg-secondary)] bg-[var(--color-bg-panel-alt)]'}">${statusLabel(selectedNode.status)}</span>
           <${ActionButton} variant="subtle" size="sm" class="ml-auto" onClick=${() => { selectedNodeId.value = null }} ariaLabel="패널 닫기">닫기<//>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">중요도</div>
-            <div class="text-xl font-bold text-[var(--text-near-white)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-primary)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
           </div>
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">빈도</div>
-            <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${selectedNode.weight}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-secondary)] tabular-nums">${selectedNode.weight}</div>
           </div>
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">연결</div>
-            <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${connectedEdges.length}</div>
+            <div class="text-xl font-bold text-[var(--color-fg-secondary)] tabular-nums">${connectedEdges.length}</div>
           </div>
         </div>
         ${connectedEdges.length > 0 ? html`
-          <div class="border-t border-[var(--slate-gray-10)] pt-3">
-            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
+          <div class="border-t border-[var(--color-bg-panel-alt)] pt-3">
+            <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-[var(--track-caps)] mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
-                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
-                  <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
+                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
+                  <span class="text-[var(--color-fg-secondary)]">${otherLabel}</span>
                   <span class="text-2xs text-[var(--color-fg-muted)]">${edgeKindLabel(edge.kind)}</span>
                   ${edge.active ? html`<${StatusDot} size="xs" class="bg-[var(--color-status-ok)]" />` : null}
                 </div>

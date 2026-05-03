@@ -3,42 +3,42 @@
 /* ── Live Monitor (merged from live.css) ───────────────── */
 
 @utility pulse-bubble {
-  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
-  &:hover { background: var(--white-8); }
+  transition: border-color var(--t-med), background var(--t-med), box-shadow var(--t-med);
+  &:hover { background: var(--color-bg-hover); }
 }
 
 @utility pulse-working {
-  border-color: var(--ok-35);
-  animation: livePulse 2s ease-in-out infinite;
+  border-color: var(--color-status-ok);
+  animation: livePulse 2s var(--ease-inout) infinite;
 }
 
 @utility pulse-selected {
-  border-color: rgba(96,165,250,0.6);
-  background: var(--blue-400-8);
-  box-shadow: 0 0 8px var(--blue-400-15);
+  border-color: var(--color-accent-fg);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 0 8px rgb(var(--color-accent-glow) / 0.3);
 }
 
 @utility activity-item {
-  transition: background 0.15s;
-  &:hover { background: var(--white-4); }
-  &.live-event-broadcast { border-left-color: rgba(96,165,250,0.5); }
-  &.live-event-task { border-left-color: rgba(74,222,128,0.5); }
-  &.live-event-keeper { border-left-color: rgba(168,85,247,0.5); }
-  &.live-event-system { border-left-color: rgba(255,255,255,0.15); }
+  transition: background var(--t-fast);
+  &:hover { background: var(--color-bg-hover); }
+  &.live-event-broadcast { border-left-color: var(--color-accent-fg); }
+  &.live-event-task { border-left-color: var(--color-status-ok); }
+  &.live-event-keeper { border-left-color: var(--color-status-warn); }
+  &.live-event-system { border-left-color: var(--color-border-strong); }
 }
 
 @utility activity-item-new {
-  animation: activityFadeIn 0.3s ease-out;
+  animation: activityFadeIn 0.3s var(--ease-out);
 }
 
 @utility focus-agent-card {
-  transition: background 0.15s, border-color 0.15s;
-  &:hover { background: var(--white-4); border-color: var(--white-10); }
+  transition: background var(--t-fast), border-color var(--t-fast);
+  &:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
 }
 
 @utility focus-agent-selected {
-  border-color: rgba(96,165,250,0.4);
-  background: rgba(96,165,250,0.05);
+  border-color: var(--color-accent-fg-dim);
+  background: var(--color-bg-elevated);
 }
 
 @media (max-width: 1100px) {

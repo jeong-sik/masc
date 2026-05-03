@@ -449,7 +449,7 @@ describe('ConnectorStatusPanel', () => {
     const dirPanel = container.querySelector('[data-keeper-directory-error-panel]') as HTMLElement | null
     expect(dirPanel).toBeTruthy()
     expect(dirPanel!.className).toContain('bg-[var(--warn-10)]')
-    expect(dirPanel!.className).toContain('border-l-amber-500')
+    expect(dirPanel!.className).toContain('border-l-[var(--color-warn)]')
     // Named chip: "Directory error" is what AT hears.
     const dirChip = dirPanel!.querySelector('[aria-label]')
     expect(dirChip?.getAttribute('aria-label')).toContain('사용 불가')
@@ -695,7 +695,7 @@ describe('ConnectorStatusPanel', () => {
 
     // Regression guard for the screenshot bug: when a connector card's
     // brand accent is green (iMessage), the outer card renders a green
-    // gradient; a neutral `bg-[var(--white-4)]` panel sitting inside it
+    // gradient; a neutral `bg-[var(--color-bg-elevated)]` panel sitting inside it
     // used to read as a "success" tint ("not started" painted green).
     // The panel now uses informational amber + a Portainer-style left
     // stripe so it's unambiguously "needs action" regardless of the
@@ -703,7 +703,7 @@ describe('ConnectorStatusPanel', () => {
     const panel = container.querySelector('[data-sidecar-not-started-panel]') as HTMLElement | null
     expect(panel).toBeTruthy()
     expect(panel!.className).toContain('bg-[var(--warn-10)]')
-    expect(panel!.className).toContain('border-l-amber-500')
+    expect(panel!.className).toContain('border-l-[var(--color-warn)]')
     // And the explicit "Not running" status chip is the one AT users hear.
     const chip = panel!.querySelector('[data-sidecar-status-chip]')
     expect(chip).toBeTruthy()
@@ -752,7 +752,7 @@ describe('ConnectorStatusPanel', () => {
     const emptyPanel = container.querySelector('[data-no-keepers-empty-panel]') as HTMLElement | null
     expect(emptyPanel).toBeTruthy()
     expect(emptyPanel!.className).toContain('bg-[var(--warn-10)]')
-    expect(emptyPanel!.className).toContain('border-l-amber-500')
+    expect(emptyPanel!.className).toContain('border-l-[var(--color-warn)]')
     const chip = emptyPanel!.querySelector('[data-no-keepers-status-chip]')
     expect(chip).toBeTruthy()
     expect(chip!.getAttribute('aria-label')).toContain('설정된 키퍼 없음')

@@ -100,9 +100,9 @@ function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
 }
 
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
-  if (direction === 'flat') return 'var(--slate-500)'
+  if (direction === 'flat') return 'var(--color-fg-muted)'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
-  return bad ? 'var(--bad-light)' : '#34d399'
+  return bad ? 'var(--bad-light)' : 'var(--color-emerald)'
 }
 
 function auditFreshnessClass(isoTimestamp: string | null): string {
@@ -129,10 +129,10 @@ function SummaryCard({
       ? 'border-[var(--ok-20)] bg-[var(--ok-10)]'
       : tone === 'warn'
         ? 'border-[var(--warn-20)] bg-[var(--warn-10)]'
-        : 'border-[var(--color-border-default)] bg-[var(--white-1)]'
+        : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
 
   return html`
-    <div class="rounded border ${toneClass} p-3">
+    <div class="rounded-[var(--r-1)] border ${toneClass} p-3">
       <${Eyebrow} tone="disabled">${title}</${Eyebrow}>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
       <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-disabled)]">${detail}</div>
@@ -143,7 +143,7 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
       <div class="font-medium text-[var(--color-status-warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
@@ -168,12 +168,12 @@ function readinessStatusClass(status: string | null | undefined): string {
 function attentionSeverityClass(severity: string | null | undefined): string {
   if (severity === 'bad') return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
   if (severity === 'warn') return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-  return 'border-[var(--color-border-default)] bg-[var(--white-1)] text-[var(--color-fg-disabled)]'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)]'
 }
 
 function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
@@ -195,7 +195,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
 function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   if (events.length === 0) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No decision-needed or blocker events are active.
       </div>
     `
@@ -204,7 +204,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${events.slice(0, 6).map(event => html`
-        <div class="rounded border px-3 py-2 ${attentionSeverityClass(event.severity)}">
+        <div class="rounded-[var(--r-1)] border px-3 py-2 ${attentionSeverityClass(event.severity)}">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-2xs font-medium">
@@ -213,7 +213,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               <div class="mt-0.5 text-3xs leading-relaxed">${event.summary}</div>
             </div>
             ${event.requires_decision
-              ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
+              ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
               : null}
           </div>
           ${event.recommended_action
@@ -235,7 +235,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
   if (!truth || !readiness) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         Control room readiness is unavailable for this refresh.
       </div>
     `
@@ -299,14 +299,14 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       ${watchlist.map(row => html`
         <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
           <div class="min-w-0">
@@ -336,7 +336,7 @@ function TrendCell({ name, metric, value, valueClass }: {
   const trend = getTrend(name, metric)
   const arrow = trend ? trendArrow(trend.direction) : ''
   const colorClass = trend ? trendColorClass(trend.direction, metric) : ''
-  const sColor = trend ? sparklineColor(metric, trend.direction) : 'var(--slate-500)'
+  const sColor = trend ? sparklineColor(metric, trend.direction) : 'var(--color-fg-muted)'
 
   return html`
     <td class="py-1.5 text-right">
@@ -413,8 +413,8 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 <div class="mt-1 flex max-w-60 flex-wrap gap-1">
                   <span
                     class=${row.goal_linked
-                      ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
+                      ? 'rounded-[var(--r-1)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
+                      : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
                   >
                     ${row.goal_label
@@ -423,14 +423,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   </span>
                   <span
                     class=${row.sandbox_profile
-                      ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
-                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
+                      ? 'rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
+                      : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
                     title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
                   ${row.decision_required
-                    ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
+                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
                     : null}
                   ${row.terminal_reason_code
                     ? html`
@@ -495,14 +495,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
+                  ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
+                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
                     : html`<span class="text-3xs text-[var(--color-fg-disabled)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
+                  class="rounded-[var(--r-1)] min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -527,7 +527,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-2xs font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">
@@ -555,7 +555,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
         <div class="flex items-center gap-2 text-2xs">
           <div class="flex min-w-0 flex-1 items-center gap-1.5">
             <div
-              class="h-1.5 rounded-sm bg-[var(--bad-10)]"
+              class="h-1.5 rounded-[var(--r-0)] bg-[var(--bad-10)]"
               style="width: ${Math.max(6, (category.count / maxCount) * 100)}%"
             ></div>
             <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
@@ -721,10 +721,10 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-3xs">
-            ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
-            ${offlineCount > 0 ? html`<span class="rounded-sm bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">
@@ -732,7 +732,7 @@ export function FleetTelemetryPanel() {
             ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
           </span>
           <button
-            class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+            class="rounded-[var(--r-1)] bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>

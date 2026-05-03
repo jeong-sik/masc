@@ -35,7 +35,7 @@ export function Switch({
 
   const trackClass = checked
     ? 'bg-[var(--ok-20)] border-[var(--ok-20)]'
-    : 'bg-[var(--white-4)] border-[var(--color-border-default)]'
+    : 'bg-[var(--color-bg-elevated)] border-[var(--color-border-default)]'
 
   const thumbClass = checked
     ? 'translate-x-[14px] bg-[var(--color-fg-primary)]'
@@ -50,12 +50,12 @@ export function Switch({
         aria-disabled=${disabled}
         tabindex=${disabled ? -1 : 0}
         data-testid=${testId}
-        class=${`relative h-5 w-9 cursor-pointer rounded-full border transition-colors duration-200 ${trackClass} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+        class=${`relative h-5 w-9 cursor-pointer rounded-full border transition-colors duration-[var(--t-med)] ${trackClass} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
         onClick=${toggle}
         onKeyDown=${onKeyDown}
       >
         <span
-          class=${`absolute top-[2px] h-3.5 w-3.5 rounded-full transition-transform duration-200 ${thumbClass}`}
+          class=${`absolute top-[2px] h-3.5 w-3.5 rounded-full transition-transform duration-[var(--t-med)] ${thumbClass}`}
         />
       </div>
       ${label

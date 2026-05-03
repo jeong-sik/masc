@@ -33,10 +33,10 @@ const doneVisibleCount = signal(20)
 const searchDoneVisibleCount = signal(20)
 const DONE_PAGE_SIZE = 20
 const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
-const DECK_PANEL = 'overflow-hidden rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
+const DECK_PANEL = 'overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
 const DECK_HEAD = 'border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2'
-const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
-const META_CHIP = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const META_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 
 export function resetTaskBacklogState() {
   doneVisibleCount.value = DONE_PAGE_SIZE
@@ -106,7 +106,7 @@ function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <article class="flex flex-col gap-2 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-panel-alt)]">
+    <article class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-panel-alt)]">
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-1.5">
           <span class="${DECK_CHIP} ${priorityToneClass(p)} font-semibold">${priorityLabel(p)}</span>
@@ -138,7 +138,7 @@ function KanbanCard({ task }: { task: Task }) {
           ${canExpand ? html`
             <button
               type="button"
-              class="w-fit rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              class="w-fit rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => toggleTaskExpand(task.id)}
               aria-expanded=${isExpanded}
             >
@@ -152,20 +152,20 @@ function KanbanCard({ task }: { task: Task }) {
 
       <div class="flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-muted)]">
         ${task.status === 'awaiting_verification'
-          ? html`<span class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
           : task.completed_at && task.status === 'done'
-            ? html`<span class="rounded-sm border border-ok/25 bg-ok/10 px-1.5 py-0.5 text-ok">완료 <${TimeAgo} timestamp=${task.completed_at} /></span>`
+            ? html`<span class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 px-1.5 py-0.5 text-ok">완료 <${TimeAgo} timestamp=${task.completed_at} /></span>`
             : task.completed_at && task.status === 'cancelled'
-              ? html`<span class="rounded-sm border border-[var(--bad-30)] bg-[var(--bad-10)] px-1.5 py-0.5 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
+              ? html`<span class="rounded-[var(--r-0)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-1.5 py-0.5 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
               : task.created_at
                 ? html`<span class="${META_CHIP}"><${TimeAgo} timestamp=${task.created_at} /></span>`
                 : null}
-        ${task.assignee ? html`<span class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]">@${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>
@@ -203,7 +203,7 @@ function TaskColumn({
           <h3 class="font-mono text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-primary)]">${title}</h3>
           <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">${description}</p>
         </div>
-        <span class="rounded-sm px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>
+        <span class="rounded-[var(--r-0)] px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>
       </div>
       <div ref=${listRef} class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
         ${children}
@@ -281,7 +281,7 @@ export function TaskBacklog() {
   return html`
     <${Card} title="태스크 백로그" class="section" variant="compact">
       ${hasError && hasData ? html`
-        <div class="mb-2 rounded-sm border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
+        <div class="mb-2 rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="min-w-55 flex-1">
@@ -295,7 +295,7 @@ export function TaskBacklog() {
         ${hasSearch ? html`
           <button
             type="button"
-            class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+            class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
             onClick=${() => {
               resetTaskSearch()
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
@@ -329,7 +329,7 @@ export function TaskBacklog() {
           title="검증 대기"
           count=${sortedAwaitingVerification.length}
           description="verifier keeper가 completion_contract 정량 기준을 독립 실측 중인 태스크입니다."
-          badgeClass="border border-accent/30 bg-[var(--accent-10)] text-accent"
+          badgeClass="border border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg"
         >
           ${sortedAwaitingVerification.length === 0
             ? html`<${EmptyState} message=${emptyColumnMessage ?? '검증 대기 중인 태스크가 없습니다'} compact />`
@@ -347,7 +347,7 @@ export function TaskBacklog() {
           ${hasMoreDone ? html`
             <button
               type="button"
-              class="w-full rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              class="w-full rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
                 else doneVisibleCount.value += DONE_PAGE_SIZE

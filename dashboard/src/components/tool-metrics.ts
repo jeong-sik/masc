@@ -50,7 +50,7 @@ export function filterTools<T extends Pick<ToolMetricsTopEntry, 'name'>>(
 
 function KpiCard({ children, label }: { children: unknown; label: string }) {
   return html`
-    <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="flex flex-col items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${children}</span>
       <span class="text-2xs text-[var(--color-fg-muted)] font-medium">${label}</span>
     </div>
@@ -83,12 +83,12 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
         return html`
           <div class="tool-bar-row" key=${item.name}>
             <div class="flex items-center gap-1.5 overflow-hidden">
-              <span class="flex-shrink-0 size-4 rounded text-3xs font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
+              <span class="flex-shrink-0 size-4 rounded-[var(--r-1)] text-3xs font-mono font-bold flex items-center justify-center bg-[var(--color-bg-elevated)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--color-fg-primary)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs" title=${item.name}>${item.name}</span>
             </div>
-            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--white-4)]">${cat.label}</span>
-            <div class="h-3.5 rounded-xs bg-[var(--white-6)] overflow-hidden">
-              <div class="h-full rounded-xs min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
+            <span class="px-1.5 py-px rounded-xs text-3xs font-medium text-center text-[var(--color-fg-disabled)] bg-[var(--color-bg-elevated)]">${cat.label}</span>
+            <div class="h-3.5 rounded-xs bg-[var(--color-bg-hover)] overflow-hidden">
+              <div class="h-full rounded-xs min-w-0.5 transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
             <span class="text-[var(--color-fg-muted)] text-2xs text-right font-mono">${item.call_count}</span>
           </div>
@@ -106,17 +106,17 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-essential">공개 MCP</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-essential">공개 MCP</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-standard">내부 전용</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-standard">내부 전용</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-full">숨김</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded-[var(--r-1)] badge-full">숨김</span>
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>

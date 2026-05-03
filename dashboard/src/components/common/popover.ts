@@ -115,9 +115,9 @@ export function Popover({
               'absolute z-50 ' +
               placementCls +
               ' left-0 min-w-48 max-w-80 ' +
-              'bg-[var(--dialog-panel-bg)] rounded-md ' +
+              'bg-[var(--dialog-panel-bg)] rounded-[var(--r-2)] ' +
               'border border-[var(--dialog-panel-border)] ' +
-              'shadow-[0_8px_24px_rgba(0,0,0,0.4)] p-3'
+              'shadow-[var(--shadow-panel)] p-3'
             }
           >
             ${children}

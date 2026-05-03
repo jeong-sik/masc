@@ -62,9 +62,9 @@ function rowClass(row: PhaseConditionRow): string {
     return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-fg-primary)]'
   }
   if (row.value) {
-    return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-fg-primary)]'
+    return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-fg-primary)]'
   }
-  return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)]'
 }
 
 export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis }) {
@@ -82,7 +82,7 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
     >
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div id="phase-conditions-title" class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div id="phase-conditions-title" class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             Phase conditions
           </div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
@@ -106,7 +106,7 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
         ${diagnosis.rows.map(row => html`
           <li
             key=${row.key}
-            class=${`rounded border px-3 py-2 text-2xs leading-normal ${rowClass(row)}`}
+            class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${rowClass(row)}`}
             aria-current=${row.determining ? 'step' : undefined}
           >
             <div class="flex flex-wrap items-center gap-2">

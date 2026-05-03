@@ -480,7 +480,7 @@ function MetricChip({
   tone?: string
 }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)]">${label}</div>
       <div class="mt-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-fg-secondary)]">
         <${StatusChip} tone=${tone} uppercase=${false}>${value}<//>
@@ -499,7 +499,7 @@ function JourneyTile({
   children: preact.ComponentChildren
 }) {
   return html`
-    <section class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-3 flex flex-col gap-3 min-h-[132px] ${cx ?? ''}" aria-label=${label}>
+    <section class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 flex flex-col gap-3 min-h-[132px] ${cx ?? ''}" aria-label=${label}>
       <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
       <div class="flex flex-col gap-2 text-sm text-[var(--color-fg-primary)]">
         ${children}
@@ -595,7 +595,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
           <${RouteLink}
             tab="workspace"
             params=${{ section: 'planning' }}
-            class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--white-5)]"
+            class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
           >
             View task
           <//>
@@ -706,9 +706,9 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
           <//>
         </div>
 
-        <div class="flex items-center gap-3 border-t border-[var(--white-8)] pt-3">
+        <div class="flex items-center gap-3 border-t border-[var(--color-border-default)] pt-3">
           <button
-            class="inline-flex items-center rounded px-3 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] transition hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-5)]"
+            class="inline-flex items-center rounded-[var(--r-1)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] transition hover:text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
             aria-expanded=${showExtended.value ? 'true' : 'false'}
             onClick=${() => { showExtended.value = !showExtended.value }}
           >
@@ -768,7 +768,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                   ${lifeEntries.length > 0
                     ? html`
                         ${lifeEntries.map((entry) => html`
-                          <div key=${entry.id} class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                          <div key=${entry.id} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
                             <div class="flex items-center justify-between gap-2">
                               <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
                                 ${entry.source}

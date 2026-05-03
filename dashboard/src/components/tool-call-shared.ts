@@ -71,7 +71,7 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   { match: n => n.includes('read'),
     icon: 'R', color: TOOL_TONE.info, label: 'read' },
 ]
-const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[var(--slate-400)]', label: 'tool' }
+const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[var(--color-fg-muted)]', label: 'tool' }
 
 // ── Functions ───────────────────────────────────────────
 

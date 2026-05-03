@@ -60,7 +60,7 @@ describe('DialogOverlay a11y', () => {
       html`<${DialogOverlay}
         labelledBy="d3-title"
         onClose=${() => {}}
-        panelClass="bg-[var(--color-bg-page)] rounded p-5"
+        panelClass="bg-[var(--color-bg-page)] rounded-[var(--r-1)] p-5"
       >
         <h2 id="d3-title">Multi-action</h2>
         <button>Primary</button>

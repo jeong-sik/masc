@@ -13,10 +13,10 @@
     border: 1px solid var(--color-border-default);
     background: var(--color-bg-surface);
     padding: 8px 12px;
-    border-radius: 3px;
+    border-radius: var(--r-1);
     letter-spacing: var(--track-wide);
   }
-  .pv-banner b { color: var(--color-fg-secondary); font-weight: 600; }
+  .pv-banner b { color: var(--color-fg-secondary); font-weight: var(--fw-semi); }
 
   /* ── Motion token cards ───────────────────────────────── */
   .mot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
@@ -24,7 +24,7 @@
   .mot-card {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 16px;
     display: flex; flex-direction: column; gap: 12px;
     position: relative; overflow: hidden;
@@ -47,7 +47,7 @@
   .mot-stage {
     height: 80px;
     border: 1px dashed var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     background: var(--color-bg-page);
     display: flex; align-items: center; justify-content: center;
     position: relative;
@@ -83,7 +83,7 @@
   .kf-cell {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 12px;
     display: flex; flex-direction: column; gap: 8px;
     min-height: 110px;
@@ -97,7 +97,7 @@
   .kf-stage {
     flex: 1;
     border: 1px dashed var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     background: var(--color-bg-page);
     display: flex; align-items: center; justify-content: center;
     overflow: hidden;
@@ -107,7 +107,7 @@
     width: 22px; height: 22px;
     background: var(--color-accent-fg);
     border: 1px solid var(--brass-2);
-    border-radius: 3px;
+    border-radius: var(--r-1);
   }
   .kf-bar {
     height: 6px; width: 60%;
@@ -116,7 +116,7 @@
       var(--color-bg-hover) 50%,
       var(--color-bg-elevated) 100%);
     background-size: 200% 100%;
-    border-radius: 2px;
+    border-radius: var(--r-0);
   }
 
   /* keyframes.css demos — duration tuned for visibility, not production */
@@ -175,7 +175,7 @@
     background: var(--color-bg-surface);
   }
   .pv-tab td.tok { color: var(--color-accent-fg); }
-  .pv-tab td.tag { color: var(--color-fg-muted); font-size: 10px; }
+  .pv-tab td.tag { color: var(--color-fg-muted); font-size: var(--fs-10); }
 </style>
 </head>
 <body>

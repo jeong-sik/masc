@@ -34,8 +34,8 @@ const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }>
 export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const m = snapshot.measurement
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
         측정
       </div>
       ${m.captured && m.auto_rules ? html`
@@ -71,14 +71,14 @@ export function flagTooltip(label: string, on: boolean): string {
 }
 
 function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: 'ok' | 'warn' }) {
-  const offCls = 'text-[var(--color-fg-disabled)] border-[var(--white-8)]'
+  const offCls = 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)]'
   const onCls =
     tone === 'warn'
-      ? 'text-[var(--amber-bright)] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
+      ? 'text-[var(--warn-fg)] border-[var(--warn-border)] bg-[var(--warn-soft)]'
       : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
   return html`
     <span
-      class=${`rounded-sm border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
+      class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
       title=${flagTooltip(label, on)}
     >
       ${label}
@@ -117,16 +117,16 @@ export function InvariantsPanel({
   const allOk = okCount === total
   const badgeText = allOk ? `${total}/${total}` : `${okCount}/${total}`
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Safety
         </div>
         <span
-          class=${`rounded-sm border px-2 py-0.5 text-3xs font-mono tabular-nums ${
+          class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono tabular-nums ${
             allOk
               ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
-              : 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
+              : 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]'
           }`}
           title=${allOk
             ? `All ${total} keeper composite invariants hold.`

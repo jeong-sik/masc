@@ -123,14 +123,14 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
+    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
-          class="rounded px-2 py-0.5 font-medium transition-colors ${
+          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === preset
-              ? 'bg-accent/20 text-accent'
-              : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
+              ? 'bg-[var(--accent-20)] text-accent-fg'
+              : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
           }"
           onClick=${() => setTimeRangeFilter(preset)}
           aria-pressed=${current === preset}
@@ -150,17 +150,17 @@ function ViewSelector({
   onSelect: (view: ObservatoryView) => void
 }) {
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
+    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${([
         { key: 'timeline', label: '타임라인' },
         { key: 'live', label: '라이브' },
       ] as const).map(view => html`
         <button
           type="button"
-          class="rounded px-2 py-0.5 font-medium transition-colors ${
+          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === view.key
-              ? 'bg-accent/20 text-accent'
-              : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
+              ? 'bg-[var(--accent-20)] text-accent-fg'
+              : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
           }"
           onClick=${() => onSelect(view.key)}
           aria-pressed=${current === view.key}
@@ -291,10 +291,10 @@ export function Observatory() {
             <${RangeSelector} />
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
+              class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value
                   ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
+                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
               }"
               onClick=${() => {
                 liveMode.value = !liveMode.value
@@ -304,7 +304,7 @@ export function Observatory() {
             >
               ${liveMode.value ? html`
                 <span class="relative flex h-2 w-2" aria-hidden="true">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok-10)] opacity-75"></span>
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--ok-10)] opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-2 w-2 bg-[var(--ok-10)]"></span>
                 </span>
                 자동 갱신
@@ -315,7 +315,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
@@ -329,7 +329,7 @@ export function Observatory() {
         : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
-            <div class="flex flex-col gap-2 rounded border border-card-border bg-card/30 p-4">
+            <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
               <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
               <${EventTrack}
                 events=${data.events}

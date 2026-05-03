@@ -21,31 +21,31 @@ const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
     fill: 'var(--color-accent-fg)',
     text: 'var(--color-accent-fg)',
     chipBg: 'var(--accent-12)',
-    chipBorder: 'rgba(71,184,255,0.24)',
+    chipBorder: 'var(--info-border)',
   },
   ok: {
     fill: 'var(--color-status-ok)',
     text: 'var(--color-status-ok)',
     chipBg: 'var(--emerald-12)',
-    chipBorder: 'rgba(34,197,94,0.24)',
+    chipBorder: 'var(--ok-border)',
   },
   warn: {
     fill: 'var(--color-status-warn)',
     text: 'var(--color-status-warn)',
-    chipBg: 'rgba(250,204,21,0.12)',
-    chipBorder: 'rgba(250,204,21,0.24)',
+    chipBg: 'var(--warn-soft)',
+    chipBorder: 'var(--warn-border)',
   },
   bad: {
     fill: 'var(--color-status-err)',
     text: 'var(--color-status-err)',
-    chipBg: 'rgba(248,113,113,0.12)',
-    chipBorder: 'rgba(248,113,113,0.24)',
+    chipBg: 'var(--bad-10)',
+    chipBorder: 'var(--err-border)',
   },
   muted: {
-    fill: 'rgba(148,163,184,0.85)',
+    fill: 'var(--color-fg-muted)',
     text: 'var(--color-fg-muted)',
-    chipBg: 'var(--slate-gray-12)',
-    chipBorder: 'rgba(148,163,184,0.24)',
+    chipBg: 'var(--color-border-default)',
+    chipBorder: 'var(--color-border-default)',
   },
 }
 
@@ -74,7 +74,7 @@ export function DistributionBars({
   const maxValue = Math.max(...visibleItems.map(item => item.value), 1)
 
   return html`
-    <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
@@ -96,15 +96,15 @@ export function DistributionBars({
                         ${item.detail ? html`<div class="truncate text-3xs text-[var(--color-fg-muted)]">${item.detail}</div>` : null}
                       </div>
                       <span
-                        class="shrink-0 rounded-sm border px-2 py-0.5 text-3xs font-semibold"
+                        class="shrink-0 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold"
                         style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                       >
                         ${valueFormatter(item.value)}
                       </span>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-sm bg-[var(--white-5)]">
+                    <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]">
                       <div
-                        class="h-full rounded-sm transition-[width] duration-[var(--t-slow)]"
+                        class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)]"
                         style=${`width:${Math.min(width, 100)}%;background:${palette.fill};opacity:0.8;`}
                       ></div>
                     </div>
@@ -132,7 +132,7 @@ export function SegmentedBar({
   const total = visibleItems.reduce((sum, item) => sum + item.value, 0)
 
   return html`
-    <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">${title}</div>
@@ -143,7 +143,7 @@ export function SegmentedBar({
         ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
-              <div class="flex h-3 overflow-hidden rounded-sm bg-[var(--white-5)]">
+              <div class="flex h-3 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]">
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100
@@ -174,7 +174,7 @@ export function SegmentedBar({
                   return html`
                     <span
                       title=${`${item.label}: ${formattedValue}`}
-                      class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs font-medium"
+                      class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
                       <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>

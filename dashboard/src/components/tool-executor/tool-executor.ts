@@ -13,7 +13,7 @@ import {
 
 function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
   return html`
-    <div class="rounded border border-[rgba(251,113,133,0.4)] bg-[var(--bad-10)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] p-3">
       <p class="text-xs text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
       <div class="flex gap-2">
         <${ActionButton} variant="danger" size="sm" onClick=${onConfirm}>실행<//>

@@ -37,8 +37,8 @@ function MetaTag({ children }: { children: unknown }) {
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: 'var(--color-fg-muted)',
   INFO: 'var(--color-fg-primary)',
-  WARN: '#e6a700',
-  ERROR: '#e05050',
+  WARN: 'var(--color-status-warn)',
+  ERROR: 'var(--color-status-err)',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -179,13 +179,13 @@ export function renderLogMessage(entry: LogEntry): string {
 function sourceTone(source: string): string {
   switch (source) {
     case 'client_tool_host':
-      return 'text-[#dff3ff] bg-[var(--accent-10)] border-[var(--accent-22)]'
+      return 'text-[var(--color-accent-fg)] bg-[var(--accent-10)] border-[var(--accent-22)]'
     case 'legacy_stderr':
-      return 'text-[var(--bad-light)] bg-[var(--brick-soft)] border-[rgba(224,80,80,0.18)]'
+      return 'text-[var(--bad-light)] bg-[var(--brick-soft)] border-[var(--err-border)]'
     case 'legacy_traceln':
-      return 'text-[#ffd88a] bg-[rgba(230,167,0,0.12)] border-[rgba(230,167,0,0.18)]'
+      return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
-      return 'text-[var(--color-fg-muted)] bg-[var(--white-3)] border-[var(--white-10)]'
+      return 'text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)] border-[var(--color-border-default)]'
   }
 }
 
@@ -242,17 +242,17 @@ export function renderLogRow(entry: LogEntry) {
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
-  let backgroundClass = 'bg-[var(--white-1)]'
+  let backgroundClass = 'bg-[var(--color-bg-surface)]'
   if (level === 'ERROR') {
-    backgroundClass = 'bg-[rgba(224,80,80,0.08)]'
+    backgroundClass = 'bg-[var(--bad-6)]'
   } else if (level === 'WARN') {
-    backgroundClass = 'bg-[rgba(230,167,0,0.05)]'
+    backgroundClass = 'bg-[var(--warn-soft)]'
   }
 
   return html`
     <div
       key=${entry.seq}
-      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[rgba(255,255,255,0.05)] px-3 py-3 ${backgroundClass}"
+      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
     >
       <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}
@@ -272,7 +272,7 @@ export function renderLogRow(entry: LogEntry) {
           ? html`<${MetaTag}>${entry.raw_level}</${MetaTag}>`
           : null}
         ${clientName
-          ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[#dff3ff]" uppercase=${false}>${clientName}</${StatusChip}>`
+          ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
         ${toolName
           ? html`<${StatusChip} tone="neutral" uppercase=${false} class="gap-1"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span>${toolName}</span></${StatusChip}>`
@@ -367,8 +367,8 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]" aria-label="로그 뷰어">
-        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--white-5)] px-4 py-4">
+      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
+        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
               class="logs-select px-3 py-2 text-xs"
@@ -417,7 +417,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"
@@ -429,7 +429,7 @@ export function LogViewer() {
             </label>
             <button
               type="button"
-              class="logs-refresh-btn rounded border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[#dff3ff]"
+              class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -443,7 +443,7 @@ export function LogViewer() {
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[#ffb3b3]">${logError}</div>
+          <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">

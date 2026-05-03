@@ -44,7 +44,7 @@ describe('SectionCap a11y', () => {
 
   it('caller-supplied extra class passes axe', async () => {
     render(
-      html`<${SectionCap} class="mb-2 border-b border-[var(--white-5)]">
+      html`<${SectionCap} class="mb-2 border-b border-[var(--color-border-divider)]">
         Diagnostics
       <//>`,
       container,

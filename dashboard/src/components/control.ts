@@ -8,7 +8,7 @@ import { OperationsPanel } from './operations-panel'
 export function Operations() {
   return html`
     <div class="flex flex-col gap-5">
-      <div class="transition-opacity duration-300">
+      <div class="transition-opacity duration-[var(--t-slow)]">
         <${OperationsPanel} />
       </div>
     </div>

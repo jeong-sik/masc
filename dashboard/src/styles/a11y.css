@@ -3,7 +3,7 @@
 /* WCAG 2.4.7 Focus Visible — global keyboard focus ring for all interactive elements.
    Uses box-shadow so it follows border-radius and never clips. */
 :focus-visible {
-  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline: 2px solid var(--accent-45, rgb(var(--brass-glow) / .45));
   outline-offset: 2px;
 }
 
@@ -62,11 +62,11 @@
   border-width: 1px;
   background: var(--color-bg-page, #0a0f1a);
   color: var(--color-fg-primary, #e2e8f0);
-  border-color: var(--accent-45, rgba(71, 184, 255, 0.7));
+  border-color: var(--accent-45, rgb(var(--brass-glow) / .45));
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--fs-14);
   text-decoration: none;
-  outline: 2px solid var(--accent-45, rgba(71, 184, 255, 0.7));
+  outline: 2px solid var(--accent-45, rgb(var(--brass-glow) / .45));
   outline-offset: 2px;
 }
 
@@ -74,7 +74,7 @@
   .pixel-avatar[data-status] { animation: none; }
   .pixel-avatar--has-blocker {
     animation: none;
-    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
+    box-shadow: 0 0 0 2px rgb(var(--err-glow) / .6);
   }
   .activity-dot--live-pulse { animation: none; }
   .pulse-working { animation: none; }

@@ -44,13 +44,13 @@ describe('progressBarHeightClass (pure)', () => {
 
 describe('progressBarTrackToneClass (pure)', () => {
   it('default is the white-5 muted track', () => {
-    expect(progressBarTrackToneClass()).toBe('bg-[var(--white-5)]')
-    expect(progressBarTrackToneClass('default')).toBe('bg-[var(--white-5)]')
+    expect(progressBarTrackToneClass()).toBe('bg-[var(--color-bg-elevated)]')
+    expect(progressBarTrackToneClass('default')).toBe('bg-[var(--color-bg-elevated)]')
   })
 
   it('each variant maps to a distinct CSS var (no drift)', () => {
-    expect(progressBarTrackToneClass('dim')).toBe('bg-[var(--white-6)]')
-    expect(progressBarTrackToneClass('muted')).toBe('bg-[var(--white-8)]')
+    expect(progressBarTrackToneClass('dim')).toBe('bg-[var(--color-bg-hover)]')
+    expect(progressBarTrackToneClass('muted')).toBe('bg-[var(--color-bg-hover)]')
   })
 })
 
@@ -87,7 +87,7 @@ describe('ProgressBar component', () => {
     expect(fill.getAttribute('style')).toContain('width: 42.50%')
   })
 
-  it('data-progress-bar-pct is integer-rounded for clean E2E selectors', () => {
+  it('data-progress-bar-pct is integer-rounded-[var(--r-1)] for clean E2E selectors', () => {
     render(html`<${ProgressBar} pct=${33.7} />`, container)
     expect(container.querySelector('[data-progress-bar]')!.getAttribute('data-progress-bar-pct')).toBe('34')
   })

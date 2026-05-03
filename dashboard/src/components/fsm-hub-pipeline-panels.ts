@@ -52,18 +52,18 @@ export function filterObservedLanes(
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
   ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]',
   info: 'text-[var(--color-accent-fg)] border-[var(--accent-30)] bg-[var(--accent-10)]',
-  warn: 'text-[var(--amber-bright)] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
-  error: 'text-[var(--color-status-err)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
+  warn: 'text-[var(--warn-fg)] border-[var(--warn-border)] bg-[var(--warn-soft)]',
+  error: 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]',
 }
 
 /** Panel-level accent -- border + subtle tinted overlay -- so that the
     overall tone of the current operator insight is visible from the
     peripheral visual field. */
 const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
-  ok: 'border-[var(--white-8)] bg-[var(--white-2)]',
-  info: 'border-[var(--white-8)] bg-[var(--white-2)]',
-  warn: 'border-[var(--amber-bright-45)] bg-[rgba(245,158,11,0.04)] shadow-[0_0_0_1px_rgba(245,158,11,0.15)_inset]',
-  error: 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
+  ok: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
+  info: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
+  warn: 'border-[var(--warn-border)] bg-[var(--warn-soft)] shadow-[0_0_0_1px_var(--warn-border)_inset]',
+  error: 'border-[var(--err-border)] bg-[var(--bad-6)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
 }
 
 export function OperationalMeaningPanel({
@@ -89,7 +89,7 @@ export function OperationalMeaningPanel({
 
   return html`
     <div
-      class=${`rounded border p-4 transition-colors duration-300 ${panelCls}`}
+      class=${`rounded-[var(--r-1)] border p-4 transition-colors duration-[var(--t-slow)] ${panelCls}`}
       role=${isAlarm ? 'alert' : undefined}
       aria-live=${isAlarm ? 'polite' : undefined}
     >
@@ -99,7 +99,7 @@ export function OperationalMeaningPanel({
           <div class="mt-1 text-xl font-semibold text-[var(--color-fg-secondary)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)] leading-relaxed">${insight.detail}</div>
         </div>
-        <span class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
+        <span class=${`rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
           ${insight.tone}
         </span>
       </div>
@@ -110,14 +110,14 @@ export function OperationalMeaningPanel({
 
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${insight.evidence.map(item => html`
-          <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">
+          <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">
             ${item}
           </span>
         `)}
       </div>
 
       <div class="mt-4 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           관찰 레인
         </div>
         <${TextInput}
@@ -135,10 +135,10 @@ export function OperationalMeaningPanel({
         : html`
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             ${visibleLanes.map(lane => html`
-              <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${lane.field}</span>
-                  <span class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
+                  <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${lane.field}</span>
+                  <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>
@@ -163,7 +163,7 @@ const PHASE_BAR_FILL: Record<string, string> = {
   HandingOff: 'var(--purple)',
   Failing: 'var(--color-status-err)',
   Draining: 'var(--color-status-warn)',
-  Stable: '#71717a',
+  Stable: 'var(--color-fg-muted)',
 }
 
 function PhaseSparkline({
@@ -311,7 +311,7 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded-[var(--r-1)] border p-5 transition-[background-color,border-color,box-shadow] duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >
@@ -373,18 +373,18 @@ export function PipelineStep({
 
   const isActive = value !== 'idle' && value !== 'undecided' && value !== 'accumulating'
   const borderCls = flash
-    ? 'border-[var(--color-accent-fg)] shadow-[0_0_8px_rgba(71,184,255,0.35)]'
+    ? 'border-[var(--color-accent-fg)] shadow-[0_0_8px_rgb(var(--info-glow)/0.35)]'
     : isActive
-      ? 'border-[var(--indigo-50)] shadow-[0_0_6px_rgba(129,140,248,0.15)]'
-      : 'border-[var(--white-8)]'
+      ? 'border-[var(--info-border)] shadow-[0_0_6px_rgb(var(--info-glow)/0.15)]'
+      : 'border-[var(--color-border-default)]'
   const bgCls = isActive && !flash
     ? 'bg-[var(--indigo-4)]'
-    : 'bg-[var(--white-2)]'
+    : 'bg-[var(--color-bg-surface)]'
   const activePulse = isActive && !flash ? 'animate-pulse' : ''
 
   const connectorCls = isActive
     ? 'border-t border-dashed border-[var(--indigo-50)] animate-[marching-ants_1s_linear_infinite]'
-    : 'border-t border-[var(--white-10)]'
+    : 'border-t border-[var(--color-border-default)]'
 
   const heldFor = sinceTs != null ? fmtDuration(Math.max(0, now - sinceTs)) : null
   const stalenessCls = (() => {
@@ -404,12 +404,12 @@ export function PipelineStep({
     <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
       title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
-      <div class=${`flex-1 rounded border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
+      <div class=${`flex-1 rounded-[var(--r-1)] border px-3 py-2 transition-[background-color,border-color,opacity] duration-[var(--t-xslow)] ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
             <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--color-fg-muted)]">${label}</span>
-            ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
+            ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
             <span class=${`text-3xs font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
@@ -436,8 +436,8 @@ export function TurnPipelineStrip({
   // nowSecondsSignal independently, so this component itself never reads
   // the signal and is not re-rendered by 5 s ticks.
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">

@@ -28,7 +28,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
         <div class="text-xs leading-relaxed text-text-muted">
           ${linkedGoalId
             ? html`
-              <span class="inline-flex items-center gap-1 rounded border border-accent/30 bg-[var(--accent-10)] px-1.5 py-0.5 text-2xs text-accent">
+              <span class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-1.5 py-0.5 text-2xs text-accent-fg">
                 goal ${linkedGoalTitle ?? linkedGoalId}
               </span>
               에 직접 연결된 backlog 태스크를 생성합니다.
@@ -48,7 +48,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
   }
 
   return html`
-    <div class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.88)] p-4">
+    <div class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-4">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>
@@ -62,7 +62,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
 
       <div class="flex flex-col gap-3">
         ${linkedGoalId ? html`
-          <div class="rounded border border-accent/25 bg-[var(--accent-10)] px-3 py-2 text-2xs leading-relaxed text-accent">
+          <div class="rounded-[var(--r-1)] border border-[var(--accent-25)] bg-[var(--accent-10)] px-3 py-2 text-2xs leading-relaxed text-accent-fg">
             연결 목표:
             <strong class="ml-1 text-text-strong">${linkedGoalTitle ?? linkedGoalId}</strong>
             <span class="ml-1 text-text-muted">(${linkedGoalId})</span>
@@ -100,7 +100,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
               options=${PRIORITY_OPTIONS}
               onInput=${(v: string) => { priority.value = Number(v) }}
             />
-            <div class="rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-text-muted">
+            <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-text-muted">
               backlog 카드와 동일하게 <strong class="text-text-strong">P1 → P4</strong> 순으로 표시됩니다.
             </div>
           </div>

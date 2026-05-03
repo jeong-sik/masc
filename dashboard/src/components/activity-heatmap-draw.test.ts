@@ -15,10 +15,10 @@ describe("constants", () => {
 
 describe("intensityColor", () => {
   it("returns base color for count 0", () => {
-    expect(intensityColor(0, 100)).toBe("var(--slate-800)")
+    expect(intensityColor(0, 100)).toBe("var(--color-bg-panel-alt)")
   })
   it("returns base color for max 0", () => {
-    expect(intensityColor(5, 0)).toBe("var(--slate-800)")
+    expect(intensityColor(5, 0)).toBe("var(--color-bg-panel-alt)")
   })
   it("maps ratio <= 0.25", () => {
     expect(intensityColor(25, 100)).toBe("#0e4a5c")

@@ -28,11 +28,11 @@ export function dashedNoticeClasses(
   extra?: string,
 ): string {
   const borderClass = border === 'subtle'
-    ? 'border-[var(--white-8)]'
+    ? 'border-[var(--color-border-default)]'
     : 'border-[var(--color-border-default)]'
   const sized = size === 'md'
-    ? 'rounded px-4 py-6 text-xs'
-    : 'rounded px-4 py-2 text-3xs'
+    ? 'rounded-[var(--r-1)] px-4 py-6 text-xs'
+    : 'rounded-[var(--r-1)] px-4 py-2 text-3xs'
   const parts = [
     'border border-dashed text-center text-[var(--color-fg-disabled)]',
     sized,

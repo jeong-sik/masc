@@ -40,6 +40,28 @@ import {
 export { resetHarnessHealthState, refreshHarnessSurface }
 
 // ── Mermaid flow helpers (live state graph) ──
+// Mermaid classDef requires literal hex values — CSS vars are not resolved.
+// These constants map to design system token values for single-source truth.
+
+const M_SOURCE_FILL = '#0f172a'     // --color-bg-3 (navy approx)
+const M_SOURCE_STROKE = '#475569'   // --color-line-2
+const M_SOURCE_TEXT = '#cbd5e1'     // --color-frost-100
+const M_HUB_FILL = '#111827'        // --color-bg-surface
+const M_HUB_STROKE = '#38bdf8'      // --color-cyan
+const M_HUB_TEXT = '#e0f2fe'        // --color-frost-100
+const M_HEALTHY_FILL = '#082f1d'
+const M_HEALTHY_STROKE = '#4ade80'
+const M_HEALTHY_TEXT = '#dcfce7'
+const M_WARN_FILL = '#3b2a07'
+const M_WARN_STROKE = '#fbbf24'
+const M_WARN_TEXT = '#fde68a'
+const M_STALE_FILL = '#1f2937'
+const M_STALE_STROKE = '#94a3b8'    // --color-fg-4
+const M_STALE_TEXT = '#e2e8f0'      // --color-frost-100
+const M_IDLE_FILL = '#111827'       // --color-bg-surface
+const M_IDLE_STROKE = '#475569'     // --color-line-2
+const M_IDLE_TEXT = '#94a3b8'       // --color-fg-4
+const M_ACTIVE_STROKE = '#7dd3fc'
 
 type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
 
@@ -135,13 +157,13 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
   const currentRail = activeRail(data)
   const source = [
     'flowchart LR',
-    '  classDef source fill:#0f172a,stroke:#475569,color:#cbd5e1;',
-    '  classDef hub fill:#111827,stroke:#38bdf8,color:#e0f2fe;',
-    '  classDef healthyRail fill:#082f1d,stroke:#4ade80,color:#dcfce7;',
-    '  classDef warningRail fill:#3b2a07,stroke:#fbbf24,color:#fde68a;',
-    '  classDef staleRail fill:#1f2937,stroke:#94a3b8,color:#e2e8f0,stroke-dasharray: 5 3;',
-    '  classDef idleRail fill:#111827,stroke:#475569,color:#94a3b8,stroke-dasharray: 3 4;',
-    '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
+    `  classDef source fill:${M_SOURCE_FILL},stroke:${M_SOURCE_STROKE},color:${M_SOURCE_TEXT};`,
+    `  classDef hub fill:${M_HUB_FILL},stroke:${M_HUB_STROKE},color:${M_HUB_TEXT};`,
+    `  classDef healthyRail fill:${M_HEALTHY_FILL},stroke:${M_HEALTHY_STROKE},color:${M_HEALTHY_TEXT};`,
+    `  classDef warningRail fill:${M_WARN_FILL},stroke:${M_WARN_STROKE},color:${M_WARN_TEXT};`,
+    `  classDef staleRail fill:${M_STALE_FILL},stroke:${M_STALE_STROKE},color:${M_STALE_TEXT},stroke-dasharray: 5 3;`,
+    `  classDef idleRail fill:${M_IDLE_FILL},stroke:${M_IDLE_STROKE},color:${M_IDLE_TEXT},stroke-dasharray: 3 4;`,
+    `  classDef activeRail stroke:${M_ACTIVE_STROKE},stroke-width:3px;`,
     '  taskDone["작업 완료<br/>판정 검증"]',
     '  keeperTurn["keeper 턴<br/>압축 압력"]',
     '  keeperRollover["keeper 교체<br/>지표 스냅샷"]',
@@ -190,9 +212,9 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
       </div>
 
       <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-disabled)]">
-        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
-        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
-        <span class="rounded-sm border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1">실선: 실시간 신호</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1">점선: 스냅샷 갱신</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-accent-fg)] px-2 py-1 text-[var(--color-fg-primary)]">강조: 가장 최근 채널</span>
       </div>
 
       <${MermaidGraph}
@@ -200,7 +222,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
         prefix="harness-flow"
         fallbackText=${fallbackText}
         minHeightClass="min-h-65"
-        diagramClass="border border-[var(--white-8)]"
+        diagramClass="border border-[var(--color-border-default)]"
       />
     </div>
   `
@@ -242,7 +264,7 @@ export function HarnessHealth() {
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
@@ -252,12 +274,12 @@ export function HarnessHealth() {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
               >오토리서치 보기</button>
             </div>
@@ -289,7 +311,7 @@ export function HarnessHealth() {
           </div>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
           ${data.scope_note}
         </div>
 
@@ -325,7 +347,7 @@ export function HarnessHealth() {
             />
 
             ${fallbackPct > 80 ? html`
-              <div class="rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
+              <div class="rounded-[var(--r-1)] border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
                 <div class="mb-1 text-sm font-medium text-[var(--color-status-warn)]">평가 모델 미연결</div>
                 <div class="text-xs text-[var(--color-status-warn)]">
                   전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.
@@ -360,7 +382,7 @@ export function HarnessHealth() {
               ] satisfies KpiStripIslandData['cells']}
             />
 
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 

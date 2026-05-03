@@ -12,7 +12,7 @@
   .brand-card {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 32px;
     display: flex; flex-direction: column; gap: 20px;
     justify-content: space-between;
@@ -72,7 +72,7 @@
   .persona {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 18px 14px;
     display: flex; flex-direction: column; gap: 10px;
     min-height: 180px;
@@ -88,7 +88,7 @@
     font: 700 14px/1 var(--font-mono);
     color: var(--color-fg-primary);
     position: relative;
-    border-radius: 3px;
+    border-radius: var(--r-1);
   }
   .persona-avatar::before {
     content: ""; position: absolute; top: -2px; right: -2px;
@@ -128,7 +128,7 @@
   .voice-card {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 16px;
     display: flex; flex-direction: column; gap: 10px;
   }
@@ -153,7 +153,7 @@
   .meta-hero {
     background: var(--color-bg-page);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 32px 28px;
     position: relative;
     overflow: hidden;
@@ -203,7 +203,7 @@
   .principle {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 16px;
     display: flex; flex-direction: column; gap: 8px;
   }
@@ -227,7 +227,7 @@
   /* Sizing scale */
   .sizes {
     display: flex; align-items: flex-end; gap: 24px;
-    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1);
     padding: 28px;
   }
   .size-sample {
@@ -287,7 +287,7 @@
       <div class="size-sample">
         <div class="wordmark" style="gap:6px">
           <span class="wordmark-dot" style="width:8px;height:8px"></span>
-          <span class="wordmark-text" style="font-size:14px">MASC</span>
+          <span class="wordmark-text" style="font-size:var(--fs-14)">MASC</span>
         </div>
         <span class="brand-caption">Topbar · 14px</span>
       </div>

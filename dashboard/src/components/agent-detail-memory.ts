@@ -70,7 +70,7 @@ function SynapseWeightBar({ weight }: { weight: number }) {
     <${ProgressBar}
       pct=${pct}
       size="sm"
-      trackClass="w-16 rounded"
+      trackClass="w-16 rounded-[var(--r-1)]"
       class=${synapseWeightFillClass(weight)}
       ariaLabel="시냅스 가중치 ${pct}%"
     />
@@ -230,7 +230,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="border border-[var(--white-10)] rounded px-2 py-1.5 text-xs">
+                          <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
@@ -239,7 +239,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                               <span class="text-3xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

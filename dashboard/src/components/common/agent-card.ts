@@ -51,7 +51,7 @@ export function AgentCard({
 
   return html`
     <article
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4"
       data-agent-card
       data-testid=${testId}
     >

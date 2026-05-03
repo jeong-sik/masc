@@ -65,7 +65,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
       </div>
       <div
         ref=${trackRef}
-        class="relative flex-1 h-12 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        class="relative flex-1 h-12 rounded-[var(--r-1)] bg-bg-1/40 border border-card-border/50 cursor-crosshair"
         role="group"
         aria-label="도구 성공률 트렌드"
         onMouseMove=${(e: MouseEvent) => {
@@ -94,7 +94,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   y="0"
                   width="${(halfW * 2).toFixed(1)}"
                   height="${viewBoxHeight}"
-                  fill="${r.zScore < 0 ? 'var(--bad-12)' : 'rgba(245,158,11,0.10)'}"
+                  fill="${r.zScore < 0 ? 'var(--bad-12)' : 'var(--warn-soft)'}"
                   key=${`anomaly-${i}`}
                 >
                   <title>z=${r.zScore.toFixed(2)} · ${r.point.success_rate.toFixed(1)}%</title>
@@ -108,7 +108,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
               fill="none"
               stroke="currentColor"
               stroke-width="1.5"
-              class="text-accent"
+              class="text-accent-fg"
               vector-effect="non-scaling-stroke"
             />
             ${anomalyResults.map((r) => {
@@ -120,7 +120,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   cy="${y.toFixed(1)}"
                   r=${r.isAnomaly ? '3' : '1.5'}
                   fill="currentColor"
-                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-warn)]') : 'text-accent'}
+                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-warn)]') : 'text-accent-fg'}
                   stroke=${r.isAnomaly ? 'currentColor' : 'none'}
                   stroke-width=${r.isAnomaly ? '0.5' : '0'}
                 >

@@ -81,7 +81,7 @@ export const Tooltip: FunctionComponent<TooltipProps> = ({ children, content, te
             id=${id}
             role="tooltip"
             data-testid=${testId}
-            class="absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-primary)] shadow-lg"
+            class="absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)]"
           >${content}</span>`
         : null}
     </span>

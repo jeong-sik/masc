@@ -20,7 +20,7 @@
 .kpi-cell {
   position: relative;
   padding: calc(var(--sp-inline) + 2px) var(--sp-gutter);
-  border-right: 1px solid var(--line-1);
+  border-right: 1px solid var(--color-border-default);
   display: flex; flex-direction: column; justify-content: space-between;
   gap: var(--sp-inline);
   min-width: 0; overflow: hidden;
@@ -47,7 +47,7 @@
   font: var(--type-label);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0;
 }
@@ -62,7 +62,7 @@
   font: var(--type-kpi-l);
   font-weight: var(--fw-med);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-1);
+  color: var(--color-fg-primary);
   letter-spacing: var(--track-tight);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   transition: color var(--motion-swap);
@@ -70,7 +70,7 @@
 
 .kpi-unit {
   font: var(--type-caption);
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   text-transform: uppercase;
   letter-spacing: var(--track-wide);
 }
@@ -78,11 +78,11 @@
 .kpi-delta {
   font: var(--type-caption);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
 }
 .kpi-delta.up   { color: var(--ok-fg); }
 .kpi-delta.down { color: var(--err-fg); }
-.kpi-delta.flat { color: var(--fg-4); }
+.kpi-delta.flat { color: var(--color-fg-disabled); }
 
 /* ── Spark (bottom-right corner) ── */
 .kpi-spark {
@@ -142,7 +142,7 @@
 .kpi-cell.is-loading .kpi-value {
   color: transparent;
   background: linear-gradient(90deg,
-    var(--bg-2) 0%, var(--bg-3) 25%, var(--bg-2) 50%, var(--bg-3) 75%, var(--bg-2) 100%);
+    var(--color-bg-elevated) 0%, var(--color-bg-hover) 25%, var(--color-bg-elevated) 50%, var(--color-bg-hover) 75%, var(--color-bg-elevated) 100%);
   background-size: 200% 100%;
   animation: anim-shimmer 2s linear infinite;
   border-radius: var(--r-1);

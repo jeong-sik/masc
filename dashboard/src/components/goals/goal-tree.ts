@@ -48,12 +48,12 @@ import {
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
-const CARD_BOX = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
+const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
-const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
-const GOAL_PANEL = 'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
-const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded border p-3 transition-colors w-full text-left'
+const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
+const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded-[var(--r-1)] border p-3 transition-colors w-full text-left'
 const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`
 
 /**
@@ -170,13 +170,13 @@ function badgeClass(badge: string): string {
     case 'stalled':
       return 'border-warn/30 bg-warn/10 text-warn'
     case 'activity_unobserved':
-      return 'border-card-border/60 bg-[var(--white-4)] text-text-muted'
+      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-muted'
     case 'sandbox':
-      return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+      return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
     case 'linkage_warning':
       return 'border-bad/30 bg-bad/10 text-bad'
     default:
-      return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   }
 }
 
@@ -205,7 +205,7 @@ function healthClass(health: GoalTreeNode['health']): string {
     case 'blocked': return 'border-bad/35 bg-bad/10 text-bad'
     case 'at_risk': return 'border-warn/30 bg-warn/10 text-warn'
     case 'on_track': return 'border-ok/30 bg-ok/10 text-ok'
-    default: return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   }
 }
 
@@ -234,7 +234,7 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
     case 'stalled':
       return 'border-warn/25 bg-warn/10 text-warn'
     default:
-      return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+      return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   }
 }
 
@@ -282,11 +282,11 @@ function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
       : fsm.state_kind === 'blocked'
         ? 'border-bad/35 bg-bad/10 text-bad'
         : fsm.state_kind === 'verification_gate' || fsm.state_kind === 'approval_gate'
-          ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
-          : 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+          ? 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
+          : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   return html`
     <span
-      class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
+      class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
       title=${`source=${fsm.source}; activity=${goalFsmObservationLabel(fsm.activity_observation)}; stagnation=${goalFsmStagnationLabel(fsm.stagnation_status)}`}
     >
       Goal FSM · ${goalFsmStateKindLabel(fsm.state_kind)}
@@ -303,14 +303,14 @@ function keeperTrustDispositionClass(
     return 'border-warn/25 bg-warn/10 text-warn'
   }
   if (disposition === 'Pass') return 'border-ok/25 bg-ok/10 text-ok'
-  return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+  return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
 }
 
 function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): string {
   switch (severity) {
     case 'bad': return 'border-bad/25 bg-bad/10 text-bad'
     case 'warn': return 'border-warn/25 bg-warn/10 text-warn'
-    default: return 'border-card-border/50 bg-[var(--white-3)] text-text-body'
+    default: return 'border-card-border/50 bg-[var(--color-bg-surface)] text-text-body'
   }
 }
 
@@ -355,13 +355,13 @@ function verificationStatusClass(
   request: GoalVerificationRequest | null,
   isOpen: boolean,
 ) {
-  if (!request) return 'border-card-border/60 bg-[var(--white-4)] text-text-muted'
-  if (isOpen) return 'border-amber-400/25 bg-amber-400/10 text-amber-100'
+  if (!request) return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-muted'
+  if (isOpen) return 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
   switch (request.status) {
     case 'approved': return 'border-ok/25 bg-ok/10 text-ok'
     case 'rejected': return 'border-bad/25 bg-bad/10 text-bad'
     case 'cancelled': return 'border-warn/25 bg-warn/10 text-warn'
-    default: return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   }
 }
 
@@ -381,19 +381,19 @@ function GoalVerificationEvidencePanel({
   const statusClass = verificationStatusClass(request, isOpen)
   const votes = request?.votes ?? []
   const panelClass = compact
-    ? 'ml-6 rounded-sm border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
+    ? 'ml-6 rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-2 text-xs text-[var(--color-warn-fg)]'
     : CARD_BOX
 
   return html`
     <div class=${panelClass}>
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="${DECK_LABEL}">AI 확인</div>
-        <span class="rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold ${statusClass}">
+        <span class="rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold ${statusClass}">
           ${verificationStatusLabel(request, isOpen)}
         </span>
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-secondary)]">
-        <span class="rounded-sm border border-amber-400/20 bg-amber-400/8 px-1.5 py-0.5 text-amber-100">
+        <span class="rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-1.5 py-0.5 text-[var(--color-warn-fg)]">
           quorum ${summary.approve_count}/${requiredVerdicts}
         </span>
         <span>reject ${summary.reject_count}</span>
@@ -423,7 +423,7 @@ function GoalVerificationEvidencePanel({
           ${votes.map(vote => {
             const evidenceRefs = vote.evidence_refs ?? []
             return html`
-              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
+              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
                   <span class="${DECK_CHIP} uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">${vote.decision}</span>
@@ -512,15 +512,15 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const clamped = Math.max(0, Math.min(100, pct))
   const barColor =
     clamped >= 80 ? 'var(--color-status-ok)'
-    : clamped >= 50 ? 'var(--amber-bright)'
-    : clamped >= 20 ? '#fb923c'
+    : clamped >= 50 ? 'var(--color-amber-bright)'
+    : clamped >= 20 ? 'var(--color-orange-400)'
     : 'var(--color-status-err)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-sm bg-[var(--color-bg-elevated)] overflow-hidden">
-        <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
+      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+        <div class="${h} rounded-[var(--r-0)] transition-[width] duration-[var(--t-xslow)]" style="width:${clamped}%;background:${barColor}"></div>
       </div>
       <span class="${DECK_META} w-9 text-right font-semibold tabular-nums">${clamped}%</span>
     </div>
@@ -542,15 +542,15 @@ function TreeSummary({
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.total_goals}</div>
         <div class="mt-1 ${DECK_LABEL}">전체 목표</div>
       </div>
-      <div class="rounded-sm border border-ok/25 bg-ok/10 p-3 text-center">
+      <div class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.active_goals}</div>
         <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-ok/80">정상</div>
       </div>
-      <div class="rounded-sm border border-warn/25 bg-warn/10 p-3 text-center">
+      <div class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-warn tabular-nums">${summary.at_risk_goals}</div>
         <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-warn/80">위험</div>
       </div>
-      <div class="rounded-sm border border-bad/25 bg-bad/10 p-3 text-center">
+      <div class="rounded-[var(--r-0)] border border-bad/25 bg-bad/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-bad tabular-nums">${summary.blocked_goals}</div>
         <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-bad/80">차단</div>
       </div>
@@ -559,13 +559,13 @@ function TreeSummary({
         <div class="mt-1 ${DECK_LABEL}">승인 대기</div>
       </div>
       ${goalVerificationCount > 0 ? html`
-        <div class="rounded-sm border border-amber-400/30 bg-amber-400/10 p-3 text-center">
-          <div class="font-mono text-xl font-semibold text-amber-200 tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-amber-100/80">Goal 검증 대기</div>
+        <div class="rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-3 text-center">
+          <div class="font-mono text-xl font-semibold text-[var(--color-warn-fg)] tabular-nums">${goalVerificationCount}</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-warn-fg)]">Goal 검증 대기</div>
         </div>
       ` : null}
       ${awaitingVerificationCount > 0 ? html`
-        <div class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] p-3 text-center">
+        <div class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] p-3 text-center">
           <div class="font-mono text-xl font-semibold text-[var(--color-accent-fg)] tabular-nums">${awaitingVerificationCount}</div>
           <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-accent-fg)]/80">Task 검증 대기</div>
         </div>
@@ -580,7 +580,7 @@ function TreeSummary({
 
 function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
   return html`
-    <span class="inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${healthClass(health)}">
+    <span class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${healthClass(health)}">
       ${healthLabel(health)}
     </span>
   `
@@ -593,7 +593,7 @@ function GoalBadges({ badges }: { badges: string[] }) {
       ${badges.map(badge => html`
         <span
           key=${badge}
-          class="inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${badgeClass(badge)}"
+          class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${badgeClass(badge)}"
         >
           ${badgeLabel(badge)}
         </span>
@@ -609,14 +609,14 @@ function coordinationViolationsForGoal(goalId: string): DashboardCoordinationFsm
 
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
-    <div class="flex flex-wrap items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs">
-      <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
+    <div class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs">
+      <span class="size-2 rounded-[var(--r-0)] shrink-0" style="background:${task.status_color}"></span>
       <span class="min-w-0 flex-1 truncate text-text-body">${task.title}</span>
-      <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-medium text-text-muted">
+      <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs font-medium text-text-muted">
         ${task.linkage_source === 'explicit' ? 'goal_id' : 'title tag'}
       </span>
       ${task.assignee ? html`
-        <span class="rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent">${task.assignee}</span>
+        <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent-fg">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
     </div>
@@ -655,7 +655,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded-md border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
+              class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)]"
               style="color:${horizonColor(node.horizon)}"
             >
               ${horizonLabel(node.horizon)}
@@ -672,7 +672,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             ${node.metric ? html`
               <span
-                class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
+                class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
                 title=${`metric · ${node.metric}${node.target_value ? ` → ${node.target_value}` : ''}`}
               >
                 <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
@@ -681,18 +681,18 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
-                <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent" title="verifier keeper의 독립 실측을 기다리는 task">
+                <span class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent-fg" title="verifier keeper의 독립 실측을 기다리는 task">
                   Task 검증 대기 ${awaiting}
                 </span>
               ` : null
             })()}
             ${node.pending_verification_count > 0 ? html`
-              <span class="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-3xs font-medium text-amber-200">
+              <span class="rounded-[var(--r-1)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-2 py-0.5 text-3xs font-medium text-[var(--color-warn-fg)]">
                 Goal 검증 대기 ${node.pending_verification_count}
               </span>
             ` : null}
             ${node.phase === 'awaiting_approval' ? html`
-              <span class="rounded border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-3xs font-medium text-rose-200">
+              <span class="rounded-[var(--r-1)] border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-3xs font-medium text-rose-200">
                 승인 대기
               </span>
             ` : null}
@@ -701,13 +701,13 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               <span>quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}</span>
             ` : null}
             ${node.pending_approval_count > 0 ? html`
-              <span class="rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
+              <span class="rounded-[var(--r-1)] border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
                 approval ${node.pending_approval_count}
               </span>
             ` : null}
             ${coordinationViolations.length > 0 ? html`
               <span
-                class="rounded border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
+                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
                 title="Goal x Task x Board x Reward"
               >
                 FSM ${coordinationViolations.length}
@@ -715,19 +715,19 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ` : null}
             ${node.blocking_source !== 'none' ? html`
               <span
-                class="rounded border px-2 py-0.5 text-3xs font-medium ${blockerSourceClass(node.blocking_source)}"
+                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${blockerSourceClass(node.blocking_source)}"
                 title=${node.blocking_reason}
               >
                 ${blockerSourceLabel(node.blocking_source)}
               </span>
             ` : null}
             ${node.infra_risk_count > 0 ? html`
-              <span class="rounded border border-bad/25 bg-bad/10 px-2 py-0.5 text-3xs font-medium text-bad">
+              <span class="rounded-[var(--r-1)] border border-bad/25 bg-bad/10 px-2 py-0.5 text-3xs font-medium text-bad">
                 infra ${node.infra_risk_count}
               </span>
             ` : null}
             ${node.latest_keeper_ref ? html`
-              <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
+              <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-medium text-text-body">
                 ${node.latest_keeper_ref}${node.latest_turn_ref != null ? ` · turn ${node.latest_turn_ref}` : ''}
               </span>
             ` : null}
@@ -755,7 +755,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             <${TimeAgo} timestamp=${node.last_activity_at} />
           </span>
           ${isSelected ? html`
-            <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold text-accent">selected</span>
+            <span class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold text-accent-fg">selected</span>
           ` : null}
         </div>
       </button>
@@ -764,8 +764,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="mt-1.5 flex flex-col gap-1.5">
           <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
-            <div class="ml-6 flex flex-col gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
-              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
+            <div class="ml-6 flex flex-col gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-dim">연결된 태스크</div>
               ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>
           ` : null}
@@ -796,8 +796,8 @@ function DetailMetric({
           ? 'text-bad'
           : 'text-text-strong'
   return html`
-    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-      <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">${label}</div>
+    <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">${label}</div>
       <div class="mt-2 text-lg font-semibold tabular-nums ${toneClass}">${value}</div>
     </div>
   `
@@ -811,9 +811,9 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
         <button
           key=${tab}
           type="button"
-          class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
-            ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
-            : 'border-card-border/60 bg-[var(--white-3)] text-text-body hover:border-card-border/90'}"
+          class="rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
+            ? 'border-[var(--accent-35)] bg-[var(--accent-10)] text-accent-fg'
+            : 'border-card-border/60 bg-[var(--color-bg-surface)] text-text-body hover:border-card-border/90'}"
           onClick=${() => { detailTab.value = tab }}
         >
           ${tab}
@@ -840,7 +840,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
 
   return html`
-    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+    <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">${keeper.name}</div>
@@ -848,12 +848,12 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
         <div class="flex flex-wrap justify-end gap-1.5">
           ${trust?.disposition ? html`
-            <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${keeperTrustDispositionClass(trust)}">
+            <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${keeperTrustDispositionClass(trust)}">
               검증 ${trustDispositionLabel(trust.disposition)}
             </span>
           ` : null}
           ${keeper.latest_execution_outcome ? html`
-            <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-semibold text-text-body">
+            <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-text-body">
               ${keeper.latest_execution_outcome}
             </span>
           ` : null}
@@ -870,8 +870,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action || latestTerminalCode || latestNextAction ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
-          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
+        <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
           ` : null}
@@ -899,9 +899,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
       ` : null}
       ${latestEvent ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
+        <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최근 키퍼 이벤트</div>
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">최근 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">
               <${TimeAgo} timestamp=${latestEvent.ts} />
             </div>
@@ -935,7 +935,7 @@ function GoalTimeline({ events }: { events: GoalDetailTimelineEvent[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${events.map(event => html`
-        <div key=${`${event.kind}:${event.lane}:${event.ts}`} class="rounded border p-3 ${timelineSeverityClass(event.severity)}">
+        <div key=${`${event.kind}:${event.lane}:${event.ts}`} class="rounded-[var(--r-1)] border p-3 ${timelineSeverityClass(event.severity)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-sm font-semibold">${event.title}</div>
             <div class="text-3xs text-text-dim">
@@ -982,12 +982,12 @@ function GoalDetailPanel({
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
-            <span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
+            <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)]" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
             ${selectedNode.metric ? html`
               <span
-                class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
                 title="이 목표가 추적하는 metric"
               >
                 <span class="text-text-muted">metric</span>
@@ -1012,7 +1012,7 @@ function GoalDetailPanel({
         </div>
       </div>
 
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
+      <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
         ${selectedNode.status_reason}
       </div>
 
@@ -1022,27 +1022,27 @@ function GoalDetailPanel({
       ${loading && !detail ? html`<${LoadingState}>goal detail 로드 중...<//>` : null}
 
       ${activeTab === 'summary' ? html`
-        <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+        <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
           <div class="mb-2 flex flex-wrap items-center gap-2">
             <span class="text-2xs font-semibold uppercase text-text-muted">Goal FSM</span>
-            <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-semibold text-text-body">
+            <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-text-body">
               ${selectedNode.goal_fsm.source}
             </span>
           </div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2 text-xs text-text-body">
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">state</div>
               <div class="mt-1 font-semibold text-text-strong">${goalPhaseLabel(selectedNode.goal_fsm.state)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">kind</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmStateKindLabel(selectedNode.goal_fsm.state_kind)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">activity</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmObservationLabel(selectedNode.goal_fsm.activity_observation)}</div>
             </div>
-            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">stagnation</div>
               <div class="mt-1 font-semibold text-text-strong">${goalFsmStagnationLabel(selectedNode.goal_fsm.stagnation_status)}</div>
             </div>
@@ -1050,7 +1050,7 @@ function GoalDetailPanel({
           ${selectedNode.goal_fsm.next_actions.length > 0 ? html`
             <div class="mt-3 flex flex-wrap gap-1.5">
               ${selectedNode.goal_fsm.next_actions.map(action => html`
-                <code key=${action} class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-secondary">${action}</code>
+                <code key=${action} class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-text-secondary">${action}</code>
               `)}
             </div>
           ` : null}
@@ -1059,8 +1059,8 @@ function GoalDetailPanel({
         ${selectedNode.blocking_source !== 'none' ? html`
           <div class=${CARD_BOX}>
             <div class="mb-2 flex flex-wrap items-center gap-2">
-              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">차단 맥락</span>
-              <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
+              <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">차단 맥락</span>
+              <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
                 ${blockerSourceLabel(selectedNode.blocking_source)}
               </span>
             </div>
@@ -1093,7 +1093,7 @@ function GoalDetailPanel({
 
         ${selectedNode.badges.length > 0 ? html`
           <div class=${CARD_BOX}>
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">배지</div>
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">배지</div>
             <${GoalBadges} badges=${selectedNode.badges} />
           </div>
         ` : null}
@@ -1101,7 +1101,7 @@ function GoalDetailPanel({
         <div class=${CARD_BOX}>
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal 범위 태스크</div>
+              <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal 범위 태스크</div>
               <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
             </div>
           </div>
@@ -1127,7 +1127,7 @@ function GoalDetailPanel({
             <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
 
             <div class=${CARD_BOX}>
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비 상태</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">키퍼 준비 상태</div>
               ${detail ? (
                 detail.linked_keepers.length > 0
                   ? html`
@@ -1140,13 +1140,13 @@ function GoalDetailPanel({
             </div>
 
             <div class=${CARD_BOX}>
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">승인 대기</div>
               ${detail ? (
                 detail.approvals.length > 0
                   ? html`
                     <div class="flex flex-col gap-2">
                       ${detail.approvals.map((approval, index) => html`
-                        <div key=${String(approval.id ?? index)} class="rounded border border-warn/20 bg-warn/6 p-3 text-xs">
+                        <div key=${String(approval.id ?? index)} class="rounded-[var(--r-1)] border border-warn/20 bg-warn/6 p-3 text-xs">
                           <div class="flex flex-wrap items-center justify-between gap-2">
                             <strong class="text-text-strong">${String(approval.tool_name ?? 'tool')}</strong>
                             <span class="text-text-dim">${String(approval.risk_level ?? 'risk')}</span>
@@ -1162,7 +1162,7 @@ function GoalDetailPanel({
           </div>
 
           <div class=${CARD_BOX}>
-            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">통합 타임라인</div>
+            <div class="mb-3 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">통합 타임라인</div>
             ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
           </div>
         </div>
@@ -1271,7 +1271,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

@@ -102,7 +102,7 @@ function CopyableToolCallBlock({
           size=${12}
         />
       </div>
-      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--color-fg-secondary)]`}>${value}</pre>
+      <pre class=${`text-xs font-mono bg-[var(--bg-deep)] rounded-[var(--r-1)] p-2 overflow-x-auto ${maxHeightClass} whitespace-pre-wrap text-[var(--color-fg-secondary)]`}>${value}</pre>
     </div>
   `
 }
@@ -230,7 +230,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         />
       </div>
 
-      <div class="border border-[var(--color-border-default)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
+      <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden max-h-[500px] overflow-y-auto">
         <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--color-border-default)]">
           <span class="w-4"></span>
           <span class="w-16">시간</span>

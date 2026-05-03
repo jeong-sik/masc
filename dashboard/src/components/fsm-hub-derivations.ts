@@ -242,7 +242,7 @@ export function deriveStateEntries(
 const TIME_AXIS_STEPS_SEC = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200]
 
 /** Compute up to `maxTicks` evenly-spaced absolute-time tick marks that
-    lie strictly inside `[spanStart, spanEnd]`. The step is rounded up
+    lie strictly inside `[spanStart, spanEnd]`. The step is rounded-[var(--r-1)] up
     to the nearest human-friendly value (1s..2h) so labels align on
     round clock moments, not arbitrary offsets. Returns empty when the
     span is too narrow to fit more than a single tick. */

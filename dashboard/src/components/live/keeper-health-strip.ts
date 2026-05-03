@@ -34,7 +34,7 @@ function ContextBar({ p }: { p: KeeperPressure }) {
   const pct = Math.round(p.ratio * 100)
   return html`
     <div
-      class="relative h-5 w-1.5 rounded-sm ${pressureColor(p.ratio)} border ${stageIndicator(p.stage)} opacity-90"
+      class="relative h-5 w-1.5 rounded-[var(--r-0)] ${pressureColor(p.ratio)} border ${stageIndicator(p.stage)} opacity-90"
       title="${p.name}: ctx ${pct}% (${p.stage})"
     />
   `
@@ -63,7 +63,7 @@ export function KeeperHealthStrip() {
   const statusChips = keeperHealthStatusChips(summary)
 
   return html`
-    <div class="flex items-center gap-4 rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] px-4 py-2.5">
+    <div class="flex items-center gap-4 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-4 py-2.5">
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-sm font-medium text-[var(--color-fg-secondary)] whitespace-nowrap">
           Keeper

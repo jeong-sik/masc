@@ -195,16 +195,16 @@ export function KeeperMemoryTierPanel({
           const pct = row.cap > 0 ? Math.min(100, Math.round((row.used / row.cap) * 100)) : 0
           const saturated = row.used >= row.cap
           const barColor = saturated
-            ? 'bg-[rgba(251,191,36,0.7)]'
+            ? 'bg-[var(--warn-fg)]'
             : pct >= 75
-              ? 'bg-[rgba(34,197,94,0.7)]'
-              : 'bg-[rgba(99,102,241,0.6)]'
+              ? 'bg-[var(--ok-20)]'
+              : 'bg-[var(--info-fg)]'
           return html`
             <div class="flex items-center gap-2 text-2xs">
               <div class="w-24 truncate text-[var(--color-fg-primary)] font-mono" title=${row.kind}>
                 ${row.kind}
               </div>
-              <div class="relative flex-1 h-4 rounded-sm bg-[var(--white-4)] border border-[var(--white-8)] overflow-hidden">
+              <div class="relative flex-1 h-4 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
                 <div class=${`absolute inset-y-0 left-0 ${barColor}`} style=${`width: ${pct}%`}></div>
               </div>
               <div class="w-16 text-right text-[var(--color-fg-muted)] tabular-nums">
@@ -219,7 +219,7 @@ export function KeeperMemoryTierPanel({
       </div>
 
       <div class="mt-2">
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
           Compaction sub-FSM (KeeperCompactionLifecycle.tla)
         </div>
         <${CytoscapeFsm} spec=${compactionSpec} height="200px" />

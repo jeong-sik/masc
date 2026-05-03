@@ -277,7 +277,7 @@ describe('fmtPerfTokPerSec', () => {
 })
 
 describe('fmtPerfLatencyPair', () => {
-  it('renders both values as rounded integers with ms suffix', () => {
+  it('renders both values as rounded-[var(--r-1)] integers with ms suffix', () => {
     expect(fmtPerfLatencyPair(1500.6, 3200.4)).toBe('1501 / 3200 ms')
   })
   it('uses "—" for undefined and "ø" for null inside the pair', () => {

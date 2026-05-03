@@ -47,7 +47,7 @@ function renderNode(
   const row = html`
     <div
       key=${node.id}
-      class="flex cursor-pointer items-center rounded py-0.5 pr-2 hover:bg-[var(--white-6)]"
+      class="flex cursor-pointer items-center rounded-[var(--r-1)] py-0.5 pr-2 hover:bg-[var(--color-bg-hover)]"
       style=${{ paddingLeft }}
       onClick=${() =>
         node.type === 'directory' ? onToggle?.(node.id) : onSelect?.(node)}
@@ -101,7 +101,7 @@ export function FileTree({
 
   return html`
     <div
-      class="overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
+      class="overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
       data-file-tree
       data-testid=${testId}
       role="tree"

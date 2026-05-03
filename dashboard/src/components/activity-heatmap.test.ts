@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { intensityColor, canvasWidth, canvasHeight, hitTest } from './activity-heatmap'
 
 describe('intensityColor', () => {
-  const COLORS = ['var(--slate-800)', '#0e4a5c', '#0e6e7e', '#14919b', 'var(--cyan)']
+  const COLORS = ['var(--color-bg-panel-alt)', '#0e4a5c', '#0e6e7e', '#14919b', 'var(--cyan)']
 
   it('returns first color for zero count', () => {
     expect(intensityColor(0, 100)).toBe(COLORS[0])

@@ -30,8 +30,8 @@ interface KeeperStateDiagramProps {
 
 function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown }) {
   const cls = accent
-    ? 'inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]'
-    : 'inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5'
+    ? 'inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]'
+    : 'inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5'
   return html`<span class="${cls}">${children}</span>`
 }
 
@@ -103,7 +103,7 @@ export function signalTone(severity: string | null | undefined): string {
     case 'warn':
       return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
     case 'ok':
-      return 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
+      return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
     default:
       // Client-side observability: record unexpected severities so future
       // backend additions are noticed before they regress to silent-OK.
@@ -116,8 +116,8 @@ export function signalTone(severity: string | null | undefined): string {
 
 export function badgeTone(ok: boolean): string {
   return ok
-    ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
-    : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
+    ? 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+    : 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
 }
 
 function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {
@@ -235,14 +235,14 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
 
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
           </div>
           <${FilterChips}
@@ -269,10 +269,10 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
                   fallbackText=${mermaidSource}
                 />
                 <div class="flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-disabled)]">
-                  <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">
                     backend phase ${stateDiagram?.current_phase ?? 'unknown'}
                   </span>
-                  <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">
                     response.mermaid
                   </span>
                 </div>
@@ -294,7 +294,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         ${INVARIANT_LABELS.map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
-            <div class=${`rounded border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>
+            <div class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>
               <div class="font-semibold">${label}</div>
               <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
             </div>
@@ -304,18 +304,18 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">관측된 전이</div>
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--color-fg-secondary)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--color-fg-disabled)]">→</span>
                 <span class="font-mono text-[var(--color-accent-fg)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
-                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>
                 ${transition.operator_signal ? html`
-                  <span class=${`rounded-sm border px-2 py-0.5 text-3xs ${signalTone(transition.operator_signal.severity)}`}>
+                  <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs ${signalTone(transition.operator_signal.severity)}`}>
                     ${transition.operator_signal.requires_operator_decision ? 'decision required' : transition.operator_signal.class}
                   </span>
                 ` : null}

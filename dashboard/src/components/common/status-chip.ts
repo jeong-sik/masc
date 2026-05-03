@@ -1,4 +1,4 @@
-// StatusChip — rounded-sm status/tag pill.
+// StatusChip — rounded-[var(--r-0)] status/tag pill.
 //
 // Reference UIs (GitHub label, Linear state badge, Stripe API key
 // badge, Vercel deployment state): a 10px uppercase pill with a
@@ -26,7 +26,7 @@
 // every existing usage compiling while the caller mix converges.
 //
 // P3 update — `uppercase` prop (default true) splits the shape
-// tokens (rounded-sm + border + px-2 py-0.5 + text-3xs) from
+// tokens (rounded-[var(--r-0)] + border + px-2 py-0.5 + text-3xs) from
 // the uppercase/tracking-wider pair. `uppercase={false}` renders
 // a plain (non-uppercase, non-tracked) neutral pill — the shape
 // used by config-resolution-panel's 4 "inline tag" call sites
@@ -50,7 +50,7 @@ export type StatusChipTone =
   | ''
 
 const BASE_SHAPE =
-  'inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs'
+  'inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs'
 const UPPERCASE_CLASS = 'uppercase tracking-wider'
 
 const SEMANTIC_TONE: Record<StatusChipTone, string> = {
@@ -58,10 +58,10 @@ const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   warn: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   bad: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
   info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
-  neutral: 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
+  neutral: 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
   paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
   select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
-  '': 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--color-fg-muted)]',
+  '': 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
 }
 
 /** Keeper lifecycle state → StatusChip tone.
@@ -134,7 +134,7 @@ export function isSemanticTone(tone: string): tone is StatusChipTone {
     uppercase flag (default true). Handles the semantic/raw tone
     dichotomy so callers never have to.
 
-    Shape tokens (rounded-sm + border + px-2 py-0.5 + text-3xs)
+    Shape tokens (rounded-[var(--r-0)] + border + px-2 py-0.5 + text-3xs)
     are always present. `uppercase + tracking-wider` is conditional
     on the `uppercase` flag — callers rendering plain tag pills
     (no all-caps) pass `uppercase={false}` to drop both together. */

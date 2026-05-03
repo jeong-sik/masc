@@ -29,7 +29,7 @@ import { formatAgeSummary } from './governance-utils'
 export { refreshGovernance } from './governance-store'
 
 function MetaTag({ children, mono = false }: { children: unknown; mono?: boolean }) {
-  const cls = `rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
+  const cls = `rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
   return html`<span class=${cls}>${children}</span>`
 }
 
@@ -95,7 +95,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
+      <div class="mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-[var(--shadow-1)]">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           All open cases are older than ${formatAgeSummary(oldestAge)}.
@@ -107,7 +107,7 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judgment</h2>
-        <span class="rounded border border-[var(--white-5)] bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
+        <span class="rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
       </div>
@@ -117,7 +117,7 @@ function GovernanceSummaryStrip() {
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="rounded-[var(--r-1)] border-transparent bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
@@ -160,7 +160,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[#f7b6b6]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -179,7 +179,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded border border-[var(--white-5)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">Judge model ${label}</span>
@@ -239,14 +239,14 @@ function JudgmentsSection() {
     const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
     const chipClass = tone === 'warn'
       ? 'border-warn/30 bg-warn/10 text-warn'
-      : 'border-[var(--color-border-default)] bg-[var(--white-3)] text-text-muted'
+      : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
     return html`
       <div data-testid="live-judge-empty">
         <${Card} title=${title} class="section mb-5" variant="compact">
           <${EmptyState} message=${message} compact />
           ${lastSeen || meta ? html`
             <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
-              ${lastSeen ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
+              ${lastSeen ? html`<span class="inline-flex items-center rounded-[var(--r-1)] border ${chipClass} px-2 py-0.5 font-medium">
                 Last judgment <${TimeAgo} timestamp=${lastSeen} />
               </span>` : null}
               ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
@@ -261,22 +261,22 @@ function JudgmentsSection() {
     <${Card} title=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
-          <div class="rounded border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
+          <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
-              <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
+              <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent-fg">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
               ${j.confidence != null ? html`<span class="ml-auto text-2xs text-text-muted">Confidence ${Math.round(j.confidence * 100)}%</span>` : null}
             </div>
             <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
             ${j.recommended_action ? html`
               <div class="mt-2 flex items-center gap-1.5 text-2xs">
-                <span class="rounded border border-accent/20 bg-accent/8 px-1.5 py-0.5 font-medium text-accent">${j.recommended_action.action_kind ?? 'action'}</span>
+                <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] px-1.5 py-0.5 font-medium text-accent-fg">${j.recommended_action.action_kind ?? 'action'}</span>
                 ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
                 ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
               </div>
             ` : null}
             ${j.guardrail_state?.requires_human_gate ? html`
-              <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">Approval required</div>
+              <div class="mt-1.5 inline-flex items-center rounded-[var(--r-1)] border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">Approval required</div>
             ` : null}
             ${j.generated_at ? html`<div class="mt-1.5 text-2xs text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
           </div>
@@ -317,8 +317,8 @@ export function approvalRiskToneClass(riskLevel: string): string {
   const normalized = riskLevel.trim().toLowerCase()
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
-  if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
-  return 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted'
+  if (normalized === 'medium') return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
 function approvalDispositionToneClass(disposition?: string | null): string {
@@ -326,7 +326,7 @@ function approvalDispositionToneClass(disposition?: string | null): string {
   if (normalized === 'alert') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'pause') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'pass') return 'border-ok/30 bg-ok/10 text-ok'
-  return 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
 const RISK_RANK: Record<string, number> = {
@@ -369,12 +369,12 @@ function KeeperApprovalAlertBanner() {
 
   return html`
     <div
-      class="mb-3.5 flex items-center gap-4 rounded border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
+      class="mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-[var(--shadow-1)] ring-2 ${ringTone}"
       data-testid="keeper-hitl-alert-banner"
       role="status"
       aria-live="polite"
     >
-      <div class="shrink-0 flex items-center justify-center w-11 h-11 rounded-sm border border-current/30 bg-current/10">
+      <div class="shrink-0 flex items-center justify-center w-11 h-11 rounded-[var(--r-1)] border border-current/30 bg-current/10">
         <${AlertTriangle} size=${22} aria-hidden="true" />
       </div>
       <div class="flex-1 min-w-0">
@@ -408,15 +408,15 @@ function KeeperApprovalEmptyState() {
   const chipClass = ctx.tone === 'warn'
     ? 'border-warn/30 bg-warn/10 text-warn'
     : ctx.tone === 'ok'
-      ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
-      : 'border-[var(--white-10)] bg-[var(--white-5)] text-text-muted'
+      ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
+      : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted'
   return html`
     <div data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
       ${ctx.secondary ? html`<div class="mt-0.5 text-center text-2xs text-text-dim">${ctx.secondary}</div>` : null}
       ${ctx.lastActivity || meta ? html`
         <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-2xs ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
-          ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
+          ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded-[var(--r-1)] border ${chipClass} px-2 py-0.5 font-medium">
             Last judge activity <${TimeAgo} timestamp=${ctx.lastActivity} />
           </span>` : null}
           ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
@@ -500,7 +500,7 @@ function KeeperApprovalQueueSection() {
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-sm px-3 py-1 font-extrabold'
         : 'border-warn/40 bg-warn/15 text-warn text-sm px-3 py-1 font-extrabold')
-    : 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
@@ -508,7 +508,7 @@ function KeeperApprovalQueueSection() {
         <div class="text-xs text-text-muted">
           Keeper tool calls above the risk threshold wait here.
         </div>
-        <span class="rounded border ${countBadgeClass}">
+        <span class="rounded-[var(--r-1)] border ${countBadgeClass}">
           ${items.length} pending
         </span>
       </div>
@@ -538,15 +538,15 @@ function KeeperApprovalQueueSection() {
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
-                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
-                      <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
                         ${item.tool_name}
                       </span>
-                      <span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(item.risk_level)}">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(item.risk_level)}">
                         ${item.risk_level}
                       </span>
                       <span class="ml-auto text-2xs text-text-dim">
@@ -567,7 +567,7 @@ function KeeperApprovalQueueSection() {
                         ? html`<${MetaTag} mono>${item.selected_model}</${MetaTag}>`
                         : null}
                       ${item.disposition
-                        ? html`<span class="rounded border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
+                        ? html`<span class="rounded-[var(--r-1)] border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
                           ${item.disposition}${item.disposition_reason ? ` · ${item.disposition_reason}` : ''}
                         </span>`
                         : null}
@@ -629,15 +629,15 @@ function ApprovalRulesSection() {
               ${rules.map((rule: KeeperApprovalRule) => {
                 const deleting = actingId === `rule:${rule.id}`
                 return html`
-                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
+                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}
                       </span>
-                      <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
+                      <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent-fg">
                         ${rule.tool_name}
                       </span>
-                      ${rule.max_risk ? html`<span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}
+                      ${rule.max_risk ? html`<span class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}
                       <span class="ml-auto text-2xs text-text-dim">
                         ${rule.created_at ? html`Created <${TimeAgo} timestamp=${rule.created_at} />` : null}
                         ${rule.last_matched_at ? html` · last matched <${TimeAgo} timestamp=${rule.last_matched_at} />` : null}

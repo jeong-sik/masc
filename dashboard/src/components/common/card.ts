@@ -1,5 +1,5 @@
 // SurfaceCard — reusable card container with Tailwind variants
-// Replaces 40+ inline `p-4 rounded border border-[var(--color-border-default)]` patterns
+// Replaces 40+ inline `p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)]` patterns
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -10,7 +10,7 @@ import { statusDotColor } from './status-badge'
 const CARD_BASE = 'card'
 export const CARD_STANDARD = `${CARD_BASE}`
 const CARD_LIGHT = `${CARD_BASE} !bg-transparent !backdrop-blur-none`
-const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[0_1px_2px_rgba(0,0,0,0.14)]`
+const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[var(--shadow-1)]`
 
 type CardVariant = 'standard' | 'light' | 'compact'
 
@@ -85,7 +85,7 @@ export function SectionCard({
   // SPEC `.section-head` upgrade — SectionHead atom replaces the
   // legacy SectionHeader. The strip wants to sit flush against the
   // card's top edge, so the outer SurfaceCard padding is forced to 0
-  // (overflow-hidden lets the strip clip into the rounded corner) and
+  // (overflow-hidden lets the strip clip into the rounded-[var(--r-1)] corner) and
   // the body padding moves into a dedicated wrapper. The `light`
   // variant deliberately keeps the bg-transparent override — the
   // SectionHead's bg-surface still reads as a strip because it sits

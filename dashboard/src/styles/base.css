@@ -14,14 +14,12 @@ html {
 }
 
 body {
-  font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-  color: var(--text-body);
-  line-height: 1.5;
-  background:
-    radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / 0.08), transparent 22%),
-    radial-gradient(circle at 8% 88%, rgb(var(--warn-glow) / 0.04), transparent 28%),
-    radial-gradient(circle at 50% 50%, rgb(var(--info-glow) / 0.03), transparent 40%),
-    linear-gradient(180deg, var(--bg-root-deep) 0%, var(--color-bg-page) 48%, var(--bg-root-dim) 100%);
+  font-family: var(--font-sans);
+  color: var(--color-fg-secondary);
+  line-height: var(--lh-body);
+  background-color: var(--color-bg-page);
+  background-image:
+    radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / 0.05), transparent 20%);
   background-attachment: fixed;
   position: relative;
 }
@@ -33,7 +31,7 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--brass-1);
   text-decoration: none;
 }
 

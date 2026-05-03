@@ -13,7 +13,7 @@ body.focus-mode .app {
     0    /* kpi     */
     0    /* life    */
     1fr  /* center row (side / center / rail) */
-    var(--h-drawer) /* drawer  */
+    auto /* drawer  */
     0    /* compose */
     0;   /* status  */
 }
@@ -45,32 +45,32 @@ body.focus-mode .vp-banner { display: none !important; }
   cursor: pointer;
   border-radius: 0;
   user-select: none;
-  transition: color .12s ease, border-color .12s ease, background .12s ease;
-  box-shadow: 0 2px 12px rgba(0,0,0,.5);
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+  box-shadow: var(--shadow-card);
 }
 .focus-toggle:hover {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.08);
+  background: rgb(var(--color-accent-glow) / .08);
 }
 .focus-toggle.on {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.12);
+  background: rgb(var(--color-accent-glow) / .12);
 }
 .focus-toggle .focus-icon {
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1;
 }
 .focus-toggle .focus-label {
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 /* When in focus mode, give status tray (added separately) clear space */
 body.focus-mode .focus-toggle {
-  background: rgba(20,18,14,.85);
+  background: var(--scrim-strong);
   backdrop-filter: blur(4px);
 }
 
@@ -83,28 +83,28 @@ body.widget-solo-mode .focus-cluster { display: none; }
   position: fixed;
   right: 12px;
   bottom: 12px;
-  z-index: 1100;
+  z-index: 51;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
 }
 .focus-cluster .focus-toggle {
-  position: relative; /* keep in stacking context; cancel fixed from standalone rule */
+  position: static; /* override the fixed positioning above */
 }
 
 /* Menu popover — sits above the toggle button */
 .focus-menu {
-  background: rgba(20,18,14,.96);
+  background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default, #2c2823);
-  box-shadow: 0 4px 20px rgba(0,0,0,.6);
+  box-shadow: var(--shadow-panel);
   padding: 4px 0;
   min-width: 200px;
-  font: 11px/1 var(--font-mono);
+  font: var(--fs-11)/1 var(--font-mono);
 }
 .focus-menu-h {
   padding: 6px 10px 4px;
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: .14em;
   text-transform: uppercase;
   color: var(--color-fg-muted, #6b6258);
@@ -124,7 +124,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
   cursor: pointer;
 }
 .focus-menu-row:hover {
-  background: rgba(180,140,60,.08);
+  background: rgb(var(--color-accent-glow) / .08);
   color: var(--brass-1, #f0c674);
 }
 .focus-menu-row.on .focus-menu-k {
@@ -133,7 +133,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 .focus-menu-k {
   width: 10px;
   color: var(--color-fg-muted, #6b6258);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
 }
 .focus-menu-l {
   flex: 1;
@@ -141,7 +141,7 @@ body.widget-solo-mode .focus-cluster { display: none; }
 }
 .focus-menu-sub {
   color: var(--color-fg-muted, #6b6258);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -149,5 +149,5 @@ body.widget-solo-mode .focus-cluster { display: none; }
 .focus-toggle.menu-open {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.12);
+  background: rgb(var(--color-accent-glow) / .12);
 }

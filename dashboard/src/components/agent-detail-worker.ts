@@ -42,7 +42,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
         ${worker.related_session_id ? html`
           <${WorkerInfoRow}>
             <${DetailLabel}>세션</${DetailLabel}>
-            <span class="font-mono truncate" style="font-size: 11px" title=${worker.related_session_id}>${worker.related_session_id}</span>
+            <span class="font-mono truncate text-[var(--fs-11)]" title=${worker.related_session_id}>${worker.related_session_id}</span>
             <${CopyIdButton} value=${worker.related_session_id} label="session_id" size=${10} />
           </${WorkerInfoRow}>
         ` : null}
@@ -50,7 +50,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
           <${WorkerInfoRow}>
             <${DetailLabel}>시그널</${DetailLabel}>
             <${TimeAgo} timestamp=${worker.last_signal_at} />
-            ${worker.signal_truth ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${worker.signal_truth}</span>` : null}
+            ${worker.signal_truth ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${worker.signal_truth}</span>` : null}
           </${WorkerInfoRow}>
         ` : null}
       </div>

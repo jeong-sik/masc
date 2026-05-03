@@ -42,7 +42,7 @@ export const MemorySearch: FunctionComponent<MemorySearchProps> = ({
         type="text"
         value=${localQuery}
         onInput=${handleInput}
-        class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         placeholder="기억 검색 (의미적 유사도)..."
         aria-label="메모리 검색"
       />
@@ -54,10 +54,10 @@ export const MemorySearch: FunctionComponent<MemorySearchProps> = ({
           r => html`
             <div
               key=${r.id}
-              class="group flex cursor-pointer items-center gap-3 rounded px-3 py-2 hover:bg-[var(--white-6)]"
+              class="group flex cursor-pointer items-center gap-3 rounded-[var(--r-1)] px-3 py-2 hover:bg-[var(--color-bg-hover)]"
               role="listitem"
             >
-              <div class="h-1 w-12 overflow-hidden rounded-full bg-[var(--white-4)]">
+              <div class="h-1 w-12 overflow-hidden rounded-full bg-[var(--color-bg-elevated)]">
                 <div
                   class="h-full rounded-full"
                   style=${{

@@ -122,14 +122,14 @@ export function MermaidGraph({
         <div class="space-y-2">
           <${EmptyState} message=${error} compact />
           ${fallbackText ? html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm leading-loose text-[var(--color-fg-disabled)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm leading-loose text-[var(--color-fg-disabled)]">
               ${fallbackText}
             </div>
           ` : null}
         </div>
       ` : html`
         <div
-          class=${`overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] ${diagramClass}`.trim()}
+          class=${`overflow-auto rounded-[var(--radius-lg)] p-3 bg-[var(--color-bg-surface)] ${diagramClass}`.trim()}
           ref=${hostRef}
           role="img"
           aria-label=${fallbackText ?? '다이어그램'}

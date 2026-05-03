@@ -39,7 +39,7 @@
     color: var(--color-fg-secondary);
   }
   .pv-banner .lbl {
-    font-weight: 600;
+    font-weight: var(--fw-semi);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
     color: var(--color-fg-secondary);
@@ -55,7 +55,7 @@
     color: var(--color-fg-muted);
     letter-spacing: var(--track-wide);
   }
-  .pv-cell .pv-src b { color: var(--color-fg-secondary); font-weight: 600; }
+  .pv-cell .pv-src b { color: var(--color-fg-secondary); font-weight: var(--fw-semi); }
 
   /* ── Viewport switcher ───────────────────────────────────── */
   .vp-switch {
@@ -107,7 +107,7 @@
     color: var(--color-fg-secondary);
     margin-bottom: 16px;
   }
-  .vp-readout b { color: var(--color-accent-fg); font-weight: 600; }
+  .vp-readout b { color: var(--color-accent-fg); font-weight: var(--fw-semi); }
   .vp-readout .ramp {
     display: inline-flex; gap: 3px;
   }
@@ -315,7 +315,7 @@
     }
     .demo-pillbar::-webkit-scrollbar { display: none; }
     .demo-shell .hdr { padding: 12px; }
-    .demo-shell .hdr .ttl { font-size: 18px; }
+    .demo-shell .hdr .ttl { font-size: var(--fs-18); }
   }
 
   /* Breakpoint catalogue table */
@@ -347,7 +347,7 @@
     color: var(--color-fg-muted);
     font-size: var(--fs-9);
   }
-  .bp-cat td.tok b { color: var(--color-warn-fg); font-weight: 600; }
+  .bp-cat td.tok b { color: var(--color-warn-fg); font-weight: var(--fw-semi); }
   .bp-cat td.affects {
     font-family: var(--font-mono);
     font-size: var(--fs-9);
@@ -504,7 +504,7 @@
       <div class="vp-stage vp-stage-mobile" data-vp="mobile">
         <div class="demo-shell">
           <div class="hdr">
-            <div class="ttl" style="font-size:18px">Dashboard</div>
+            <div class="ttl" style="font-size:var(--fs-18)">Dashboard</div>
             <div class="hr">
               <span class="pill">cascade · ok</span>
             </div>

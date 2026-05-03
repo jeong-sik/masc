@@ -44,9 +44,9 @@
   .radius-val { font: 9px/1.2 var(--font-mono); color: var(--color-fg-muted); }
 
   /* Elevation stack */
-  .elev-wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px; background: var(--color-bg-page); border: 1px solid var(--color-border-default); border-radius: 3px; }
+  .elev-wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px; background: var(--color-bg-page); border: 1px solid var(--color-border-default); border-radius: var(--r-1); }
   .elev-card {
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 20px 16px;
     font: 10px/1.2 var(--font-mono);
     letter-spacing: var(--track-caps);
@@ -55,7 +55,7 @@
     display: flex; flex-direction: column; gap: 8px;
     min-height: 100px;
   }
-  .elev-card .v { color: var(--color-fg-primary); font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .elev-card .v { color: var(--color-fg-primary); font-size: var(--fs-14); letter-spacing: 0; text-transform: none; }
   .elev-0 { background: #0c0b08; border: 1px solid #2a2520; }
   .elev-1 { background: #141210; border: 1px solid #2a2520; box-shadow: inset 0 1px 0 rgb(255 255 255 / .02); }
   .elev-2 { background: #1a1815; border: 1px solid #3a332c; box-shadow: 0 1px 2px rgb(0 0 0 / .4), inset 0 1px 0 rgb(255 255 255 / .03); }
@@ -68,7 +68,7 @@
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
   }
   .density-card {
-    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1);
     overflow: hidden;
   }
   .density-h {
@@ -79,7 +79,7 @@
     color: var(--color-fg-secondary);
     display: flex; justify-content: space-between;
   }
-  .density-h .meta { color: var(--color-fg-muted); font-size: 9px; }
+  .density-h .meta { color: var(--color-fg-muted); font-size: var(--fs-9); }
   .d-row {
     display: grid; grid-template-columns: 10px 1fr auto auto; gap: 10px; align-items: center;
     padding: 0 12px;
@@ -89,7 +89,7 @@
   }
   .d-row:last-child { border-bottom: none; }
   .d-row .dot { width: 6px; height: 6px; border-radius: 50%; justify-self: center; }
-  .d-row .t { color: var(--color-fg-muted); font-size: 9px; }
+  .d-row .t { color: var(--color-fg-muted); font-size: var(--fs-9); }
   .d-compact .d-row { height: 18px; }
   .d-normal  .d-row { height: 22px; }
   .d-comfy   .d-row { height: 28px; }
@@ -98,7 +98,7 @@
   .layout-demo {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 16px;
   }
   .layout-grid {
@@ -125,10 +125,10 @@
   .layout-grid .kpi    { grid-column: 1 / -1; grid-row: 3; background: var(--color-bg-elevated); color: var(--color-fg-primary); }
   .layout-grid .life   { grid-column: 1 / -1; grid-row: 4; }
   .layout-grid .side   { grid-column: 1; grid-row: 5; background: var(--color-bg-surface); }
-  .layout-grid .center { grid-column: 2; grid-row: 5; background: var(--color-bg-page); color: var(--color-accent-fg); font-size: 10px; }
+  .layout-grid .center { grid-column: 2; grid-row: 5; background: var(--color-bg-page); color: var(--color-accent-fg); font-size: var(--fs-10); }
   .layout-grid .rail   { grid-column: 3; grid-row: 5; background: var(--color-bg-surface); }
   .layout-grid .compose{ grid-column: 1 / -1; grid-row: 6; background: var(--color-bg-elevated); color: var(--color-fg-secondary); }
-  .layout-grid .status { grid-column: 1 / -1; grid-row: 7; background: var(--color-bg-surface); font-size: 8px; }
+  .layout-grid .status { grid-column: 1 / -1; grid-row: 7; background: var(--color-bg-surface); font-size: var(--fs-8); }
 </style>
 </head>
 <body class="masc-ds">
@@ -166,9 +166,9 @@
     </div>
     <div class="radius-grid">
       <div class="radius-card"><div class="radius-shape" style="border-radius:0"></div><span class="radius-name">r-0</span><span class="radius-val">0 · sharp</span></div>
-      <div class="radius-card"><div class="radius-shape" style="border-radius:3px"></div><span class="radius-name">r-1</span><span class="radius-val">3px · default</span></div>
-      <div class="radius-card"><div class="radius-shape" style="border-radius:5px"></div><span class="radius-name">r-2</span><span class="radius-val">5px · popover</span></div>
-      <div class="radius-card"><div class="radius-shape" style="border-radius:8px"></div><span class="radius-name">r-3</span><span class="radius-val">8px · drawer</span></div>
+      <div class="radius-card"><div class="radius-shape" style="border-radius:var(--r-1)"></div><span class="radius-name">r-1</span><span class="radius-val">3px · default</span></div>
+      <div class="radius-card"><div class="radius-shape" style="border-radius:var(--r-2)"></div><span class="radius-name">r-2</span><span class="radius-val">5px · popover</span></div>
+      <div class="radius-card"><div class="radius-shape" style="border-radius:var(--r-3)"></div><span class="radius-name">r-3</span><span class="radius-val">8px · drawer</span></div>
       <div class="radius-card"><div class="radius-shape" style="border-radius:999px"></div><span class="radius-name">r-full</span><span class="radius-val">pill</span></div>
     </div>
   </section>

@@ -79,7 +79,7 @@ function NodeView({ node, depth }: NodeViewProps) {
 export function AgentDelegation({ root, testId }: AgentDelegationProps) {
   return html`
     <div
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       role="tree"
       data-agent-delegation
       data-testid=${testId}

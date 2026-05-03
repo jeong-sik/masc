@@ -11,7 +11,7 @@ export const TOP_PAD = 20
 export const LEGEND_HEIGHT = 32
 
 const COLORS: readonly [string, string, string, string, string] = [
-  'var(--slate-800)',
+  'var(--color-bg-panel-alt)',
   '#0e4a5c',
   '#0e6e7e',
   '#14919b',
@@ -53,12 +53,12 @@ export function drawHeatmap(
   const h = canvasHeight()
 
   // Background
-  ctx.fillStyle = '#0f1117'
+  ctx.fillStyle = 'var(--color-bg-surface)'
   ctx.fillRect(0, 0, w, h)
 
   // Hour labels (top)
   ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = 'var(--slate-500)'
+  ctx.fillStyle = 'var(--color-fg-muted)'
   ctx.textAlign = 'center'
   for (const hour of HOUR_LABELS) {
     const x = LEFT_MARGIN + hour * (CELL + GAP) + CELL / 2
@@ -71,7 +71,7 @@ export function drawHeatmap(
     const y = TOP_PAD + day * (CELL + GAP)
     const label = DAY_LABELS[day]!
 
-    ctx.fillStyle = 'var(--slate-400)'
+    ctx.fillStyle = 'var(--color-fg-muted)'
     ctx.font = '11px system-ui, sans-serif'
     ctx.fillText(label, LEFT_MARGIN - 6, y + CELL / 2 + 4)
 
@@ -88,7 +88,7 @@ export function drawHeatmap(
   // Legend
   const legendY = TOP_PAD + 7 * (CELL + GAP) + 8
   ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = 'var(--slate-500)'
+  ctx.fillStyle = 'var(--color-fg-muted)'
   ctx.textAlign = 'left'
   ctx.fillText('적음', LEFT_MARGIN, legendY + 10)
 
@@ -101,7 +101,7 @@ export function drawHeatmap(
     ctx.fill()
   }
 
-  ctx.fillStyle = 'var(--slate-500)'
+  ctx.fillStyle = 'var(--color-fg-muted)'
   ctx.textAlign = 'left'
   ctx.fillText('많음', legendStartX + COLORS.length * (CELL + 2) + 4, legendY + 10)
 }

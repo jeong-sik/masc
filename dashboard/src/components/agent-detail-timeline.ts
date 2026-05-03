@@ -36,7 +36,7 @@ export function timelineEventLabel(type: string): string {
 
 function SummaryBadge({ children }: { children: unknown }) {
   return html`
-    <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${children}</span>
+    <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${children}</span>
   `
 }
 
@@ -102,19 +102,19 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const cat = toolCategory(toolName)
 
   return html`
-    <div class="flex flex-col py-1.5 px-2 rounded hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
+    <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
       <div class="flex items-center gap-2 text-sm">
-        <div class="flex-shrink-0 size-6 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
+        <div class="flex-shrink-0 size-6 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
-        <span class="text-3xs px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)]">${cat.label}</span>
+        <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
           : null}
         ${success
-          ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]">ok</span>`
-          : html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
+          ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
+          : html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
       </div>
@@ -196,7 +196,7 @@ export function AgentTimelineSection() {
                       const detail = evt.detail as Record<string, string | undefined>
                       const title = detail.title ?? detail.content ?? ''
                       return html`
-                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
                           <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
                           <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
                           ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}

@@ -100,6 +100,7 @@ type semantic =
   | `Sp_7
   | `Sp_8
   | `Sp_0h
+  | `R_0
   | `R_1
   | `R_2
   | `R_3

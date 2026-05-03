@@ -155,12 +155,12 @@ export function AgentLiveTimeline({ name }: { name: string }) {
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <${FilterChips} chips=${FILTER_CHIPS} active=${activeFilter} />
         <div class="flex items-center gap-2 text-2xs">
-          <span class="px-2 py-0.5 rounded bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
+          <span class="px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-fg-muted)] text-3xs">${eventsPerMin}/min</span>
           <span class="text-[var(--color-fg-muted)]">${filtered.length} events</span>
           <button type="button"
-            class="px-2 py-0.5 rounded text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
-              ? 'border-[rgba(34,197,94,0.4)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
-              : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
+            class="px-2 py-0.5 rounded-[var(--r-1)] text-3xs border cursor-pointer transition-[background-color,border-color,box-shadow] duration-[var(--t-med)] ${autoScroll.value
+              ? 'border-[var(--ok-border)] text-[var(--color-status-ok)] bg-[var(--color-bg-elevated)]'
+              : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-elevated)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}
           >
@@ -173,7 +173,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         ${filtered.length === 0
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
-              <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+              <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
                 <${StatusChip} tone=${eventKindBadgeTone(entry)}>${eventKindLabel(entry.eventType)}<//>
                 <span class="flex-1 text-[var(--color-fg-primary)] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`

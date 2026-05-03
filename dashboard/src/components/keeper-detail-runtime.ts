@@ -55,7 +55,7 @@ export function resolveKeeperCurrentTaskLabel(
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${value}</span>
     </div>
@@ -70,7 +70,7 @@ function ToolChip({ name }: { name: string }) {
     <${ActionButton}
       variant="primary"
       size="sm"
-      class="!rounded-sm !py-0.5 !text-3xs !text-[var(--color-accent-fg)] inline-flex items-center gap-1"
+      class="!rounded-[var(--r-0)] !py-0.5 !text-3xs !text-[var(--color-accent-fg)] inline-flex items-center gap-1"
       title=${`${cat.label}: ${name}`}
       ariaLabel=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
@@ -124,7 +124,7 @@ export function AllowlistPreview({
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
           ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
+              <span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-0)] text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
                 +${hiddenCount}
               </span>
             `
@@ -261,7 +261,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   }
 
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <div class="flex items-center gap-2">
         ${isOverride && deltaText
@@ -331,7 +331,7 @@ export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
     <${CollapsibleSection}
       title=${html`터 예산 ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}`}
       open=${diverges}
-      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}
+      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-[var(--accent-50)]'}
     >
       <${TurnBudgetPanel} keeper=${keeper} />
     <//>
@@ -496,7 +496,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         : null}
       ${showEmptyState
         ? html`
-            <div class="py-3 px-3 rounded border border-dashed border-[var(--color-border-default)] text-2xs text-[var(--color-fg-muted)] italic">
+            <div class="py-3 px-3 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-2xs text-[var(--color-fg-muted)] italic">
               필터 결과 없음 (${totalRows} items)
             </div>
           `
@@ -623,7 +623,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <${ActionButton}
           variant="ghost"
           size="md"
-          class="!bg-[var(--white-3)] !text-[var(--color-fg-muted)] hover:!text-[var(--color-fg-primary)] hover:!bg-[var(--white-6)]"
+          class="!bg-[var(--color-bg-surface)] !text-[var(--color-fg-muted)] hover:!text-[var(--color-fg-primary)] hover:!bg-[var(--color-bg-hover)]"
           disabled=${!openToolsQuery}
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
@@ -658,7 +658,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
         <span class="text-xs text-[var(--color-fg-muted)]">감사</span>
         <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>

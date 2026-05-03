@@ -226,7 +226,7 @@ async function submitResolve(
 // for the cancel/reject actions in this panel. Btn default variant uses
 // fg-secondary, so this constant stays until a tone variant ships.
 const BTN_SECONDARY =
-  'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 function RowActions({
   row,
@@ -403,7 +403,7 @@ function VerificationRow({
                 <summary class="cursor-pointer text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
                   자세히
                 </summary>
-                <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
+                <div class="flex flex-col gap-2 mt-2 p-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
                   ${hasTaskTitle
                     ? html`
                         <div>
@@ -620,7 +620,7 @@ export function VerificationRequestsPanel() {
         ? html`
             <div
               role="note"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
             >
               검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
               <code class="text-[var(--color-fg-secondary)]">pending</code> 상태에서만 표시됩니다.

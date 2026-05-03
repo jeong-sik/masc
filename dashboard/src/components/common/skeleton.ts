@@ -18,7 +18,7 @@
 
 import { html } from 'htm/preact'
 
-const SKELETON_BASE = 'animate-pulse bg-[var(--white-4)] rounded'
+const SKELETON_BASE = 'animate-pulse bg-[var(--color-bg-elevated)] rounded-[var(--r-1)]'
 
 export interface SkeletonProps {
   /** Tailwind width class or arbitrary value via class. Default w-full. */
@@ -129,7 +129,7 @@ export function SkeletonCircle({
   const sizing = size ?? 'h-8 w-8'
   const ariaHidden = ariaLabel === undefined ? 'true' : undefined
   return html`<div
-    class=${`animate-pulse rounded-full bg-[var(--white-4)] ${sizing} ${cx ?? ''}`}
+    class=${`animate-pulse rounded-full bg-[var(--color-bg-elevated)] ${sizing} ${cx ?? ''}`}
     aria-hidden=${ariaHidden}
     aria-label=${ariaLabel}
     role=${ariaLabel !== undefined ? 'status' : undefined}

@@ -58,11 +58,11 @@ export function TaskStaleAlert() {
 
   return html`
     <section
-      class="rounded border border-warn/30 bg-warn/5 p-3"
+      class="rounded-[var(--r-1)] border border-warn/30 bg-warn/5 p-3"
       aria-label="오래된 태스크 점유"
     >
       <header class="mb-2 flex items-baseline justify-between gap-2">
-        <h3 class="text-xs font-semibold uppercase tracking-1 text-warn">
+        <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-warn">
           오래 점유 중인 태스크 (${entries.length})
         </h3>
         <span class="text-2xs text-text-muted">
@@ -73,7 +73,7 @@ export function TaskStaleAlert() {
         ${entries.map(e => html`
           <li
             key=${e.task.id}
-            class="flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs"
+            class="flex flex-wrap items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs"
           >
             <button
               type="button"
@@ -87,14 +87,14 @@ export function TaskStaleAlert() {
             ${e.task.assignee ? html`
               <span class="text-text-muted">@${e.task.assignee}</span>
             ` : null}
-            <span class="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-2xs text-warn">
+            <span class="rounded-[var(--r-1)] border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-2xs text-warn">
               ${e.label}
             </span>
             <div class="flex gap-1">
               ${e.task.assignee ? html`
                 <button
                   type="button"
-                  class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent hover:bg-[var(--accent-15)]"
+                  class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
                   title="해당 키퍼 상세로 이동해 직접 nudge"
                   onClick=${() => e.task.assignee && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: e.task.assignee })}
                 >
@@ -103,7 +103,7 @@ export function TaskStaleAlert() {
               ` : null}
               <button
                 type="button"
-                class="rounded border border-text-muted/30 px-2 py-0.5 text-2xs text-text-muted hover:bg-[var(--color-bg-panel-alt)]"
+                class="rounded-[var(--r-1)] border border-text-muted/30 px-2 py-0.5 text-2xs text-text-muted hover:bg-[var(--color-bg-panel-alt)]"
                 title="태스크 상세 패널 열기"
                 onClick=${() => navigate('workspace', { section: 'planning', task: e.task.id })}
               >

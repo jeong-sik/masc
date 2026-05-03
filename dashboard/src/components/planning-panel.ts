@@ -62,7 +62,7 @@ function severityToneClass(severity: string | undefined): string {
     case 'warn':
       return 'border-warn/35 bg-warn/10 text-warn'
     default:
-      return 'border-accent/25 bg-[var(--accent-10)] text-accent'
+      return 'border-[var(--accent-25)] bg-[var(--accent-10)] text-accent-fg'
   }
 }
 
@@ -84,9 +84,9 @@ function evidenceLabel(evidence: DashboardCoordinationFsmEvidence): string {
 
 function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordinationFsmEvidence }) {
   return html`
-    <li class="min-w-0 rounded border border-card-border/40 bg-white/[0.03] px-2 py-1">
+    <li class="min-w-0 rounded-[var(--r-1)] border border-card-border/40 bg-white/[0.03] px-2 py-1">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <span class="rounded border border-card-border/50 bg-black/15 px-1.5 py-0.5 text-3xs font-semibold uppercase text-text-muted">
+        <span class="rounded-[var(--r-1)] border border-card-border/50 bg-black/15 px-1.5 py-0.5 text-3xs font-semibold uppercase text-text-muted">
           ${evidenceLabel(evidence)}
         </span>
         <span class="min-w-0 truncate text-2xs font-medium text-text-strong">
@@ -103,9 +103,9 @@ function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordination
 function CoordinationViolationRow({ violation }: { violation: DashboardCoordinationFsmViolation }) {
   const evidence = (violation.evidence ?? []).slice(0, 3)
   return html`
-    <li class="rounded border border-card-border/60 bg-black/10 p-2">
+    <li class="rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-2">
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="rounded border px-2 py-0.5 text-3xs font-semibold uppercase ${severityToneClass(violation.severity)}">
+        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${severityToneClass(violation.severity)}">
           ${violation.severity ?? 'info'}
         </span>
         <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? 'coordination'}</span>
@@ -134,32 +134,32 @@ function CoordinationHealthPanel() {
   const warnCount = coordinationCount(snapshot, 'warn')
   const evidenceCount = coordinationCount(snapshot, 'evidence')
   return html`
-    <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3" aria-label="협력 상태">
+    <section class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label="협력 상태">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">협력 상태</div>
           <div class="text-2xs text-text-dim">Goal x Task x Board x Reward · ${snapshot.mode ?? 'advisory'}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">
-          <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             products ${coordinationCount(snapshot, 'products')}
           </span>
-          <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             violations ${coordinationCount(snapshot, 'violations')}
           </span>
-          <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-1 text-text-body">
+          <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             evidence ${evidenceCount}
           </span>
           ${errorCount > 0 ? html`
-            <span class="rounded border border-bad/35 bg-bad/10 px-2 py-1 text-bad">error ${errorCount}</span>
+            <span class="rounded-[var(--r-1)] border border-bad/35 bg-bad/10 px-2 py-1 text-bad">error ${errorCount}</span>
           ` : null}
           ${warnCount > 0 ? html`
-            <span class="rounded border border-warn/35 bg-warn/10 px-2 py-1 text-warn">warn ${warnCount}</span>
+            <span class="rounded-[var(--r-1)] border border-warn/35 bg-warn/10 px-2 py-1 text-warn">warn ${warnCount}</span>
           ` : null}
         </div>
       </div>
       ${snapshot.projection_error ? html`
-        <div class="mt-2 rounded border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn">
+        <div class="mt-2 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn">
           projection: ${snapshot.projection_error}
         </div>
       ` : null}

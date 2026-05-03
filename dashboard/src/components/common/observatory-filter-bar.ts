@@ -28,12 +28,12 @@ function Chip({
   onClear: () => void
 }) {
   return html`
-    <span class="inline-flex items-center gap-1.5 rounded-sm border border-card-border bg-card/50 px-2.5 py-1 text-2xs">
+    <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-card-border bg-card/50 px-2.5 py-1 text-2xs">
       <span class="text-text-dim font-medium">${label}:</span>
       <span class="font-mono text-text-strong">${value}</span>
       <button
         type="button"
-        class="ml-0.5 rounded-sm min-w-6 min-h-6 p-1 text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong transition-colors inline-flex items-center justify-center"
+        class="ml-0.5 rounded-[var(--r-0)] min-w-6 min-h-6 p-1 text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-strong transition-colors inline-flex items-center justify-center"
         onClick=${onClear}
         aria-label=${`Clear ${label} filter`}
       >
@@ -53,7 +53,7 @@ export function ObservatoryFilterBar() {
 
   return html`
     <div
-      class="mb-3 flex flex-wrap items-center gap-2 rounded border border-card-border bg-bg-1/60 px-3 py-2"
+      class="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-card-border bg-bg-1/60 px-3 py-2"
       role="region"
       aria-label="Active observability filters"
     >
@@ -88,7 +88,7 @@ export function ObservatoryFilterBar() {
       ` : null}
       <button
         type="button"
-        class="ml-auto rounded text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
+        class="ml-auto rounded-[var(--r-1)] text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
         onClick=${() => clearObservatoryFilters()}
       >
         Clear all

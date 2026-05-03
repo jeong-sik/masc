@@ -41,7 +41,7 @@ export function BranchTree({ repository_id, branches, default_branch }: BranchTr
   })
 
   return html`
-    <div class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden" data-repo-id="${repository_id}">
+    <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden" data-repo-id="${repository_id}">
       <div class="px-3 py-2 border-b border-card-border/30 bg-card/40">
         <div class="flex items-center justify-between">
           <span class="text-2xs font-semibold uppercase tracking-wider text-text-muted">브랜치</span>
@@ -61,7 +61,7 @@ export function BranchTree({ repository_id, branches, default_branch }: BranchTr
                 ${branch}
               </span>
               ${isDefault
-                ? html`<span class="text-3xs font-bold px-1.5 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shrink-0">기본</span>`
+                ? html`<span class="text-3xs font-bold px-1.5 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shrink-0">기본</span>`
                 : null}
             </li>
           `

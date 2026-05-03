@@ -1,5 +1,5 @@
 // SectionHeader — consistent section labels across dashboard
-// Replaces 34+ inline patterns: `text-3xs uppercase tracking-1 text-[var(--color-fg-muted)] font-medium`
+// Replaces 34+ inline patterns: `text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] font-medium`
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

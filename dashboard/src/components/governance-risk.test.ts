@@ -11,19 +11,19 @@ describe('approvalRiskToneClass', () => {
   })
 
   it('returns accent tone for medium', () => {
-    expect(approvalRiskToneClass('medium')).toBe('border-accent/30 bg-[var(--accent-10)] text-accent')
+    expect(approvalRiskToneClass('medium')).toBe('border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg')
   })
 
   it('returns muted tone for low', () => {
-    expect(approvalRiskToneClass('low')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('low')).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted')
   })
 
   it('returns muted tone for unknown', () => {
-    expect(approvalRiskToneClass('unknown')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('unknown')).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted')
   })
 
   it('returns muted tone for empty string', () => {
-    expect(approvalRiskToneClass('')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('')).toBe('border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted')
   })
 
   it('is case-insensitive', () => {
@@ -32,7 +32,7 @@ describe('approvalRiskToneClass', () => {
   })
 
   it('trims whitespace', () => {
-    expect(approvalRiskToneClass('  medium  ')).toBe('border-accent/30 bg-[var(--accent-10)] text-accent')
+    expect(approvalRiskToneClass('  medium  ')).toBe('border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg')
   })
 })
 

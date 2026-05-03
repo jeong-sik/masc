@@ -108,7 +108,7 @@ function inputHandler(sig: { value: string }) {
 export function StartFormButton({ class: cx }: { class?: string }) {
   return html`
     <button type="button"
-      class=${cx ?? 'px-3 py-1.5 rounded text-xs font-medium border border-accent/50 text-accent hover:bg-[var(--accent-10)] transition-colors'}
+      class=${cx ?? 'px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-50)] text-accent-fg hover:bg-[var(--accent-10)] transition-colors'}
       onClick=${() => { showStartForm.value = true }}
     >
       새 루프 시작
@@ -126,8 +126,8 @@ export function StartAutoresearchForm() {
     <${DialogOverlay}
       labelledBy="start-autoresearch-title"
       onClose=${closeStartForm}
-      overlayClass="fixed inset-0 z-50 flex items-center justify-center bg-[var(--white-5)]/60 backdrop-blur-sm"
-      panelClass="w-full max-w-lg mx-4 rounded border border-card-border bg-[var(--card-bg)] shadow-sm p-6"
+      overlayClass="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-bg-elevated)]/60 backdrop-blur-sm"
+      panelClass="w-full max-w-lg mx-4 rounded-[var(--r-1)] border border-card-border bg-[var(--card-bg)] shadow-[var(--shadow-1)] p-6"
     >
       <h2 id="start-autoresearch-title" class="text-sm font-semibold text-[var(--color-fg-secondary)] mb-4">
         새 오토리서치 루프
@@ -238,23 +238,23 @@ export function StartAutoresearchForm() {
         ` : null}
 
         ${startFormError.value ? html`
-          <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
+          <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
             ${startFormError.value}
           </div>
         ` : null}
 
         <div class="flex items-center justify-end gap-2 mt-2">
           <button type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium border border-card-border text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] transition-colors"
+            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border border-card-border text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] transition-colors"
             onClick=${closeStartForm}
             disabled=${startFormBusy.value}
           >
             취소
           </button>
           <button type="button"
-            class="px-4 py-1.5 rounded text-xs font-semibold border transition-colors ${
+            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold border transition-colors ${
               canSubmit.value
-                ? 'border-accent/60 bg-accent/15 text-accent hover:bg-accent/25'
+                ? 'border-[var(--accent-60)] bg-[var(--accent-15)] text-accent-fg hover:bg-[var(--accent-25)]'
                 : 'border-card-border bg-card/60 text-[var(--color-fg-muted)] cursor-not-allowed opacity-50'
             }"
             disabled=${!canSubmit.value}

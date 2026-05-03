@@ -29,13 +29,13 @@ import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
-const DECK_PANEL = 'overflow-hidden rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
+const DECK_PANEL = 'overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
 const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
-const DECK_CARD = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
+const DECK_CARD = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
-const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
-const BRASS_CHIP = 'rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
+const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const BRASS_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
 
 export function PlanningStat({
   label,
@@ -69,7 +69,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+      class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
@@ -109,7 +109,7 @@ function GuideCard({
       </div>
       <p class="text-xs leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap">${summary}</p>
       ${command ? html`
-        <div class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-xs leading-relaxed text-[var(--color-fg-secondary)]">
+        <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-xs leading-relaxed text-[var(--color-fg-secondary)]">
           <code class="font-mono text-3xs text-[var(--color-fg-primary)]">${command}</code>
         </div>
       ` : null}
@@ -175,7 +175,7 @@ function KeeperToolActivity() {
                 <button
                   key=${k.name}
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+                  class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
                   onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}
@@ -191,7 +191,7 @@ function KeeperToolActivity() {
             <div class="${DECK_LABEL} mb-2">최근 자주 사용된 도구</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-1">
               ${topTools.map(([name, count]) => html`
-                <div key=${name} class="flex items-center justify-between rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-3xs">
+                <div key=${name} class="flex items-center justify-between rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-3xs">
                   <span class="truncate font-mono text-[var(--color-fg-secondary)]">${normalizeToolName(name)}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-[var(--color-fg-disabled)]">${count}</span>
                 </div>
@@ -299,7 +299,7 @@ export function Planning() {
             </div>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-accent-fg)] transition-colors hover:border-[var(--color-accent-fg)]"
+              class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-accent-fg)] transition-colors hover:border-[var(--color-accent-fg)]"
               onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
             >
               목표 트리에서 보기
@@ -311,12 +311,12 @@ export function Planning() {
           <div class="flex flex-col gap-2 p-3">
             <div class="flex flex-wrap gap-1.5">
               ${(grouped.short ?? []).length > 0 ? html`
-                <span class="rounded-sm border border-ok/25 bg-ok/10 px-1.5 py-0.5 font-mono text-3xs text-ok">
+                <span class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 px-1.5 py-0.5 font-mono text-3xs text-ok">
                   단기 ${(grouped.short ?? []).length}${hp.short.total > 0 ? ` · ${hp.short.done}/${hp.short.total} (${formatProgressPct(hp.short)})` : ''}
                 </span>
               ` : null}
               ${(grouped.mid ?? []).length > 0 ? html`
-                <span class="rounded-sm border border-warn/25 bg-warn/10 px-1.5 py-0.5 font-mono text-3xs text-warn">
+                <span class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-1.5 py-0.5 font-mono text-3xs text-warn">
                   중기 ${(grouped.mid ?? []).length}${hp.mid.total > 0 ? ` · ${hp.mid.done}/${hp.mid.total} (${formatProgressPct(hp.mid)})` : ''}
                 </span>
               ` : null}
@@ -332,7 +332,7 @@ export function Planning() {
                   <div class="flex items-center gap-2 text-3xs">
                     <span class="${DECK_META} w-8 shrink-0">단기</span>
                     <div
-                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
+                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.short.ratio * 100)}
                       aria-valuemin="0"
@@ -350,7 +350,7 @@ export function Planning() {
                   <div class="flex items-center gap-2 text-3xs">
                     <span class="${DECK_META} w-8 shrink-0">중기</span>
                     <div
-                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
+                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.mid.ratio * 100)}
                       aria-valuemin="0"
@@ -368,7 +368,7 @@ export function Planning() {
                   <div class="flex items-center gap-2 text-3xs">
                     <span class="${DECK_META} w-8 shrink-0">장기</span>
                     <div
-                      class="relative h-1 grow overflow-hidden rounded-sm bg-[var(--color-bg-elevated)]"
+                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
                       role="progressbar"
                       aria-valuenow=${Math.round(hp.long.ratio * 100)}
                       aria-valuemin="0"
@@ -397,7 +397,7 @@ export function Planning() {
                       ${list.map(g => {
                         const p = goalProgressFor(g.id)
                         return html`
-                          <div key=${g.id} class="flex items-center gap-2 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5">
+                          <div key=${g.id} class="flex items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5">
                             <div class="min-w-0 flex-1">
                               <div class="flex items-center gap-2">
                                 <span class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${g.title}</span>

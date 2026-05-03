@@ -101,7 +101,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
       </div>
       <div
         ref=${trackRef}
-        class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        class="relative flex-1 h-8 rounded-[var(--r-1)] bg-bg-1/40 border border-card-border/50 cursor-crosshair"
         role="group"
         aria-label="도구 호출 타임라인 마커"
         onMouseMove=${(e: MouseEvent) => {
@@ -120,10 +120,10 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
               const isSelected = selected !== null
                 && selected.kind === 'tool_call'
                 && selected.entry === entry
-              const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
+              const ringClass = isSelected ? 'ring-2 ring-accent-fg ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
-                  class="absolute top-1 bottom-1 w-[3px] ${color} rounded-px hover:w-1.5 transition-all cursor-pointer ${ringClass}"
+                  class="absolute top-1 bottom-1 w-[3px] ${color} rounded-px hover:w-1.5 transition-[width] cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
                   title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}${count > 1 ? ` · ${count} calls` : ''}`}
                   onClick=${(e: MouseEvent) => {
@@ -131,7 +131,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded-[var(--r-1)] bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
                     ${count}
                   </span>
                 ` : null}</span>

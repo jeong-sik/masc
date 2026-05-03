@@ -104,7 +104,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   const detail = layer.detail ?? layer.evidence[0] ?? ''
 
   return html`
-    <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
+    <div class="flex items-center gap-3 py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
       <span class="flex-shrink-0 w-30 text-2xs font-mono text-[var(--color-accent-fg)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
       <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--color-fg-secondary)]">${scoreText}</span>
@@ -150,8 +150,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (loading && !data) {
     return html`
-      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)] animate-pulse" role="status">데이터 로딩 중...</div>
       </div>
     `
@@ -159,8 +159,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (error && !data) {
     return html`
-      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 데이터 없음</div>
       </div>
     `
@@ -168,8 +168,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
   if (!data || data.count === 0) {
     return html`
-      <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+        <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
         <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
@@ -186,11 +186,11 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   const trend = computeTrend(data.snapshots)
 
   return html`
-    <div class="p-4 rounded border ${coverageTone(coverage)} transition-colors">
+    <div class="p-4 rounded-[var(--r-1)] border ${coverageTone(coverage)} transition-colors">
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">평가 품질</span>
+          <span class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">평가 품질</span>
           <${StatusChip} tone=${evalPassTone(allPassed)} class="font-semibold">${evalPassLabel(allPassed)}</${StatusChip}>
           ${baseline
             ? html`<${StatusChip} tone=${baseline.tone} uppercase=${false} class="font-medium">${baseline.text}</${StatusChip}>`
@@ -198,7 +198,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
         </div>
         <button
           type="button"
-          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 min-w-6 min-h-6 inline-flex items-center justify-center rounded"
+          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 min-w-6 min-h-6 inline-flex items-center justify-center rounded-[var(--r-1)]"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
           aria-label="평가 결과 새로고침"
@@ -224,7 +224,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* 24h Trend */}
       ${trend ? html`
-        <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
+        <div class="flex items-center gap-2 pt-2 border-t border-[var(--color-border-default)]">
           <${Eyebrow} tone="disabled">추세 (24h)</${Eyebrow}>
           <span class="text-2xs font-mono tabular-nums text-[var(--color-fg-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}

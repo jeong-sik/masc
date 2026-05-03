@@ -9,27 +9,27 @@
 /* ── Markdown Rendered Content (marked GFM output) ────────── */
 @utility markdown-content {
   line-height: 1.55;
-  color: var(--text-body);
+  color: var(--color-fg-secondary);
 
   & p { margin: 6px 0; }
 
-  & h1 { font-size: 16px; font-weight: 700; margin: 16px 0 8px; color: var(--text-heading); }
-  & h2 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--text-heading); }
-  & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--text-body); }
+  & h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
-    background: var(--white-8);
-    color: var(--ff-gold-bright);
+    background: var(--color-bg-elevated);
+    color: var(--brass-1);
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-1);
     font-size: 0.9em;
   }
 
   & pre {
-    background: var(--white-3);
+    background: var(--color-bg-panel-alt);
     padding: 12px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--border-slate-12);
+    border-radius: var(--r-2);
+    border: 1px solid var(--color-border-default);
     overflow-x: auto;
     font-size: var(--fs-sm);
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -46,7 +46,7 @@
   }
 
   & blockquote {
-    border-left: 3px solid var(--ff-gold-40);
+    border-left: 3px solid var(--brass-border);
     padding-left: 12px;
     color: var(--color-fg-muted);
     margin: 8px 0;
@@ -57,24 +57,24 @@
   & li { margin: 2px 0; }
   & li > ul, & li > ol { margin: 2px 0; }
 
-  & hr { border: none; border-top: 1px solid var(--border-slate-16); margin: 12px 0; }
+  & hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
 
-  & a { color: var(--accent); &:hover { text-decoration: underline; } }
-  & strong { font-weight: 600; }
+  & a { color: var(--brass-1); &:hover { text-decoration: underline; } }
+  & strong { font-weight: var(--fw-semi); }
   & del { color: var(--color-fg-muted); }
 
   & table { margin: 8px 0; }
 
-  & img { max-width: 100%; height: auto; border-radius: 8px; margin: 4px 0; }
+  & img { max-width: 100%; height: auto; border-radius: var(--r-2); margin: 4px 0; }
 }
 
 /* ── Mermaid rendered output ──────────────────────────────── */
 .mermaid-rendered {
-  border-radius: 8px;
+  border-radius: var(--r-2);
   padding: 16px;
   margin: 8px 0;
-  background: var(--white-3);
-  border: 1px solid var(--border-slate-12);
+  background: var(--color-bg-panel-alt);
+  border: 1px solid var(--color-border-default);
   overflow-x: auto;
 }
 
@@ -84,24 +84,24 @@
   border: 1px solid var(--purple-12);
   padding: 10px 14px;
   margin: 8px 0;
-  & summary { cursor: pointer; color: var(--purple); font-size: var(--fs-sm); }
+  & summary { cursor: pointer; color: var(--color-purple); font-size: var(--fs-sm); }
 }
 
 /* button.agent/agent-card: element+class selector, kept as raw CSS */
 button.agent,
 button.agent-card {
   cursor: pointer;
-  &:hover { background: var(--white-8); }
+  &:hover { background: var(--color-bg-elevated); }
 }
 
 /* button.monitor-alert/row: element+class selector, kept as raw CSS */
 button.monitor-alert,
 button.monitor-row {
-  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
-  &:hover { transform: translateY(-1px); border-color: var(--border-slate-35); background: var(--white-6); }
-  &.ok { border-color: var(--ok-18); }
-  &.warn { border-color: var(--warn-28); }
-  &.bad { border-color: rgba(248, 113, 113, 0.34); }
+  transition: border-color var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-med) var(--ease);
+  &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
+  &.ok { border-color: rgb(var(--ok-glow) / .18); }
+  &.warn { border-color: rgb(var(--warn-glow) / .28); }
+  &.bad { border-color: rgb(var(--err-glow) / .34); }
 }
 
 /* status-badge state variants: folded into @utility status-badge above */
@@ -115,32 +115,32 @@ button.monitor-row {
 @utility agent-runtime-strip {
   background: linear-gradient(
     90deg,
-    rgba(10, 22, 40, 0.85) 0%,
-    rgba(16, 28, 48, 0.7) 100%
+    color-mix(in srgb, var(--color-bg-page) 85%, black) 0%,
+    color-mix(in srgb, var(--color-bg-surface) 70%, black) 100%
   );
 }
 
 @utility agent-runtime-ctx-fill {
-  transition: width 0.3s ease;
+  transition: width var(--t-slow) var(--ease);
   &.warn { background: var(--warn); }
-  &.bad { background: var(--bad-light); }
+  &.bad { background: var(--err); }
 }
 
 /* ── Live Timeline ─────────────────── */
 
 /* Event kind badge variants */
-@utility agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }
-@utility agent-event-badge--lifecycle { background: var(--accent-12); color: var(--accent); }
-@utility agent-event-badge--keeper { background: var(--ff-gold-15); color: var(--ff-gold-bright); }
-@utility agent-event-badge--error { background: var(--bad-soft); color: var(--bad-light); }
-@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--purple); }
-@utility agent-event-badge--task { background: var(--warn-12); color: var(--warn); }
-@utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan); }
-@utility agent-event-badge--default { background: var(--border-slate-12); color: var(--color-fg-muted); }
+@utility agent-event-badge--heartbeat { background: rgb(var(--ok-glow) / .12); color: var(--ok); }
+@utility agent-event-badge--lifecycle { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
+@utility agent-event-badge--keeper { background: rgb(var(--brass-glow) / .15); color: var(--brass-1); }
+@utility agent-event-badge--error { background: rgb(var(--err-glow) / .15); color: var(--err); }
+@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--color-purple); }
+@utility agent-event-badge--task { background: rgb(var(--warn-glow) / .12); color: var(--warn); }
+@utility agent-event-badge--board { background: var(--info-soft); color: var(--info-fg); }
+@utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-muted); }
 
 /* ── Micro-Interactions (Task 289) ── */
 @utility pressable {
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease-out;
+  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease-out);
   &:active:not(:disabled) {
     transform: scale(0.97);
     opacity: 0.9;
@@ -148,15 +148,14 @@ button.monitor-row {
 }
 
 @utility hover-lift {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease-out, border-color 0.2s ease-out, background-color 0.2s ease-out;
+  transition: transform var(--t-med) var(--ease), border-color var(--t-med) var(--ease-out), background-color var(--t-med) var(--ease-out);
   &:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
   }
 }
 
 @utility micro-fade {
-  transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  transition: opacity var(--t-med) var(--ease-inout), background-color var(--t-med) var(--ease-inout), color var(--t-med) var(--ease-inout), border-color var(--t-med) var(--ease-inout);
 }
 
 /* ── Automatic Global Micro-Interactions (Task 289) ── */

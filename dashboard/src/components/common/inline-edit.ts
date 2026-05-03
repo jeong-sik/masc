@@ -59,7 +59,7 @@ export function InlineEdit({
   if (!editing) {
     return html`
       <span
-        class="inline-block cursor-text rounded px-1 py-0.5 text-sm text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)]"
+        class="inline-block cursor-text rounded-[var(--r-1)] px-1 py-0.5 text-sm text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
         onClick=${startEdit}
         data-testid=${testId}
         role="button"
@@ -85,7 +85,7 @@ export function InlineEdit({
       onInput=${(e: InputEvent) => setDraft((e.currentTarget as HTMLInputElement).value)}
       onBlur=${commit}
       onKeyDown=${onKeyDown}
-      class="inline-block w-full rounded border border-[var(--accent-30)] bg-[var(--color-bg-page)] px-2 py-0.5 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--accent-30)]"
+      class="inline-block w-full rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--color-bg-page)] px-2 py-0.5 text-sm text-[var(--color-fg-primary)] outline-none focus:ring-1 focus:ring-[var(--accent-30)]"
       data-testid=${testId ? `${testId}-input` : undefined}
       aria-label="편집 중"
     />

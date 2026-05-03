@@ -45,7 +45,7 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
 
   return html`
     <div
-      class="h-64 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
+      class="h-64 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
       data-event-stream
       data-testid=${testId}
       role="log"
@@ -61,7 +61,7 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
                 e => html`
                   <div
                     key=${e.id}
-                    class="flex items-start gap-2 rounded px-2 py-1 hover:bg-[var(--white-6)]"
+                    class="flex items-start gap-2 rounded-[var(--r-1)] px-2 py-1 hover:bg-[var(--color-bg-hover)]"
                     role="listitem"
                   >
                     <span

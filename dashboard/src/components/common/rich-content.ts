@@ -24,18 +24,18 @@ function previewCard(preview: LinkPreview) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="group flex overflow-hidden rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
+      class="group flex overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--color-bg-elevated)]"
     >
       ${imageUrl
         ? html`
-            <div class="w-[112px] shrink-0 bg-[var(--white-5)]">
+            <div class="w-[112px] shrink-0 bg-[var(--color-bg-elevated)]">
               <img src=${imageUrl} alt=${title} class="block h-full w-full object-cover" loading="lazy" />
             </div>
           `
         : null}
       <div class="min-w-0 flex-1 px-3 py-2.5">
         <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-          ${faviconUrl ? html`<img src=${faviconUrl} alt="" class="h-3.5 w-3.5 rounded-sm" loading="lazy" />` : null}
+          ${faviconUrl ? html`<img src=${faviconUrl} alt="" class="h-3.5 w-3.5 rounded-[var(--r-0)]" loading="lazy" />` : null}
           <span class="truncate">${preview.site_name || hostLabel}</span>
         </div>
         <div class="mt-1 text-xs font-semibold leading-snug text-[var(--color-fg-secondary)] group-hover:text-[var(--color-accent-fg)]">

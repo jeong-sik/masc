@@ -33,9 +33,9 @@ function viewButton(view: RepositoryView, label: string, icon: unknown) {
   return html`
     <button
       type="button"
-      class="inline-flex h-8 items-center gap-2 rounded border px-3 text-xs font-semibold transition-colors cursor-pointer ${active
-        ? 'border-accent/40 bg-accent/15 text-accent'
-        : 'border-[var(--white-10)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)] hover:text-text-body'}"
+      class="inline-flex h-8 items-center gap-2 rounded-[var(--r-1)] border px-3 text-xs font-semibold transition-colors cursor-pointer ${active
+        ? 'border-[var(--accent-40)] bg-[var(--accent-15)] text-accent-fg'
+        : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-body'}"
       aria-pressed=${active}
       onClick=${() => { updateViewParam(view) }}
     >
@@ -63,8 +63,8 @@ export function RepositoryManagement() {
       </div>
 
       ${view === 'repos' ? html`
-        <div class="grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-3)] max-[900px]:grid-cols-1">
-          <div class="min-h-0 border-r border-[var(--white-8)] max-[900px]:border-r-0 max-[900px]:border-b">
+        <div class="grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] max-[900px]:grid-cols-1">
+          <div class="min-h-0 border-r border-[var(--color-border-default)] max-[900px]:border-r-0 max-[900px]:border-b">
             <${RepoSidebar} />
           </div>
           <div class="min-h-0 overflow-y-auto p-4">
@@ -75,11 +75,11 @@ export function RepositoryManagement() {
       ` : view === 'graph' ? html`
         <${GitGraphPanel} />
       ` : view === 'credentials' ? html`
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
           <${CredentialSettings} />
         </div>
       ` : html`
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
           <${KeeperRepoMapping} />
         </div>
       `}

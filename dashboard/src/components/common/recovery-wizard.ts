@@ -64,7 +64,7 @@ export function RecoveryWizard({
 
   return html`
     <div
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-recovery-wizard
       data-testid=${testId}
     >
@@ -76,7 +76,7 @@ export function RecoveryWizard({
       </div>
 
       <div
-        class="mb-3 h-2 w-full rounded-full bg-[var(--white-10)]"
+        class="mb-3 h-2 w-full rounded-full bg-[var(--color-bg-hover)]"
         role="progressbar"
         aria-valuemin="0"
         aria-valuemax=${stepCount}
@@ -84,7 +84,7 @@ export function RecoveryWizard({
         aria-label="복구 진행률"
       >
         <div
-          class="h-full rounded-full bg-[var(--color-accent)] transition-all duration-500"
+          class="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-[var(--t-xslow)]"
           style=${{ width: `${progressPercent}%` }}
         ></div>
       </div>

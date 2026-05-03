@@ -48,6 +48,7 @@
      Use these instead of bare --ok / rgb(var(--ok-glow)/...) in components. */
   --ok-soft:   rgb(107 158 107 / .10);
   --ok-fg:     #8ebc8e;
+  --ok-on:     #0c0b08;         /* text on ok bg — near-black warm */
   --ok-border: rgb(107 158 107 / .35);
   --ok-ring:   0 0 0 1px rgb(107 158 107 / .45), 0 0 8px rgb(107 158 107 / .35);
 
@@ -240,10 +241,14 @@ body[data-density="comfortable"]  { --density: 1.15; }
      scopes cleanly. */
   --_density-scope: 1;
 
-  /* Radius — small only; this is an ops tool */
+  /* Radius — micro for controls, macro for cards/panels */
+  --r-0: 2px;
   --r-1: 3px;
   --r-2: 5px;
   --r-3: 8px;
+  --r-4: 12px;
+  --r-5: 20px;
+  --r-6: 28px;
 
   /* Elevation — 7-step scale. Each level bundles shadow + bg + border.
      Use `.elev-*` helper classes in primitives.css, or reference tokens directly. */
@@ -301,6 +306,14 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --state-active-border: var(--brass-3);
   --state-disabled-fg:   var(--fg-4);
   --state-disabled-bg:   transparent;
+
+  /* Syntax highlight — editor token colors */
+  --syn-key:   #c195e8;
+  --syn-str:   #a8c97a;
+  --syn-num:   #d4a14a;
+  --syn-fn:    #e8c976;
+  --syn-type:  #88b5d8;
+  --syn-prop:  #b8ad9a;
 
   /* Divider alias — semantic pointer to the line you draw between panels.
      line-1 is the raw hairline; --divider is the role. */
@@ -413,7 +426,7 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 /* Label — small-caps lock-up used on every panel title */
 .label {
   font-size: var(--fs-11);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--fg-3);

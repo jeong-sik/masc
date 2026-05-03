@@ -33,14 +33,14 @@ export function overviewSkeletonTileCount(): number {
   return KNOWN_CONNECTOR_IDS.length
 }
 
-const BAR = 'h-3 w-1 rounded-px bg-[var(--white-4)] animate-pulse'
-const PILL = 'h-4 flex-1 rounded-sm bg-[var(--white-4)] animate-pulse'
-const LINE = 'h-3 rounded bg-[var(--white-4)] animate-pulse'
+const BAR = 'h-3 w-1 rounded-px bg-[var(--color-bg-elevated)] animate-pulse'
+const PILL = 'h-4 flex-1 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse'
+const LINE = 'h-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] animate-pulse'
 
 function TileSkeleton() {
   return html`
     <div
-      class="flex min-w-0 flex-col gap-2 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3"
+      class="flex min-w-0 flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-overview-skeleton-tile
     >
       <div class="flex min-w-0 items-center gap-2">
@@ -56,8 +56,8 @@ function TileSkeleton() {
         <div class=${PILL}></div>
       </div>
       <div class="flex items-center gap-1">
-        <div class="h-4 w-16 rounded-sm bg-[var(--white-4)] animate-pulse"></div>
-        <div class="h-4 w-11 rounded-sm bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-16 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse"></div>
+        <div class="h-4 w-11 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] animate-pulse"></div>
       </div>
       <div class="flex items-end gap-0.5" aria-hidden="true">
         ${Array.from({ length: 45 }, (_, i) => html`<span class=${BAR} data-skeleton-bar-index=${i}></span>`)}

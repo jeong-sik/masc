@@ -35,7 +35,7 @@ const TRANSITIONS: LifecycleTransition[] = [
 
 function nodeClass(isCurrent: boolean): string {
   const base =
-    'transition-all duration-300'
+    'transition-[background-color,border-color,box-shadow,opacity] duration-[var(--t-slow)]'
   if (isCurrent) {
     return `${base} r-6 stroke-[var(--accent-9)] stroke-2 fill-[var(--accent-3)]`
   }
@@ -94,7 +94,7 @@ export function AgentLifecycle({
 
   return html`
     <div
-      class="rounded-lg border border-[var(--gray-6)] bg-[var(--gray-1)] p-4"
+      class="rounded-[var(--r-3)] border border-[var(--gray-6)] bg-[var(--gray-1)] p-4"
       role="region"
       aria-label="에이전트 생명주기"
       data-testid=${testId}
@@ -156,7 +156,7 @@ export function AgentLifecycle({
                 stroke=${isFlashing ? 'var(--accent-9)' : 'var(--gray-8)'}
                 stroke-width=${isFlashing ? '2.5' : '1.5'}
                 marker-end=${isFlashing ? 'url(#arrowhead-flash)' : 'url(#arrowhead)'}
-                class=${isFlashing ? 'transition-colors duration-300' : ''}
+                class=${isFlashing ? 'transition-colors duration-[var(--t-slow)]' : ''}
               />
               <text
                 x=${(from.x + to.x) / 2}

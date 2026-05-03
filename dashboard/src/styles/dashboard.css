@@ -6,19 +6,19 @@
 
 /* ── Collapsible Sections ── */
 .overview-section-collapsible > summary {
-  transition: background 0.15s;
+  transition: background var(--t-fast);
 }
 
 .overview-section-collapsible > summary:hover {
-  background: var(--white-4);
+  background: var(--color-bg-hover);
 }
 
 .overview-section-collapsible > summary::before {
   content: '\25B8';
   font-size: var(--fs-xs);
-  transition: transform 0.15s;
+  transition: transform var(--t-fast);
   display: inline-block;
-  color: var(--text-slate);
+  color: var(--color-fg-muted);
 }
 
 .overview-section-collapsible[open] > summary::before {
@@ -72,14 +72,14 @@
 }
 /* ── Agent card hover ── */
 .agent-card:hover {
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--brass-1);
   transform: none;
-  border-color: var(--accent-30);
+  border-color: rgb(var(--brass-glow) / 0.30);
 }
 
-@utility logs-refresh-btn { &:hover { border-color: var(--accent); } }
+@utility logs-refresh-btn { &:hover { border-color: var(--brass-1); } }
 
-@utility logs-row { &:hover { background: var(--white-3); } }
+@utility logs-row { &:hover { background: var(--color-bg-elevated); } }
 
 /* ── Board (Posts) ─────────────────────────────────────────── */
 
@@ -87,22 +87,21 @@
   border-color: var(--color-border-default);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
-  transition: border-color 0.15s, background 0.15s;
-  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: none; }
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
 
 /* Vote column */
 @utility vote-btn {
-  transition: color 0.2s;
+  transition: color var(--t-med);
   &:hover { color: var(--vote-hover); }
   &.upvote:hover, &.upvote.active { color: var(--vote-up); }
   &.downvote:hover, &.downvote.active { color: var(--vote-down); }
-  &.animate { animation: votePop 0.3s ease; }
+  &.animate { animation: votePop 0.3s var(--ease-out); }
 }
 
 /* Board comments: compound selector, kept as raw CSS */
 .board-comment .comment-text {
-  transition: max-height 0.3s ease;
+  transition: max-height var(--t-slow) var(--ease);
 }
 .board-comment .comment-text.expanded { max-height: none; }
 .board-comment .comment-expand-btn:hover { text-decoration: underline; }
@@ -156,7 +155,7 @@
 
 .swimlane-vis-container .vis-item.activity-swimlane-item {
   border-color: transparent;
-  color: var(--text-body);
+  color: var(--color-fg-secondary);
 }
 
 .swimlane-vis-container .vis-item.activity-swimlane-item--presence {
@@ -164,19 +163,19 @@
 }
 
 .swimlane-vis-container .vis-time-axis .vis-text {
-  color: var(--slate-400);
-  font-size: 10px;
+  color: var(--color-fg-disabled);
+  font-size: var(--fs-10);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label {
-  color: var(--text-slate-light);
-  font-size: 11px;
-  border-bottom: 1px solid rgba(100, 116, 139, 0.12);
+  color: var(--color-fg-muted);
+  font-size: var(--fs-11);
+  border-bottom: 1px solid var(--color-border-default);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted,
 .swimlane-vis-container .vis-center .vis-group.activity-swimlane-group-highlighted {
-  background: rgba(251, 191, 36, 0.08);
+  background: rgb(var(--brass-glow) / 0.08);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted {
@@ -188,47 +187,47 @@
 .swimlane-vis-container .vis-panel.vis-right,
 .swimlane-vis-container .vis-panel.vis-top,
 .swimlane-vis-container .vis-panel.vis-bottom {
-  border-color: rgba(100, 116, 139, 0.12);
+  border-color: var(--color-border-default);
 }
 
 .swimlane-vis-container .vis-current-time {
-  background-color: var(--rose);
+  background-color: var(--err);
 }
 
 .swimlane-vis-container .vis-tooltip {
-  background-color: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(100, 116, 139, 0.3);
+  background-color: color-mix(in srgb, var(--color-bg-page) 95%, black);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
-  color: var(--frost-100);
-  font-size: 11px;
+  color: var(--color-fg-primary);
+  font-size: var(--fs-11);
   padding: 6px 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--elev-3-shadow);
   white-space: pre-wrap;
 }
 
 .swimlane-vis-container .vis-item.vis-selected {
   border-color: var(--warn);
   border-width: 2px;
-  box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
+  box-shadow: 0 0 5px rgb(var(--brass-glow) / 0.5);
   z-index: 10;
 }
 
 
 /* ── Card Subtle Hover Lift ── */
 .card {
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
 
 .card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-panel-hover);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
 }
 
 /* ── Custom Webkit Scrollbar ── */
 @layer utilities {
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: var(--white-10) transparent;
+    scrollbar-color: var(--color-border-default) transparent;
   }
   
   .custom-scrollbar::-webkit-scrollbar {
@@ -241,12 +240,12 @@
   }
   
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--white-10);
+    background: var(--color-border-default);
     border-radius: var(--r-1);
   }
-  
+
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: var(--white-20);
+    background: var(--color-fg-disabled);
   }
 }
 

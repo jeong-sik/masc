@@ -210,7 +210,7 @@ function loadSafeAutonomy(): Promise<void> {
 
 function StatusPill({ status }: { status: DomainStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wide ${statusTone(status)}`}>
+    <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wide ${statusTone(status)}`}>
       ${statusLabel(status)}
     </span>
   `
@@ -240,7 +240,7 @@ function DomainCard({ item }: { item: ScorecardItem }) {
 
 function KeeperCard({ item }: { item: KeeperItem }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -253,12 +253,12 @@ function KeeperCard({ item }: { item: KeeperItem }) {
           <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${item.goal || 'No goal'}</div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
             ${item.active_goal_ids.map(goalId => html`
-              <span class="rounded border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5">${goalId}</span>
+              <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-2 py-0.5">${goalId}</span>
             `)}
           </div>
           ${item.last_blocker
             ? html`
-              <div class="mt-3 rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
+              <div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-30)] bg-[var(--warn-12)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
                 blocker: ${item.last_blocker}
               </div>
             `
@@ -303,7 +303,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
             </div>
             ${item.human_action_required
               ? html`
-                <span class="rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-2 py-1 text-3xs font-semibold uppercase tracking-wide text-[var(--color-status-err)]">
+                <span class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-2 py-1 text-3xs font-semibold uppercase tracking-wide text-[var(--color-status-err)]">
                   human
                 </span>
               `
@@ -331,7 +331,7 @@ function SafeAutonomyTrend({ history }: { history: number[] }) {
           const belowThreshold = score < threshold
           return html`
             <div
-              class="flex-1 rounded-sm ${belowThreshold
+              class="flex-1 rounded-[var(--r-0)] ${belowThreshold
                 ? 'bg-[var(--bad-30)]'
                 : 'bg-[var(--ok-30)]'}"
               style=${`height: ${pct}%`}
@@ -356,7 +356,7 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
   return html`
     <div class="space-y-2">
       ${timeline.map(item => html`
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-xs text-[var(--color-fg-secondary)]">${item.summary}</div>
@@ -391,10 +391,10 @@ export function SafeAutonomyPanel() {
           loadingMessage="Loading safe-autonomy scorecard..."
           render=${(data: SafeAutonomyData) => html`
             <div class="space-y-4">
-              <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
-                    <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+                    <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                       Advisory Truth Layer
                     </div>
                     <div class="mt-2 flex items-center gap-2">

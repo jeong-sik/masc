@@ -35,7 +35,7 @@
   .scale-cell {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 18px 14px;
     display: flex; flex-direction: column; gap: 10px;
     min-height: 120px;
@@ -57,7 +57,7 @@
   .family-card {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 20px;
     display: flex; flex-direction: column; gap: 14px;
   }
@@ -68,7 +68,7 @@
     color: var(--color-fg-muted);
   }
   .family-demo { font-size: 40px; line-height: 1; color: var(--color-fg-primary); }
-  .family-stack { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); word-break: break-all; }
+  .family-stack { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-muted); word-break: break-all; }
 
   .usage-row {
     display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
@@ -76,7 +76,7 @@
   .do, .dont {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 14px 16px;
     display: flex; flex-direction: column; gap: 10px;
   }
@@ -92,14 +92,14 @@
 
   .kpi-demo {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1);
     padding: 14px 16px;
   }
   .kpi-cell { display: flex; flex-direction: column; gap: 4px; padding-right: 14px; border-right: 1px solid var(--color-border-default); }
   .kpi-cell:last-child { border-right: none; }
   .kpi-label { font: 600 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); }
   .kpi-val   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 20px; color: var(--color-fg-primary); }
-  .kpi-val .u { font-size: 9px; color: var(--color-fg-muted); margin-left: 4px; letter-spacing: var(--track-caps); text-transform: uppercase; }
+  .kpi-val .u { font-size: var(--fs-9); color: var(--color-fg-muted); margin-left: 4px; letter-spacing: var(--track-caps); text-transform: uppercase; }
   .kpi-val.brass { color: var(--color-accent-fg); }
   .kpi-val.ok    { color: var(--ok-fg); }
   .kpi-val.err   { color: var(--err-fg); }
@@ -107,10 +107,10 @@
   pre.voice {
     background: var(--color-bg-page);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 14px 16px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--fs-12);
     line-height: 1.7;
     color: var(--color-fg-secondary);
     white-space: pre-wrap;
@@ -158,16 +158,16 @@
       <span class="sub">9 → 36px, tabular-nums, tight line-heights</span>
     </div>
     <div class="scale-grid">
-      <div class="scale-cell"><span class="scale-num" style="font-size:9px">1.24</span><span class="scale-meta">fs-9 · micro</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:10px">1.24</span><span class="scale-meta">fs-10 · caption</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:11px">1.24</span><span class="scale-meta">fs-11 · label</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:12px">1.24</span><span class="scale-meta">fs-12 · meta</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:13px">1.24</span><span class="scale-meta">fs-13 · body</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:14px">1.24</span><span class="scale-meta">fs-14 · title</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:16px">1.24</span><span class="scale-meta">fs-16 · kpi-m</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-9)">1.24</span><span class="scale-meta">fs-9 · micro</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-10)">1.24</span><span class="scale-meta">fs-10 · caption</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-11)">1.24</span><span class="scale-meta">fs-11 · label</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-12)">1.24</span><span class="scale-meta">fs-12 · meta</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-13)">1.24</span><span class="scale-meta">fs-13 · body</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-14)">1.24</span><span class="scale-meta">fs-14 · title</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-16)">1.24</span><span class="scale-meta">fs-16 · kpi-m</span></div>
       <div class="scale-cell"><span class="scale-num" style="font-size:20px">1.24</span><span class="scale-meta">fs-20 · kpi-l</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:28px">1.24</span><span class="scale-meta">fs-28 · hero</span></div>
-      <div class="scale-cell"><span class="scale-num" style="font-size:36px">1.24</span><span class="scale-meta">fs-36 · display</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-28)">1.24</span><span class="scale-meta">fs-28 · hero</span></div>
+      <div class="scale-cell"><span class="scale-num" style="font-size:var(--fs-36)">1.24</span><span class="scale-meta">fs-36 · display</span></div>
     </div>
   </section>
 
@@ -187,13 +187,13 @@
 
       <div class="type-row">
         <span class="type-role">Hero · h2</span>
-        <span class="type-sample-inline" style="font:600 28px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">TPS 1.24<span style="font-size:12px; color:var(--color-fg-muted); margin-left:4px">s</span></span>
+        <span class="type-sample-inline" style="font:600 28px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">TPS 1.24<span style="font-size:var(--fs-12); color:var(--color-fg-muted); margin-left:4px">s</span></span>
         <span class="type-spec">mono 28 / 600 / tabular</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">KPI-L · h3</span>
-        <span class="type-sample-inline" style="font:600 20px/1.2 var(--font-mono); font-variant-numeric:tabular-nums; color:var(--color-accent-fg)">87<span style="font-size:10px; color:var(--color-fg-muted); margin-left:3px">%</span> <span style="color:var(--ok-fg)">PASS</span></span>
+        <span class="type-sample-inline" style="font:600 20px/1.2 var(--font-mono); font-variant-numeric:tabular-nums; color:var(--color-accent-fg)">87<span style="font-size:var(--fs-10); color:var(--color-fg-muted); margin-left:3px">%</span> <span style="color:var(--ok-fg)">PASS</span></span>
         <span class="type-spec">mono 20 / 600 / tabular</span>
       </div>
 

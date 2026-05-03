@@ -205,12 +205,12 @@ export function KeeperChatPanel({ name }: { name: string }) {
       : entries
 
   return html`
-    <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
-      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
+    <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
         <div class="min-w-55 flex-1">
           <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
           <div class="mt-2 text-md font-semibold text-[var(--color-fg-secondary)]">@${name}</div>
-          <div class="mt-1 text-sm leading-loose text-[var(--text-secondary)]">
+          <div class="mt-1 text-sm leading-loose text-[var(--color-fg-secondary)]">
             이 키퍼와의 실시간 직접 대화입니다. 스트리밍 응답은 동일한 대화 레인에 표시됩니다.
           </div>
         </div>
@@ -224,7 +224,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
             value=${query}
             onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
           />
-          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">
+          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">
             ${hasQuery ? `${filteredMessages.length} / ${messages.length}개 메시지` : `${messages.length}개 메시지`}
           </span>
         </div>
@@ -247,7 +247,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         ? html`<${Surf} kind="err" role="alert" padding="tight" class="mx-4 mb-4 text-xs leading-loose">${chatError.value}<//>`
         : null}
 
-      <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">
+      <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
         <${ChatComposer}
           draft=${chatInput.value}
           placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}

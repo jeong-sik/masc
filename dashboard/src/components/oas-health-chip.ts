@@ -152,7 +152,7 @@ export function OasHealthChip() {
         />
       </div>
       ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`
-        <div class="mt-3 pt-3 border-t border-[var(--white-6)] grid md:grid-cols-2 gap-4">
+        <div class="mt-3 pt-3 border-t border-[var(--color-border-default)] grid md:grid-cols-2 gap-4">
           ${recentEvents.value.length > 0 ? html`
             <div>
               <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">

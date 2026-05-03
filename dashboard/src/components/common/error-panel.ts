@@ -46,8 +46,8 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
 
   if (items.length === 0) {
     return html`
-      <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl">
-        <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)]">
+      <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-[var(--r-3)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-panel)] backdrop-blur-xl">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-divider)]">
           <span class="text-xs font-medium text-[var(--color-fg-muted)]">에러 없음</span>
           <${ActionButton} variant="subtle" size="sm" class="p-0.5" ariaLabel="에러 패널 닫기" onClick=${onClose}>
             <${X} size=${14} />
@@ -61,8 +61,8 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
   }
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl flex flex-col" role="alert">
-      <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)] shrink-0">
+    <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-[var(--r-3)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-panel)] backdrop-blur-xl flex flex-col" role="alert">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-divider)] shrink-0">
         <span class="text-xs font-medium text-[var(--color-fg-muted)]">미확인 에러 <span class="text-[var(--color-status-err)]">${items.length}</span>건</span>
         <div class="flex items-center gap-1">
           <${ActionButton}
@@ -77,21 +77,21 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
         </div>
       </div>
 
-      <div class="overflow-y-auto flex-1 divide-y divide-[var(--white-5)]">
+      <div class="overflow-y-auto flex-1 divide-y divide-[var(--color-border-default)]">
         ${items.map(e => {
           const sev = e.severity
           const iconColor = SEVERITY_ICON_COLOR[sev]
           const badgeBg = CODE_BADGE_BG[sev]
           const label = CODE_LABELS[e.errorCode]
           return html`
-          <div key=${e.id} class="flex items-start gap-2 px-3 py-2 hover:bg-[var(--white-4)] transition-colors group">
+          <div key=${e.id} class="flex items-start gap-2 px-3 py-2 hover:bg-[var(--color-bg-elevated)] transition-colors group">
             <span class="mt-0.5 shrink-0 ${iconColor}">
               ${sev === 'info' ? html`<${Info} size=${13} />` : html`<${AlertTriangle} size=${13} />`}
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5 text-xs">
                 <span class="font-medium text-[var(--color-fg-secondary)] truncate">${e.agentName}</span>
-                <span class="shrink-0 text-2xs px-1 py-px rounded ${badgeBg}">${label}</span>
+                <span class="shrink-0 text-2xs px-1 py-px rounded-[var(--r-1)] ${badgeBg}">${label}</span>
                 ${e.taskId ? html`<span class="text-[var(--color-fg-muted)] truncate max-w-20">${e.taskId}</span>` : null}
                 ${e.count > 1 ? html`<span class="shrink-0 text-2xs text-[var(--color-status-warn)]">×${e.count}</span>` : null}
               </div>
@@ -101,7 +101,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
             <${ActionButton}
               variant="subtle"
               size="sm"
-              class="shrink-0 mt-0.5 p-1 opacity-0 group-hover:opacity-100 hover:text-[var(--color-status-ok)] hover:bg-[var(--white-8)]"
+              class="shrink-0 mt-0.5 p-1 opacity-0 group-hover:opacity-100 hover:text-[var(--color-status-ok)] hover:bg-[var(--color-bg-hover)]"
               title="확인"
               ariaLabel="에러 확인"
               onClick=${() => acknowledgeError(e.id)}

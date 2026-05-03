@@ -14,13 +14,13 @@ describe('idPillClasses (pure)', () => {
       'font-medium',
       'py-1',
       'px-2.5',
-      'rounded',
+      'rounded-[var(--r-1)]',
       'whitespace-nowrap',
-      'shadow-sm',
+      'shadow-1',
       'border',
-      'border-accent/20',
+      'border-[var(--accent-20)]',
       'bg-[var(--accent-10)]',
-      'text-accent',
+      'text-accent-fg',
     ]) {
       expect(cls).toContain(token)
     }
@@ -37,8 +37,8 @@ describe('idPillClasses (pure)', () => {
   })
 
   it('extra class appended (caller composition — hover states, margin)', () => {
-    const cls = idPillClasses(false, 'group-hover:bg-accent/20 transition-colors')
-    expect(cls).toContain('group-hover:bg-accent/20')
+    const cls = idPillClasses(false, 'group-hover:bg-[var(--accent-20)] transition-colors')
+    expect(cls).toContain('group-hover:bg-[var(--accent-20)]')
     expect(cls).toContain('transition-colors')
   })
 
@@ -50,7 +50,7 @@ describe('idPillClasses (pure)', () => {
   it('shape tokens present regardless of mono flag (regression guard)', () => {
     for (const mono of [true, false]) {
       const cls = idPillClasses(mono)
-      for (const token of ['rounded', 'text-3xs', 'px-2.5', 'py-1', 'text-accent']) {
+      for (const token of ['rounded-[var(--r-1)]', 'text-3xs', 'px-2.5', 'py-1', 'text-accent-fg']) {
         expect(cls).toContain(token)
       }
     }
@@ -96,12 +96,12 @@ describe('IdPill component', () => {
 
   it('class prop composes into the class attribute (hover state pass-through)', () => {
     render(
-      html`<${IdPill} class="group-hover:bg-accent/20 transition-colors">t1<//>`,
+      html`<${IdPill} class="group-hover:bg-[var(--accent-20)] transition-colors">t1<//>`,
       container,
     )
     const cls = container.querySelector('[data-id-pill]')!.getAttribute('class') ?? ''
-    expect(cls).toContain('group-hover:bg-accent/20')
+    expect(cls).toContain('group-hover:bg-[var(--accent-20)]')
     expect(cls).toContain('transition-colors')
-    expect(cls).toContain('rounded')
+    expect(cls).toContain('rounded-[var(--r-1)]')
   })
 })

@@ -52,9 +52,9 @@ function BoldLabel({ children }: { children: unknown }) {
 
 function CardBox({ children, dataKeeper }: { children: unknown; dataKeeper?: string }) {
   if (dataKeeper) {
-    return html`<div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
+    return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
   }
-  return html`<div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">${children}</div>`
+  return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">${children}</div>`
 }
 
 // As of 2026-04-30 the per-connector sub-tabs were merged into
@@ -323,7 +323,7 @@ export function HeaderMiniStat({
   const valueTone = headerStatToneClass(tone)
   return html`
     <div
-      class="flex min-w-15 flex-col items-end justify-center rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1 text-right"
+      class="flex min-w-15 flex-col items-end justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-right"
       data-header-mini-stat=${label}
       data-header-mini-stat-tone=${tone}
       data-testid=${testId}
@@ -358,7 +358,7 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     default:
       return {
         dot: 'var(--color-fg-disabled)',
-        badge: 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]',
+        badge: 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]',
         label: health || 'idle',
       }
   }
@@ -474,12 +474,12 @@ export function connectorCardBorderClass(label: string): string {
     case 'connected':
       return 'border-l-4 border-l-emerald-500'
     case 'stale':
-      return 'border-l-4 border-l-amber-500'
+      return 'border-l-4 border-l-[var(--color-warn)]'
     case 'disconnected':
       return 'border-l-4 border-l-rose-500'
     case 'offline':
     default:
-      return 'border-l-4 border-l-[var(--white-10)]'
+      return 'border-l-4 border-l-[var(--color-border-default)]'
   }
 }
 
@@ -835,7 +835,7 @@ function ConnectorLivePanel({
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
   return html`
-    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded border border-[var(--color-border-default)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
+    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${connectorName}</span>
@@ -843,7 +843,7 @@ function ConnectorLivePanel({
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>${connector.bot_user_name}</${MutedSpan}>`
           : null}
         <span class="text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
+        <span class=${`inline-flex items-center gap-1.5 rounded-[var(--r-0)] border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
@@ -859,7 +859,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
+                  class="cursor-pointer rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -873,7 +873,7 @@ function ConnectorLivePanel({
             : null}
           <button
             type="button"
-            class="cursor-pointer rounded border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
+            class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
             aria-label="toggle header details"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
           >${ui.headerExpanded ? '▴' : '▾'}</button>
@@ -914,7 +914,7 @@ function ConnectorLivePanel({
 
       ${ui.headerExpanded
         ? html`
-            <div class="mt-2 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] p-3 text-2xs">
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -943,7 +943,7 @@ function ConnectorLivePanel({
 
       ${connectorError || connector?.error
         ? html`
-            <div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]" data-connector-warning-panel>
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]" data-connector-warning-panel>
               <div class="font-semibold text-[var(--color-fg-primary)]">
                 ${connectorError ? 'Connector API 사용 불가' : 'Sidecar 상태 경고'}
               </div>
@@ -966,11 +966,11 @@ function ConnectorLivePanel({
       ${keeperDirectoryError && keepers.length === 0
         ? html`
             <div
-              class="mt-3 rounded border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
+              class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                 aria-label="키퍼 디렉토리 상태: 사용 불가"
               >
                 <span aria-hidden="true">⚠</span>
@@ -992,12 +992,12 @@ function ConnectorLivePanel({
       ${showNoKeeperEmpty
         ? html`
             <div
-              class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
+              class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-3 text-xs"
               data-no-keepers-empty-panel
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                  class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                   aria-label="키퍼 설정 상태: 설정된 키퍼 없음"
                   data-no-keepers-status-chip
                 >
@@ -1032,13 +1032,13 @@ function ConnectorLivePanel({
             // on the outer card for vertical scannability.
             return html`
               <div
-                class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
+                class="mt-3 rounded-[var(--r-1)] border border-dashed border-[var(--warn-20)] border-l-4 border-l-[var(--color-warn)] bg-[var(--warn-10)] px-3 py-3 text-xs"
                 data-sidecar-not-started-panel
               >
                 <div class="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex flex-wrap items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                      class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
                       aria-label="사이드카 프로세스 상태: 실행 중 아님"
                       data-sidecar-status-chip
                     >
@@ -1196,7 +1196,7 @@ function ConnectorLivePanel({
                           </div>
                           ${expanded
                             ? html`
-                                <div class="mt-2 rounded border border-dashed border-[var(--color-border-default)] bg-[var(--white-3)] p-2">
+                                <div class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2">
                                   <${TextInput}
                                     value=${ui.channelDraft}
                                     placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
@@ -1215,7 +1215,7 @@ function ConnectorLivePanel({
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
-                                                class="!rounded-sm !py-0.5"
+                                                class="!rounded-[var(--r-0)] !py-0.5"
                                                 title=${roomId}
                                                 ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
@@ -1251,7 +1251,7 @@ function ConnectorLivePanel({
         ? html`
             <div class="mt-3 space-y-2">
               ${unknownGroups.map(group => html`
-                <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
+                <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
                   <div class="flex items-baseline gap-2">
                     <span class="text-[var(--color-status-warn)]">⚠</span>
                     <div class="min-w-0">
@@ -1313,7 +1313,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
@@ -1326,7 +1326,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div class="flex items-center gap-2">
           <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
-          <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
+          <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
             ${tone.label}
           </span>
         </div>
@@ -1380,7 +1380,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]">
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]">
               <div class="mb-1 uppercase tracking-5 text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1407,7 +1407,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
+        <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
           ${tone.label}
         </span>
       </div>
@@ -1427,7 +1427,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       </div>
       ${lastError
         ? html`
-            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </div>
           `
@@ -1440,7 +1440,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
   const isError = Boolean(event.error)
   const badgeClass = isError
     ? 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
-    : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+    : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
 
   return html`
     <${CardBox}>
@@ -1456,7 +1456,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
               : null}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${badgeClass}`}>
+        <span class=${`rounded-[var(--r-0)] px-2 py-1 text-3xs uppercase tracking-5 ${badgeClass}`}>
           ${event.outcome}
         </span>
       </div>
@@ -1483,7 +1483,7 @@ function DisclosurePanel({
   testId: string
 }) {
   return html`
-    <details class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
+    <details class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div>
@@ -1522,7 +1522,7 @@ function GateAnalyticsSection({
     >
       ${gate === null
         ? html`
-            <div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">
+            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">
               게이트가 광고하는 connector runtime 은 보이지만, 게이트가 관찰한 트래픽 은 아직 없습니다.
             </div>
           `
@@ -1556,7 +1556,7 @@ function GateAnalyticsSection({
                     Observed room bindings
                   </div>
                   ${gate.bindings.length === 0
-                    ? html`<div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 room 바인딩 없음</div>`
+                    ? html`<div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 room 바인딩 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -1569,7 +1569,7 @@ function GateAnalyticsSection({
                     Recent gate events
                   </div>
                   ${gate.recent_events.length === 0
-                    ? html`<div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">커넥터 이벤트 기록 없음</div>`
+                    ? html`<div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">커넥터 이벤트 기록 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
@@ -1634,7 +1634,7 @@ export function ConnectorStatusPanel() {
 
   if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
     return html`
-      <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--color-fg-disabled)]">
+      <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-6 text-center text-xs text-[var(--color-fg-disabled)]">
         ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
       </div>
     `
@@ -1692,7 +1692,7 @@ export function ConnectorStatusPanel() {
         ? html`
             <div
               id="connector-detail-panel"
-              class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)]/40 p-3"
+              class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]/40 p-3"
               data-testid="connector-detail-panel"
             >
               <div class="mb-3 flex items-center justify-between gap-3 text-2xs">

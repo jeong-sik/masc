@@ -56,7 +56,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   return html`
     <div class="flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
       ${items.map(item => html`
-        <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded font-medium">
+        <span class="inline-flex items-center bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] px-2 py-1 rounded-[var(--r-1)] font-medium">
           ${item}
         </span>
       `)}
@@ -77,8 +77,8 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   return html`
     <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--color-fg-muted)]">
       <span class="relative flex size-2">
-        <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--color-status-ok)] opacity-75"></span>
-        <span class="relative inline-flex size-2 rounded-sm bg-[var(--color-status-ok)]"></span>
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--color-status-ok)] opacity-75"></span>
+        <span class="relative inline-flex size-2 rounded-[var(--r-0)] bg-[var(--color-status-ok)]"></span>
       </span>
       에이전트 작업 중...
     </div>
@@ -183,7 +183,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       ${'' /* Event list */}
       <div
         ref=${listRef}
-        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--color-border-default)] bg-[var(--white-2)]"
+        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />

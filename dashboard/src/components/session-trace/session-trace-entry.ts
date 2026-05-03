@@ -38,12 +38,12 @@ function TraceBadge({
   const cls = (() => {
     switch (tone) {
       case 'bad':
-        return 'text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]'
+        return 'text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
       case 'ok':
-        return 'text-3xs px-1.5 py-0.5 rounded bg-[var(--color-ok-soft)] text-[var(--color-status-ok)]'
+        return 'text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-ok-soft)] text-[var(--color-status-ok)]'
       case 'neutral':
       default:
-        return `text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase${wide ? ' tracking-wider' : ''}`
+        return `text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] uppercase${wide ? ' tracking-wider' : ''}`
     }
   })()
   return html`<span class="${cls}">${children}</span>`
@@ -85,7 +85,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   return html`
     <span>${segments.map(seg =>
       seg.match
-        ? html`<mark class="bg-[var(--color-brass-soft)] text-[var(--color-fg-secondary)] px-0.5 rounded">${seg.text}</mark>`
+        ? html`<mark class="bg-[var(--color-brass-soft)] text-[var(--color-fg-secondary)] px-0.5 rounded-[var(--r-1)]">${seg.text}</mark>`
         : seg.text
     )}</span>
   `
@@ -105,7 +105,7 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   broadcast:  { icon: 'M', color: TRACE_TONE.brassText, label: '브로드캐스트' },
   task:       { icon: 'T', color: 'text-[var(--color-accent-fg)]', label: '태스크' },
   tool_call:  { icon: '>', color: 'text-[var(--color-status-ok)]', label: '도구 호출' },
-  heartbeat:  { icon: 'H', color: 'text-[var(--slate-400)]', label: '하트비트' },
+  heartbeat:  { icon: 'H', color: 'text-[var(--color-fg-muted)]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--color-status-warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: TRACE_TONE.infoText, label: '내부 사고' },
   oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
@@ -129,7 +129,7 @@ function durableStyle(kind: unknown): { icon: string; color: string } | null {
     case 'tool_called':      return { icon: 't', color: 'text-[var(--color-status-ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--color-status-ok)]' }
     case 'state_transition': return { icon: '>', color: 'text-[var(--color-accent-fg)]' }
-    case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--slate-400)]' }
+    case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--color-fg-muted)]' }
     case 'turn_started':     return { icon: 'r', color: 'text-[var(--color-status-warn)]' }
     default: return null
   }
@@ -208,7 +208,7 @@ function DiffBlock({ text }: { text: string }) {
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
       ${truncatedCount > 0 ? html`
-        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--white-6)]">
+        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--color-border-default)]">
           ... ${truncatedCount} lines truncated for performance ...
         </div>
       ` : null}
@@ -225,8 +225,8 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 
   const titleLabel = isErr ? 'Error' : 'Result'
   const titleColor = isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'
-  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
-  const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--white-3)]'
+  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--color-border-default)]'
+  const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--color-bg-surface)]'
 
   const MAX_TEXT_LEN = 100000
   const isTruncatedPlain = hint === 'plain' && text.length > MAX_TEXT_LEN
@@ -240,20 +240,20 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
           <${TraceBadge} tone="neutral">${hint}</${TraceBadge}>
         ` : null}
       </div>
-      <div class="rounded border ${borderColor} ${bgColor} overflow-hidden">
+      <div class="rounded-[var(--r-1)] border ${borderColor} ${bgColor} overflow-hidden">
         <div class="${shouldCollapse ? `max-h-[${RESULT_COLLAPSED_MAX_HEIGHT}px] overflow-hidden relative` : ''}"
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
             : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
           ${shouldCollapse ? html`
-            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
+            <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--color-bg-surface)]'} to-transparent pointer-events-none"></div>
           ` : null}
         </div>
         ${needsCollapse ? html`
           <button
             type="button"
-            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
+            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer border-t border-[var(--color-border-default)] bg-transparent"
             onClick=${() => { expanded.value = !expanded.value }}
           >
             ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}
@@ -283,7 +283,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         <${ResultViewer} text=${resultText} hint=${hint} isError=${Boolean(event.error)} />
       ` : null}
       ${gateRejected ? html`
-        <div class="text-3xs px-2 py-1 rounded bg-[var(--bad-10)] text-[var(--color-status-err)] inline-block">
+        <div class="text-3xs px-2 py-1 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)] inline-block">
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
@@ -307,7 +307,7 @@ function BroadcastDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = typeof event.detail.content === 'string' ? event.detail.content : ''
   if (!content) return null
   return html`
-    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded border border-[var(--white-6)]">
+    <div class="mt-2 text-sm leading-relaxed px-3 py-2 bg-[var(--color-bg-surface)] rounded-[var(--r-1)] border border-[var(--color-border-default)]">
       <${Markdown} text=${content} />
     </div>
   `
@@ -319,7 +319,7 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
   const title = typeof d.title === 'string' ? d.title : null
   const notes = typeof d.completion_notes === 'string' ? d.completion_notes : null
   return html`
-    <div class="mt-2 text-xs text-[var(--color-fg-primary)] space-y-1 px-3 py-2 bg-[var(--white-3)] rounded">
+    <div class="mt-2 text-xs text-[var(--color-fg-primary)] space-y-1 px-3 py-2 bg-[var(--color-bg-surface)] rounded-[var(--r-1)]">
       ${taskId ? html`<div><span class="text-[var(--color-fg-disabled)]">ID:</span> <span class="font-mono">${taskId}</span></div>` : null}
       ${title ? html`<div><span class="text-[var(--color-fg-disabled)]">제목:</span> ${title}</div>` : null}
       ${notes ? html`<div><span class="text-[var(--color-fg-disabled)]">노트:</span> ${notes}</div>` : null}
@@ -330,7 +330,7 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
 function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   if (event.thinkingRedacted) {
     return html`
-      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.brassPanel} text-xs ${TRACE_TONE.brassText} italic">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel} text-xs ${TRACE_TONE.brassText} italic">
         이 사고 과정은 비공개 처리되었습니다.
       </div>
     `
@@ -338,7 +338,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = event.thinkingContent ?? ''
   if (!content) return null
   return html`
-    <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.brassPanel}">
+    <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel}">
       <div class="text-sm leading-relaxed text-[var(--color-fg-primary)]">
         <${Markdown} text=${content} />
       </div>
@@ -356,7 +356,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
     const phaseColor = phase === 'called' ? 'text-[var(--color-accent-fg)]' : 'text-[var(--color-status-ok)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] space-y-1">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">단계:</span>
           <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
@@ -375,7 +375,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const turn = d.turn
     const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]">
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">턴 ${turn != null ? String(turn) : '-'}:</span>
           <span class="font-mono font-semibold text-[var(--color-fg-primary)]">${phaseLabel}</span>
@@ -392,7 +392,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
     const compactPhase = typeof d.phase === 'string' ? d.phase : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-2">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-2">
         <div class="flex items-center gap-3 text-xs">
           ${before != null ? html`<span><span class="text-[var(--color-fg-disabled)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
           <span class="text-[var(--color-fg-disabled)]">→</span>
@@ -423,7 +423,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
     const turn = d.turn
     return html`
-      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs">
           <span><span class="text-[var(--color-fg-disabled)]">모델:</span> <span class="font-mono">${model}</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
@@ -441,7 +441,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded ${TRACE_TONE.infoPanel} space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs flex-wrap">
           <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
@@ -451,7 +451,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         ${responseText ? html`
           <details class="mt-1">
             <summary class="text-3xs text-[var(--color-fg-disabled)] cursor-pointer hover:text-[var(--color-fg-primary)]">응답 텍스트</summary>
-            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--color-fg-primary)] whitespace-pre-wrap break-all max-h-75 overflow-auto">${responseText}</pre>
+            <pre class="mt-1 p-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] text-2xs font-mono text-[var(--color-fg-primary)] whitespace-pre-wrap break-all max-h-75 overflow-auto">${responseText}</pre>
           </details>
         ` : null}
       </div>
@@ -462,7 +462,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
         <div class="text-xs"><span class="text-[var(--color-fg-disabled)]">도메인:</span> <span class="font-mono text-[var(--color-status-err)]">${domain}</span></div>
         ${errorDetail ? html`<div class="text-2xs font-mono text-[var(--color-fg-primary)] break-all">${errorDetail}</div>` : null}
       </div>
@@ -475,7 +475,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
   if (detailRows.length === 0) return null
   return html`
-    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
+    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]">
       ${detailRows.map(row => html`
         <div class="flex items-start gap-2 text-xs leading-relaxed">
           <span class="min-w-[92px] text-[var(--color-fg-disabled)] font-mono">${row.label}</span>
@@ -519,9 +519,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || (event.kind === 'lifecycle' && event.detail.durable_kind)
 
   const row = html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded ${gateRejected ? 'opacity-50' : ''}">
+    <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
       ${'' /* Icon */}
-      <div class="flex-shrink-0 mt-0.5 size-7 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
+      <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
       </div>
 
@@ -543,7 +543,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           ${event.operationId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">OP ${event.operationId}</span>` : null}
           ${event.workerRunId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">WR ${event.workerRunId}</span>` : null}
           ${event.kind === 'task' ? html`
-            <span class="text-3xs font-bold uppercase tracking-wider ${taskColor(String(event.detail.type))} bg-[var(--white-5)] px-1.5 py-0.5 rounded">
+            <span class="text-3xs font-bold uppercase tracking-wider ${taskColor(String(event.detail.type))} bg-[var(--color-bg-elevated)] px-1.5 py-0.5 rounded-[var(--r-1)]">
               ${taskIcon(String(event.detail.type))}
             </span>
           ` : null}
@@ -573,7 +573,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   if (!hasDetail) return row
 
   return html`
-    <details class="rounded hover:bg-[var(--white-3)] transition-colors group">
+    <details class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors group">
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">

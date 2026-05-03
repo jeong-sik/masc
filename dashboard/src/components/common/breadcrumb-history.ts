@@ -51,7 +51,7 @@ export function BreadcrumbHistory({ items, onNavigate, testId }: BreadcrumbHisto
                 ? html`<span class="text-[var(--color-fg-muted)] mx-0.5" aria-hidden="true">/</span>`
                 : null}
               <button
-                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[var(--color-bg-surface)] ${activeCls}"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] ${activeCls}"
                 onClick=${() => onNavigate?.(item.id)}
                 aria-current=${item.active ? 'page' : undefined}
                 disabled=${!onNavigate}

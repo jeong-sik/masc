@@ -45,7 +45,7 @@
   }
   .pg-head .sub {
     color: var(--color-fg-muted);
-    font-size: 13px;
+    font-size: var(--fs-13);
     max-width: 720px;
   }
   .pg-meta {
@@ -55,7 +55,7 @@
     text-transform: uppercase;
     letter-spacing: .08em;
   }
-  .pg-meta b { color: var(--color-accent-fg); font-weight: 500; }
+  .pg-meta b { color: var(--color-accent-fg); font-weight: var(--fw-med); }
 
   /* — TOC strip — */
   .toc {
@@ -79,7 +79,7 @@
   }
   .toc ol { margin: 0; padding: 0; list-style: none; font: 11px/1.6 var(--font-mono); }
   .toc li { display: flex; gap: 8px; color: var(--color-fg-secondary); }
-  .toc li b { color: var(--color-fg-primary); font-weight: 500; min-width: 22px; }
+  .toc li b { color: var(--color-fg-primary); font-weight: var(--fw-med); min-width: 22px; }
   .toc a { color: inherit; text-decoration: none; }
   .toc a:hover { color: var(--color-accent-fg); }
 
@@ -122,7 +122,7 @@
     color: var(--color-fg-muted);
     text-align: right;
   }
-  .track-head .summary b { color: var(--ok-fg); font-weight: 500; }
+  .track-head .summary b { color: var(--ok-fg); font-weight: var(--fw-med); }
 
   /* — zone cards — */
   .zones {
@@ -166,7 +166,7 @@
   }
   .zone p.lead {
     color: var(--color-fg-secondary);
-    font-size: 12px;
+    font-size: var(--fs-12);
     margin: 0 0 14px;
   }
   .zone .lbl {
@@ -185,7 +185,7 @@
     margin: 0 0 12px;
     word-break: break-all;
   }
-  .zone .data b { color: var(--color-accent-fg); font-weight: 500; }
+  .zone .data b { color: var(--color-accent-fg); font-weight: var(--fw-med); }
   .zone .data em { color: var(--info-fg); font-style: normal; }
   .zone .vars {
     list-style: none;
@@ -285,9 +285,9 @@
     color: var(--color-fg-muted);
   }
   .plan td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--color-fg-secondary); }
-  .plan td.mono b { color: var(--color-accent-fg); font-weight: 500; }
+  .plan td.mono b { color: var(--color-accent-fg); font-weight: var(--fw-med); }
   .plan tr td:first-child { width: 70px; }
-  .plan tr.parallel td:first-child { color: var(--ok-fg); font-weight: 500; }
+  .plan tr.parallel td:first-child { color: var(--ok-fg); font-weight: var(--fw-med); }
 
   /* — footer / acceptance — */
   .accept {
@@ -299,7 +299,7 @@
   .accept h3 { font: 500 13px/1.2 var(--font-sans); color: var(--color-fg-primary); margin: 0 0 10px; }
   .accept ul { margin: 0; padding-left: 18px; color: var(--color-fg-secondary); font-size: 12.5px; line-height: 1.6; }
   .accept ul li { margin-bottom: 4px; }
-  .accept ul li b { color: var(--color-accent-fg); font-weight: 500; }
+  .accept ul li b { color: var(--color-accent-fg); font-weight: var(--fw-med); }
 
   /* citations */
   .cite {
@@ -313,7 +313,7 @@
     text-transform: lowercase;
     letter-spacing: .02em;
   }
-  .cite b { color: var(--info-fg); font-weight: 500; }
+  .cite b { color: var(--info-fg); font-weight: var(--fw-med); }
 </style>
 </head>
 <body>

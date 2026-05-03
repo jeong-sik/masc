@@ -221,7 +221,7 @@ export function GovernanceMonitor() {
                         <tr class="border-b border-[var(--color-border-default)]/30 text-[var(--color-fg-primary)]">
                           <td class="py-1.5 pr-4 font-mono text-2xs">${r.tool}</td>
                           <td class="py-1.5 pr-4">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--color-bg-hover)]">${r.reason}</span>
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs bg-[var(--color-bg-hover)]">${r.reason}</span>
                           </td>
                           <td class="py-1.5 text-right font-medium text-[var(--color-fg-secondary)]">${r.count}</td>
                         </tr>

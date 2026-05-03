@@ -33,7 +33,7 @@ export function SyncConflict({ conflicts, onResolve, testId }: SyncConflictProps
 
   return html`
     <div
-      class="rounded border border-[var(--error-10)] bg-[var(--color-bg-surface)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--error-10)] bg-[var(--color-bg-surface)] p-3"
       data-sync-conflict
       data-testid=${testId}
       role="region"
@@ -52,11 +52,11 @@ export function SyncConflict({ conflicts, onResolve, testId }: SyncConflictProps
             >
               <div class="mb-1 font-mono text-3xs text-[var(--color-fg-secondary)]">${c.field}</div>
               <div class="mb-1 grid grid-cols-2 gap-2">
-                <div class="rounded bg-[var(--ok-10)]/10 p-2">
+                <div class="rounded-[var(--r-1)] bg-[var(--ok-10)]/10 p-2">
                   <div class="mb-0.5 text-3xs font-medium text-[var(--ok-10)]">로컬</div>
                   <div class="break-all font-mono text-xs text-[var(--color-fg-primary)]">${c.localValue}</div>
                 </div>
-                <div class="rounded bg-[var(--error-10)]/10 p-2">
+                <div class="rounded-[var(--r-1)] bg-[var(--error-10)]/10 p-2">
                   <div class="mb-0.5 text-3xs font-medium text-[var(--error-10)]">원격</div>
                   <div class="break-all font-mono text-xs text-[var(--color-fg-primary)]">${c.remoteValue}</div>
                 </div>
@@ -75,7 +75,7 @@ export function SyncConflict({ conflicts, onResolve, testId }: SyncConflictProps
         )}
       </div>
       <button
-        class="mt-2 w-full rounded bg-[var(--color-accent)] py-1.5 text-sm text-white transition-colors hover:bg-[var(--accent-11)]"
+        class="mt-2 w-full rounded-[var(--r-1)] bg-[var(--color-accent)] py-1.5 text-sm text-white transition-colors hover:bg-[var(--accent-11)]"
         onClick=${() => onResolve(resolutions)}
         aria-label="병합 적용"
       >

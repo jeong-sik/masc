@@ -9,7 +9,7 @@
   .sw { display: flex; flex-direction: column; gap: 0; }
   .sw-chip {
     height: 88px;
-    border-radius: 3px;
+    border-radius: var(--r-1);
     border: 1px solid var(--color-border-default);
     position: relative;
     overflow: hidden;
@@ -57,7 +57,7 @@
   }
   .slot {
     height: 44px;
-    border-radius: 3px;
+    border-radius: var(--r-1);
     padding: 6px 8px;
     display: flex; flex-direction: column; justify-content: space-between;
   }
@@ -75,7 +75,7 @@
     padding: 12px;
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
   }
   .keeper-dot {
     width: 12px; height: 12px; border-radius: 50%;
@@ -96,7 +96,7 @@
     padding: 14px;
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
   }
   .rule-h {
     display: flex; align-items: center; gap: 8px;
@@ -129,7 +129,7 @@
   }
   .ui-row.active .name { color: var(--color-accent-fg); }
   .ui-row .name { color: var(--color-fg-primary); }
-  .ui-row .meta { color: var(--color-fg-muted); font-size: 9px; }
+  .ui-row .meta { color: var(--color-fg-muted); font-size: var(--fs-9); }
 </style>
 </head>
 <body class="masc-ds">
@@ -363,7 +363,7 @@
     </div>
 
     <div class="pv-sect-h" style="margin-top:16px">
-      <h3 style="margin:0; font-size:13px; color:var(--color-fg-muted)">Soft fills (badge backgrounds)</h3>
+      <h3 style="margin:0; font-size:var(--fs-13); color:var(--color-fg-muted)">Soft fills (badge backgrounds)</h3>
       <span class="sub"><code>--p-*-soft</code> — alpha .10 of base</span>
     </div>
     <div class="pv-grid-4">

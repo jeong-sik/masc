@@ -71,6 +71,12 @@
   /* --accent-45 reserved for focus-ring strength (high-contrast keyboard
      focus halo). Distinct semantic from -30 so the role is grep-able. */
   --accent-45: rgb(var(--brass-glow) / 0.45);
+  --accent-5: rgb(var(--brass-glow) / 0.05);
+  --accent-25: rgb(var(--brass-glow) / 0.25);
+  --accent-35: rgb(var(--brass-glow) / 0.35);
+  --accent-40: rgb(var(--brass-glow) / 0.40);
+  --accent-50: rgb(var(--brass-glow) / 0.50);
+  --accent-60: rgb(var(--brass-glow) / 0.60);
 
   /* Semantic - Success (Green) */
   --ok-soft: rgb(var(--ok-glow) / 0.15);
@@ -426,6 +432,7 @@
      reach into the raw --{kind}-glow triplet directly.  Idle has no
      glow (silent state, no chrome). */
   --color-status-ok-glow:      var(--ok-glow);
+  --color-fg-on-ok:            var(--ok-on);
   --color-status-warn-glow:    var(--warn-glow);
   --color-status-err-glow:     var(--err-glow);
   --color-status-info-glow:    var(--info-glow);

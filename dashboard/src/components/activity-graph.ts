@@ -95,8 +95,8 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   function statCard(label: string, value: number, series: number[], color: string, highlight = false) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-[15px] px-3.5">
-        <div class="text-3xs text-[var(--color-fg-muted)] tracking-1 uppercase font-medium">${label}</div>
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-[15px] px-3.5">
+        <div class="text-3xs text-[var(--color-fg-muted)] tracking-[var(--track-caps)] uppercase font-medium">${label}</div>
         <div class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums ${highlight ? 'text-[var(--color-status-ok)]' : ''}">${value}</div>
         ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
       </div>
@@ -105,8 +105,8 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      ${statCard('노드', s.node_count ?? 0, [], 'var(--slate-400)')}
-      ${statCard('엣지', s.edge_count ?? 0, [], 'var(--slate-500)')}
+      ${statCard('노드', s.node_count ?? 0, [], 'var(--color-fg-muted)')}
+      ${statCard('엣지', s.edge_count ?? 0, [], 'var(--color-fg-muted)')}
       ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, 'var(--color-status-ok)', true)}
       ${statCard('작업', s.task_count ?? 0, tdSeries, 'var(--color-status-warn)')}
       ${statCard('이벤트', s.event_count ?? 0, evSeries, 'var(--purple)')}
@@ -123,13 +123,13 @@ function actionCategoryClass(group: ActionTimelineGroup): string {
     case 'message':
       return 'border-[var(--cyan)]/35 bg-[var(--cyan)]/10 text-[var(--cyan)]'
     case 'board':
-      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
+      return 'border-[var(--purple)]/35 bg-[var(--purple)]/10 text-[var(--purple)]'
     case 'governance':
       return 'border-[var(--rose-light)]/35 bg-[var(--color-status-err)]/10 text-[var(--bad-light)]'
     case 'lifecycle':
-      return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
     default:
-      return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -173,7 +173,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex flex-col gap-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/50 p-4">
+      <div class="flex flex-col gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/50 p-4">
         <div class="flex flex-col gap-1">
           <div class="text-base font-semibold text-[var(--color-fg-secondary)]">원본 실행 이벤트를 최근 액션 단위로 묶어 보여줍니다.</div>
           <div class="text-xs text-[var(--color-fg-muted)]">
@@ -193,13 +193,13 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
           />
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-2xs transition-all duration-150 ${showLifecycle.value
+            class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2.5 py-1.5 text-2xs transition-colors duration-[var(--t-med)] ${showLifecycle.value
               ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
-              : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)]'}"
+              : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
             생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
-            <span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
+            <span class="rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs">${rawCounts.lifecycle}</span>
           </button>
         </div>
       </div>
@@ -211,11 +211,11 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
         : filteredGroups.map(group => {
             const expanded = expandedActionGroups.value.has(group.id)
             return html`
-              <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/55 p-4 shadow-sm shadow-black/8" key=${group.id}>
+              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/55 p-4 shadow-[var(--shadow-1)]" key=${group.id}>
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${actionCategoryClass(group)}">
+                      <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${actionCategoryClass(group)}">
                         ${categoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-2xs font-medium text-[var(--color-fg-primary)]">${group.actor}</span>` : null}
@@ -231,23 +231,23 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 </div>
                 <div class="mt-3 flex flex-wrap gap-1.5">
                   ${group.kinds.slice(0, 4).map(kind => html`
-                    <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
+                    <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" key=${kind}>
                       ${activityEventKindLabel(kind)}
                     </span>
                   `)}
                 </div>
-                <div class="mt-3 flex items-center justify-between gap-3 border-t border-[var(--white-6)] pt-3">
+                <div class="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-3">
                   <span class="text-2xs text-[var(--color-fg-muted)]">원본 이벤트를 펼쳐서 순서를 확인할 수 있습니다.</span>
                   <div class="flex items-center gap-2">
                     ${group.actor ? html`
                       <a
-                        class="rounded border border-[var(--accent-20)] bg-[var(--color-accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
+                        class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--color-accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-colors duration-[var(--t-med)] hover:bg-[var(--accent-10)]"
                         href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
                       >이 keeper로 보기</a>
                     ` : null}
                     <button
                       type="button"
-                      class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-all duration-150 hover:bg-[var(--white-8)]"
+                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
                       aria-expanded=${expanded}
                     >
@@ -256,10 +256,10 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   </div>
                 </div>
                 ${expanded ? html`
-                  <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
+                  <div class="mt-3 flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
                     ${group.rawEvents.map(event => html`
-                      <div class="flex items-start gap-3 rounded border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
-                        <span class="inline-flex min-w-18 items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                      <div class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" key=${event.seq}>
+                        <span class="inline-flex min-w-18 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                           ${activityEventKindLabel(event.kind)}
                         </span>
                         <div class="min-w-0 flex-1">
@@ -304,19 +304,19 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
         const score = nodeScore(node)
         const pct = maxScore > 0 ? (score / maxScore) * 100 : 0
         return html`
-          <div class="flex items-center gap-2.5 py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
-            <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
+          <div class="flex items-center gap-2.5 py-2 px-3 rounded-[var(--radius-lg)] bg-[var(--color-bg-surface)] border border-solid border-[var(--color-border-default)]" key=${node.id}>
+            <span class="w-[22px] text-center text-sm font-bold text-[var(--color-fg-muted)]">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
+                <span class="text-base font-semibold text-[var(--color-fg-primary)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
                 <span class="text-2xs text-[var(--color-fg-muted)]">${node.weight}회</span>
               </div>
-              <div class="h-1 rounded-sm bg-[var(--slate-gray-10)] overflow-hidden">
-                <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
+              <div class="h-1 rounded-[var(--r-0)] bg-[var(--color-bg-panel-alt)] overflow-hidden">
+                <div class="h-full rounded-[var(--r-0)] bg-[var(--cyan)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="text-sm font-semibold text-text-slate-light min-w-8 text-right">${score.toFixed(1)}</span>
-            <span class="text-2xs py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-sm font-semibold text-[var(--color-fg-muted)]-light min-w-8 text-right">${score.toFixed(1)}</span>
+            <span class="text-2xs py-0.5 px-[7px] rounded-[var(--r-1)] ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-status-ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}

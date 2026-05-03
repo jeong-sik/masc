@@ -20,7 +20,7 @@
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
     border-left: 2px solid var(--color-accent-fg);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     font: var(--type-caption);
     color: var(--color-fg-secondary);
   }
@@ -31,7 +31,7 @@
     text-transform: uppercase;
     padding: 3px 8px;
     border: 1px solid var(--color-border-strong);
-    border-radius: 2px;
+    border-radius: var(--r-0);
     color: var(--color-fg-muted);
   }
 
@@ -41,7 +41,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 0;
     border: 1px solid var(--color-border-default);
-    border-radius: 3px;
+    border-radius: var(--r-1);
     overflow: hidden;
   }
   .col {
@@ -77,7 +77,7 @@
   .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
   .swatch {
     height: 38px; min-width: 56px; flex: 1 1 56px;
-    border-radius: 2px;
+    border-radius: var(--r-0);
     border: 1px solid var(--color-border-default);
     padding: 4px 6px;
     display: flex; flex-direction: column; justify-content: space-between;
@@ -118,7 +118,7 @@
   .cat .chip {
     display: inline-block;
     width: 14px; height: 14px;
-    border-radius: 2px;
+    border-radius: var(--r-0);
     border: 1px solid var(--color-border-default);
     margin-right: 8px;
     vertical-align: -3px;

@@ -21,8 +21,8 @@
 }
 
 @keyframes avatar-pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(71, 184, 255, 0); }
-  50% { box-shadow: 0 0 8px 2px rgba(71, 184, 255, 0.3); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
+  50% { box-shadow: 0 0 8px 2px rgb(var(--info-glow) / .3); }
 }
 
 @keyframes avatar-particle {
@@ -33,18 +33,18 @@
 /* ── Agent state animations ────────────────────────────── */
 
 @keyframes workingPulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--ok-soft); }
-  50% { box-shadow: 0 0 6px 1px var(--ok-25); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .15); }
+  50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .25); }
 }
 
 @keyframes warnBlink {
-  0%, 100% { border-color: var(--warn-28); }
-  50% { border-color: rgba(251, 191, 36, 0.50); }
+  0%, 100% { border-color: rgb(var(--warn-glow) / .28); }
+  50% { border-color: rgb(var(--warn-glow) / .5); }
 }
 
 @keyframes blocker-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.5); }
+  0%, 100% { box-shadow: 0 0 0 2px rgb(var(--err-glow) / .4); }
+  50% { box-shadow: 0 0 0 3px rgb(var(--err-glow) / .5); }
 }
 
 /* ── Component keyframes (consolidated) ──────────────────── */
@@ -69,8 +69,8 @@
 }
 
 @keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
-  50% { box-shadow: 0 0 6px 1px var(--ok-12); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .25); }
+  50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .12); }
 }
 
 @keyframes activityFadeIn {
@@ -89,8 +89,8 @@
 }
 
 @keyframes pipeline-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
-  50% { box-shadow: 0 0 4px 1px rgba(96, 165, 250, 0.25); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
+  50% { box-shadow: 0 0 4px 1px rgb(var(--info-glow) / .25); }
 }
 
 @keyframes pipeline-badge-pulse {
@@ -99,8 +99,8 @@
 }
 
 @keyframes keeperPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
-  50% { opacity: 0.8; box-shadow: 0 0 0 3px rgba(74,222,128,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .4); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 3px rgb(var(--ok-glow) / 0); }
 }
 
 @keyframes loadingPulse {
@@ -156,8 +156,8 @@
   51%, 100% { opacity: 0; }
 }
 
-.anim-heartbeat  { animation: anim-heartbeat  1.4s ease-in-out infinite; }
-.anim-pulse-glow { animation: anim-pulse-glow 2.4s ease-in-out infinite; }
+.anim-heartbeat  { animation: anim-heartbeat  1.4s var(--ease-inout) infinite; }
+.anim-pulse-glow { animation: anim-pulse-glow 2.4s var(--ease-inout) infinite; }
 .anim-blink      { animation: anim-blink      1s steps(1)      infinite; }
 
 /* Shimmer ships its own background gradient since the animation is

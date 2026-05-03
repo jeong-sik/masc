@@ -70,7 +70,7 @@ export interface SurfProps {
   /** Override the default 12px padding. Some callers want a tighter
    *  inline strip (auth banner) or a roomier card body (chat error). */
   padding?: 'tight' | 'default' | 'loose'
-  /** Drop the rounded corner — used when Surf sits inside a parent
+  /** Drop the rounded-[var(--r-1)] corner — used when Surf sits inside a parent
    *  that already provides the radius (e.g. inside a Card). */
   flat?: boolean
   /** Forwarded to data-testid. */

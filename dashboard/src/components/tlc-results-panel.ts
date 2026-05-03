@@ -178,7 +178,7 @@ function ResultsTable({ entries }: { entries: TlcResultEntry[] }) {
         </thead>
         <tbody>
           ${entries.map((entry) => html`
-            <tr class="border-t border-[var(--white-10)]">
+            <tr class="border-t border-[var(--color-border-default)]">
               <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.spec_name}</td>
               <td class="py-1 pr-4 font-mono text-[var(--color-fg-muted)]">${entry.cfg_name}</td>
               <td class="py-1 pr-4">
@@ -269,7 +269,7 @@ export function TlcResultsPanel() {
         ${data && allEntries.length > 0 && !hasAnyEvidence
           ? html`
             <div
-              class="rounded border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-xs text-[var(--warn-bright)]"
+              class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-xs text-[var(--warn-bright)]"
               role="status"
             >
               TLC 실행 증거 없음: 등록된 항목은 있지만 마지막 실행, 상태 공간, 로그 경로가 아직 없습니다.

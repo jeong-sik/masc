@@ -12,23 +12,23 @@
     .brand-row { display:flex; align-items:center; gap:10px; margin-bottom: 20px; }
     .back { font: var(--type-micro); color: var(--color-fg-disabled); text-decoration:none; letter-spacing: .08em; }
     .back:hover { color: var(--color-fg-secondary); }
-    h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-    .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; }
-    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
+    h1 { font-family: var(--font-mono); font-size: var(--fs-18); font-weight: var(--fw-semi); margin: 0 0 4px; }
+    .sub { color: var(--color-fg-muted); font-size: var(--fs-12); margin-bottom: 28px; }
+    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: var(--fw-semi); font-size: var(--fs-11); margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
     .seg { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 16px 18px; margin-bottom: 10px; display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start; }
-    .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); }
-    .seg .meta .n { color: var(--color-fg-primary); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
-    .seg .meta .code { display:block; margin-top: 6px; color: var(--color-fg-disabled); font-size: 10px; line-height: 1.5; }
+    .seg .meta { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted); }
+    .seg .meta .n { color: var(--color-fg-primary); font-weight:var(--fw-semi); font-size: var(--fs-13); margin-bottom: 4px; display:block; }
+    .seg .meta .code { display:block; margin-top: 6px; color: var(--color-fg-disabled); font-size: var(--fs-10); line-height: 1.5; }
     .seg .demo { display:flex; flex-wrap:wrap; gap: 8px; align-items:center; min-height: 28px; }
     .seg .demo.col { flex-direction:column; align-items:stretch; gap: 4px; }
     .row-demo { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .grp-label { font: var(--type-micro); color: var(--color-fg-disabled); letter-spacing: .08em; text-transform:uppercase; margin-right: 4px; }
     .swatch { display:inline-flex; flex-direction:column; align-items:center; gap:3px; min-width: 56px; }
-    .swatch .sw { width: 100%; height: 20px; border-radius: 2px; border: 1px solid var(--color-border-default); }
+    .swatch .sw { width: 100%; height: 20px; border-radius: var(--r-0); border: 1px solid var(--color-border-default); }
     .swatch .lb { font: var(--type-micro); color: var(--color-fg-disabled); letter-spacing: .04em; }
     /* kv showcase */
     .kv-sample { background: var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1); padding: 8px 12px; min-width: 280px; }
-    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled); }
   </style>
 </head>
 <body>
@@ -113,10 +113,10 @@
     <div class="seg">
       <div class="meta"><span class="n">Band</span>2px horizontal strip at the top of a card. State indicator.</div>
       <div class="demo col">
-        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-running"></div><div style="padding:10px 12px; font-size:12px">nick0cave · t-9f2a</div></div>
-        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-ok"></div><div style="padding:10px 12px; font-size:12px">masc-improver · t-c022 · DONE</div></div>
-        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-err"></div><div style="padding:10px 12px; font-size:12px">qa-king · suite-merge-blockers · 3 FAIL</div></div>
-        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-stalled"></div><div style="padding:10px 12px; font-size:12px">rama · t-d551 · STALLED 22m</div></div>
+        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-running"></div><div style="padding:10px 12px; font-size:var(--fs-12)">nick0cave · t-9f2a</div></div>
+        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-ok"></div><div style="padding:10px 12px; font-size:var(--fs-12)">masc-improver · t-c022 · DONE</div></div>
+        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-err"></div><div style="padding:10px 12px; font-size:var(--fs-12)">qa-king · suite-merge-blockers · 3 FAIL</div></div>
+        <div style="width:280px; background:var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1)"><div class="band is-stalled"></div><div style="padding:10px 12px; font-size:var(--fs-12)">rama · t-d551 · STALLED 22m</div></div>
       </div>
     </div>
 
@@ -184,7 +184,7 @@
     <div class="seg">
       <div class="meta"><span class="n">tk</span>Inline code/token highlight in flowing text.</div>
       <div class="demo col">
-        <div style="color: var(--color-fg-secondary); font-size: 13px; line-height: 1.6; max-width: 560px">
+        <div style="color: var(--color-fg-secondary); font-size: var(--fs-13); line-height: 1.6; max-width: 560px">
           cascade hit on <span class="tk is-brass">moonshot</span> @step=2 for task <span class="tk">t-9f2a</span> — diff <span class="tk">+18 −4</span> in <span class="tk">keeper.ts</span>. Suite <span class="tk is-err">suite-merge-blockers</span> reports 3 FAIL / 47 PASS.
         </div>
       </div>
@@ -194,13 +194,13 @@
     <div class="seg">
       <div class="meta"><span class="n">surf-*</span>Soft tinted surfaces. Pair bg + fg + border in one class.</div>
       <div class="demo">
-        <span class="surf-brass" style="padding:6px 10px; border-radius: 3px">brass</span>
-        <span class="surf-ok" style="padding:6px 10px; border-radius: 3px">ok</span>
-        <span class="surf-warn" style="padding:6px 10px; border-radius: 3px">warn</span>
-        <span class="surf-err" style="padding:6px 10px; border-radius: 3px">err</span>
-        <span class="surf-info" style="padding:6px 10px; border-radius: 3px">info</span>
-        <span class="surf-stalled" style="padding:6px 10px; border-radius: 3px">stalled</span>
-        <span class="surf-idle" style="padding:6px 10px; border-radius: 3px">idle</span>
+        <span class="surf-brass" style="padding:6px 10px; border-radius: var(--r-1)">brass</span>
+        <span class="surf-ok" style="padding:6px 10px; border-radius: var(--r-1)">ok</span>
+        <span class="surf-warn" style="padding:6px 10px; border-radius: var(--r-1)">warn</span>
+        <span class="surf-err" style="padding:6px 10px; border-radius: var(--r-1)">err</span>
+        <span class="surf-info" style="padding:6px 10px; border-radius: var(--r-1)">info</span>
+        <span class="surf-stalled" style="padding:6px 10px; border-radius: var(--r-1)">stalled</span>
+        <span class="surf-idle" style="padding:6px 10px; border-radius: var(--r-1)">idle</span>
       </div>
     </div>
 
@@ -208,13 +208,13 @@
     <div class="seg">
       <div class="meta"><span class="n">elev-0…6</span>7-step stack. Each bundles bg + border + shadow. Modals top out at 6.</div>
       <div class="demo">
-        <div class="elev-0" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">0</div>
-        <div class="elev-1" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">1</div>
-        <div class="elev-2" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">2</div>
-        <div class="elev-3" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">3</div>
-        <div class="elev-4" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">4</div>
-        <div class="elev-5" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">5</div>
-        <div class="elev-6" style="width: 80px; height: 48px; border-radius: 3px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted)">6</div>
+        <div class="elev-0" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">0</div>
+        <div class="elev-1" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">1</div>
+        <div class="elev-2" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">2</div>
+        <div class="elev-3" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">3</div>
+        <div class="elev-4" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">4</div>
+        <div class="elev-5" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">5</div>
+        <div class="elev-6" style="width: 80px; height: 48px; border-radius: var(--r-1); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted)">6</div>
       </div>
     </div>
 
@@ -222,9 +222,9 @@
     <div class="seg">
       <div class="meta"><span class="n">focusable</span>Brass double-ring. Never blue system default.</div>
       <div class="demo">
-        <input class="focusable" placeholder="Tab here to see focus ring" style="height:24px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-radius: 3px; padding: 0 8px; color: var(--color-fg-primary); font-family: var(--font-mono); font-size: 12px; width: 220px" />
+        <input class="focusable" placeholder="Tab here to see focus ring" style="height:24px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); padding: 0 8px; color: var(--color-fg-primary); font-family: var(--font-mono); font-size: var(--fs-12); width: 220px" />
         <button class="btn focusable">focusable btn</button>
-        <input class="focusable is-err" value="error state" style="height:24px; background: var(--color-bg-panel-alt); border: 1px solid var(--err-border); border-radius: 3px; padding: 0 8px; color: var(--err-fg); font-family: var(--font-mono); font-size: 12px; width: 140px" />
+        <input class="focusable is-err" value="error state" style="height:24px; background: var(--color-bg-panel-alt); border: 1px solid var(--err-border); border-radius: var(--r-1); padding: 0 8px; color: var(--err-fg); font-family: var(--font-mono); font-size: var(--fs-12); width: 140px" />
       </div>
     </div>
 
@@ -237,13 +237,13 @@
           <span class="anim-heartbeat" style="width:9px; height:9px; border-radius:50%; background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--color-accent-glow)/.7)"></span>
           <span style="width:16px"></span>
           <span class="grp-label">pulse-glow</span>
-          <span style="width: 60px; height: 18px; border-radius: 3px; background: var(--color-bg-elevated); display:inline-block" class="anim-pulse-glow"></span>
+          <span style="width: 60px; height: 18px; border-radius: var(--r-1); background: var(--color-bg-elevated); display:inline-block" class="anim-pulse-glow"></span>
           <span style="width:16px"></span>
           <span class="grp-label">blink</span>
           <span class="caret" style="color: var(--color-accent-fg)"></span>
           <span style="width:16px"></span>
           <span class="grp-label">shimmer</span>
-          <span class="anim-shimmer" style="width: 140px; height: 14px; border-radius: 2px; display:inline-block"></span>
+          <span class="anim-shimmer" style="width: 140px; height: 14px; border-radius: var(--r-0); display:inline-block"></span>
         </div>
       </div>
     </div>
@@ -260,9 +260,9 @@
          Tokens map to design-system equivalents in tokens.generated.css. */
       .uic-mark { line-height: 1.55; color: var(--color-fg-secondary); font-family: var(--font-sans); max-width: 560px; }
       .uic-mark p { margin: 6px 0; }
-      .uic-mark h1 { font-size: var(--fs-16); font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
-      .uic-mark h2 { font-size: var(--fs-14); font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
-      .uic-mark h3 { font-size: var(--fs-13); font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
+      .uic-mark h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: 16px 0 8px; color: var(--color-fg-primary); }
+      .uic-mark h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: 12px 0 6px; color: var(--color-fg-primary); }
+      .uic-mark h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: 8px 0 4px; color: var(--color-fg-secondary); }
       .uic-mark code { background: var(--color-bg-elevated); color: var(--brass-fg); padding: 1px 5px; border-radius: var(--r-1); font-size: 0.9em; font-family: var(--font-mono); }
       .uic-mark pre { background: var(--color-bg-panel-alt); padding: 12px 14px; border-radius: var(--r-1); border: 1px solid var(--color-border-default); overflow-x: auto; font-size: var(--fs-12); font-family: var(--font-mono); line-height: 1.6; margin: 8px 0; }
       .uic-mark pre code { background: none; color: inherit; padding: 0; font-size: inherit; border-radius: 0; }
@@ -281,7 +281,7 @@
 
       .uic-runtime-strip { background: linear-gradient(90deg, var(--color-bg-panel-alt) 0%, var(--color-bg-surface) 100%); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 8px 12px; min-width: 280px; display: flex; flex-direction: column; gap: 6px; }
       .uic-runtime-strip .lbl { font: var(--type-micro); color: var(--color-fg-muted); letter-spacing: var(--track-caps); text-transform: uppercase; }
-      .uic-runtime-track { height: 4px; background: var(--color-bg-elevated); border-radius: 2px; overflow: hidden; }
+      .uic-runtime-track { height: 4px; background: var(--color-bg-elevated); border-radius: var(--r-0); overflow: hidden; }
       .uic-runtime-fill { height: 100%; background: var(--color-accent-fg); transition: width 0.3s ease; }
       .uic-runtime-fill.warn { background: var(--warn); }
       .uic-runtime-fill.bad  { background: var(--err); }

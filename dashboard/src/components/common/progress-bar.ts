@@ -61,9 +61,9 @@ type ProgressBarTrackTone = 'default' | 'dim' | 'muted'
     pre-change variants without adding arbitrary hex inputs. */
 export function progressBarTrackToneClass(tone: ProgressBarTrackTone = 'default'): string {
   switch (tone) {
-    case 'default': return 'bg-[var(--white-5)]'
-    case 'dim': return 'bg-[var(--white-6)]'
-    case 'muted': return 'bg-[var(--white-8)]'
+    case 'default': return 'bg-[var(--color-bg-elevated)]'
+    case 'dim': return 'bg-[var(--color-bg-hover)]'
+    case 'muted': return 'bg-[var(--color-bg-hover)]'
   }
 }
 
@@ -91,8 +91,8 @@ interface ProgressBarProps {
   testId?: string
 }
 
-const TRACK_BASE = 'w-full overflow-hidden rounded-sm'
-const FILL_BASE = 'h-full rounded-sm transition-[width] duration-[var(--t-slow)] ease-in-out'
+const TRACK_BASE = 'w-full overflow-hidden rounded-[var(--r-0)]'
+const FILL_BASE = 'h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]'
 
 export function ProgressBar({
   pct,

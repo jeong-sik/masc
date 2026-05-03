@@ -147,11 +147,11 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">
-            <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
+            <code class="text-xs font-medium text-[var(--color-fg-primary)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
             <${StatusChip} tone=${item.is_enabled ? 'ok' : 'neutral'}>${item.is_enabled ? 'ON' : 'OFF'}<//>
           </div>
-          <div class="mt-1.5 text-sm text-[var(--text-body)]">${item.description}</div>
+          <div class="mt-1.5 text-sm text-[var(--color-fg-secondary)]">${item.description}</div>
           <div class="mt-1 flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
             <span>source: ${item.source}</span>
             <span>since: v${item.since}</span>
@@ -167,15 +167,15 @@ function CategorySection({ category, categoryData }: { category: string; categor
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
       <div class="mb-3 flex items-center justify-between">
         <div>
-          <div class="text-sm font-medium text-[var(--text-strong)]">${categoryLabel}</div>
+          <div class="text-sm font-medium text-[var(--color-fg-primary)]">${categoryLabel}</div>
           <div class="mt-0.5 text-xs text-[var(--color-fg-muted)]">
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
+        <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]">
           ${categoryData.total}
         </div>
       </div>
@@ -202,21 +202,21 @@ export function FeatureHealth() {
             const overview = data.overview
             return html`
               <div class="space-y-4">
-                <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
                       <${SectionCap}>기능 플래그 상태<//>
-                      <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
+                      <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-primary)]">
                         ${overview.enabled_count} / ${overview.total_features} 기능 활성화
                       </div>
-                      <div class="mt-2 text-sm leading-airy text-[var(--text-body)]">
+                      <div class="mt-2 text-sm leading-airy text-[var(--color-fg-secondary)]">
                         시스템 기능 플래그 상태를 실시간으로 모니터링합니다.
                         ${overview.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
                       </div>
                     </div>
                     <button
                       type="button"
-                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--color-fg-secondary)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>
@@ -284,13 +284,13 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--color-fg-disabled)]">
+                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-xs text-[var(--color-fg-disabled)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
-                    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+                    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
                       <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>

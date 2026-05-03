@@ -113,10 +113,10 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kcb_cooling --> kcb_clean
   end
 
-  classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:#fca5a5
-  classDef stable   fill:#0f1a0f,stroke:#166534,color:#86efac
-  classDef motion   fill:#1a1305,stroke:#a16207,color:#fde68a
-  classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fca5a5
+  classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:var(--rose-light)
+  classDef stable   fill:#0f1a0f,stroke:#166534,color:var(--ok-fg)
+  classDef motion   fill:#1a1305,stroke:#a16207,color:var(--amber-bright)
+  classDef error    fill:#1e0a0a,stroke:#b91c1c,color:var(--rose-light)
 
   class ksm_stopped,ksm_dead,ksm_zombie terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating,kcb_clean stable
@@ -143,10 +143,10 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
   return html`
     <section
       data-testid="composite-fsm-flowchart"
-      class="rounded border border-[var(--white-10)] bg-[var(--white-5)] contain-content ${props.class ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] contain-content ${props.class ?? ''}"
       aria-label="복합 FSM 플로우차트"
     >
-      <header class="border-b border-[var(--white-10)] p-3">
+      <header class="border-b border-[var(--color-border-default)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">
           복합 FSM 플로우차트 (TLA+ spec)
         </h2>

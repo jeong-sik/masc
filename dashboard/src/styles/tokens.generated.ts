@@ -88,6 +88,7 @@ export const TOKENS = {
   "sp7": { name: "--sp-7", value: "32px", tier: "raw", kind: "dimension" },
   "sp8": { name: "--sp-8", value: "40px", tier: "raw", kind: "dimension" },
   "sp0h": { name: "--sp-0h", value: "2px", tier: "raw", kind: "dimension" },
+  "r0": { name: "--r-0", value: "2px", tier: "raw", kind: "dimension" },
   "r1": { name: "--r-1", value: "3px", tier: "raw", kind: "dimension" },
   "r2": { name: "--r-2", value: "5px", tier: "raw", kind: "dimension" },
   "r3": { name: "--r-3", value: "8px", tier: "raw", kind: "dimension" },

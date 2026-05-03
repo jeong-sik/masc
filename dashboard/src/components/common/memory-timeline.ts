@@ -56,7 +56,7 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
           h => html`
             <div
               key=${h.hour}
-              class="flex-1 rounded-t transition-all"
+              class="flex-1 rounded-t transition-[background-color,opacity]"
               style=${{
                 opacity: 0.1 + h.intensity * 0.9,
                 height: `${20 + h.intensity * 80}%`,
@@ -78,15 +78,15 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
       </div>
       <div class="mt-1.5 flex items-center gap-3 text-3xs text-[var(--color-fg-muted)]">
         <span class="inline-flex items-center gap-1">
-          <span class="inline-block h-2 w-2 rounded-sm" style=${{ background: 'var(--ok-10)' }}></span>
+          <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--ok-10)' }}></span>
           읽기
         </span>
         <span class="inline-flex items-center gap-1">
-          <span class="inline-block h-2 w-2 rounded-sm" style=${{ background: 'var(--warn-10)' }}></span>
+          <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--warn-10)' }}></span>
           쓰기
         </span>
         <span class="inline-flex items-center gap-1">
-          <span class="inline-block h-2 w-2 rounded-sm" style=${{ background: 'var(--color-accent)' }}></span>
+          <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--color-accent)' }}></span>
           검색
         </span>
         <span class="ml-auto">최대 ${maxCount}회</span>

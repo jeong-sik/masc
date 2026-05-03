@@ -35,11 +35,11 @@ export function HeadlessBtn({
 
   // Precompute class string — htm/preact forbids `+` inside html`` templates.
   const base =
-    'inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-all'
+    'inline-flex items-center justify-center rounded-[var(--r-2)] px-3 py-1.5 text-sm font-medium transition-[background-color,border-color,box-shadow]'
   const focusCls = focusVisible
     ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-bg-surface)]'
     : ''
-  const hoverCls = hovered && !pressed ? 'bg-[var(--white-4)]' : ''
+  const hoverCls = hovered && !pressed ? 'bg-[var(--color-bg-elevated)]' : ''
   const pressedCls = pressed ? 'scale-95 opacity-80' : ''
   const disabledCls = disabled ? 'opacity-50 pointer-events-none' : ''
 

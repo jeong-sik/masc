@@ -28,7 +28,7 @@ describe('connectorCardBorderClass (pure)', () => {
     // Uses a CSS variable so the muted tone tracks the dashboard theme
     // rather than hardcoding a zinc hue that fights dark-mode tokens.
     expect(connectorCardBorderClass('offline')).toContain('border-l-4')
-    expect(connectorCardBorderClass('offline')).toContain('var(--white-10)')
+    expect(connectorCardBorderClass('offline')).toContain('var(--color-border-default)')
   })
 
   it('unknown label falls back to the offline (muted) tone', () => {

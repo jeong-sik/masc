@@ -81,7 +81,7 @@ describe('ctxSegmentColor', () => {
   })
 
   it('returns default color for unknown keys', () => {
-    expect(ctxSegmentColor('unknown_key')).toBe('var(--slate-400)')
+    expect(ctxSegmentColor('unknown_key')).toBe('var(--color-fg-muted)')
   })
 })
 

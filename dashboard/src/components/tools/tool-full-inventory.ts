@@ -31,7 +31,7 @@ import {
 
 function StatCard({ value, label }: { value: number; label: string }) {
   return html`
-    <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex flex-col gap-1.5">
       <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${value}</span>
       <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">${label}</span>
     </div>
@@ -94,7 +94,7 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--color-bg-surface)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
         <${StatCard} value=${totalCount} label="전체 도구" />
         <${StatCard} value=${publicCount} label="MCP 공개" />
@@ -119,7 +119,7 @@ export function FullInventoryView({
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
-            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-3xs font-semibold bg-[var(--white-8)] text-[var(--color-fg-muted)] rounded-sm ml-1">${surfaceCountForFilter(inventory, key)}</span>
+            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-3xs font-semibold bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)] rounded-[var(--r-0)] ml-1">${surfaceCountForFilter(inventory, key)}</span>
           <//>
         `)}
       </div>

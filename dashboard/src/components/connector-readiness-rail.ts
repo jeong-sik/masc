@@ -96,12 +96,12 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     gradient: 'bg-gradient-to-b from-rose-500/15 to-rose-500/0',
   },
   idle: {
-    bg: 'bg-[var(--white-3)]',
-    border: 'border-[var(--white-8)]',
+    bg: 'bg-[var(--color-bg-surface)]',
+    border: 'border-[var(--color-border-default)]',
     text: 'text-[var(--color-fg-disabled)]',
-    dot: 'bg-[var(--white-10)]',
+    dot: 'bg-[var(--color-bg-hover)]',
     icon: '·',
-    gradient: 'bg-gradient-to-b from-[var(--white-4)] to-[var(--white-2)]',
+    gradient: 'bg-gradient-to-b from-[var(--color-bg-elevated)] to-[var(--color-bg-surface)]',
   },
 }
 
@@ -139,7 +139,7 @@ function Pill({ pill }: { pill: RailPill }) {
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-[var(--r-1)] border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}
       aria-busy=${inflight ? 'true' : 'false'}
@@ -152,7 +152,7 @@ function Pill({ pill }: { pill: RailPill }) {
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-xs font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--color-bg-page)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-xs font-bold ${inflight ? 'bg-[var(--color-bg-hover)]' : tone.dot} text-[var(--color-bg-page)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>

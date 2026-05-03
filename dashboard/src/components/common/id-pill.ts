@@ -1,25 +1,25 @@
-// IdPill — rounded accent pill for identifier-style tokens
+// IdPill — rounded-[var(--r-1)] accent pill for identifier-style tokens
 // (task ids, agent run tokens, object handles). Distinct from
-// StatusChip (rounded-sm semantic status badge) and Kbd (keyboard
+// StatusChip (rounded-[var(--r-0)] semantic status badge) and Kbd (keyboard
 // shortcut pill): IdPill is *flat value surface* — the reader sees
 // it and knows "this is the ID of the thing", not its status.
 //
 // Reference UIs (Linear issue id badge, GitHub commit SHA pill,
 // Vercel deployment hash, Stripe object id chip): small accent-
-// tinted rounded badges with monospace option for hashes/SHAs.
+// tinted rounded-[var(--r-1)] badges with monospace option for hashes/SHAs.
 //
 // Before this primitive, agent-detail.ts had three sites re-
 // implementing the same accent-tinted identifier pill shape
 // (TaskSummary task.id, TaskHistoryPanel row.taskId, archived-
 // participant label). Subtle drift across them: lines 117/128
-// used `py-1 px-2.5 shadow-sm`, line 229 had drifted to `py-1
-// px-2` (tighter). Primitive normalises to px-2.5 + shadow-sm —
+// used `py-1 px-2.5 shadow-1`, line 229 had drifted to `py-1
+// px-2` (tighter). Primitive normalises to px-2.5 + shadow-1 —
 // 229 widens ~4px which the flex-wrap parent absorbs without
 // overflow. P4 of the 9-PR dashboard hygiene sweep.
 //
 // Scope note — what IdPill is NOT absorbing in this PR:
 // • agent-detail:224 (secondaryLabel) — `px-2 py-0.5` no border,
-//   different pill shape (name tag, not id badge). P7 rounded
+//   different pill shape (name tag, not id badge). P7 rounded-[var(--r-1)]
 //   sweep.
 // • agent-detail:228 (unified.description) — neutral tone with
 //   drifted opacities (bg-[var(--white-N)] border-white/N). Needs a
@@ -28,7 +28,7 @@
 //   in P6 color normalisation.
 // • agent-detail:230 (agent.model) — mono neutral pill with
 //   reversed opacities to 228. P6.
-// • agent-detail-worker:45 (signal_truth) — `rounded-sm` with
+// • agent-detail-worker:45 (signal_truth) — `rounded-[var(--r-0)]` with
 //   raw `var(--accent-36)` border. That is StatusChip
 //   shape with an untypeable border, not IdPill shape. P6 when
 //   raw rgba colors resolve to CSS vars.
@@ -41,9 +41,9 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 const BASE =
-  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded whitespace-nowrap shadow-sm border'
+  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-1 border'
 const TONE_ACCENT =
-  'border-accent/20 bg-[var(--accent-10)] text-accent'
+  'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
 const MONO_CLASS = 'font-mono'
 
 /** Pure: class string for an IdPill, with optional monospace and
@@ -69,7 +69,7 @@ interface IdPillProps {
       task slugs and agent runtime names). */
   mono?: boolean
   /** Extra Tailwind classes for caller composition — parent group-
-      hover states (`group-hover:bg-accent/20 transition-colors`),
+      hover states (`group-hover:bg-[var(--accent-20)] transition-colors`),
       margin/width, custom title attribute. The primitive
       deliberately does not know about parent `group` context. */
   class?: string

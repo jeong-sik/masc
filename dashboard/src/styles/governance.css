@@ -4,8 +4,8 @@
 /* ═══ Governance ═══ */
 
 button.governance-row.selected {
-  border-color: rgba(71, 184, 255, 0.5);
-  background: var(--accent-14);
+  border-color: rgb(var(--info-glow) / 0.5);
+  background: rgb(var(--brass-glow) / 0.14);
 }
 
 /* ── Responsive ── */
@@ -25,12 +25,12 @@ button.governance-row.selected {
   background:
     linear-gradient(
       135deg,
-      var(--backdrop-modal) 0%,
-      rgba(16, 28, 52, 0.88) 100%
+      rgb(var(--color-accent-glow) / 0.03) 0%,
+      var(--color-bg-page) 100%
     );
   box-shadow:
-    0 0 20px rgba(200, 168, 78, 0.04),
-    inset 0 1px 0 var(--ff-gold-8);
+    0 0 20px rgb(var(--color-accent-glow) / .04),
+    inset 0 1px 0 rgb(var(--color-accent-glow) / .08);
 }
 
 @media (max-width: 768px) {

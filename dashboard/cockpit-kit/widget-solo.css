@@ -34,7 +34,7 @@ body.widget-solo-mode #root { height: 100vh; }
 }
 .ws-name {
   color: var(--color-fg-primary);
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   letter-spacing: .04em;
 }
 .ws-id {
@@ -62,7 +62,7 @@ body.widget-solo-mode #root { height: 100vh; }
 .ws-act:hover {
   color: var(--brass-1, #f0c674);
   border-color: var(--brass-3, #6b5022);
-  background: rgba(180,140,60,.08);
+  background: rgb(var(--color-accent-glow) / .08);
 }
 
 .ws-body {
@@ -151,7 +151,7 @@ body.widget-solo-mode #root { height: 100vh; }
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 .ws-empty-msg li a {
   color: var(--brass-1, #f0c674);
@@ -169,9 +169,9 @@ body.widget-solo-mode #root { height: 100vh; }
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-disabled);
-  font: 10px/1 var(--font-mono);
+  font: var(--fs-10)/1 var(--font-mono);
   cursor: pointer;
-  border-radius: 2px;
+  border-radius: var(--r-0);
   margin-left: 4px;
   text-decoration: none;
 }

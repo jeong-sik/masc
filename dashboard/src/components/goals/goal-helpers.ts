@@ -178,14 +178,14 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
   const barColor =
     pct >= 80 ? 'var(--color-status-ok)'
     : pct >= 50 ? 'var(--amber-bright)'
-    : pct >= 20 ? '#fb923c'
+    : pct >= 20 ? 'var(--color-orange-400)'
     : 'var(--color-status-err)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-sm bg-[var(--white-10)] overflow-hidden">
-        <div class="${h} rounded-sm transition-all duration-500" style="width:${pct}%;background:${barColor}"></div>
+      <div class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden">
+        <div class="${h} rounded-[var(--r-0)] transition-[width] duration-[var(--t-xslow)]" style="width:${pct}%;background:${barColor}"></div>
       </div>
       <span class="text-2xs font-semibold tabular-nums text-text-muted w-14 text-right">${done}/${total}</span>
     </div>
@@ -212,7 +212,7 @@ export function horizonColor(h: string): string {
     case 'short': return 'var(--color-status-ok)'
     case 'mid': return 'var(--amber-bright)'
     case 'long': return 'var(--indigo)'
-    default: return '#888'
+    default: return 'var(--color-fg-muted)'
   }
 }
 

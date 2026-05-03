@@ -76,7 +76,7 @@ function GhostButton({
   return html`
     <button
       type="button"
-      class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
       disabled=${disabled}
       onClick=${onClick}
       aria-expanded=${ariaExpanded}
@@ -165,7 +165,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
   if (hydrating) {
     return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-fg-secondary)]'
   }
-  return 'border-[rgba(148,163,184,0.18)] bg-[var(--slate-gray-8)] text-[var(--color-fg-primary)]'
+  return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -178,7 +178,7 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
 
 function DiagChip({ label }: { label: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)]">${label}</span>
+    <span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-0)] text-3xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)]">${label}</span>
   `
 }
 
@@ -208,7 +208,7 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[rgba(5,14,31,0.55)]">
+    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
@@ -247,7 +247,7 @@ export function KeeperDiagnosticSummary({
           />`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -315,17 +315,17 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
           <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-md font-semibold text-[var(--color-fg-secondary)]">@${keeperName}</div>
-              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
+              <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
-            <div class="mt-1 text-sm leading-loose text-[var(--text-secondary)]">
+            <div class="mt-1 text-sm leading-loose text-[var(--color-fg-secondary)]">
               Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
@@ -336,7 +336,7 @@ export function KeeperConversationPanel({
             <${GhostButton}
               onClick=${toggleInternal}
               ariaExpanded=${showInternal}
-              class=${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}
+              class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </${GhostButton}>
@@ -357,7 +357,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-2xl border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
                   ${chatAccess.message}
                 </div>
               `
@@ -372,13 +372,13 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-2xl border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">
+        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
           <${ChatComposer}
             draft=${draft}
             placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
@@ -415,11 +415,11 @@ export function KeeperRuntimeActions({
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-medium cursor-pointer transition-colors border'
-  const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]`
-  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
-  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
-  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-medium cursor-pointer transition-colors border'
+  const ghostBtn = `${btnBase} border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]`
+  const activeGhostBtn = `${btnBase} border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]`
+  const secondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-10)] text-[var(--color-status-warn)] hover:bg-[var(--warn-soft)]`
+  const activeSecondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
 
   return html`
     <div class="flex flex-wrap gap-2">

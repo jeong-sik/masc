@@ -34,7 +34,7 @@
     font-family: var(--font-display); font-size: 20px; letter-spacing: 0.22em;
     color: var(--text-bright); text-transform: uppercase; text-shadow: none; margin: 0;
   }
-  .page-head .crumb { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .page-head .crumb { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
 
   /* Card */
   .card {
@@ -47,13 +47,13 @@
   }
   .card > header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
   .card > header h2 {
-    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.3em;
-    color: var(--text-dim); text-transform: uppercase; font-weight: 500; margin: 0;
+    font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.3em;
+    color: var(--text-dim); text-transform: uppercase; font-weight: var(--fw-med); margin: 0;
   }
-  .card > header .r { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-  .card > header .r b { color: var(--text-bright); font-weight: 400; }
+  .card > header .r { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .card > header .r b { color: var(--text-bright); font-weight: var(--fw-reg); }
 
-  .legend { display: inline-flex; gap: 14px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+  .legend { display: inline-flex; gap: 14px; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
   .legend .lg-i { display: inline-flex; align-items: center; gap: 6px; }
   .legend .sw { width: 10px; height: 2px; display: inline-block; }
 
@@ -62,7 +62,7 @@
 
   /* SVG defaults */
   svg.chart { display: block; width: 100%; font-family: var(--font-mono); }
-  svg.chart text { fill: var(--axis-lbl); font-size: 10px; }
+  svg.chart text { fill: var(--axis-lbl); font-size: var(--fs-10); }
   svg.chart .axis line, svg.chart .axis path { stroke: var(--axis); }
   svg.chart .grid line { stroke: var(--grid); }
   svg.chart .hair { stroke: var(--hair-strong); stroke-dasharray: 2 3; }
@@ -71,7 +71,7 @@
   .tt {
     position: absolute; pointer-events: none;
     background: #0c0806; border: 1px solid var(--hair-strong);
-    padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-bright);
+    padding: 8px 10px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-bright);
     white-space: nowrap; z-index: 20; transform: translate(10px, -50%);
     box-shadow: 0 4px 18px rgba(0,0,0,0.6);
   }
@@ -92,16 +92,16 @@
   .agent-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
   .agent-row.warn .dot { background: var(--warn); }
   .agent-row.bad .dot  { background: var(--bad); }
-  .agent-row .name { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); letter-spacing: 0.04em; }
+  .agent-row .name { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-bright); letter-spacing: 0.04em; }
   .agent-row .spark { height: 28px; }
-  .agent-row .val { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; }
-  .agent-row .state { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; text-align: right; }
+  .agent-row .val { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+  .agent-row .state { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; text-align: right; }
   .agent-row.bad .state { color: var(--bad); }
 
   /* Flame graph */
   .flame {
     position: relative;
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--fs-11);
     color: var(--text-bright);
     border: 1px solid var(--hair);
     background: #0c0806;
@@ -126,7 +126,7 @@
   .flame .f .num { margin-left: auto; color: var(--text-dim); }
   .flame-scale {
     display: flex; justify-content: space-between;
-    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim);
     margin-top: 6px; padding: 0 2px;
     font-variant-numeric: tabular-nums;
   }
@@ -139,11 +139,11 @@
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;
     border-top: 1px solid var(--hair); margin-top: 12px; padding-top: 12px;
   }
-  .hist-stats .k { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
-  .hist-stats .v { font-family: var(--font-mono); font-size: 14px; color: var(--text-bright); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .hist-stats .k { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .hist-stats .v { font-family: var(--font-mono); font-size: var(--fs-14); color: var(--text-bright); font-variant-numeric: tabular-nums; margin-top: 2px; }
 
   .pattern-caption {
-    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim);
+    font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.26em; color: var(--text-dim);
     text-transform: uppercase; margin: 0 0 10px;
   }
 

@@ -9,7 +9,7 @@
   .dashboard-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 16px;
+    gap: var(--sp-4);
     padding: 16px;
     min-height: auto;
   }
@@ -35,7 +35,7 @@
   }
 
   .header-title-wrap h1 {
-    font-size: 22px;
+    font-size: var(--fs-22);
   }
 
   /* Stack all common grids */
@@ -65,11 +65,11 @@
   }
 
   .header-title-wrap h1 {
-    font-size: 18px;
+    font-size: var(--fs-18);
   }
 
   .header-subtitle {
-    font-size: 11px;
+    font-size: var(--fs-11);
   }
 
   .tab-pill-bar {

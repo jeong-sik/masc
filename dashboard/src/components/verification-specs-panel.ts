@@ -79,7 +79,7 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
   return html`
     <div class="overflow-x-auto">
       <table class="w-full text-xs tabular-nums" aria-label="TLA+ 스펙 목록">
-        <thead class="text-left text-slate-400">
+        <thead class="text-left text-[var(--color-fg-muted)]">
           <tr>
             <th scope="col" class="py-1 pr-4">사양</th>
             <th scope="col" class="py-1 pr-4">분류</th>
@@ -92,16 +92,16 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
           ${entries.map((entry: TlaSpecEntry) => {
             const cov = cfgCoverage(entry)
             return html`
-              <tr class="border-t border-slate-800">
-                <td class="py-1 pr-4 font-medium text-slate-100">${entry.name}</td>
+              <tr class="border-t border-[var(--color-border-default)]">
+                <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.name}</td>
                 <td class="py-1 pr-4">
                   <${StatusChip} tone=${categoryTone(entry.category)} label=${categoryLabel(entry.category)} />
                 </td>
                 <td class="py-1 pr-4">
                   <${StatusChip} tone=${cov.tone} label=${cov.label} />
                 </td>
-                <td class="py-1 pr-4 font-mono text-slate-400">${entry.path}</td>
-                <td class="py-1 text-slate-400">${shortMtime(entry.mtime_iso)}</td>
+                <td class="py-1 pr-4 font-mono text-[var(--color-fg-muted)]">${entry.path}</td>
+                <td class="py-1 text-[var(--color-fg-muted)]">${shortMtime(entry.mtime_iso)}</td>
               </tr>
             `
           })}
@@ -187,7 +187,7 @@ export function VerificationSpecsPanel() {
         : null}
 
       <${Card} title="형식 명세">
-        <div class="mb-2 text-xs text-slate-400">
+        <div class="mb-2 text-xs text-[var(--color-fg-muted)]">
           <span class="font-mono">${dirLabel}</span>
         </div>
         ${filtered.length === 0

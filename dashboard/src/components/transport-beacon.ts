@@ -75,10 +75,10 @@ export function computeBeaconView(args: {
 // dashboard design-system aliases to stay consistent with neighbouring
 // status chips (ConnectionStatus, ErrorCounterBadge).
 const STATE_CLASS: Record<BeaconState, string> = {
-  green: 'text-[#9af3ba] bg-[var(--ok-soft)] border-[var(--color-status-ok)]',
-  yellow: 'text-[#f3df9a] bg-[var(--warn-soft)] border-[var(--color-status-warn)]',
-  red: 'text-[#f7b7b7] bg-[var(--bad-soft)] border-[var(--color-status-err)]',
-  gray: 'text-[var(--color-fg-muted)] bg-[var(--white-4)] border-[var(--color-border-default)]',
+  green: 'text-[var(--color-status-ok)] bg-[var(--ok-soft)] border-[var(--color-status-ok)]',
+  yellow: 'text-[var(--color-status-warn)] bg-[var(--warn-soft)] border-[var(--color-status-warn)]',
+  red: 'text-[var(--color-status-err)] bg-[var(--bad-soft)] border-[var(--color-status-err)]',
+  gray: 'text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] border-[var(--color-border-default)]',
 }
 
 const beaconView = computed<BeaconView>(() => computeBeaconView({
@@ -94,7 +94,7 @@ export function TransportBeacon() {
   const view = beaconView.value
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap rounded border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
+      class="flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-1)] border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
       title=${view.title}
       role="status"
       data-beacon-state=${view.state}

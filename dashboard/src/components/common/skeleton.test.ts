@@ -14,7 +14,7 @@ describe('skeletonClasses (pure)', () => {
   it('returns base + default width + default height when nothing is passed', () => {
     const cls = skeletonClasses()
     expect(cls).toContain('animate-pulse')
-    expect(cls).toContain('bg-[var(--white-4)]')
+    expect(cls).toContain('bg-[var(--color-bg-elevated)]')
     expect(cls).toContain('w-full')
     expect(cls).toContain('h-4')
   })
@@ -78,7 +78,7 @@ describe('Skeleton component', () => {
     const el = container.querySelector('[data-skeleton-block]') as HTMLElement
     expect(el).toBeTruthy()
     expect(el.className).toContain('animate-pulse')
-    expect(el.className).toContain('bg-[var(--white-4)]')
+    expect(el.className).toContain('bg-[var(--color-bg-elevated)]')
   })
 
   it('defaults to aria-hidden="true" (decorative — AT hears loading from parent)', () => {

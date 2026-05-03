@@ -219,14 +219,14 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   const lineColor = lastRate >= 95 ? 'var(--color-status-ok)' : lastRate >= 90 ? 'var(--color-status-warn)' : 'var(--color-status-err)'
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between mb-1.5">
         <${Eyebrow}>성공률 추이</${Eyebrow}>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
         ${bars.map(b => html`
-          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'var(--ok-soft)'}" rx="0.5" />
+          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'var(--bad-20)' : 'var(--ok-soft)'}" rx="0.5" />
         `)}
         <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
       </svg>
@@ -321,7 +321,7 @@ export function ToolQualityPanel() {
           </div>
         </div>
         <button
-          class="text-3xs px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+          class="text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
           onClick=${handleRefreshToolQualityClick}
           aria-label="도구 품질 새로고침"
         >새로고침</button>

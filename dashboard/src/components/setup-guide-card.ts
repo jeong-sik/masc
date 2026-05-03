@@ -76,7 +76,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-8)]"
+      class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -107,16 +107,16 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
   const progressBarToneClass =
     tone === 'complete' ? 'bg-[var(--ok-10)]' :
     tone === 'in-progress' ? 'bg-[var(--color-accent-fg)]' :
-    'bg-[var(--white-10)]'
+    'bg-[var(--color-bg-hover)]'
 
   return html`
     <div
-      class="mt-2 overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-2)]"
+      class="mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-setup-guide-tone=${tone}
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--white-4)]"
+        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
         aria-expanded=${isOpen}
         aria-controls=${`setup-guide-${connectorId}`}
         onClick=${toggle}
@@ -129,7 +129,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-ok)]"
+                  class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-ok)]"
                   aria-label="설정 가이드 완료"
                   data-setup-complete-badge
                 >
@@ -150,7 +150,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
            always visible so the progress signals out even when the
            card is collapsed (operator scanning multiple cards). -->
       <div
-        class="h-[2px] w-full bg-[var(--white-4)]"
+        class="h-[2px] w-full bg-[var(--color-bg-elevated)]"
         role="progressbar"
         aria-valuenow=${pct}
         aria-valuemin=${0}
@@ -159,7 +159,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
         data-setup-progress-bar
       >
         <div
-          class=${`h-full transition-all duration-300 ${progressBarToneClass}`}
+          class=${`h-full transition-[width] duration-[var(--t-slow)] ${progressBarToneClass}`}
           style=${`width: ${pct}%`}
           data-setup-progress-bar-fill
         ></div>
@@ -167,7 +167,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
       ${isOpen
         ? html`
-            <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--white-8)] px-3 py-2.5 text-2xs text-[var(--color-fg-primary)]">
+            <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--color-border-default)] px-3 py-2.5 text-2xs text-[var(--color-fg-primary)]">
               <p class="mb-2 text-[var(--color-fg-disabled)]">${guide.intro}</p>
               <ol class="list-none space-y-2" data-setup-step-list>
                 ${guide.steps.map((step, idx) => {
@@ -179,11 +179,11 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   // emerald-filled when the step is complete.
                   const circleToneClass = done
                     ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-                    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
+                    : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
-                        class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>
@@ -200,7 +200,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                       />
                       <label
                         for=${`setup-step-${connectorId}-${idx}`}
-                        class=${`min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--white-10)]' : ''}`}
+                        class=${`min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--color-fg-disabled)]' : ''}`}
                       >
                         <span>${step.text}</span>
                         ${step.link
@@ -213,7 +213,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
               </ol>
               ${guide.references.length > 0
                 ? html`
-                    <div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--white-8)] pt-2">
+                    <div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border-default)] pt-2">
                       <span class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">refs</span>
                       ${guide.references.map(ref => html`<${ExternalLinkChip} href=${ref.href} label=${ref.label} />`)}
                     </div>

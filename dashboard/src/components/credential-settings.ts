@@ -84,11 +84,11 @@ export function credentialTypeLabel(type: CredentialType): string {
 export function credentialTypeBadgeClass(type: CredentialType): string {
   switch (type) {
     case 'github':
-      return 'bg-[var(--accent-10)] text-accent border-accent/20'
+      return 'bg-[var(--accent-10)] text-accent-fg border-[var(--accent-20)]'
     case 'gitlab':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'local':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
   }
 }
 
@@ -112,9 +112,9 @@ export function credentialStateBadgeClass(state: CredentialState | null | undefi
     case 'Stale':
       return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'Unmaterialized':
-      return 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-dim border-[var(--color-border-default)]'
     default:
-      return 'bg-[var(--white-5)] text-text-muted border-[var(--white-10)]'
+      return 'bg-[var(--color-bg-elevated)] text-text-muted border-[var(--color-border-default)]'
   }
 }
 
@@ -179,8 +179,8 @@ export function resetCredentials(): void {
 
 function SectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]" aria-hidden="true"></span>
+    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-6 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" aria-hidden="true"></span>
       ${title}
     </div>
   `
@@ -188,7 +188,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function CredentialTypeBadge({ type }: { type: CredentialType }) {
   return html`
-    <span class="text-2xs font-bold px-2 py-0.5 rounded border ${credentialTypeBadgeClass(type)} shadow-sm">
+    <span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${credentialTypeBadgeClass(type)} shadow-1">
       ${credentialTypeLabel(type)}
     </span>
   `
@@ -196,7 +196,7 @@ function CredentialTypeBadge({ type }: { type: CredentialType }) {
 
 function CredentialStateBadge({ state }: { state?: CredentialState | null }) {
   return html`
-    <span class="text-2xs font-bold px-2 py-0.5 rounded border ${credentialStateBadgeClass(state)} shadow-sm">
+    <span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] border ${credentialStateBadgeClass(state)} shadow-1">
       ${credentialStateLabel(state)}
     </span>
   `
@@ -221,7 +221,7 @@ export function CredentialSettings() {
         <${ErrorState} message=${state.message} />
         <button
           type="button"
-          class="py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--white-10)] text-text-body self-start"
+          class="py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-bg-hover)] text-text-body self-start"
           onClick=${() => loadCredentials({ force: true })}
         >
           다시 시도
@@ -287,8 +287,8 @@ export function CredentialSettings() {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
-  const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
+  const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'
   const helperStyle = 'mt-1 text-3xs leading-relaxed text-text-dim'
 
   return html`
@@ -297,7 +297,7 @@ export function CredentialSettings() {
         <h2 class="text-sm font-bold text-text-strong">크리덴셜 관리</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--purple)] text-[#1e1b4b]"
+          class="${btnBase} bg-[var(--purple)] text-[var(--color-bg-0)]"
           onClick=${() => {
             showAddForm.value = !isAdding
             if (!isAdding) resetAddDraft()
@@ -308,7 +308,7 @@ export function CredentialSettings() {
       </div>
 
       ${isAdding ? html`
-        <div class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm p-4 shadow-[var(--shadow-1)]">
           <${SectionHeader} title="새 크리덴셜" />
           <div class="flex flex-col gap-3">
             <div>
@@ -437,7 +437,7 @@ export function CredentialSettings() {
             <div class="flex gap-2 mt-1">
               <button
                 type="button"
-                class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
+                class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
                 onClick=${handleSave}
                 disabled=${isSaving}
               >
@@ -445,7 +445,7 @@ export function CredentialSettings() {
               </button>
               <button
                 type="button"
-                class="${btnBase} bg-[var(--white-10)] text-text-body"
+                class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
                 onClick=${() => { showAddForm.value = false; resetAddDraft() }}
               >
                 취소
@@ -456,11 +456,11 @@ export function CredentialSettings() {
       ` : null}
 
       ${list.length === 0 ? html`
-        <div class="py-8 text-center text-2xs text-text-muted rounded border border-card-border/30 bg-card/10">
+        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10">
           등록된 크리덴셜이 없습니다.
         </div>
       ` : html`
-        <div class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)]">
           <table class="w-full text-left">
             <thead>
               <tr class="border-b border-card-border/30 bg-card/40">
@@ -497,7 +497,7 @@ export function CredentialSettings() {
                         <code class="font-mono text-3xs text-text-body break-all">${cred.gh_config_dir}</code>
                       ` : html`<span class="text-3xs text-text-dim">GH_CONFIG_DIR --</span>`}
                       ${githubLoginCommand(cred.gh_config_dir) && cred.state?.kind !== 'Materialized' ? html`
-                        <code class="font-mono text-3xs text-accent break-all">${githubLoginCommand(cred.gh_config_dir)}</code>
+                        <code class="font-mono text-3xs text-accent-fg break-all">${githubLoginCommand(cred.gh_config_dir)}</code>
                       ` : null}
                       ${cred.ssh_key_path ? html`
                         <code class="font-mono text-3xs text-text-dim break-all">ssh ${cred.ssh_key_path}</code>
@@ -507,7 +507,7 @@ export function CredentialSettings() {
                   <td class="py-2 px-3 text-right">
                     <button
                       type="button"
-                      class="text-2xs font-semibold px-2 py-1 rounded bg-[var(--color-status-err)]/10 text-[var(--color-status-err)] border border-[var(--color-status-err)]/20 hover:bg-[var(--color-status-err)]/20 transition-colors cursor-pointer"
+                      class="text-2xs font-semibold px-2 py-1 rounded-[var(--r-1)] bg-[var(--color-status-err)]/10 text-[var(--color-status-err)] border border-[var(--color-status-err)]/20 hover:bg-[var(--color-status-err)]/20 transition-colors cursor-pointer"
                       onClick=${() => handleDelete(cred.id)}
                       disabled=${deletingId.value === cred.id}
                     >

@@ -4,15 +4,15 @@
 
 @utility pixel-avatar--xl {
   box-shadow:
-    0 0 0 2px var(--ff-navy),
-    0 0 0 3px var(--ff-gold),
+    0 0 0 2px var(--color-bg-page),
+    0 0 0 3px var(--brass-1),
     0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 /* State animations applied to the avatar container */
 .pixel-avatar[data-status="active"],
 .pixel-avatar[data-status="working"] {
-  animation: avatar-bounce 1.2s ease-in-out infinite;
+  animation: avatar-bounce 1.2s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="busy"] {
@@ -20,11 +20,11 @@
 }
 
 .pixel-avatar[data-status="idle"] {
-  animation: avatar-breathe 3s ease-in-out infinite;
+  animation: avatar-breathe 3s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="listening"] {
-  animation: avatar-pulse-glow 2s ease-in-out infinite;
+  animation: avatar-pulse-glow 2s var(--ease-inout) infinite;
 }
 
 .pixel-avatar[data-status="offline"],
@@ -35,20 +35,20 @@
 
 /* Signal truth ring */
 .pixel-avatar.signal-ring--live {
-  box-shadow: 0 0 0 2px var(--agent-working);
+  box-shadow: 0 0 0 2px var(--color-agent-working);
 }
 
 .pixel-avatar.signal-ring--stale {
-  box-shadow: 0 0 0 2px var(--agent-busy);
+  box-shadow: 0 0 0 2px var(--color-agent-busy);
 }
 
 .pixel-avatar.signal-ring--archived {
-  box-shadow: 0 0 0 2px var(--border-slate-30);
+  box-shadow: 0 0 0 2px var(--color-border-strong);
 }
 
 /* Blocker pulse ring */
 @utility pixel-avatar--has-blocker {
-  animation: blocker-pulse 1.5s ease-in-out infinite;
+  animation: blocker-pulse 1.5s var(--ease-inout) infinite;
 }
 
 /* Activity dot — positioned absolute */
@@ -64,14 +64,14 @@
 }
 
 @utility activity-dot--live-pulse {
-  background: var(--agent-working);
-  box-shadow: 0 0 4px rgba(122, 224, 154, 0.8);
-  animation: pulse 1.5s ease-in-out infinite;
+  background: var(--color-agent-working);
+  box-shadow: 0 0 4px rgb(var(--ok-glow) / 0.8);
+  animation: pulse 1.5s var(--ease-inout) infinite;
 }
 
-@utility activity-dot--live { background: var(--agent-working); }
-@utility activity-dot--stale { background: var(--agent-busy); }
-@utility activity-dot--inactive { background: rgba(138, 163, 211, 0.4); }
+@utility activity-dot--live { background: var(--color-agent-working); }
+@utility activity-dot--stale { background: var(--color-agent-busy); }
+@utility activity-dot--inactive { background: var(--color-fg-disabled); }
 @utility activity-dot--unknown { background: var(--color-border-default); }
 
 /* Speech bubble */
@@ -82,14 +82,14 @@
   transform: translateX(-50%);
   white-space: nowrap;
   padding: 3px 8px;
-  background: rgba(30, 30, 40, 0.92);
-  border: 1px solid var(--white-12);
-  color: var(--text-strong);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-fg-primary);
   font-size: var(--fs-2xs);
   line-height: 1.3;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--t-fast) var(--ease);
   z-index: 10;
   max-width: 160px;
   overflow: hidden;
@@ -103,7 +103,7 @@
   left: 50%;
   transform: translateX(-50%);
   border: 4px solid transparent;
-  border-top-color: rgba(30, 30, 40, 0.92);
+  border-top-color: var(--color-bg-surface);
 }
 
 .pixel-avatar:hover .pixel-avatar__speech-bubble,

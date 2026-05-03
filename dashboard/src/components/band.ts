@@ -45,8 +45,8 @@ export interface BandProps {
   /** Forwarded to data-testid. */
   testId?: string
   /** Border radius on top corners only. Default true (matches SPEC
-   *  `.band` rendered above a card's rounded surface — `1px 1px 0 0`).
-   *  Set false when the band is not at the top of a rounded container. */
+   *  `.band` rendered above a card's rounded-[var(--r-1)] surface — `1px 1px 0 0`).
+   *  Set false when the band is not at the top of a rounded-[var(--r-1)] container. */
   topRadius?: boolean
 }
 

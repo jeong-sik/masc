@@ -153,8 +153,8 @@ export function deriveMatrix(
 
 const CELL_TONE: Record<MatrixCellState, { dot: string; text: string; bg: string }> = {
   bound:   { dot: 'bg-[var(--ok-10)]',     text: 'text-[var(--color-status-ok)]',        bg: 'bg-[var(--ok-10)]' },
-  unbound: { dot: 'bg-[var(--white-8)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
-  na:      { dot: 'bg-[var(--white-4)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
+  unbound: { dot: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
+  na:      { dot: 'bg-[var(--color-bg-elevated)]', text: 'text-[var(--color-fg-disabled)]', bg: 'bg-transparent'    },
   unknown: { dot: 'bg-[var(--warn-10)]',       text: 'text-[var(--color-status-warn)]',          bg: 'bg-[var(--warn-10)]'   },
 }
 
@@ -205,7 +205,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
   return html`
     <button
       type="button"
-      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
+      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded-[var(--r-1)] px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
@@ -229,7 +229,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <section class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
+    <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">
@@ -246,15 +246,15 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
         </div>
         <div class="text-3xs text-[var(--color-fg-disabled)]">
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>bound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]" aria-hidden="true"></span>unbound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]" aria-hidden="true"></span>n/a</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-bg-hover)]" aria-hidden="true"></span>unbound</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-bg-elevated)]" aria-hidden="true"></span>n/a</span>
           <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--warn-10)]" aria-hidden="true"></span>unknown</span>
         </div>
       </header>
 
       ${!hasKeepers
         ? html`
-            <div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
+            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
               No keepers yet — add one under <${Tk}>config/keepers/<//> and restart.
             </div>
           `
@@ -265,7 +265,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 ${matrix.columns.map(colId => html`
                   <button
                     type="button"
-                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
+                    class="flex cursor-pointer items-center justify-center gap-1 rounded-[var(--r-1)] px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                     aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
@@ -355,7 +355,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   return html`
     <button
       type="button"
-      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
+      class=${`flex cursor-pointer items-center gap-2 truncate rounded-[var(--r-1)] px-2 py-1 text-left text-xs hover:bg-[var(--color-bg-elevated)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
       aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}

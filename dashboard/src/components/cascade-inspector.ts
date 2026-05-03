@@ -106,9 +106,9 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
   }
 
   return html`
-    <div class="overflow-x-auto rounded border border-card-border/60">
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
-        <thead class="bg-[var(--white-3)] text-text-muted">
+        <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
             <${ThBase}>시간</${ThBase}>
             <${ThBase}>Cascade</${ThBase}>
@@ -121,7 +121,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
         </thead>
         <tbody class="divide-y divide-card-border/40">
           ${events.map(e => html`
-            <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--white-3)] transition-colors">
+            <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--color-bg-surface)] transition-colors">
               <td class="px-3 py-2 text-text-body whitespace-nowrap">
                 <${TimeAgo} timestamp=${e.ts} />
               </td>
@@ -147,9 +147,9 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
   }
 
   return html`
-    <div class="overflow-x-auto rounded border border-card-border/60">
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60">
       <table class="w-full text-left text-xs">
-        <thead class="bg-[var(--white-3)] text-text-muted">
+        <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
             <${ThBase}>프로바이더</${ThBase}>
             <${ThRight}>성공률</${ThRight}>
@@ -161,7 +161,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
         </thead>
         <tbody class="divide-y divide-card-border/40">
           ${providers.map(p => html`
-            <tr key=${p.provider_key} class="hover:bg-[var(--white-3)] transition-colors">
+            <tr key=${p.provider_key} class="hover:bg-[var(--color-bg-surface)] transition-colors">
               <td class="px-3 py-2 font-medium text-text-strong">${p.provider_key}</td>
               <td class="px-3 py-2 text-right tabular-nums ${p.success_rate >= 0.9 ? 'text-ok' : p.success_rate >= 0.7 ? 'text-warn' : 'text-bad'}">
                 ${Math.round(p.success_rate * 100)}%
@@ -200,8 +200,8 @@ export function CascadeInspector() {
   ]
 
   return html`
-    <div class="flex flex-col gap-5">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="Cascade 검사기">
+    <div class="flex flex-col gap-8">
+      <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Cascade 검사기</div>
@@ -215,7 +215,7 @@ export function CascadeInspector() {
         </div>
       </section>
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="전략 추적">
+      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="전략 추적">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">전략 추적</div>
@@ -237,7 +237,7 @@ export function CascadeInspector() {
         }
       </section>
 
-      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">
+      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">
         <div class="mb-3">
           <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">프로바이더</div>
           <h3 class="mt-1 text-md font-semibold text-text-strong">건강도 스냅숏</h3>

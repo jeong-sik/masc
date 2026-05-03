@@ -16,7 +16,7 @@ describe('CountBadge', () => {
     render(h(CountBadge, null, '1'), container)
     const el = container.querySelector('span')
     expect(el).not.toBeNull()
-    expect(el?.classList.contains('bg-[var(--white-8)]')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-bg-hover)]')).toBe(true)
     expect(el?.classList.contains('text-[var(--color-fg-muted)]')).toBe(true)
   })
 

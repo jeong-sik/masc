@@ -13,7 +13,7 @@ import {
 
 function StatCell({ label, value }: { label: string; value: number }) {
   return html`
-    <div class="min-w-0 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
+    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="text-2xs font-medium uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">${label}</div>
       <div class="mt-1 text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${value}</div>
     </div>
@@ -112,7 +112,7 @@ export function GitGraphPanel() {
       </div>
 
       ${graph.warnings.length > 0 ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-sm text-[var(--warn-bright)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-sm text-[var(--warn-bright)]">
           ${graph.warnings[0]}
         </div>
       ` : null}

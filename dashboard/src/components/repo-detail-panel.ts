@@ -147,7 +147,7 @@ function InfoRow({
         ? (value ? 'ON' : 'OFF')
         : String(value)
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-1.5">
       <div class="flex items-center gap-2">
         ${icon ? html`<span class="text-[var(--color-fg-muted)]">${icon}</span>` : null}
         <span class="text-xs font-medium text-text-muted">${label}</span>
@@ -189,7 +189,7 @@ export function RepoDetailPanel() {
         <${ErrorState} message=${detailState.message} />
         <button
           type="button"
-          class="text-2xs px-3 py-1.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+          class="text-2xs px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
           onClick=${() => void loadRepoDetail(selectedId)}
         >
           다시 시도
@@ -242,7 +242,7 @@ export function RepoDetailPanel() {
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--accent-10)] text-accent-fg hover:bg-[var(--accent-20)] transition-colors disabled:opacity-50"
             onClick=${() => void handleSync()}
             disabled=${syncing.value}
           >
@@ -253,7 +253,7 @@ export function RepoDetailPanel() {
           </button>
           <button
             type="button"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer border-none bg-[var(--bad-12)] text-[var(--color-status-err)] hover:bg-[var(--bad-20)] transition-colors"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--bad-12)] text-[var(--color-status-err)] hover:bg-[var(--bad-20)] transition-colors"
             onClick=${() => void handleDelete()}
           >
             <${Trash2} size=${13} aria-hidden="true" />
@@ -299,8 +299,8 @@ export function RepoDetailPanel() {
       </div>
 
       <div>
-        <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-4 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-          <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]" aria-hidden="true"></span>
+        <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg mt-4 mb-3 pb-1.5 border-b border-[var(--accent-20)] flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" aria-hidden="true"></span>
           브랜치 목록
         </div>
 
@@ -319,16 +319,16 @@ export function RepoDetailPanel() {
                 ${branches.map(branch => html`
                   <div
                     key=${branch.name}
-                    class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm"
+                    class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm"
                   >
                     <div class="flex items-center gap-2">
                       <${GitBranch} size=${12} class="text-[var(--color-fg-muted)]" aria-hidden="true" />
                       <span class="text-xs font-medium text-text-strong">${branch.name}</span>
                       ${branch.is_default
-                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--accent-10)] text-accent border border-accent/20">기본</span>`
+                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)]">기본</span>`
                         : null}
                       ${branch.is_remote
-                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-text-dim border border-[var(--white-10)]">원격</span>`
+                        ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)]">원격</span>`
                         : null}
                     </div>
                     ${branch.last_commit_at

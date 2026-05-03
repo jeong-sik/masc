@@ -25,7 +25,7 @@
   z-index: var(--z-tab-sticky);
   backdrop-filter: blur(8px);
   opacity: 0;
-  transition: opacity 0.2s, background 0.15s;
+  transition: opacity var(--t-med), background var(--t-fast);
   pointer-events: none;
   &.visible {
     opacity: 1;
@@ -33,7 +33,7 @@
   }
   &:hover {
     background: var(--color-bg-tab-sticky-hover);
-    color: var(--text-near-white);
+    color: var(--color-fg-primary);
   }
 }
 
@@ -41,13 +41,13 @@
 @utility tool-metrics-sections {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 @utility tool-bar-row {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   font-size: var(--fs-sm);
 }

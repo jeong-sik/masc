@@ -167,11 +167,11 @@ function executionReceiptClass(execution: KeeperCompositeExecution | undefined):
     case 'ok':
       return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
     case 'bad':
-      return 'border-[rgba(248,113,113,0.36)] text-[var(--bad-light)] bg-[rgba(248,113,113,0.08)]'
+      return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
     case 'warn':
       return 'border-[var(--warn-20)] text-[var(--color-status-warn)] bg-[var(--warn-10)]'
     case 'muted':
-      return 'border-[var(--white-8)] text-[var(--color-fg-disabled)] bg-[var(--white-3)]'
+      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-surface)]'
   }
 }
 
@@ -595,11 +595,11 @@ export function FsmHub(props: FsmHubProps = {}) {
         <//>
 
         ${/* ── Zone 5: Collapsible Graph ── */ ''}
-        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]"
+        <details class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
-          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
             Compound Graph — 5 sub-FSMs (Cytoscape)
           </summary>
           <div class="px-3 pb-3">
@@ -635,7 +635,7 @@ function ShortcutsOverlay({
       labelledBy="shortcuts-title"
       onClose=${onClose}
       overlayClass="fixed inset-0 z-50 flex items-center justify-center"
-      panelClass="rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-sm"
+      panelClass="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-[var(--shadow-1)]"
     >
       <div class="flex items-center justify-between mb-3">
         <h2 id="shortcuts-title" class="m-0 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-muted)]">
@@ -708,8 +708,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-sm border text-3xs font-mono ${idleIsLong ? 'text-[var(--color-fg-muted)] border-[var(--warn-20)]' : 'text-[var(--color-fg-disabled)] border-[var(--white-10)]'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-3xs opacity-70"><span aria-hidden="true">· </span>턴 #${snapshot.last_outcome.turn_id}</span>` : null}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono ${idleIsLong ? 'text-[var(--color-fg-muted)] border-[var(--warn-20)]' : 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)]'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-3xs opacity-70"><span aria-hidden="true">· </span>턴 #${snapshot.last_outcome.turn_id}</span>` : null}</span>`
     : null
   const receiptLabel = snapshot ? executionReceiptLabel(snapshot.execution) : null
 
@@ -729,16 +729,16 @@ function StatusBar({
 
   const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
+    <div class=${`sticky top-0 z-20 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[var(--shadow-panel)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
-            class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+            class=${`text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-[background-color,border-color] ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
-                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
+                : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
             }`}
             onClick=${onRefresh}
             aria-label="강제 새로고침"
@@ -747,7 +747,7 @@ function StatusBar({
             ${refreshFlash ? '✓' : '↻'}
           </button>
           <button
-            class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -757,7 +757,7 @@ function StatusBar({
           ${liveBadge}
           ${snapshot && receiptLabel ? html`
             <span
-              class=${`inline-block max-w-[28rem] truncate align-middle px-2 py-0.5 rounded-sm border text-3xs font-mono ${executionReceiptClass(snapshot.execution)}`}
+              class=${`inline-block max-w-[28rem] truncate align-middle px-2 py-0.5 rounded-[var(--r-0)] border text-3xs font-mono ${executionReceiptClass(snapshot.execution)}`}
               title=${executionReceiptTitle(snapshot.execution)}
             >
               receipt ${receiptLabel}
@@ -766,7 +766,7 @@ function StatusBar({
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
-              class="px-1.5 py-0.5 rounded border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
+              class="px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
               title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
             >
               ⏸ 일시 중지
@@ -790,7 +790,7 @@ function StatusBar({
               placeholder="keeper 이름 필터"
               ariaLabel="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-30 max-w-45 !rounded-sm !bg-[var(--white-3)] !px-2.5 !py-0.5 !text-3xs font-mono"
+              class="min-w-30 max-w-45 !rounded-[var(--r-0)] !bg-[var(--color-bg-surface)] !px-2.5 !py-0.5 !text-3xs font-mono"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`
@@ -801,13 +801,13 @@ function StatusBar({
             const active = name === selected
             const cls = active
               ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--color-accent-fg)]'
-              : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
+              : 'bg-[var(--color-bg-surface)] border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
             return html`
               <button
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
+                class=${`rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
@@ -837,25 +837,25 @@ function StatusBar({
       ${snapshot ? html`
         <div class="mt-1.5 flex items-center gap-2 text-3xs font-mono flex-wrap">
           ${/* KPI micro-metrics */ ''}
-          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--color-fg-primary)]">
+          <span class="px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
-          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[var(--indigo)]' : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'}`}>
+          <span class=${`px-1.5 py-0.5 rounded-[var(--r-1)] border ${transitionCount > 0 ? 'border-[var(--info-border)] text-[var(--info-fg)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)]'}`}>
             ${transitionCount} 전환
           </span>
           <span
-            class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
+            class=${`relative px-1.5 py-0.5 rounded-[var(--r-1)] border overflow-hidden ${
               observationCount >= MAX_OBSERVATIONS
-                ? 'border-[rgba(245,158,11,0.4)] text-[var(--amber-bright)]'
-                : 'border-[var(--white-8)] text-[var(--color-fg-disabled)]'
+                ? 'border-[var(--warn-border)] text-[var(--warn-fg)]'
+                : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)]'
             }`}
             title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}
           >
             <span
               class=${`absolute inset-0 ${
                 observationCount >= MAX_OBSERVATIONS
-                  ? 'bg-[rgba(245,158,11,0.08)]'
-                  : 'bg-[var(--white-3)]'
+                  ? 'bg-[var(--warn-soft)]'
+                  : 'bg-[var(--color-bg-surface)]'
               }`}
               style=${`width: ${Math.round((observationCount / MAX_OBSERVATIONS) * 100)}%`}
             ></span>
@@ -872,7 +872,7 @@ function StatusBar({
 
 // ── Skeleton Loading (Linear/Stripe pattern) ────────────
 
-const shimmerCls = 'animate-pulse rounded bg-[var(--white-5)]'
+const shimmerCls = 'animate-pulse rounded-[var(--r-1)] bg-[var(--color-bg-elevated)]'
 
 function SkeletonBar({ w, h = 'h-3' }: { w: string; h?: string }) {
   return html`<div class=${`${shimmerCls} ${w} ${h}`}></div>`
@@ -882,7 +882,7 @@ function SkeletonLayout() {
   return html`
     <div class="flex flex-col gap-3" aria-hidden="true" aria-label="통합 스냅샷 로딩 중">
       ${/* Operator Meaning skeleton */ ''}
-      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-4">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-3"><${SkeletonBar} w="w-3/4" h="h-5" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-full" h="h-3" /></div>
@@ -894,7 +894,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Hero Phase skeleton */ ''}
-      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-5">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5">
         <${SkeletonBar} w="w-32" h="h-2" />
         <div class="mt-2"><${SkeletonBar} w="w-40" h="h-8" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-20" h="h-2" /></div>
@@ -904,11 +904,11 @@ function SkeletonLayout() {
       </div>
 
       ${/* Pipeline Strip skeleton */ ''}
-      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-2 flex gap-2">
           ${[1,2,3,4].map(i => html`
-            <div key=${i} class="flex-1 rounded border border-[var(--white-8)] p-2">
+            <div key=${i} class="flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-2">
               <${SkeletonBar} w="w-10" h="h-2" />
               <div class="mt-1"><${SkeletonBar} w="w-16" h="h-4" /></div>
               <div class="mt-1"><${SkeletonBar} w="w-14" h="h-2" /></div>
@@ -918,7 +918,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Swimlane skeleton */ ''}
-      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${SkeletonBar} w="w-28" h="h-2" />
         <div class="mt-2 flex flex-col gap-1.5">
           ${[1,2,3,4,5].map(i => html`
@@ -933,7 +933,7 @@ function SkeletonLayout() {
       ${/* Health Grid skeleton */ ''}
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         ${[1,2,3].map(i => html`
-          <div key=${i} class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+          <div key=${i} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <${SkeletonBar} w="w-20" h="h-2" />
             <div class="mt-2 flex flex-wrap gap-1.5">
               <${SkeletonBar} w="w-14" h="h-5" />
@@ -993,15 +993,15 @@ function CollapsibleZone({
   }
 
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden">
       <button
         type="button"
-        class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--white-3)] transition-colors cursor-pointer select-none"
+        class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--color-bg-surface)] transition-colors cursor-pointer select-none"
         onClick=${toggle}
         aria-expanded=${!collapsed}
         aria-controls=${`zone-${id}`}
       >
-        <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${zoneTitle}</span>
+        <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${zoneTitle}</span>
         <span class=${`text-3xs text-[var(--color-fg-disabled)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`} aria-hidden="true">▾</span>
       </button>
       ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}

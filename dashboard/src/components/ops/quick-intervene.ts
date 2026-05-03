@@ -80,7 +80,7 @@ export function QuickIntervene() {
           disabled=${busy}
         />
         <${TextInput}
-          class="min-w-50 flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
+          class="min-w-50 flex-1 border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
           placeholder="Message"
           value=${quickMessage.value}
           name="quick_intervene_message"
@@ -97,13 +97,13 @@ export function QuickIntervene() {
 
       ${showAdvanced
         ? html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-              <label class="block text-2xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]" for="quick-intervene-actor">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+              <label class="block text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]" for="quick-intervene-actor">
                 Actor
               </label>
               <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">Interventions and approval requests are recorded with this name.</p>
               <${TextInput}
-                class="mt-3 max-w-65 border-[var(--white-8)] bg-[var(--white-3)]"
+                class="mt-3 max-w-65 border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
                 value=${actorName.value.trim() || 'dashboard'}
                 name="quick_intervene_actor"
                 ariaLabel="Intervention actor"

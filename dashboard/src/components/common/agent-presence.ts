@@ -36,7 +36,7 @@ const PRESENCE_CONFIG: Record<PresenceVisualState, PresenceConfig> = {
     label: '대기',
   },
   offline: {
-    colorClass: 'bg-[var(--white-10)]',
+    colorClass: 'bg-[var(--color-bg-hover)]',
     pulse: false,
     label: '오프라인',
   },

@@ -166,7 +166,7 @@ function renderActivityTimeline() {
           key=${entry.key}
           data-testid="ops-activity-item"
           data-activity-kind=${entry.kind}
-          class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-3"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
         >
           <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
             <${CountBadge} tone=${entry.tone}>${entry.label}<//>
@@ -210,18 +210,18 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4" aria-label="Operations panel">
-      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
+      ${operatorError.value ? html`<section class="ops-banner rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
 
       ${workflowContext ? html`
-        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="Workflow context">
+        <section class="ops-banner rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="Workflow context">
           <div class="flex gap-2 flex-wrap items-center text-[var(--color-fg-primary)]">
             <strong class="font-semibold">${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[var(--color-fg-secondary)] leading-relaxed">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[var(--color-fg-muted)] text-xs">
             ${workflowReady
               ? 'Target and inputs were prefilled from the recommended action.'

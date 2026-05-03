@@ -33,20 +33,20 @@ function registryStateBadge(state: string | null) {
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[var(--emerald-12)]', text: 'text-[var(--color-status-ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--color-status-err)]' },
-    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[var(--slate-400)]' },
-    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--color-status-warn)]' },
-    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
+    Dead: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--color-fg-muted)]' },
+    Stopped: { bg: 'bg-[var(--warn-soft)]', text: 'text-[var(--color-status-warn)]' },
+    Paused: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--stalled-fg)]' },
   }
-  const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
-  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
+  const c = colors[state] ?? { bg: 'bg-[var(--color-bg-elevated)]', text: 'text-[var(--color-fg-muted)]' }
+  return html`<span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
 const COHORT_COLORS: Record<CrashCategory, string> = {
   heartbeat: 'var(--amber-bright)',
   turn: 'var(--color-status-err)',
-  fiber: '#8b5cf6',
-  exception: '#ec4899',
-  other: '#6b7280',
+  fiber: 'var(--stalled-fg)',
+  exception: 'var(--err-fg)',
+  other: 'var(--color-fg-muted)',
 }
 
 function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntry[] }) {
@@ -58,8 +58,8 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
     .filter(([, count]) => count > 0)
   return html`
     <div>
-      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
-      <div class="flex w-full h-3 rounded-sm overflow-hidden bg-[var(--white-5)]">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
+      <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-elevated)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
                title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
@@ -90,12 +90,12 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   const entries = sp_events.slice(0, 10) as SpEventLike[]
   return html`
     <div>
-      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
+          <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--purple-12)]">
             <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
+            <span class="text-[var(--stalled-fg)]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
         `)}
       </div>
@@ -153,7 +153,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           </div>
         ` : null}
         ${dead_since ? html`
-          <div class="py-2 px-3 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)]">
+          <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)]">
             ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}
@@ -171,10 +171,10 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           return html`
             <div>
               <div class="flex items-center justify-between mb-2">
-                <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)]">장애 이력</div>
+                <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
-                    class="text-3xs font-medium px-2 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)] transition-colors"
+                    class="text-3xs font-medium px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors"
                     onClick=${() => { crashShowAll.value = !crashShowAll.value }}
                     aria-pressed=${crashShowAll.value}>
                     ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}
@@ -194,7 +194,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 ${visible.length === 0 ? html`
                   <div class="py-2 px-2 text-2xs text-[var(--color-fg-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
-                  <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
+                  <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-surface)]">
                     <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>

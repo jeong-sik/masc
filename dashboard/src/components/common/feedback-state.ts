@@ -50,7 +50,7 @@ interface LoadingStateProps {
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   return html`
     <div class="loading-state flex flex-col items-center py-8 text-sm ${cx ?? ''}" role="status" aria-live="polite">
-      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent" aria-hidden="true" />
+      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent-fg" aria-hidden="true" />
       <span>${children ?? '불러오는 중...'}</span>
     </div>
   `
@@ -63,7 +63,7 @@ interface ErrorStateProps {
 
 export function ErrorState({ message, class: cx }: ErrorStateProps) {
   return html`
-    <div class="flex items-start gap-2 rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-sm text-[var(--bad-light)] ${cx ?? ''}" role="alert">
+    <div class="flex items-start gap-2 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-sm text-[var(--bad-light)] ${cx ?? ''}" role="alert">
       <${AlertTriangle} size=${16} class="mt-0.5 shrink-0" aria-hidden="true" />
       <span>${message}</span>
     </div>
@@ -97,11 +97,11 @@ export function ErrorRecoverable({
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
     >
       <div class="flex items-center gap-2">
         <${AlertTriangle} size=${16} class="shrink-0 text-[var(--warn-bright)]" aria-hidden="true" />
-        <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--warn-bright)]">
+        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">
           복구 가능
         </span>
         ${onRetry ? html`
@@ -149,11 +149,11 @@ export function ErrorFatal({
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
     >
       <div class="flex items-center gap-2">
         <${AlertOctagon} size=${16} class="shrink-0 text-[var(--bad-light)]" aria-hidden="true" />
-        <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--bad-light)]">
+        <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--bad-light)]">
           치명적
         </span>
         ${onReload ? html`

@@ -285,7 +285,7 @@ export function resetKeeperRepoMappings(): void {
 
 function RepoBadge({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-1 px-2.5 rounded text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm">
+    <span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1">
       ${name}
     </span>
   `
@@ -331,7 +331,7 @@ export function KeeperRepoMapping() {
   const mappings = mState.status === 'loaded' ? mState.data : []
   const mappingByKeeper = new Map(mappings.map(m => [m.keeper_id, m]))
 
-  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
+  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
 
   async function handleSave(keeperId: string) {
     const draft = draftMappings.value.get(keeperId)
@@ -387,7 +387,7 @@ export function KeeperRepoMapping() {
         <h2 class="text-sm font-bold text-text-strong">키퍼 저장소 매핑</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--white-10)] text-text-body"
+          class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
           onClick=${() => loadKeeperRepoMappings({ force: true })}
         >
           새로고침
@@ -395,13 +395,13 @@ export function KeeperRepoMapping() {
       </div>
 
       ${saveError.value ? html`
-        <div class="rounded border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
           ${saveError.value}
         </div>
       ` : null}
 
       ${keepers.length === 0 ? html`
-        <div class="py-8 text-center text-2xs text-text-muted rounded border border-card-border/30 bg-card/10">
+        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10">
           등록된 키퍼가 없습니다.
         </div>
       ` : html`
@@ -443,7 +443,7 @@ export function KeeperRepoMapping() {
             return html`
               <div
                 key=${keeperId}
-                class="rounded border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-sm"
+                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)]"
               >
                 <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3">
                   <div class="flex items-center gap-2 min-w-0">
@@ -454,11 +454,11 @@ export function KeeperRepoMapping() {
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     ${changed ? html`
-                      <span class="text-3xs text-accent font-semibold">변경됨</span>
+                      <span class="text-3xs text-accent-fg font-semibold">변경됨</span>
                     ` : null}
                     <button
                       type="button"
-                      class="${btnBase} bg-[var(--color-status-ok)] text-[#000] py-1 px-3 text-2xs"
+                      class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs"
                       onClick=${() => handleSave(keeperId)}
                       disabled=${isSaving || !changed}
                     >
@@ -468,12 +468,12 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
-                  <div class="mb-3 rounded border border-card-border/40 bg-[var(--white-3)] px-2.5 py-2">
+                  <div class="mb-3 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--color-bg-surface)] px-2.5 py-2">
                     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
                         <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
                         <select
-                          class="rounded border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent"
+                          class="rounded-[var(--r-1)] border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent-fg"
                           value=${draftCredentialId ?? ''}
                           onChange=${(event: Event) => {
                             const target = event.currentTarget as HTMLSelectElement
@@ -492,13 +492,13 @@ export function KeeperRepoMapping() {
                       <div class="flex flex-col gap-1 min-w-0 text-2xs text-text-muted md:items-end">
                         ${selectedCredential ? html`
                           <div class="flex items-center gap-1.5 min-w-0">
-                            <span class="px-2 py-0.5 rounded border ${credentialStateBadgeClass(selectedCredential.state)}">
+                            <span class="px-2 py-0.5 rounded-[var(--r-1)] border ${credentialStateBadgeClass(selectedCredential.state)}">
                               ${credentialStateLabel(selectedCredential.state)}
                             </span>
                             <span class="font-mono truncate">${selectedCredential.gh_config_dir ?? 'gh_config_dir 없음'}</span>
                           </div>
                           ${selectedLoginCommand ? html`
-                            <code class="block max-w-full overflow-x-auto rounded bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">
+                            <code class="block max-w-full overflow-x-auto rounded-[var(--r-1)] bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">
                               ${selectedLoginCommand}
                             </code>
                           ` : null}
@@ -528,7 +528,7 @@ export function KeeperRepoMapping() {
                         return html`
                           <label
                             key="${keeperId}-${repo.id}"
-                            class="flex items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--white-5)] transition-colors"
+                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors"
                           >
                             <input
                               type="checkbox"

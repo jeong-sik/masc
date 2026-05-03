@@ -124,7 +124,7 @@ export function CommandBar({
       <input
         ref=${inputRef}
         type="text"
-        class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+        class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
         placeholder=${placeholder}
         value=${query}
         onInput=${handleInput}
@@ -141,7 +141,7 @@ export function CommandBar({
         ? html`
             <ul
               id=${listId}
-              class="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
+              class="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-1 shadow-[var(--shadow-panel)]"
               role="listbox"
             >
               ${filtered.map((action, index) => {
@@ -149,7 +149,7 @@ export function CommandBar({
                 const base =
                   'flex cursor-pointer items-center px-3 py-2 text-sm'
                 const activeCls = isActive
-                  ? 'bg-[var(--white-10)] text-[var(--color-fg-primary)]'
+                  ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-primary)]'
                   : 'text-[var(--color-fg-secondary)]'
                 return html`
                   <li

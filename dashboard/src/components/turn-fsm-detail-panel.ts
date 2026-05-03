@@ -71,7 +71,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
     >
       <div class="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div id="turn-fsm-detail-title" class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+          <div id="turn-fsm-detail-title" class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             Turn FSM detail
           </div>
           <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">

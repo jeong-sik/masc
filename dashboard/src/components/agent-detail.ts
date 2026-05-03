@@ -119,7 +119,7 @@ export function filterTaskHistories(
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded shadow-sm">
+    <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)] shadow-[var(--shadow-1)]">
       <${IdPill}>${task.id}<//>
       <span class="flex-1 text-sm text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
@@ -129,9 +129,9 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="border border-card-border rounded bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
+    <div class="border border-card-border rounded-[var(--r-1)] bg-card/40 p-4 shadow-[var(--shadow-1)] hover:border-[var(--accent-30)] transition-colors group">
       <div class="mb-3">
-        <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
+        <${IdPill} class="group-hover:bg-[var(--accent-20)] transition-colors">${row.taskId}<//>
       </div>
       <pre class="m-0 whitespace-pre-wrap text-xs leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
@@ -247,24 +247,24 @@ export function AgentDetailOverlay() {
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--dialog-overlay-bg)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
-      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-sm shadow-black/50 ring-1 ring-white/5"
+      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-[var(--r-1)] border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-[var(--elev-6-shadow)] ring-1 ring-white/5"
     >
       <div class="p-6 flex flex-col gap-5">
         <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
-              ${agentEmoji ? html`<div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
+              ${agentEmoji ? html`<div class="size-12 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xl shadow-inset">${agentEmoji}</div>` : ''}
               <div>
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
-                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-[var(--white-5)] px-2 py-0.5 rounded">${secondaryLabel}</span>` : ''}
+                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-[var(--color-bg-elevated)] px-2 py-0.5 rounded-[var(--r-1)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--white-5)] px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--color-bg-hover)] border border-[var(--color-border-divider)] px-2 py-1 rounded-[var(--r-1)] text-text-muted shadow-1">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
@@ -273,9 +273,9 @@ export function AgentDetailOverlay() {
             </div>
             <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
               ${agent?.current_task || missionBrief?.current_work
-                ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
+                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-1">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
-              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
+              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-[var(--r-1)] border border-card-border shadow-1">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
@@ -284,7 +284,7 @@ export function AgentDetailOverlay() {
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
                           <button
                             type="button"
-                            class=${`text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded`}
+                            class=${`text-text-strong font-semibold hover:text-accent-fg underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded-[var(--r-1)]`}
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
                             title="키퍼 상세 페이지 열기"
                             aria-label="${keeper.name} 키퍼 상세 보기"
@@ -293,8 +293,8 @@ export function AgentDetailOverlay() {
                           ${keeperIdentity ? html`<span class="text-text-dim text-xs"><span aria-hidden="true">· </span>${keeperIdentity}</span>` : ''}
                         </span>`
                       : null}
-                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--white-5)] px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded border border-accent/10">${continuitySummary}</span>` : null}
+                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--color-bg-elevated)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent-fg/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--accent-10)]">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}
@@ -303,7 +303,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="px-4 py-2 text-sm rounded bg-card/60 shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] bg-card/60 shadow-1"
               onClick=${() => { void refreshAgentDetail() }}
               disabled=${loading.value}
             >
@@ -312,7 +312,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="danger"
               size="lg"
-              class="px-4 py-2 text-sm rounded shadow-sm"
+              class="px-4 py-2 text-sm rounded-[var(--r-1)] shadow-1"
               onClick=${handlePurge}
               disabled=${purgePending.value}
             >
@@ -321,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class=${`px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-[var(--t-med)] shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+              class=${`px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--color-bg-hover)] text-text-strong hover:bg-[var(--color-bg-hover)] transition-colors duration-[var(--t-med)] shadow-1 ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기
@@ -362,7 +362,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded-[var(--r-1)] shadow-[var(--shadow-1)] hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -380,7 +380,7 @@ export function AgentDetailOverlay() {
                   ['속도', agentFitness.value.speed_score],
                   ['종합', agentFitness.value.overall_fitness],
                 ].map(([label, val]) => html`
-                  <div class="rounded border border-card-border/50 bg-card/30 p-3 text-center">
+                  <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/30 p-3 text-center">
                     <div class="text-3xs font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
                     <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
                   </div>
@@ -396,7 +396,7 @@ export function AgentDetailOverlay() {
           <${Card} title="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
               <${TextInput}
-                class="px-4 py-2.5 rounded bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inner"
+                class="px-4 py-2.5 rounded-[var(--r-1)] bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inset"
                 value=${mentionText.value}
                 name="agent_direct_mention"
                 ariaLabel="직접 멘션 메시지"
@@ -409,7 +409,7 @@ export function AgentDetailOverlay() {
               <${ActionButton}
                 variant="primary"
                 size="lg"
-                class="px-5 py-2.5 text-sm shadow-sm shadow-accent/20"
+                class="px-5 py-2.5 text-sm shadow-1 shadow-accent-fg/20"
                 onClick=${() => { void submitMention() }}
                 disabled=${sendingMention.value || mentionText.value.trim() === ''}
               >

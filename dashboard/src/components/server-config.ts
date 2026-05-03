@@ -60,18 +60,18 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
       : 'text-[var(--color-accent-fg)] font-medium'
 
   return html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--color-bg-hover)] transition-colors">
+    <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] transition-colors">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--color-fg-secondary)]">${entry.env}</code>
           ${isEnv ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
           ` : null}
           ${!isEnv && entry.source !== 'default' ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">${entry.source}</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">${entry.source}</span>
           ` : null}
           ${entry.sensitive ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)]">sensitive</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)]">sensitive</span>
           ` : null}
         </div>
         <div class="text-xs text-[var(--color-fg-muted)] mt-0.5">${entry.description}</div>
@@ -102,7 +102,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   if (filtered.length === 0) return null
 
   return html`
-    <div class="border border-[var(--color-border-divider)] rounded overflow-hidden mb-3">
+    <div class="border border-[var(--color-border-divider)] rounded-[var(--r-1)] overflow-hidden mb-3">
       <button
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors text-left"
         aria-expanded=${isExpanded ? 'true' : 'false'}
@@ -114,7 +114,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--color-fg-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">
+          <span class="text-3xs px-2 py-0.5 rounded-[var(--r-0)] bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">
             ${customCount} custom
           </span>
         ` : null}
@@ -136,19 +136,19 @@ function ServerMeta() {
 
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>버전</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.version}</div>
       </div>
-      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>가동시간</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
-      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>OCaml</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocaml_version}</div>
       </div>
-      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>PID</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.pid}</div>
       </div>
@@ -178,7 +178,7 @@ export function ServerConfig() {
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
         <button
-          class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          class="px-3 py-1.5 text-xs rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >

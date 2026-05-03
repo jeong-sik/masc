@@ -34,7 +34,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
     } else if (typeof data === 'number') {
       valueNode = html`<span class="text-[var(--color-status-warn)]">${data}</span>`
     } else if (typeof data === 'boolean') {
-      valueNode = html`<span class="text-[#e27e8d]">${data ? 'true' : 'false'}</span>`
+      valueNode = html`<span class="text-[var(--rose-light)]">${data ? 'true' : 'false'}</span>`
     } else if (data === null) {
       valueNode = html`<span class="text-[var(--color-fg-muted)] italic">null</span>`
     } else {
@@ -67,7 +67,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
     <div class="font-mono text-sm leading-relaxed flex flex-col py-0.5 w-full min-w-0">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
+        class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
         onClick=${() => setCollapsed(!collapsed)}
         aria-expanded=${!collapsed}
         aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
@@ -80,7 +80,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
       </button>
 
       ${!collapsed && html`
-        <div class="pl-4 ml-1.5 border-l border-[var(--white-4)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
+        <div class="pl-4 ml-1.5 border-l border-[var(--color-border-divider)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${isArray
             ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
             : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
@@ -93,8 +93,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
 
 export function JsonViewerCard({ data, title }: { data: unknown; title?: string }) {
   return html`
-    <div class="bg-[var(--color-bg-page)] border border-[var(--color-border-default)] rounded overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
-      ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
+    <div class="bg-[var(--color-bg-page)] border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
+      ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
       <div class="p-3 overflow-y-auto min-h-0 w-full">
         <${JsonViewer} data=${data} />
       </div>

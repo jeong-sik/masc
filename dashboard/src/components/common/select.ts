@@ -12,7 +12,7 @@
 import { html } from 'htm/preact'
 import { ringFocusClasses } from './ring'
 
-const SELECT_BASE = `w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] focus-visible:border-[rgba(71,184,255,0.6)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} appearance-none cursor-pointer`
+const SELECT_BASE = `w-full rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:bg-[var(--color-bg-page)] focus-visible:border-[var(--info-border)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} appearance-none cursor-pointer`
 
 interface SelectOption { value: string; label: string }
 

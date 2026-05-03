@@ -19,18 +19,18 @@ describe('dashedNoticeClasses (pure)', () => {
     expect(cls).toContain('text-[var(--color-fg-disabled)]')
   })
 
-  it('sm size: 10px text + rounded + tight padding (matches fsm-hub timeline panels)', () => {
+  it('sm size: 10px text + rounded-[var(--r-1)] + tight padding (matches fsm-hub timeline panels)', () => {
     const cls = dashedNoticeClasses('sm')
     expect(cls).toContain('text-3xs')
-    expect(cls).toContain('rounded')
+    expect(cls).toContain('rounded-[var(--r-1)]')
     expect(cls).toContain('px-4')
     expect(cls).toContain('py-2')
   })
 
-  it('md size: 12px text + rounded + generous padding', () => {
+  it('md size: 12px text + rounded-[var(--r-1)] + generous padding', () => {
     const cls = dashedNoticeClasses('md')
     expect(cls).toContain('text-xs')
-    expect(cls).toContain('rounded')
+    expect(cls).toContain('rounded-[var(--r-1)]')
     expect(cls).toContain('px-4')
     expect(cls).toContain('py-6')
   })
@@ -40,7 +40,7 @@ describe('dashedNoticeClasses (pure)', () => {
   })
 
   it('subtle border tone uses --white-8 (dimmer)', () => {
-    expect(dashedNoticeClasses('sm', 'subtle')).toContain('border-[var(--white-8)]')
+    expect(dashedNoticeClasses('sm', 'subtle')).toContain('border-[var(--color-border-default)]')
   })
 
   it('extra class is appended (caller composition)', () => {

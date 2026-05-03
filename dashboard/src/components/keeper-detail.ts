@@ -200,7 +200,7 @@ function RuntimeBadge({ tone, children }: { tone: 'warn' | 'bad'; children: unkn
   const toneCls = tone === 'warn'
     ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
     : 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
-  return html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${toneCls}">${children}</span>`
+  return html`<span class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-semibold ${toneCls}">${children}</span>`
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
@@ -340,7 +340,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
-    : 'border-[var(--color-border-default)] bg-[var(--white-3)]'
+    : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabel = runtimeBlockerClass
     ? {
         ambiguous_post_commit_timeout: '커밋 후 응답 없음',
@@ -361,7 +361,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-          : 'bg-[var(--white-6)] text-[var(--color-fg-secondary)]'
+          : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
   const trustDispositionLabel = trustDisposition
     ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
         trustDisposition
@@ -370,21 +370,21 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="px-6 pt-4">
-      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)]">
+      <div class="rounded-[var(--r-1)] border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)]">
         ${keeper.paused
           ? html`<${RuntimeBadge} tone="warn">일시정지</${RuntimeBadge}>
             ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             <${ActionButton}
               variant="ghost"
               size="sm"
-              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
+              class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개<//>`
           : html`<${ActionButton}
               variant="ghost"
               size="sm"
-              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
+              class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지<//>
@@ -456,7 +456,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${trustDisposition
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
+              <span class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
                 검증 ${trustDispositionLabel}
               </span>
             `
@@ -539,7 +539,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--color-status-ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -559,7 +559,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isRunning) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -620,21 +620,21 @@ function KeeperClearContextDialog({
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
       overlayClass="fixed inset-0 z-[80] bg-[var(--dialog-overlay-bg)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+      panelClass="w-full max-w-130 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[var(--shadow-raised)]"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
-          <h3 id=${titleId} class="m-0 text-[17px] font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
+          <h3 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
           <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--color-fg-muted)]">
             ${keeperName}의 checkpoint 대화와 continuity summary를 비웁니다. 사유는 감사 로그에 남습니다.
           </p>
         </div>
 
         <label class="flex flex-col gap-2">
-          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">사유</span>
+          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">사유</span>
           <${TextArea}
             inputRef=${reasonRef}
-            class="!bg-[var(--white-3)] !min-h-[112px] !text-sm leading-paragraph"
+            class="!bg-[var(--color-bg-surface)] !min-h-[112px] !text-sm leading-paragraph"
             placeholder="예: stale continuity replay 제거"
             ariaLabel="비우기 사유"
             disabled=${pending}
@@ -643,7 +643,7 @@ function KeeperClearContextDialog({
           />
         </label>
 
-        <label class="flex items-start gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
+        <label class="flex items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             class="mt-0.5"
             checked=${preserveSystemPrompt}
@@ -657,7 +657,7 @@ function KeeperClearContextDialog({
           </span>
         </label>
 
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
           마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
@@ -670,7 +670,7 @@ function KeeperClearContextDialog({
           >취소<//>
           <button
             type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[var(--bad-50)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>
@@ -690,7 +690,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
       <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded border border-[var(--color-border-default)] bg-[rgba(90,100,120,0.08)] text-sm text-[var(--color-fg-muted)]">
+        <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : html`
@@ -773,12 +773,12 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
-                <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
                       <${MonoBadge}>${r.branch}</${MonoBadge}>
-                      ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
+                      ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
                     <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
                   </div>
@@ -794,10 +794,10 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
                   <${MonoBadge}>${pr.branch}</${MonoBadge}>
-                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
+                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
                   <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
                 </div>
               `)}
@@ -810,7 +810,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">워크트리 (${worktrees.length})</${SectionHeader}>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
-                <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
+                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
               `)}
             </div>
           </div>
@@ -957,7 +957,7 @@ export function KeeperDetailPage() {
 
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
         <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
@@ -968,20 +968,20 @@ export function KeeperDetailPage() {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button
               type="button"
               disabled=${purgePending}
-              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${submitPurgeKeeper}
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              class="flex items-center justify-center size-8 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
               aria-label="키퍼 상세 종료"
             >
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -1034,17 +1034,17 @@ export function KeeperDetailPage() {
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                     하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </span>`
                 : null}
               ${keeper.last_speech_act
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                     최근 <span class="font-mono text-[var(--color-fg-primary)]">${keeper.last_speech_act}</span>
                   </span>`
                 : null}
               ${keeper.social_model_recognized === false
-                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded border border-[var(--warn-24)] bg-[var(--warn-8)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)]">
                     대화 모델
                     ${keeper.configured_social_model
                       ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.configured_social_model}</span>`
@@ -1058,16 +1058,16 @@ export function KeeperDetailPage() {
                   </span>`
                 : null}
               ${(keeper.k2k_count ?? 0) > 0
-                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--color-fg-muted)]">
-                    K2K <span class="font-mono font-medium text-[var(--purple)]">${keeper.k2k_count}</span>
+                ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded-[var(--r-1)] bg-[var(--info-soft)] border border-[var(--info-border)] text-[var(--color-fg-muted)]">
+                    K2K <span class="font-mono font-medium text-[var(--info-fg)]">${keeper.k2k_count}</span>
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview
-              ? html`<div class="py-2 px-3 rounded bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
+              ? html`<div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
                   <div class="line-clamp-2">${keeper.recent_output_preview}</div>
                 </div>`
               : null}
@@ -1226,16 +1226,16 @@ export function KeeperDetailPage() {
             description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >
             <details class="mt-0">
-          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none rounded border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+          <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors flex items-center gap-2">
             <${StatusDot} size="xs" class="bg-[var(--color-fg-disabled)]" />
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
-            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
+            <div class="p-5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] backdrop-blur-sm">
               <${SectionHeader} size="xs" class="mb-3">저널</${SectionHeader}>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
-            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
+            <div class="p-5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] backdrop-blur-sm">
               <${SectionHeader} size="xs" class="mb-3">원시 데이터</${SectionHeader}>
               <${RawDataDebug} keeper=${keeper} />
             </div>

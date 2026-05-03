@@ -30,7 +30,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
     return html`
       <div class="flex items-center py-1.5">
         <div class="pipeline-stage-node active stage-${current}">
-          <span class="pipeline-stage-dot transition-all duration-300"></span>
+          <span class="pipeline-stage-dot transition-colors duration-[var(--t-slow)]"></span>
           <span class="pipeline-stage-label">${current}</span>
         </div>
       </div>
@@ -54,7 +54,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
         return html`
           ${i > 0 ? html`<span class="pipeline-stage-connector"></span>` : null}
           <div class=${nodeClass}>
-            <span class="pipeline-stage-dot transition-all duration-300"></span>
+            <span class="pipeline-stage-dot transition-colors duration-[var(--t-slow)]"></span>
             ${isActive
               ? html`<span class="pipeline-stage-label">${s.label}</span>`
               : null}
@@ -79,7 +79,7 @@ export function PipelineStageBadge({
     STAGES.find((s) => s.key === current)?.label ?? current
 
   return html`
-    <span class="pipeline-stage-badge rounded-sm stage-${current}">
+    <span class="pipeline-stage-badge rounded-[var(--r-0)] stage-${current}">
       ${label}
     </span>
   `

@@ -31,7 +31,7 @@ function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' 
 function toneClass(tone: 'ok' | 'bad' | 'neutral'): string {
   if (tone === 'ok') return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
   if (tone === 'bad') return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-  return 'bg-[var(--white-5)] text-text-dim border-card-border'
+  return 'bg-[var(--color-bg-elevated)] text-text-dim border-card-border'
 }
 
 function keeperOf(entry: TelemetryEntry): string | null {
@@ -66,20 +66,20 @@ export function DetailPane() {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : null
 
   return html`
-    <div class="rounded border border-accent/30 bg-bg-0/60 shadow-sm" role="region" aria-label="선택 항목 상세">
+    <div class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-bg-0/60 shadow-[var(--shadow-1)]" role="region" aria-label="선택 항목 상세">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
-          <span class="text-3xs uppercase tracking-widest text-accent font-semibold">상세</span>
+          <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent-fg font-semibold">상세</span>
           <span class="text-xs font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
-            <span class="rounded-sm border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
+            <span class="rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
               ${outcome.label}
             </span>
           ` : null}
         </div>
         <button
           type="button"
-          class="rounded px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--white-5)]"
+          class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--color-bg-elevated)]"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
@@ -104,7 +104,7 @@ export function DetailPane() {
         <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>
-        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--white-5)]/30">${formatJson(selection.entry)}</pre>
+        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--color-bg-elevated)]/30">${formatJson(selection.entry)}</pre>
       </details>
     </div>
   `

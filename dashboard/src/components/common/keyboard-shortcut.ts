@@ -35,7 +35,7 @@ export function KeyboardShortcut({ shortcuts, testId }: KeyboardShortcutProps) {
   return html`
     <div
       data-testid=${testId}
-      class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden"
       role="list"
       aria-label="키보드 단축키"
     >

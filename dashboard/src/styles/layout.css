@@ -12,7 +12,7 @@
     "sidebar  center   rail"
     "deck     deck     deck"
     "composer composer composer";
-  background: var(--bg-0);
+  background: var(--color-bg-page);
   overflow: hidden;
 }
 
@@ -20,34 +20,34 @@
   grid-area: topbar;
   display: flex; align-items: center; gap: var(--sp-4);
   padding: 0 var(--sp-4);
-  background: var(--bg-1); border-bottom: 1px solid var(--line-1);
-  font-size: var(--fs-12); color: var(--fg-2);
+  background: var(--color-bg-surface); border-bottom: 1px solid var(--color-border-strong);
+  font-size: var(--fs-12); color: var(--color-fg-secondary);
   min-width: 0; overflow: hidden;
 }
-.topbar-brand { font-weight: 600; color: var(--fg-1); letter-spacing: .02em; flex-shrink: 0; }
+.topbar-brand { font-weight: var(--fw-semi); color: var(--color-fg-primary); letter-spacing: .02em; flex-shrink: 0; }
 .topbar-brand .brand-dot {
   display: inline-block; width: 7px; height: 7px;
   background: var(--brass-1); border-radius: 50%; margin-right: 8px;
   box-shadow: 0 0 6px rgb(var(--brass-glow) / .5);
 }
-.topbar-sep { width: 1px; height: 14px; background: var(--line-2); flex-shrink: 0; }
-.topbar-crumbs { display: flex; gap: var(--sp-2); color: var(--fg-3); min-width: 0; overflow: hidden; }
-.topbar-crumbs b { color: var(--fg-1); font-weight: 500; }
+.topbar-sep { width: 1px; height: 14px; background: var(--color-border-strong); flex-shrink: 0; }
+.topbar-crumbs { display: flex; gap: var(--sp-2); color: var(--color-fg-muted); min-width: 0; overflow: hidden; }
+.topbar-crumbs b { color: var(--color-fg-primary); font-weight: var(--fw-med); }
 .topbar-spacer { flex: 1; }
 .topbar-pills { display: flex; gap: var(--sp-2); flex-shrink: 0; }
 .topbar-pill {
   font-size: var(--fs-11); padding: 2px 8px;
-  border: 1px solid var(--line-2); border-radius: var(--r-1);
-  color: var(--fg-2); font-variant-numeric: tabular-nums;
+  border: 1px solid var(--color-border-strong); border-radius: var(--r-1);
+  color: var(--color-fg-secondary); font-variant-numeric: tabular-nums;
 }
 .topbar-clock {
   font-family: var(--font-mono); font-size: var(--fs-12);
-  color: var(--fg-2); font-variant-numeric: tabular-nums; flex-shrink: 0;
+  color: var(--color-fg-secondary); font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
 
 .zone-sidebar {
   grid-area: sidebar;
-  background: var(--bg-1); border-right: 1px solid var(--line-1);
+  background: var(--color-bg-surface); border-right: 1px solid var(--color-border-default);
   overflow: hidden; display: flex; flex-direction: column;
   min-width: 0; min-height: 0;
 }
@@ -62,51 +62,51 @@
 
 .zone-rail {
   grid-area: rail;
-  background: var(--bg-1); border-left: 1px solid var(--line-1);
+  background: var(--color-bg-surface); border-left: 1px solid var(--color-border-default);
   overflow-y: auto; display: flex; flex-direction: column;
   min-width: 0; min-height: 0;
 }
 
 .zone-composer {
   grid-area: composer;
-  background: var(--bg-1); border-top: 1px solid var(--line-2);
+  background: var(--color-bg-surface); border-top: 1px solid var(--color-border-strong);
   display: flex; align-items: center; gap: var(--sp-3);
   padding: 0 var(--sp-4);
 }
 .composer-input {
-  flex: 1; background: var(--bg-2);
-  border: 1px solid var(--line-2); border-radius: var(--r-1);
-  color: var(--fg-1); font: var(--fs-13)/1 var(--font-sans);
+  flex: 1; background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong); border-radius: var(--r-1);
+  color: var(--color-fg-primary); font: var(--fs-13)/1 var(--font-sans);
   padding: 8px 12px; height: 32px; min-width: 0;
 }
-.composer-input::placeholder { color: var(--fg-4); }
+.composer-input::placeholder { color: var(--color-fg-disabled); }
 .composer-input:focus { border-color: var(--brass-3); outline: none; }
 
-.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-bottom: 1px solid var(--line-1); }
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-bottom: 1px solid var(--color-border-default); }
 .pane:last-child { border-bottom: none; }
 .pane-head {
   height: 28px; flex-shrink: 0;
   padding: 0 var(--sp-3);
   display: flex; align-items: center; gap: var(--sp-3);
-  background: var(--bg-1); border-bottom: 1px solid var(--line-1);
+  background: var(--color-bg-surface); border-bottom: 1px solid var(--color-border-default);
   font-size: var(--fs-11);
 }
-.pane-head .label { color: var(--fg-2); }
+.pane-head .label { color: var(--color-fg-secondary); }
 .pane-head .pane-meta {
-  margin-left: auto; color: var(--fg-3);
-  font-family: var(--font-mono); font-size: 10px;
+  margin-left: auto; color: var(--color-fg-muted);
+  font-family: var(--font-mono); font-size: var(--fs-10);
 }
-.pane-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg-0); }
+.pane-body { flex: 1; min-height: 0; overflow: auto; background: var(--color-bg-page); }
 
-.top-tabs { display: flex; gap: 2px; }
+.top-tabs { display: flex; gap: var(--sp-0h); }
 .top-tabs button {
   background: transparent; border: none;
   border-bottom: 2px solid transparent;
-  color: var(--fg-3); font-size: var(--fs-11); font-weight: 600;
+  color: var(--color-fg-muted); font-size: var(--fs-11); font-weight: var(--fw-semi);
   letter-spacing: .06em; text-transform: uppercase;
   padding: 4px 10px; cursor: pointer; border-radius: 0;
 }
-.top-tabs button:hover { color: var(--fg-1); background: transparent; }
+.top-tabs button:hover { color: var(--color-fg-primary); background: transparent; }
 .top-tabs button.is-active { color: var(--brass-1); border-bottom-color: var(--brass-1); }
 
 .pane-split {
@@ -117,13 +117,13 @@
 .pane-col {
   display: flex; flex-direction: column;
   min-height: 0; min-width: 0;
-  border-right: 1px solid var(--line-1);
+  border-right: 1px solid var(--color-border-default);
 }
 .pane-col:last-child { border-right: none; }
 
 .empty, .loading {
   display: flex; align-items: center; justify-content: center;
-  height: 100%; color: var(--fg-3); font-size: var(--fs-12); gap: var(--sp-2);
+  height: 100%; color: var(--color-fg-muted); font-size: var(--fs-12); gap: var(--sp-2);
 }
 
 /* narrow viewports — drop the right rail so center gets real estate */
@@ -158,8 +158,8 @@
 
 .zone-deck {
   grid-area: deck;
-  background: var(--bg-1);
-  border-top: 1px solid var(--line-3);
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-strong);
   display: flex; flex-direction: column;
   min-height: 0; min-width: 0;
   overflow: hidden;

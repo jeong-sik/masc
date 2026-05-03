@@ -7,17 +7,17 @@
   display: flex; align-items: center; gap: var(--sp-2);
   padding: 0 var(--sp-3);
   height: 28px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--line-1);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-default);
   font-size: var(--fs-10);
   flex-shrink: 0;
   overflow-x: auto;
 }
 .layer-bar-label {
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   letter-spacing: .08em;
   text-transform: uppercase;
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   font-size: var(--fs-9);
   flex-shrink: 0;
 }
@@ -25,10 +25,10 @@
   display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px;
   height: 20px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
-  background: var(--bg-2);
-  color: var(--fg-3);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
   font-size: var(--fs-10);
   cursor: pointer;
   font-family: var(--font-mono);
@@ -36,10 +36,10 @@
   flex-shrink: 0;
   transition: all var(--t-fast) var(--ease);
 }
-.layer-toggle:hover { color: var(--fg-1); background: var(--bg-3); }
+.layer-toggle:hover { color: var(--color-fg-primary); background: var(--color-bg-hover); }
 .layer-toggle .glyph {
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--fg-4);
+  background: var(--color-fg-disabled);
   transition: all var(--t-fast) var(--ease);
 }
 .layer-toggle.is-on .glyph { transform: scale(1.2); }
@@ -56,22 +56,22 @@
 
 .layer-opacity {
   display: none;
-  align-items: center; gap: 4px;
+  align-items: center; gap: var(--sp-1);
   margin-left: auto;
   flex-shrink: 0;
 }
 .layer-opacity.is-show { display: inline-flex; }
 .layer-opacity label {
   font-size: var(--fs-9);
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   text-transform: uppercase;
   letter-spacing: .08em;
 }
 .layer-opacity input[type="range"] {
   width: 80px; height: 4px;
   -webkit-appearance: none; appearance: none;
-  background: var(--bg-3);
-  border-radius: 2px; outline: none;
+  background: var(--color-bg-hover);
+  border-radius: var(--r-0); outline: none;
 }
 .layer-opacity input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
@@ -81,20 +81,20 @@
 }
 
 .layer-explode {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 20px; padding: 0 8px;
-  border: 1px solid var(--line-2);
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  height: 20px; padding: 0 var(--sp-2);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
-  background: var(--bg-2);
-  color: var(--fg-2);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-secondary);
   font-size: var(--fs-10);
   letter-spacing: .08em;
   text-transform: uppercase;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--fw-semi);
   flex-shrink: 0;
 }
-.layer-explode:hover { background: var(--bg-3); color: var(--fg-1); }
+.layer-explode:hover { background: var(--color-bg-hover); color: var(--color-fg-primary); }
 .layer-explode.is-on {
   background: rgb(var(--brass-glow) / .12);
   color: var(--brass-1);
@@ -109,7 +109,7 @@
     radial-gradient(circle at center, rgb(var(--brass-glow) / var(--dot-op)) 0.7px, transparent 1.2px);
   background-size: var(--dot-size) var(--dot-size);
   background-position: 0 0;
-  background-color: var(--bg-0);
+  background-color: var(--color-bg-page);
 }
 
 /* ════════ LAYER STACK — z-axis arrangement ════════ */
@@ -148,7 +148,7 @@ body[data-explode="1"] .lyr::before {
   content: "";
   position: absolute; inset: -4px;
   border: 1px dashed rgb(var(--brass-glow) / .15);
-  border-radius: 2px;
+  border-radius: var(--r-0);
   pointer-events: none;
 }
 
@@ -168,14 +168,14 @@ body[data-explode="1"] .lyr::before {
 }
 .time-stripe.age-recent   { opacity: 1;   background: var(--warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
 .time-stripe.age-near     { opacity: .7;  background: var(--warn); }
-.time-stripe.age-mid      { opacity: .4;  background: var(--fg-3); }
-.time-stripe.age-far      { opacity: .2;  background: var(--fg-4); }
+.time-stripe.age-mid      { opacity: .4;  background: var(--color-fg-muted); }
+.time-stripe.age-far      { opacity: .2;  background: var(--color-fg-disabled); }
 .time-stripe .time-label {
   position: absolute; left: 6px; top: 0;
   font-family: var(--font-mono); font-size: var(--fs-9);
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   white-space: nowrap; padding: 1px 4px;
-  background: var(--bg-1); border-radius: 2px;
+  background: var(--color-bg-surface); border-radius: var(--r-0);
   opacity: 0; transition: opacity var(--t-fast);
 }
 .time-stripe:hover .time-label { opacity: 1; }
@@ -191,7 +191,7 @@ body[data-explode="1"] .lyr::before {
   stroke-linecap: round;
   opacity: 0.6;
   filter: drop-shadow(0 0 3px currentColor);
-  animation: streak-pulse 3s ease-in-out infinite;
+  animation: streak-pulse 3s var(--ease-inout) infinite;
 }
 @keyframes streak-pulse {
   0%, 100% { opacity: 0.35; }
@@ -225,7 +225,7 @@ body[data-explode="1"] .lyr::before {
   pointer-events: auto;
 }
 .tool-mark .tool-icon {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--brass-1);
   text-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
   line-height: 1;
@@ -238,7 +238,7 @@ body[data-explode="1"] .lyr::before {
 }
 .tool-mark .tool-count {
   font-size: var(--fs-9);
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
   font-family: var(--font-mono);
 }
 
@@ -250,7 +250,7 @@ body[data-explode="1"] .lyr::before {
 }
 .approve-stamp {
   position: absolute; left: 0; right: 0;
-  border-radius: 2px;
+  border-radius: var(--r-0);
   display: flex; align-items: center; justify-content: flex-end;
   padding-right: 24px;
   transition: top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
@@ -264,7 +264,7 @@ body[data-explode="1"] .lyr::before {
   background: rgb(var(--err-glow) / .07);
   border-left: 2px solid var(--err);
   box-shadow: inset 0 0 40px rgb(var(--err-glow) / .06);
-  animation: flag-pulse 2.4s ease-in-out infinite;
+  animation: flag-pulse 2.4s var(--ease-inout) infinite;
 }
 @keyframes flag-pulse {
   0%, 100% { background: rgb(var(--err-glow) / .05); }
@@ -273,7 +273,7 @@ body[data-explode="1"] .lyr::before {
 .approve-stamp .stamp-glyph {
   font-family: var(--font-mono);
   font-size: 56px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   line-height: 1;
   opacity: 0.08;
   letter-spacing: .08em;
@@ -294,13 +294,13 @@ body[data-explode="1"] .lyr::before {
   right: 70px;
   pointer-events: auto;
   width: 240px;
-  background: linear-gradient(180deg, rgb(138 106 160 / .16), rgb(138 106 160 / .06));
+  background: linear-gradient(180deg, rgb(var(--stalled-glow) / .16), rgb(var(--stalled-glow) / .06));
   border: 1px solid rgb(var(--stalled-glow) / .35);
   border-radius: var(--r-1);
   padding: 6px 8px 8px;
   box-shadow: 0 4px 16px rgb(0 0 0 / .5), 0 0 0 1px rgb(var(--stalled-glow) / .15), inset 0 1px 0 rgb(255 255 255 / .04);
   font-size: var(--fs-10);
-  color: var(--fg-2);
+  color: var(--color-fg-secondary);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   transition: top var(--t-slow) var(--ease-out), transform var(--t-fast) var(--ease);
@@ -327,18 +327,18 @@ body[data-explode="1"] .lyr::before {
   color: var(--stalled);
   letter-spacing: .06em; text-transform: uppercase;
 }
-.note-pin .np-head .np-author { color: var(--fg-3); text-transform: none; letter-spacing: 0; }
-.note-pin .np-head .np-ts { margin-left: auto; color: var(--fg-4); }
-.note-pin .np-body { line-height: 1.4; color: var(--fg-1); font-size: var(--fs-11); }
+.note-pin .np-head .np-author { color: var(--color-fg-muted); text-transform: none; letter-spacing: 0; }
+.note-pin .np-head .np-ts { margin-left: auto; color: var(--color-fg-disabled); }
+.note-pin .np-body { line-height: 1.4; color: var(--color-fg-primary); font-size: var(--fs-11); }
 .note-pin .np-actions {
-  display: flex; gap: 4px; margin-top: 6px;
+  display: flex; gap: var(--sp-1); margin-top: 6px;
   font-size: var(--fs-9);
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
   font-family: var(--font-mono);
 }
 .note-pin .np-actions button {
   background: transparent; border: none; padding: 0;
-  color: var(--fg-3); cursor: pointer; font-size: var(--fs-9);
+  color: var(--color-fg-muted); cursor: pointer; font-size: var(--fs-9);
   letter-spacing: .06em; text-transform: uppercase;
 }
 .note-pin .np-actions button:hover { color: var(--stalled); }
@@ -366,7 +366,7 @@ body[data-explode="1"] .lyr::before {
 .note-append-btn:hover {
   background: rgb(var(--stalled-glow) / .12);
   border-style: solid;
-  color: var(--fg-1);
+  color: var(--color-fg-primary);
 }
 
 /* ════════ Depth-of-field when hovering a specific block ════════ */

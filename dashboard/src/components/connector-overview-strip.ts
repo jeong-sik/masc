@@ -258,10 +258,10 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
 
   return html`
     <div
-      class=${`flex min-w-0 flex-col gap-3 rounded border bg-[var(--color-bg-surface)] p-3 transition-colors ${
+      class=${`flex min-w-0 flex-col gap-3 rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-3 transition-colors ${
         selected
           ? 'border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
-          : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
+          : 'border-[var(--color-border-default)] hover:border-[var(--color-border-default)]'
       }`}
       data-overview-tile=${id}
       data-overview-selected=${selected ? 'true' : 'false'}
@@ -274,17 +274,17 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         aria-pressed=${selected ? 'true' : 'false'}
       >
         <span
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-base"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--r-1)] text-base"
           style=${accent}
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
             <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${displayName}</span>
-            <span class=${`rounded-sm border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+            <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
+                    class="rounded-[var(--r-0)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -387,7 +387,7 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
   return html`
     <button
       type="button"
-      class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+      class=${`w-full cursor-pointer rounded-[var(--r-1)] border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
       disabled=${view.busy}
       aria-busy=${view.busy ? 'true' : 'false'}
       aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
@@ -460,7 +460,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
   const glyph = TILE_NOTICE_GLYPH[notice.tone]
   return html`
     <div
-      class=${`flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-3xs ${tone}`}
+      class=${`flex min-w-0 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-3xs ${tone}`}
       role="alert"
       aria-label=${`${notice.label}: ${notice.detail}`}
       title=${notice.detail}
@@ -525,11 +525,9 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
     chip border/bg tones. Returns muted token for empty/sparse
     series so a new connector doesn't leak a stale hue. */
 function deriveTrendColor(series: readonly number[]): string {
-  if (series.length === 0) return '#ffffff22'
+  if (series.length === 0) return 'var(--color-fg-disabled)'
   const last = series[series.length - 1]!
-  // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
-  // the border-*-400 tones used on HeartbeatUptimeChip.
-  if (last >= 99) return '#34d399'
+  if (last >= 99) return 'var(--color-emerald)'
   if (last >= 95) return 'var(--color-status-warn)'
   return 'var(--rose-light)'
 }
@@ -685,12 +683,12 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
             > · ${offlineLabel}</span>`
           : null}
       </span>
-      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span aria-hidden="true" class="text-[var(--color-fg-disabled)]">·</span>
       <span>
         <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-healthy>${summary.healthyCount}/${summary.connectorTotal}</span>
         <span> healthy</span>
       </span>
-      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span aria-hidden="true" class="text-[var(--color-fg-disabled)]">·</span>
       <span>
         <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-bindings>${summary.bindingCount}</span>
         <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'}</span>
@@ -706,7 +704,7 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <div
-      class="mb-2 flex items-center gap-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
+      class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
@@ -748,7 +746,7 @@ export function ConnectorOverviewStrip({
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
-      class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       data-overview-strip-root
     >
       <${IncidentBanner} droppedIds=${droppedIds} />

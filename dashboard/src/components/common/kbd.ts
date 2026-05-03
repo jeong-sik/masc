@@ -15,7 +15,7 @@
 //   border           1px solid var(--color-border-strong)
 //                                     → border border-[var(--color-border-strong)]
 //   border-bottom-width 2px (chiclet) → border-b-2
-//   border-radius    3px              → rounded-xs (--radius-xs token)
+//   border-radius    3px              → rounded-[var(--r-1)]-xs (--radius-xs token)
 //
 // Two sizes — SPEC defines md only; sm is a Tailwind-only tightening
 // for inline contexts that don't need fixed 16×16 dimensions:

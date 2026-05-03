@@ -43,7 +43,7 @@ describe('MermaidGraph a11y', () => {
       html`<${MermaidGraph}
         source="graph LR; alpha-->beta;"
         minHeightClass="min-h-60"
-        diagramClass="border border-[var(--white-5)]"
+        diagramClass="border border-[var(--color-border-divider)]"
       />`,
       container,
     )

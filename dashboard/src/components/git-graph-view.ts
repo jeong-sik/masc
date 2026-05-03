@@ -15,11 +15,40 @@ function getCytoscape(): Promise<typeof cytoscape> {
   return cytoscapePromise
 }
 
+// Cytoscape does not resolve CSS variables. Resolve once against :root
+// with fallback to literal hex values.
+const TOKEN_FALLBACKS: Record<string, string> = {
+  '--color-bg-3': '#211e1a',
+  '--color-bg-4': '#2a2621',
+  '--color-line-1': '#2a2520',
+  '--color-line-2': '#3a332c',
+  '--color-fg-3': '#7a7065',
+  '--color-fg-4': '#4a453e',
+  '--color-frost-100': '#e2e8f0',
+  '--color-white-pure': '#ffffff',
+  '--color-status-err': '#ef4444',
+  '--color-amber-bright': '#f59e0b',
+  '--color-emerald': '#22c55e',
+  '--color-cyan': '#22d3ee',
+  '--color-indigo': '#818cf8',
+}
+
+function resolveCssVar(token: string): string {
+  const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
+  const name = m ? m[1] : token.startsWith('--') ? token : null
+  if (!name) return token
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return TOKEN_FALLBACKS[name] ?? token
+  }
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || TOKEN_FALLBACKS[name] || token
+}
+
 export function borderForStatus(status: string): string {
-  if (status === 'conflict') return '#ef4444'
-  if (status === 'dirty') return '#f59e0b'
-  if (status === 'current') return '#22c55e'
-  return '#475569'
+  if (status === 'conflict') return resolveCssVar('--color-status-err')
+  if (status === 'dirty') return resolveCssVar('--color-amber-bright')
+  if (status === 'current') return resolveCssVar('--color-emerald')
+  return resolveCssVar('--color-line-2')
 }
 
 export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
@@ -37,7 +66,7 @@ export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinit
     data: {
       ...node,
       parent: node.agent_id ? `agent:${node.agent_id}` : undefined,
-      color: node.color ?? '#64748b',
+      color: node.color ?? resolveCssVar('--color-fg-3'),
       borderColor: borderForStatus(node.status),
       title: node.detail ?? node.branch ?? node.sha ?? node.label,
     },
@@ -74,7 +103,7 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
         'background-color': 'data(color)',
         'border-color': 'data(borderColor)',
         'border-width': 2,
-        color: '#e2e8f0',
+        color: resolveCssVar('--color-frost-100'),
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
         'font-size': '10px',
         'text-wrap': 'wrap',
@@ -105,7 +134,7 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: 'node.conflict',
       style: {
         'border-width': 4,
-        'overlay-color': '#ef4444',
+        'overlay-color': resolveCssVar('--color-status-err'),
         'overlay-opacity': 0.14,
       },
     },
@@ -113,11 +142,11 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: ':parent',
       style: {
         label: 'data(label)',
-        'background-color': '#0f172a',
+        'background-color': resolveCssVar('--color-bg-3'),
         'border-color': 'data(borderColor)',
         'border-style': 'dashed',
         'border-width': 1,
-        color: '#94a3b8',
+        color: resolveCssVar('--color-fg-4'),
         'font-size': '10px',
         'text-valign': 'top',
         'text-halign': 'center',
@@ -128,12 +157,12 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: 'edge',
       style: {
         width: 1.2,
-        'line-color': '#64748b',
-        'target-arrow-color': '#64748b',
+        'line-color': resolveCssVar('--color-fg-3'),
+        'target-arrow-color': resolveCssVar('--color-fg-3'),
         'target-arrow-shape': 'triangle',
         'curve-style': 'bezier',
         label: 'data(label)',
-        color: '#94a3b8',
+        color: resolveCssVar('--color-fg-4'),
         'font-size': '9px',
       },
     },
@@ -141,15 +170,15 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       selector: 'edge.checked_out',
       style: {
         'line-style': 'dashed',
-        'line-color': '#38bdf8',
-        'target-arrow-color': '#38bdf8',
+        'line-color': resolveCssVar('--color-cyan'),
+        'target-arrow-color': resolveCssVar('--color-cyan'),
       },
     },
     {
       selector: 'edge.points_to',
       style: {
-        'line-color': '#a78bfa',
-        'target-arrow-color': '#a78bfa',
+        'line-color': resolveCssVar('--color-indigo'),
+        'target-arrow-color': resolveCssVar('--color-indigo'),
       },
     },
   ]
@@ -220,20 +249,20 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
 
   return html`
     <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <div class="relative min-h-[420px] overflow-hidden rounded border border-[var(--color-border-default)] bg-[rgba(6,11,22,0.72)]">
+      <div class="relative min-h-[420px] overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div ref=${containerRef} class="h-[420px] w-full" data-testid="git-graph-canvas"></div>
         ${loading ? html`
-          <div class="absolute inset-0 grid place-items-center bg-[rgba(6,11,22,0.48)] text-sm text-[var(--color-fg-muted)]">
+          <div class="absolute inset-0 grid place-items-center bg-[var(--panel-dark-60)] text-sm text-[var(--color-fg-muted)]">
             <span class="inline-flex items-center gap-2"><${InlineSpinner} />그래프 렌더링 중...</span>
           </div>
         ` : null}
         ${error ? html`
-          <div class="absolute inset-x-4 top-4 rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-sm text-[var(--bad-light)]">
+          <div class="absolute inset-x-4 top-4 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-sm text-[var(--bad-light)]">
             ${error}
           </div>
         ` : null}
       </div>
-      <aside class="min-h-[12rem] rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <aside class="min-h-[12rem] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         ${selected ? html`
           <div class="grid gap-2 text-sm">
             <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">선택</div>

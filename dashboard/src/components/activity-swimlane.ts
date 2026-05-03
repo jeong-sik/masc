@@ -144,7 +144,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         className: span.kind === 'presence'
           ? 'activity-swimlane-item activity-swimlane-item--presence'
           : 'activity-swimlane-item',
-        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`,
+        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: var(--r-1); font-family: system-ui, sans-serif; overflow: hidden;`,
       }
       return item
     }))

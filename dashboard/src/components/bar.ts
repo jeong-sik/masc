@@ -52,7 +52,7 @@ export function Bar(props: BarProps): VNode {
     height: '100%',
     width: `${pct}%`,
     background: fillColor,
-    transition: props.noTransition === true ? undefined : 'width 500ms',
+    transition: props.noTransition === true ? undefined : `width var(--t-xslow) var(--ease-out)`,
   }
 
   const announce = props.ariaLabel ?? `${pct}%`

@@ -318,7 +318,7 @@ export function WorldVisualizer() {
   return html`
     <div
       class="relative rounded-[var(--r-2)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-0)] overflow-hidden"
-      style="padding: 16px 20px; margin-bottom: 20px;"
+      style="padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5);"
     >
       <div class="flex items-center justify-between mb-3">
         <div>

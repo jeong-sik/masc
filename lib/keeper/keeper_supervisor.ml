@@ -277,8 +277,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_crash_persistence.enqueue_record ~keepers_dir
                 ~name:meta.name ~ts ~reason ~restart_count:rc;
               Keeper_registry.record_error ~base_path meta.name reason;
-              ignore (Keeper_registry.dispatch_event_and_log ~base_path meta.name
-                (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+              Keeper_registry.dispatch_event_unit ~base_path meta.name
+                (Keeper_state_machine.Fiber_terminated { outcome = reason });
               if resolve_done (`Crashed reason) then
                 publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
                   meta.name reason ()
@@ -1005,8 +1005,8 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_unregister;
   List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
     (* RFC-0002: dispatch budget exhaustion before marking dead *)
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path entry.name
-      Keeper_state_machine.Restart_budget_exhausted);
+    Keeper_registry.dispatch_event_unit ~base_path entry.name
+      Keeper_state_machine.Restart_budget_exhausted;
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
     let detail =
       Printf.sprintf "restart budget exhausted (%d), last: %s"
@@ -1058,8 +1058,8 @@ let sweep_and_recover (ctx : _ context) =
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
         (* RFC-0002: dispatch restart attempt event *)
-        ignore (Keeper_registry.dispatch_event_and_log ~base_path old_entry.name
-          (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
+        Keeper_registry.dispatch_event_unit ~base_path old_entry.name
+          (Keeper_state_machine.Supervisor_restart_attempt { attempt });
         let old_crash_log = old_entry.crash_log in
         let reg =
           Keeper_registry.register_restarting ~base_path old_entry.name meta

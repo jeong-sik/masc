@@ -365,8 +365,8 @@ let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_and_log
-      ~base_path:ctx.config.base_path keeper_name event)
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path keeper_name event
 
 let dispatch_keepalive_event_with_audit
       ~(ctx : _ context)

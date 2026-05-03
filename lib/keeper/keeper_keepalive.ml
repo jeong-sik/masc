@@ -496,10 +496,10 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry `Stopped
   then (
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      Keeper_state_machine.Stop_requested);
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      Keeper_state_machine.Drain_complete);
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      Keeper_state_machine.Stop_requested;
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      Keeper_state_machine.Drain_complete;
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Stopped
       ~keeper_name ~detail ();
     true)
@@ -518,8 +518,8 @@ let record_keeper_crashed
   if resolve_registry_done entry (`Crashed reason)
   then (
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      (Keeper_state_machine.Fiber_terminated { outcome = reason });
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Crashed

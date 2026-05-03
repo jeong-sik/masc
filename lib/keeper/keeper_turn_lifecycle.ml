@@ -51,8 +51,8 @@ let handle_keeper_down ctx args : tool_result =
            | Error err ->
                Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
-          ignore (Keeper_registry.dispatch_event_and_log ~base_path:ctx.config.base_path name
-            Keeper_state_machine.Operator_pause)));
+          Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name
+            Keeper_state_machine.Operator_pause));
       if remove_session then (
         let rec rm_rf path =
           if Fs_compat.file_exists path then begin

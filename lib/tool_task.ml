@@ -128,7 +128,7 @@ let build_verdict_sse_payload
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
-  if String.equal task_id "" then Error (Types.Task (Types.Task_error.NotFound ""))
+  if String.equal task_id "" then Error (Types.Task (Types.Task_error.InvalidId "empty task ID"))
   else Ok task_id
 
 let sync_planning_current_task_with_owned_task (ctx : context) =

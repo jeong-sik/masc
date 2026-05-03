@@ -116,12 +116,11 @@ let set_keeper_paused_state ~agent_name paused =
          }
        in
        persist_directive_meta_update entry ~updated_meta;
-       ignore
-         (Keeper_registry.dispatch_event
-            ~base_path:entry.base_path entry.name
-            (if paused
-             then Keeper_state_machine.Operator_pause
-             else Keeper_state_machine.Operator_resume));
+       Keeper_registry.dispatch_event_unit
+         ~base_path:entry.base_path entry.name
+         (if paused
+          then Keeper_state_machine.Operator_pause
+          else Keeper_state_machine.Operator_resume);
        if not paused then begin
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;

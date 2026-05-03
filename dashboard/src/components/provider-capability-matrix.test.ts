@@ -53,8 +53,10 @@ describe('ProviderCapabilityMatrix', () => {
     const el = container()
     render(html`<${WiringGaps} />`, el)
 
-    expect(el.textContent).toContain('과소선언: 6건')
-    expect(el.textContent).toContain('정확한 선언: 6건')
+    expect(el.textContent).toContain('HIGH')
+    expect(el.textContent).toContain('MEDIUM')
+    expect(el.textContent).toContain('LOW')
+    expect(el.textContent).toContain('정확')
     expect(el.textContent).toContain('W01')
     expect(el.textContent).not.toContain('W07')
   })

@@ -187,6 +187,26 @@ export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
   gemini_cli: 'cli', codex_cli: 'cli',
 }
 
+// Provider category (Cloud API / CLI / Local). Source: sec01 §1.2.
+export type ProviderCategory = 'cloud' | 'cli' | 'local'
+
+export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
+  openai: 'cloud', claude: 'cloud', gemini: 'cloud', deepseek: 'cloud',
+  qwen35: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
+  ollama: 'local', llamacpp: 'local', glm: 'cloud',
+  gemini_cli: 'cli', codex_cli: 'cli',
+}
+
+// Feature grouping by functional category. Source: sec01 §1.3 Table.
+export const FEATURE_CATEGORIES: Array<{ id: string; label: string; featureIds: string[] }> = [
+  { id: 'tool-use', label: 'Tool Use / Function Calling', featureIds: ['tool-calling', 'parallel-tools', 'tool-choice', 'streaming-tools'] },
+  { id: 'thinking', label: 'Thinking / Reasoning', featureIds: ['thinking', 'interleaved-thinking'] },
+  { id: 'structured-output', label: 'Structured Output', featureIds: ['structured-output', 'constrained-decoding'] },
+  { id: 'sampling', label: 'Sampling & Reproducibility', featureIds: ['seed'] },
+  { id: 'context', label: 'Context & Caching', featureIds: ['prompt-caching', 'max-context'] },
+  { id: 'extended', label: 'Multimodal / Extended', featureIds: ['multimodal', 'mcp', 'code-execution', 'computer-use'] },
+]
+
 export function computeMatrixSummary() {
   let native = 0, partial = 0, unsupported = 0, total = 0
   for (const feat of FEATURES) {
@@ -224,6 +244,79 @@ export const BFCL_RANKINGS: BfclEntry[] = [
   { rank: 8,  model: 'DeepSeek V3.1',           bfclV3: '개선됨', bfclV4: '—',       feature: 'Strict Function Calling (Beta)',         license: '오픈웨이트' },
   { rank: 9,  model: 'Gemma 4 27B/31B',         bfclV3: '76.9%',  bfclV4: '—',       feature: 'Apache 2.0 멀티모달 오픈웨이트',         license: 'Apache 2.0' },
   { rank: 10, model: 'Kimi K2.6',               bfclV3: '—',      bfclV4: '경쟁력',  feature: 'SWE-Bench Pro 58.6%, 256K 컨텍스트',    license: 'Modified MIT' },
+]
+
+// ── BFCL V4 Category Breakdown ──────────────────────────────────
+
+export interface BfclV4Category {
+  id: string
+  label: string
+  description: string
+  weight: string
+}
+
+export const BFCL_V4_CATEGORIES: BfclV4Category[] = [
+  { id: 'simple',      label: 'Simple Function Calling',   description: '단일 함수 호출',                   weight: '기본' },
+  { id: 'parallel',    label: 'Parallel Function Calling', description: '다중 동시 함수 호출',               weight: '기본' },
+  { id: 'multi-select', label: 'Multiple Function Selection', description: '여러 옵션 중 정확한 도구 선택',   weight: '기본' },
+  { id: 'relevance',   label: 'Relevance Detection',       description: '함수를 호출하지 말아야 할 때 판별', weight: '10% (Irrelevance)' },
+  { id: 'multi-turn',  label: 'Multi-turn Interactions',   description: '맥락 유지 지속 대화',               weight: '30%' },
+  { id: 'agentic',     label: 'Agentic (Holistic)',        description: '전체 에이전트 평가',                 weight: '40%' },
+]
+
+type CategoryLevel = 'high' | 'mid' | 'low'
+
+export interface BfclModelCategoryBreakdown {
+  model: string
+  overall: string
+  simple: CategoryLevel
+  parallel: CategoryLevel
+  multiTurn: CategoryLevel
+  agentic: CategoryLevel
+}
+
+export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
+  { model: 'GLM-4.5',         overall: '70.85%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Opus 4.1', overall: '70.36%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Sonnet 4', overall: '70.29%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Haiku 4.5',overall: '80.6%',  simple: 'high', parallel: 'high', multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'GPT-5',           overall: '59.22%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
+  { model: 'GPT-4.1-mini',    overall: '78.8%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Qwen 3-Coder',    overall: '경쟁력', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'DeepSeek V3.1',   overall: '개선됨', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Gemma 4 27B',     overall: '76.9%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+]
+
+export function categoryLevelClass(level: CategoryLevel): string {
+  switch (level) {
+    case 'high': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'mid':  return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'low':  return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+  }
+}
+
+export function categoryLevelLabel(level: CategoryLevel): string {
+  switch (level) {
+    case 'high': return '높음'
+    case 'mid':  return '중간'
+    case 'low':  return '낮음'
+  }
+}
+
+// ── Function Calling Harness Case Study ──────────────────────────
+
+export interface HarnessModel {
+  id: string
+  params: string
+  compileRate: string
+}
+
+export const HARNESS_MODELS: HarnessModel[] = [
+  { id: 'qwen3.5-397b-a17b', params: '17B/397B MoE',  compileRate: '100%' },
+  { id: 'qwen3.5-122b-a10b', params: '10B/122B MoE',  compileRate: '100%' },
+  { id: 'qwen3.5-27b',       params: '27B Dense',     compileRate: '100%' },
+  { id: 'qwen3.5-35b-a3b',   params: '3B/35B MoE',    compileRate: '100%' },
+  { id: 'qwen3-coder-next',  params: '3B/80B Coding', compileRate: '100%' },
 ]
 
 // ── OAS Provider Capabilities (sec02 Table 1) ──────────────────
@@ -341,6 +434,151 @@ export const ANTI_PATTERNS: AntiPattern[] = [
   { id: 'H10', category: 'hardcoding', description: 'Ollama keepalive 5m이 2파일에 중복 정의', location: 'ollama_*.ml', risk: 'M' },
   { id: 'H11', category: 'hardcoding', description: 'context window size가 모델별로 하드코딩 — 신규 모델 추가 시 수동 갱신', location: 'model_caps.ml', risk: 'H' },
   { id: 'H12', category: 'hardcoding', description: 'BFCL score threshold가 상수 아닌 리터럴', location: 'model_selector.ml', risk: 'L' },
+]
+
+// ── Provider Model Catalog ──────────────────────────────────────
+// Per-provider model listings with context/pricing. Source: supplement research + official docs.
+
+export interface ProviderModel {
+  id: string
+  context: string
+  tier: 'flagship' | 'standard' | 'fast' | 'coding' | 'legacy'
+  inputPrice?: string
+  outputPrice?: string
+  notes?: string
+}
+
+export interface ProviderModelGroup {
+  providerId: string
+  models: ProviderModel[]
+}
+
+export const PROVIDER_MODELS: ProviderModelGroup[] = [
+  {
+    providerId: 'openai',
+    models: [
+      { id: 'gpt-4.1', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal' },
+      { id: 'gpt-4.1-mini', context: '1M', tier: 'standard', inputPrice: '$0.40', outputPrice: '$1.60' },
+      { id: 'gpt-4.1-nano', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
+      { id: 'o4-mini', context: '200K', tier: 'standard', inputPrice: '$1.10', outputPrice: '$4.40', notes: 'Reasoning' },
+    ],
+  },
+  {
+    providerId: 'claude',
+    models: [
+      { id: 'claude-opus-4-7', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'Thinking' },
+      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Thinking' },
+      { id: 'claude-haiku-4-5', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00' },
+    ],
+  },
+  {
+    providerId: 'gemini',
+    models: [
+      { id: 'gemini-2.5-pro', context: '1M', tier: 'flagship', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking' },
+      { id: 'gemini-2.5-flash', context: '1M', tier: 'standard', inputPrice: '$0.15', outputPrice: '$0.60', notes: 'Thinking' },
+      { id: 'gemini-2.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
+    ],
+  },
+  {
+    providerId: 'deepseek',
+    models: [
+      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning' },
+      { id: 'deepseek-v3-0324', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10' },
+      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28' },
+    ],
+  },
+  {
+    providerId: 'qwen35',
+    models: [
+      { id: 'qwen3-235b-a22b', context: '128K', tier: 'flagship', inputPrice: '$0.40', outputPrice: '$1.20', notes: 'MoE, Thinking' },
+      { id: 'qwen3-32b', context: '128K', tier: 'standard', inputPrice: '$0.12', outputPrice: '$0.36' },
+      { id: 'qwen3-8b', context: '128K', tier: 'fast', inputPrice: '$0.02', outputPrice: '$0.06' },
+    ],
+  },
+  {
+    providerId: 'mistral',
+    models: [
+      { id: 'mistral-large-2411', context: '128K', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$6.00' },
+      { id: 'mistral-medium-2505', context: '128K', tier: 'standard', inputPrice: '$0.40', outputPrice: '$2.00' },
+      { id: 'codestral-latest', context: '256K', tier: 'coding', inputPrice: '$0.30', outputPrice: '$0.90', notes: 'Code' },
+    ],
+  },
+  {
+    providerId: 'glm',
+    models: [
+      { id: 'glm-5', context: '200K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'General' },
+      { id: 'glm-5-code', context: '128K', tier: 'coding', inputPrice: '$1.20', outputPrice: '$0.30', notes: 'Coding Plan 전용' },
+      { id: 'glm-4.7', context: '128K', tier: 'standard', inputPrice: '$0.60', outputPrice: '—', notes: 'Coding Plan 기본' },
+      { id: 'glm-4.5-air', context: '128K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: 'Coding Plan 경량' },
+    ],
+  },
+  {
+    providerId: 'kimi',
+    models: [
+      { id: 'kimi-k2.6', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'Multimodal, Thinking' },
+      { id: 'kimi-k2.5', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'SoTA Agent/Code' },
+      { id: 'kimi-k2-thinking', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '장기 사고' },
+      { id: 'kimi-k2-turbo-preview', context: '256K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: '60-100 tok/s' },
+      { id: 'moonshot-v1-128k', context: '128K', tier: 'legacy', inputPrice: '—', outputPrice: '—' },
+    ],
+  },
+  {
+    providerId: 'ollama',
+    models: [
+      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+    ],
+  },
+  {
+    providerId: 'llamacpp',
+    models: [
+      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+    ],
+  },
+]
+
+export function modelTierStyle(tier: ProviderModel['tier']): string {
+  switch (tier) {
+    case 'flagship': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'standard': return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]'
+    case 'fast':     return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'coding':   return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+    case 'legacy':   return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+  }
+}
+
+// ── CLI Transport Comparison ──────────────────────────────────
+// CLI transport implementation details. Source: cli_noninteractive_deep_dive.md.
+
+export interface CliTransportInfo {
+  providerId: string
+  binary: string
+  loc: number
+  promptMode: string
+  streamFormat: string
+  argvThreshold: string
+  notes: string
+}
+
+export const CLI_TRANSPORTS: CliTransportInfo[] = [
+  { providerId: 'claude', binary: 'claude', loc: 1282, promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
+  { providerId: 'gemini_cli', binary: 'gemini', loc: 949, promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
+  { providerId: 'codex_cli', binary: 'codex', loc: 1340, promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', loc: 693, promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: '단일 모델 기본 (kimi-for-coding)' },
+]
+
+// ── GLM Coding Plan Mapping ───────────────────────────────────
+// Claude Code internal env vars → GLM model mapping. Source: supplement research.
+
+export const GLM_CODING_PLAN_MAP: Array<{ envVar: string; glmModel: string; note: string }> = [
+  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'GLM-4.7', note: '최고 성능 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'GLM-4.7', note: '표준 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'GLM-4.5-Air', note: '빠른/경량 코딩' },
+]
+
+export const GLM_WIRING_GAPS: Array<{ area: string; oasCurrent: string; official: string; gap: string }> = [
+  { area: 'Coding 전용 모델', oasCurrent: 'glm-5.1, glm-5, glm-5-turbo (auto 목록)', official: 'GLM-5-Code (별도 모델군)', gap: 'Coding 전용 모델 미식별' },
+  { area: '모델 에일리어스', oasCurrent: 'auto, flash, turbo, vision, air, ocr', official: 'GLM-4.7, GLM-4.5-Air, GLM-5-Code', gap: 'Coding-specific alias 부재' },
+  { area: 'Context ceiling', oasCurrent: '200K (General과 동일)', official: '128K (GLM-5-Code)', gap: 'Context 과다 선언' },
 ]
 
 // ── Cascade Traces ────────────────────────────────────────────
@@ -552,6 +790,98 @@ export function phaseColor(id: RoadmapPhase): string {
   if (idx <= 4) return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
   return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)] border-[var(--color-border-default)]'
 }
+
+// ── Phase Timeline (sec07 Table 7-1) ──────────────────────────
+
+export interface PhaseMilestone {
+  week: string
+  phase: string
+  work: string
+  deliverable: string
+  deps: string
+}
+
+export const PHASE_TIMELINE: PhaseMilestone[] = [
+  { week: '0–1', phase: 'Phase 1', work: 'P0-1: Function Calling Harness 핵심 루프', deliverable: 'ToolValidationLoop 모듈, 최대 3회 retry', deps: '—' },
+  { week: '1–2', phase: 'Phase 1', work: 'P0-2: PPX 기반 컴파일 시점 타입-스키마 검증', deliverable: 'SchemaViolationError 타입', deps: 'P0-1' },
+  { week: '2–3', phase: 'Phase 1', work: 'P0-3: Per-provider 통합 테스트 스위트 (13 provider × 5 scenario)', deliverable: 'Integration test suite', deps: 'P0-1' },
+  { week: '3–4', phase: 'Phase 1', work: 'P5-1: S01–S05, F01–F02 안티패턴 제거', deliverable: 'CapabilityDrop, FallbackTriggered 이벤트', deps: 'P0-1' },
+  { week: '4–5', phase: 'Phase 2', work: 'P1-1: cache_control 자동화', deliverable: 'system/tool cache 삽입 최적화', deps: 'Phase 1' },
+  { week: '5–6', phase: 'Phase 2', work: 'P1-2: Context Reducer ceiling (target = max_tokens × 0.5)', deliverable: '동적 compaction budget, 최근 4turn 보존', deps: 'P1-1' },
+  { week: '6–7', phase: 'Phase 2', work: 'P3-1: thinking_control_format 4-variant capability', deliverable: '25필드 capability 레코드, 문자열 매칭 제거', deps: 'Phase 1' },
+  { week: '7–8', phase: 'Phase 2', work: 'P3-2: Provider별 thinking 직렬화 표준화', deliverable: 'thinking_config 공통 타입, wire format 매핑', deps: 'P3-1' },
+  { week: '8–9', phase: 'Phase 3', work: 'P2-1: CLI Provider MCP 활성화', deliverable: 'validate strict mode, cross-tool context', deps: 'Phase 1' },
+  { week: '9–10', phase: 'Phase 3', work: 'P2-2: Ollama runtime tool discovery (/api/show)', deliverable: '동적 ollama_capabilities 오버라이드', deps: 'P2-1' },
+  { week: '10–11', phase: 'Phase 3', work: 'P6-1: Nemotron API, Gemma 4 추가', deliverable: '2개 신규 capability 집합', deps: 'Phase 1' },
+  { week: '11–12', phase: 'Phase 3', work: 'P6-2: Ollama Cloud + ToolResult schema validation', deliverable: 'Ollama Cloud 지원, ToolResultValidationError', deps: 'P6-1, P2-2' },
+  { week: '12–13', phase: 'Phase 4', work: 'P4-1: supports_seed, supports_seed_with_images', deliverable: '27필드 capability 레코드', deps: 'Phase 1–2' },
+  { week: '13–14', phase: 'Phase 4', work: 'P4-2: temperature=0 한계 문서화, 이미지 seed 무효화', deliverable: '결정론 제한 경고 (warn_once)', deps: 'P4-1' },
+  { week: '14–15', phase: 'Phase 4', work: 'P7-1: Usage tokens 복원 + Capability drift 감지', deliverable: 'Usage 추출, CapabilityDriftAlert', deps: 'Phase 1–3' },
+  { week: '15–16', phase: 'Phase 4', work: 'P7-2: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-1' },
+]
+
+export const PHASE_COLORS: Record<string, string> = {
+  'Phase 1': 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+  'Phase 2': 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
+  'Phase 3': 'bg-[var(--info-soft)] text-[var(--color-status-info)]',
+  'Phase 4': 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]',
+}
+
+export const RESOURCE_ALLOCATION = [
+  { track: 'OAS 코어 수정', scope: 'Backend 직렬화/파싱, Capabilities, Config', headcount: 2, pct: ['100%', '80%', '50%', '30%'] },
+  { track: 'MASC 확장', scope: 'Provider_tool_support, Cascade, Metrics', headcount: 1, pct: ['50%', '80%', '100%', '80%'] },
+  { track: '인프라', scope: 'Integration test, CI/CD, Grafana, Prometheus', headcount: 1, pct: ['80%', '100%', '100%', '100%'] },
+]
+
+// ── Success Metrics (sec07 §7.3) ──────────────────────────────
+// Three cross-cutting success indicators for the 16-week roadmap.
+
+export interface SuccessMetric {
+  id: string
+  title: string
+  target: string
+  description: string
+  phases: Record<string, string>
+}
+
+export const SUCCESS_METRICS: SuccessMetric[] = [
+  {
+    id: 'bfcl-accuracy',
+    title: 'BFCL 90%+ Tool Use Accuracy',
+    target: '90%',
+    description: '주요 6개 제공자(OpenAI, Claude, Gemini, DeepSeek, Qwen, Mistral)의 OAS 파이프라인 정확도. 모델 자체 성능이 아닌 직렬화→전송→파싱→검증 파이프라인의 정확도를 측정.',
+    phases: {
+      'Phase 1': '13 providers × 5 scenario = 65 test cases 100% pass',
+      'Phase 2': 'thinking 복합 스키마 검증 성공률 95%+',
+      'Phase 3': 'CLI Provider MCP E2E 성공률 100%, 신규 3 provider 통합 테스트 100%',
+      'Phase 4': 'BFCL V4 Simple/Parallel/Relevance 6 provider 전체 90%+',
+    },
+  },
+  {
+    id: 'zero-silent-failure',
+    title: 'Zero Silent Failure',
+    target: '0건',
+    description: '모든 비정상 동작이 WARN+ 로그 레벨로 기록, Prometheus 메트릭이나 structured event로 포착. masc_capability_drop_total, masc_fallback_triggered_total counter 기준.',
+    phases: {
+      'Phase 1': 'S01–S05 (5건) Silent Failure 완전 제거 → counter 증가 0',
+      'Phase 2': 'S06–S08 제거, F01–F04 Fake Fallback 제거',
+      'Phase 3': 'S09–S10 제거, M01–M06 String Match 중 3건 제거',
+      'Phase 4': '잔여 안티패턴 제거 완료 (28/32 = 87.5%), Grafana "Zero Silent Failure" panel OK',
+    },
+  },
+  {
+    id: 'capability-accuracy',
+    title: 'Capability Accuracy 100%',
+    target: '100%',
+    description: 'Llm_provider.Capabilities 레코드 각 필드가 실제 API 동작과 일치. capability_mismatch rejection 비율 < 1%.',
+    phases: {
+      'Phase 1': 'supports_tools, supports_tool_choice 통합 테스트 100% pass',
+      'Phase 2': 'thinking_control_format 4-variant 정합성 검증',
+      'Phase 3': 'supports_seed, supports_seed_with_images 선언 정합성',
+      'Phase 4': 'emits_usage_tokens 정합성 + drift 감지 24h 이내',
+    },
+  },
+]
 
 // ── Shared helpers ──────────────────────────────────────────────
 

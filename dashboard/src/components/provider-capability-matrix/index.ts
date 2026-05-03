@@ -10,6 +10,7 @@
 //   benchmarks   — BFCL V3/V4 rankings
 //   wiring       — OAS wiring mismatches vs official API
 //   roadmap     — P0–P7 improvement priorities (sec06 Table 6-1/6-2)
+//   models      — Per-provider model catalog with pricing/context
 //   anti-patterns — 32 anti-patterns (S/F/M/H categories)
 
 import { html } from 'htm/preact'
@@ -28,12 +29,14 @@ import { WiringGaps } from './wiring-gaps'
 import { AntiPatternList } from './anti-patterns'
 import { OasProviderTable } from './oas-provider-table'
 import { Roadmap } from './roadmap'
+import { ModelCatalog } from './model-catalog'
 
-type CapView = 'providers' | 'matrix' | 'cascade' | 'benchmarks' | 'wiring' | 'roadmap' | 'anti-patterns'
+type CapView = 'providers' | 'matrix' | 'models' | 'cascade' | 'benchmarks' | 'wiring' | 'roadmap' | 'anti-patterns'
 
 const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
   { key: 'providers', label: 'OAS 프로바이더' },
   { key: 'matrix', label: '기능 매트릭스' },
+  { key: 'models', label: '모델 카탈로그' },
   { key: 'cascade', label: '캐스케이드 트레이스' },
   { key: 'benchmarks', label: 'BFCL 벤치마크' },
   { key: 'wiring', label: 'OAS 배선 갭' },
@@ -41,23 +44,40 @@ const CAP_VIEWS: Array<{ key: CapView; label: string }> = [
   { key: 'anti-patterns', label: '안티패턴' },
 ]
 
+const PROVIDER_REFRESH_MS = 30_000
+
 export function ProviderCapabilityMatrix() {
   const activeView = useSignal<CapView>('matrix')
   const liveProviders = useSignal<DashboardRuntimeProviderSnapshot[]>([])
   const updatedLabel = useSignal<string | null>(null)
 
   useEffect(() => {
-    const ctrl = new AbortController()
-    void fetchRuntimeProviders({ signal: ctrl.signal })
-      .then(res => {
-        liveProviders.value = res.providers
-        updatedLabel.value = res.updated_at ?? null
-      })
-      .catch(err => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        console.warn('[capability-matrix] provider fetch failed', err instanceof Error ? err.message : err)
-      })
-    return () => { ctrl.abort() }
+    let disposed = false
+    let inFlight: AbortController | null = null
+
+    const refresh = () => {
+      inFlight?.abort()
+      const ctrl = new AbortController()
+      inFlight = ctrl
+      void fetchRuntimeProviders({ signal: ctrl.signal })
+        .then(res => {
+          if (disposed || ctrl.signal.aborted) return
+          liveProviders.value = res.providers
+          updatedLabel.value = res.updated_at ?? null
+        })
+        .catch(err => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          console.warn('[capability-matrix] provider fetch failed', err instanceof Error ? err.message : err)
+        })
+    }
+
+    refresh()
+    const timer = window.setInterval(refresh, PROVIDER_REFRESH_MS)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      inFlight?.abort()
+    }
   }, [])
 
   const updatedAt = updatedLabel.value
@@ -91,6 +111,15 @@ export function ProviderCapabilityMatrix() {
           <${MatrixLegend} />
           <${FeatureMatrix} liveProviders=${liveProviders.value} />
         </div>
+      ` : activeView.value === 'models' ? html`
+        <${Card}>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">Provider 모델 카탈로그</h3>
+          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+            Provider별 공식 모델 목록, 가격($/1M tokens), Context 한계, CLI transport 구현 비교.
+            GLM Coding Plan은 Claude Code 호환 엔드포인트를 통한 별도 모델 매핑 사용.
+          </p>
+          <${ModelCatalog} />
+        <//>
       ` : activeView.value === 'cascade' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS Cascade 라우팅 트레이스</h3>

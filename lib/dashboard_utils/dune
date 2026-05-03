@@ -5,4 +5,4 @@
  (public_name masc_mcp.dashboard_utils)
  (modules dashboard_utils)
  (wrapped false)
- (libraries masc_types masc_core base unix yojson))
+ (libraries masc_types masc_core unix yojson))

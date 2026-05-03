@@ -13,7 +13,9 @@ import {
 } from './data'
 import { StatusDot } from '../common/status-dot'
 import { StatTile } from '../common/stat-tile'
+import { HeartbeatStrip } from '../common/heartbeat-strip'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
+import type { HeartbeatState } from '../../lib/heartbeat-history'
 
 type LiveStatus = 'ok' | 'bad' | 'warn' | 'neutral'
 
@@ -56,6 +58,20 @@ export function liveStatusDot(
   return null
 }
 
+const HB_SLOTS = 12
+
+/** Derive a flat, uniform slot array from the current live status.
+ *  No fake historical patterns — all slots share the same state so the
+ *  bar is a present-tense status indicator rather than a history chart. */
+function statusToSlots(status: LiveStatus | null): HeartbeatState[] {
+  if (status === null || status === 'neutral') return Array<HeartbeatState>(HB_SLOTS).fill('unknown')
+  switch (status) {
+    case 'ok':   return Array<HeartbeatState>(HB_SLOTS).fill('up')
+    case 'bad':  return Array<HeartbeatState>(HB_SLOTS).fill('down')
+    case 'warn': return Array<HeartbeatState>(HB_SLOTS).fill('unknown')
+  }
+}
+
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
   const summary = useMemo(() => computeMatrixSummary(), [])
   const liveOk = liveProviders.filter(p => liveProviderStatus(p) === 'ok').length
@@ -87,6 +103,18 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
                       <span>${PROVIDER_LABELS[pid] ?? pid}</span>
                       ${kind === 'cli' ? html`<span class="text-[8px] font-mono text-[var(--color-fg-disabled)] uppercase">cli</span>` : null}
                     </div>
+                  </th>
+                `
+              })}
+            </tr>
+            <tr class="bg-[var(--white-4)]">
+              <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)]"></th>
+              ${PROVIDER_IDS.map(pid => {
+                const dot = liveStatusDot(pid, liveProviders)
+                const hb = statusToSlots(dot)
+                return html`
+                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5">
+                    <${HeartbeatStrip} history=${hb} slots=${HB_SLOTS} />
                   </th>
                 `
               })}

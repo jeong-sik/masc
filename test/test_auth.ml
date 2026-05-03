@@ -246,7 +246,7 @@ let test_verify_wrong_token () =
   match create_result, verify_result with
   | Ok _, Ok _ ->
       fail "verify_token should fail with wrong token"
-  | Ok _, Error (Types.InvalidToken _) ->
+  | Ok _, Error (Types.Auth (Types.Auth_error.InvalidToken _)) ->
       (* Expected *)
       ()
   | Ok _, Error e ->
@@ -264,8 +264,8 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   in
   cleanup_test_room dir;
   match create_result, verify_result with
-  | Ok _, Error (Types.Unauthorized msg) ->
-      let rendered = Types.masc_error_to_string (Types.Unauthorized msg) in
+  | Ok _, Error (Types.Auth (Types.Auth_error.Unauthorized msg)) ->
+      let rendered = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Unauthorized msg)) in
       check bool "mismatch message names token owner" true
         (String.contains rendered '('
          && contains_substring rendered "bearer token belongs to codex");
@@ -392,7 +392,7 @@ let test_delete_uuid_backed_credential_removes_redirect_target () =
         (Option.is_none
            (Auth.load_credential dir (Types.Credential_id.to_string id)));
       (match Auth.find_credential_by_token dir ~token:raw_token with
-       | Error (Types.InvalidToken _) -> ()
+       | Error (Types.Auth (Types.Auth_error.InvalidToken _)) -> ()
        | Error e ->
            fail
              (Printf.sprintf
@@ -829,7 +829,7 @@ let test_auth_enabled_requires_token () =
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "should require token"
-  | Error (Types.Unauthorized _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
   | Error _ -> fail "wrong error type"
 
 let test_auth_enabled_with_valid_token () =
@@ -858,7 +858,7 @@ let test_permission_denied_for_worker_admin_action () =
   cleanup_test_room dir;
   match check_result with
   | Ok () -> fail "worker should not get admin action"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
@@ -897,7 +897,7 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "unknown non-masc tool should be denied in strict mode"
-  | Error (Types.Forbidden _) ->
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) ->
       check (float 0.0001) "denial counter increments"
         (before +. 1.0)
         (strict_unknown_tool_denial_count
@@ -987,7 +987,7 @@ let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   in
   match result with
   | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
 let test_declared_tool_permission_from_tool_spec () =

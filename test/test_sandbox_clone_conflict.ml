@@ -52,7 +52,7 @@ let test_auto_provision_rejects_plain_dir_clone_conflict () =
       ~agent_name:"test-agent" ~repos_dir ~repo_name:"masc-mcp"
   with
   | Ok _ -> fail "expected sandbox_clone_conflict error"
-  | Error (Types.IoError msg) ->
+  | Error (Types.System (Types.System_error.IoError msg)) ->
       check_contains "message mentions sandbox_clone_conflict"
         "sandbox_clone_conflict" msg;
       check_contains "message mentions not a git clone" "not a git clone" msg

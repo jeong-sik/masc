@@ -77,7 +77,7 @@ let register_capabilities config ~agent_name ~capabilities =
 (** Update agent metadata (status/capabilities).
     Since #4638 agent metadata always lives under the root agents_dir. *)
 let update_agent_r config ~agent_name ?status ?capabilities () : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
+  if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized)
   else match validate_agent_name_r agent_name with
     | Error e -> Error e
     | Ok _ ->
@@ -86,12 +86,12 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
         (* Since #4638 rooms are flattened; agents always in root agents_dir *)
         let agent_file = Filename.concat (agents_dir config) filename in
         if not (Sys.file_exists agent_file) then
-          Error (Types.AgentNotFound actual_name)
+          Error (Types.Agent (Types.Agent_error.NotFound actual_name))
         else
           let locked =
             with_file_lock_r config agent_file (fun () ->
               match read_agent_with_repair config agent_file with
-              | Error _ -> Error (Types.InvalidJson "Invalid agent file")
+              | Error _ -> Error (Types.System (Types.System_error.InvalidJson "Invalid agent file"))
               | Ok agent ->
                   let status_opt =
                     match status with
@@ -99,7 +99,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
                     | Some s ->
                         (match Types.agent_status_of_string_opt (String.lowercase_ascii s) with
                          | Some st -> Ok (Some st)
-                         | None -> Error (Types.InvalidJson ("Unknown status: " ^ s)))
+                         | None -> Error (Types.System (Types.System_error.InvalidJson ("Unknown status: " ^ s))))
                   in
                   (match status_opt with
                    | Error e -> Error e
@@ -113,7 +113,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
                          | _ -> None
                        in
                        (match invalid with
-                        | Some msg -> Error (Types.TaskInvalidState msg)
+                        | Some msg -> Error (Types.Task (Types.Task_error.InvalidState msg))
                         | None ->
                             let updated_caps =
                               match capabilities with

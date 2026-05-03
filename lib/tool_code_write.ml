@@ -133,7 +133,7 @@ let validate_writable_path ~(agent_name : string) config path =
        || String.starts_with ~prefix:agent_playground_prefix canonical_path then
       Ok canonical_path
     else
-      Error (IoError (Printf.sprintf
+      Error (System (System_error.IoError (Printf.sprintf
         "Write restricted to allowed sandboxes for agent %s. \
          Expected path prefix: %s (or /.worktrees/ for server ops). \
          Got: %s. Cross-agent playground writes are blocked — write \
@@ -141,7 +141,7 @@ let validate_writable_path ~(agent_name : string) config path =
          unsure of your agent_name."
         agent_name
         agent_playground_prefix
-        canonical_path))
+        canonical_path)))
 
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
@@ -381,7 +381,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
   | Error e -> Error e
   | Ok canonical_path ->
     match Coord_git.git_root ~base_path:config.Coord.base_path with
-    | None -> Error (IoError "Not in a git repository")
+    | None -> Error (System (System_error.IoError "Not in a git repository"))
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
         (Filename.concat root ".worktrees") in
@@ -412,7 +412,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
       if in_worktrees || in_agent_playground_repos then
         Ok canonical_path
       else
-        Error (IoError (Printf.sprintf
+        Error (System (System_error.IoError (Printf.sprintf
           "Clone restricted to /.worktrees/ or this agent's own \
            %srepos/ (got: %s). Cross-agent playground clones are blocked \
            — clone into %srepos/<repo-name> instead. Call masc_status \
@@ -420,7 +420,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
           agent_playground_prefix
           canonical_path
           agent_playground_prefix
-          agent_name))
+          agent_name)))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =
@@ -734,7 +734,7 @@ let handle_code_git ctx args =
     else begin
       let cwd_result =
         if String.equal cwd "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
-          if ok then Ok None else Error (IoError msg)
+          if ok then Ok None else Error (System (System_error.IoError msg))
         else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e

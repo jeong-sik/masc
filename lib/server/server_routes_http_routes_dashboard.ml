@@ -139,7 +139,7 @@ let classify_dashboard_dev_token_candidate ~base_path raw :
         Ok (Reusable trimmed)
     | Ok _owner ->
         Ok Rotate
-    | Error (Types.InvalidToken _ | Types.TokenExpired _ | Types.Unauthorized _) ->
+    | Error (Types.Auth (Types.Auth_error.InvalidToken _ | Types.Auth_error.TokenExpired _ | Types.Auth_error.Unauthorized _)) ->
         Ok Rotate
     | Error err ->
         Error (Types.masc_error_to_string err)

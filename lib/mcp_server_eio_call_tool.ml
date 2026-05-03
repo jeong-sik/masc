@@ -628,7 +628,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         (false, Types.masc_error_to_string Types.NotInitialized)
+         (false, Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
        else
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
           false, Printf.sprintf "Internal error: %s" err_detail)

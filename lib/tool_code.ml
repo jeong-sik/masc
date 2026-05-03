@@ -153,10 +153,10 @@ let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string
 let validate_path config path =
   try
     if String.contains path '\x00' then
-      Error (IoError "Path contains null byte")
+      Error (System (System_error.IoError "Path contains null byte"))
     else
     match Coord_git.git_root ~base_path:config.Coord.base_path with
-    | None -> Error (IoError "Not in a git repository")
+    | None -> Error (System (System_error.IoError "Not in a git repository"))
     | Some git_root ->
     let absolute_path =
       if Filename.is_relative path then
@@ -187,10 +187,10 @@ let validate_path config path =
       | _ -> within canonical_root canonical
     in
     if allowed then Ok canonical
-    else Error (IoError "Path traversal detected: access outside git root")
+    else Error (System (System_error.IoError "Path traversal detected: access outside git root"))
   with
-  | Invalid_argument msg -> Error (IoError msg)
-  | exn -> Error (IoError (Stdlib.Printexc.to_string exn))
+  | Invalid_argument msg -> Error (System (System_error.IoError msg))
+  | exn -> Error (System (System_error.IoError (Stdlib.Printexc.to_string exn)))
 
 (* #6637 iter11 — per-agent playground containment for code-read tools.
 
@@ -236,10 +236,10 @@ let validate_read_path ~agent_name config path =
                (racy deletion, or a broken symlink). Treat as a
                containment failure rather than silently accepting. *)
             Error
-              (IoError
+              (System (System_error.IoError
                  (Printf.sprintf
                     "target path %S is not accessible (dangling \
-                     symlink or racy deletion)" path))
+                     symlink or racy deletion)" path)))
       with
       | Error e -> Error e
       | Ok canonical ->
@@ -270,13 +270,13 @@ let validate_read_path ~agent_name config path =
           try Ok (Unix.realpath playground_tree_abs_raw) with
           | Unix.Unix_error _ ->
               Error
-                (IoError
+                (System (System_error.IoError
                    (Printf.sprintf
                       "keeper playground tree %S does not exist; cannot \
                        validate cross-keeper containment. Clone via \
                        keeper_shell op=git_clone to provision your \
                        playground first. See #6527/#6637."
-                      playground_tree_rel))
+                      playground_tree_rel)))
         with
         | Error e -> Error e
         | Ok playground_tree_canonical ->
@@ -308,13 +308,13 @@ let validate_read_path ~agent_name config path =
               try Ok (Unix.realpath own_abs_raw) with
               | Unix.Unix_error _ ->
                   Error
-                    (IoError
+                    (System (System_error.IoError
                        (Printf.sprintf
                           "keeper playground bundle %S does not exist \
                            yet; cannot validate containment. Provision \
                            via git_clone or masc_worktree_create first. \
                            See #6527/#6637."
-                          own_rel_trailing))
+                          own_rel_trailing)))
             with
             | Error e -> Error e
             | Ok own_canonical ->
@@ -322,13 +322,13 @@ let validate_read_path ~agent_name config path =
                    || String.starts_with ~prefix:(own_canonical ^ "/") canonical
                 then Ok canonical
                 else
-                  Error (IoError (Printf.sprintf
+                  Error (System (System_error.IoError (Printf.sprintf
                     "cross-keeper playground read blocked: agent=%S tried to \
                      read path %S which is under another keeper's playground. \
                      Only %s is readable for this caller; reads outside your \
                      own playground must target the shared codebase (lib/, \
                      test/, config/, etc.). See #6527/#6637."
-                    agent_name path own_rel_trailing))
+                    agent_name path own_rel_trailing)))
 
 
 (* Handler: masc_code_search - Search code using ripgrep *)

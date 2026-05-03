@@ -1069,12 +1069,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     String.length needle > 0 && String_util.contains_substring haystack needle
   in
   let dashboard_auth_error_code = function
-    | Types.InvalidToken _ -> Some "invalid_token"
-    | Types.TokenExpired _ -> Some "token_expired"
-    | Types.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" } ->
+    | Types.Auth (Types.Auth_error.InvalidToken _) -> Some "invalid_token"
+    | Types.Auth (Types.Auth_error.TokenExpired _) -> Some "token_expired"
+    | Types.Auth (Types.Auth_error.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
         Some "same_origin_blocked"
-    | Types.Forbidden _ -> Some "insufficient_role"
-    | Types.Unauthorized reason ->
+    | Types.Auth (Types.Auth_error.Forbidden _) -> Some "insufficient_role"
+    | Types.Auth (Types.Auth_error.Unauthorized reason) ->
         let normalized = String.lowercase_ascii reason in
         if contains_substring normalized "bearer token belongs to" then
           Some "actor_mismatch"
@@ -1112,8 +1112,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | None ->
         if auth_cfg.enabled && auth_cfg.require_token && token_present then
           Error
-            (Types.Unauthorized
-               "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
+            (Types.Auth (Types.Auth_error.Unauthorized
+               "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
         else
           Ok "dashboard"
   in
@@ -1141,7 +1141,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
             ~endpoint:"HTTP tool access for masc_keeper_msg" auth_cfg
         with
         | Ok _ -> Ok ()
-        | Error msg -> Error (Types.Unauthorized msg))
+        | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg)))
   in
   let keeper_authorization_result =
     match endpoint_gate_result with
@@ -1170,8 +1170,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
   in
   let auth_error =
     match token_credential_result with
-    | Some (Error (Types.InvalidToken _ as err)) -> Some err
-    | Some (Error (Types.TokenExpired _ as err)) -> Some err
+    | Some (Error (Types.Auth (Types.Auth_error.InvalidToken _) as err)) -> Some err
+    | Some (Error (Types.Auth (Types.Auth_error.TokenExpired _) as err)) -> Some err
     | Some (Error err) -> Some err
     | _ -> (
         match keeper_authorization_result with

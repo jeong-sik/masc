@@ -449,21 +449,21 @@ let ensure_credential_alias config ~canonical_name ~alias_name :
     let canonical_file = credential_file config canonical_name in
     if not (file_exists canonical_file) then
       Error
-        (IoError
+        (System (System_error.IoError
            (Printf.sprintf
               "canonical credential not found for alias setup: \
                canonical=%s alias=%s"
-              canonical_name alias_name))
+              canonical_name alias_name)))
     else
       match load_redirect_target config canonical_file with
       | None ->
           Error
-            (IoError
+            (System (System_error.IoError
                (Printf.sprintf
                   "canonical credential %s is not a redirect stub; \
                    cannot create alias %s without a UUID-backed \
                    credential"
-                  canonical_name alias_name))
+                  canonical_name alias_name)))
       | Some uuid_file ->
           let uuid_basename = Filename.basename uuid_file in
           let alias_file = credential_file config alias_name in
@@ -487,11 +487,11 @@ let ensure_credential_alias config ~canonical_name ~alias_name :
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
                  Error
-                   (IoError
+                   (System (System_error.IoError
                       (Printf.sprintf
                          "Failed to write alias %s -> %s: %s"
                          alias_name canonical_name
-                         (Printexc.to_string exn))))
+                         (Printexc.to_string exn)))))
 
 let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
@@ -621,7 +621,7 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
       (list_credentials config)
   in
   match matches with
-  | [] -> Error (InvalidToken "Token mismatch")
+  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
   | first :: rest ->
       (match rest with
        | [] -> ()
@@ -646,7 +646,7 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
        | None -> Ok first
        | Some exp_str ->
            let now = now_iso () in
-           if now > exp_str then Error (TokenExpired first.agent_name)
+           if now > exp_str then Error (Auth (Auth_error.TokenExpired first.agent_name))
            else Ok first)
 
 (** Resolve agent_name from raw token *)
@@ -688,7 +688,7 @@ let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token
         (Printexc.to_string exn)
     in
     Log.Auth.error "%s" msg;
-    Error (IoError msg)
+    Error (System (System_error.IoError msg))
 
 let save_raw_token_credential config ~agent_name ~role ~raw_token :
     (agent_credential, masc_error) result =
@@ -756,7 +756,7 @@ let save_rotated_raw_token config (cred : agent_credential) ~raw_token :
         rotated.agent_name (Printexc.to_string exn)
     in
     Log.Auth.error "%s" msg;
-    Error (IoError msg)
+    Error (System (System_error.IoError msg))
 
 let rotate_shared_tokens_matching config ~include_agent : rotation_outcome list =
   group_credentials_by_token config
@@ -827,10 +827,10 @@ let missing_credential_error config ~agent_name ~token : masc_error =
   | Ok owner when owner.agent_name <> agent_name ->
       record_bearer_token_mismatch
         ~expected_agent:agent_name ~actual_agent:owner.agent_name;
-      Unauthorized
+      Auth (Auth_error.Unauthorized
         (bearer_token_owner_mismatch_message ~requested_agent:agent_name
-           ~token_owner:owner.agent_name)
-  | _ -> Unauthorized ("No credential found for " ^ agent_name)
+           ~token_owner:owner.agent_name))
+  | _ -> Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name))
 
 (** Verify a token.
 
@@ -856,9 +856,9 @@ let verify_token_owner_alias config ~agent_name ~token =
       record_bearer_token_mismatch
         ~expected_agent:agent_name ~actual_agent:owner.agent_name;
       Error
-        (Unauthorized
+        (Auth (Auth_error.Unauthorized
            (bearer_token_owner_mismatch_message ~requested_agent:agent_name
-              ~token_owner:owner.agent_name))
+              ~token_owner:owner.agent_name)))
   | Error e -> Error e
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
@@ -877,7 +877,7 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
         if Option.is_some (keeper_transport_alias_stable_name agent_name) then
           verify_token_owner_alias config ~agent_name ~token
         else
-          Error (InvalidToken "Token mismatch")
+          Error (Auth (Auth_error.InvalidToken "Token mismatch"))
       else
         (* Check expiry *)
         match cred.expires_at with
@@ -886,7 +886,7 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
             (* Simple ISO string comparison works for UTC *)
             let now = now_iso () in
             if now > exp_str then
-              Error (TokenExpired agent_name)
+              Error (Auth (Auth_error.TokenExpired agent_name))
             else
               Ok cred
 
@@ -999,7 +999,7 @@ let ensure_keeper_credential config ~agent_name :
           (Printexc.to_string exn)
       in
       Log.Auth.error "%s" msg;
-      Error (IoError msg)
+      Error (System (System_error.IoError msg))
   in
   (match result with
    | Ok _ ->
@@ -1025,10 +1025,10 @@ let audit_keeper_credentials config ~keeper_names =
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =
   match verify_token config ~agent_name ~token:old_token with
-  | Error (TokenExpired _) ->
+  | Error (Auth (Auth_error.TokenExpired _)) ->
       (* Allow refresh even if expired *)
       (match load_credential_with_aliases config agent_name with
-       | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
+       | None -> Error (Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name)))
        | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
   | Error e -> Error e
   | Ok old_cred -> create_token config ~agent_name ~role:old_cred.role
@@ -1065,7 +1065,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
     if has_permission Worker permission then
       Ok ()
     else
-      Error (Forbidden { agent = agent_name; action = show_permission permission })
+      Error (Auth (Auth_error.Forbidden { agent = agent_name; action = show_permission permission }))
   else
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
@@ -1073,7 +1073,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
         if has_permission cred.role permission then
           Ok ()
         else
-          Error (Forbidden { agent = agent_name; action = show_permission permission })
+          Error (Auth (Auth_error.Forbidden { agent = agent_name; action = show_permission permission }))
     | Ok None ->
         if not auth_cfg.require_token then
           (* Optional-token mode: anonymous callers are always treated as
@@ -1081,9 +1081,9 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
           if has_permission Worker permission then
             Ok ()
           else
-            Error (Forbidden { agent = agent_name; action = show_permission permission })
+            Error (Auth (Auth_error.Forbidden { agent = agent_name; action = show_permission permission }))
         else
-          Error (Unauthorized "Token required")
+          Error (Auth (Auth_error.Unauthorized "Token required"))
 
 let permission_for_tool tool_name =
   Tool_permission_map.permission_for_tool tool_name
@@ -1143,11 +1143,11 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
       else
         let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
         Error
-          (Forbidden
+          (Auth (Auth_error.Forbidden
              {
                agent = agent_name;
                action = "use unknown non-masc tool: " ^ tool_name;
-             })
+             }))
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)
@@ -1176,7 +1176,7 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token :
     | Ok (Some cred) -> Ok cred.role
     | Ok None ->
         if auth_cfg.require_token then
-          Error (Unauthorized "Token required")
+          Error (Auth (Auth_error.Unauthorized "Token required"))
         else
           Ok Worker
 
@@ -1188,7 +1188,7 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name :
     (unit, masc_error) result =
   let policy = Tool_access_role.policy_for_role role in
   if not (Tool_access_policy.allows_name policy tool_name) then
-    Error (Forbidden { agent = agent_name; action = tool_name })
+    Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
   else if not (is_tool_auth_strict_enabled ()) then
     Ok ()  (* Non-strict: policy check is sufficient *)
   else
@@ -1199,15 +1199,15 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name :
         if is_unmapped_internal_tool_name tool_name then
           (* Unmapped internal tool: require at least Worker *)
           if has_permission role CanBroadcast then Ok ()
-          else Error (Forbidden { agent = agent_name; action = tool_name })
+          else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
         else
           let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
           Error
-            (Forbidden
+            (Auth (Auth_error.Forbidden
                {
                  agent = agent_name;
                  action = "use unknown non-masc tool: " ^ tool_name;
-               })
+               }))
 
 (** Policy-based tool authorization.
     Replaces authorize_tool with a single Tool_access_policy check.

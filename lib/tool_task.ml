@@ -128,7 +128,7 @@ let build_verdict_sse_payload
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
-  if String.equal task_id "" then Error (Types.TaskNotFound "")
+  if String.equal task_id "" then Error (Types.Task (Types.Task_error.NotFound ""))
   else Ok task_id
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
@@ -372,33 +372,33 @@ let strict_release_requires_handoff = function
 let completion_state_error ~(task_id : string) ~(agent_name : string)
     ~(task_opt : Types.task option) =
   match task_opt with
-  | None -> Some (Types.TaskNotFound task_id)
+  | None -> Some (Types.Task (Types.Task_error.NotFound task_id))
   | Some task ->
     match task.task_status with
     | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
       if String.equal assignee agent_name then
         None
       else
-        Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
-    | Types.Todo -> Some (Types.TaskNotClaimed task_id)
+        Some (Types.Task (Types.Task_error.AlreadyClaimed { task_id; by = assignee }))
+    | Types.Todo -> Some (Types.Task (Types.Task_error.NotClaimed task_id))
     | Types.Done { assignee; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
-              task_id assignee))
+              task_id assignee)))
     | Types.Cancelled { cancelled_by; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
-              task_id cancelled_by))
+              task_id cancelled_by)))
     | Types.AwaitingVerification { assignee; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s is awaiting verification by %s; approve or reject before marking done"
-              task_id assignee))
+              task_id assignee)))
 
 let persisted_contract_rejection ~(ctx : context)
     ~(task_opt : Types.task option) ~(notes : string) =
@@ -550,7 +550,7 @@ let handle_batch_add_tasks ctx args =
 
 let handle_claim ?agent_tool_names ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
+    result_to_response (Error (Types.Agent (Types.Agent_error.NotJoined ctx.agent_name)))
   else if not ((=) (args |> member "agent_role") `Null) then
     (false, "agent_role is no longer supported")
   else
@@ -915,7 +915,7 @@ and handle_transition ?agent_tool_names ctx args =
   let max_cas_retries = 3 in
   let cas_retry_delay_s = 0.05 in
   let is_version_mismatch = function
-    | Error (Types.TaskInvalidState msg) ->
+    | Error (Types.Task (Types.Task_error.InvalidState msg)) ->
         let prefix = "Version mismatch" in
         String.length msg >= String.length prefix
         && String.equal (Stdlib.String.sub msg 0 (String.length prefix)) prefix

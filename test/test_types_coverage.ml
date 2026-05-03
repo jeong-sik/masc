@@ -720,27 +720,27 @@ let test_portal_state_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_masc_error_not_initialized () =
-  let s = Types.masc_error_to_string Types.NotInitialized in
+  let s = Types.masc_error_to_string (Types.System Types.System_error.NotInitialized) in
   check bool "contains not initialized" true (String.length s > 0)
 
 let test_masc_error_already_initialized () =
-  let s = Types.masc_error_to_string Types.AlreadyInitialized in
+  let s = Types.masc_error_to_string (Types.System Types.System_error.AlreadyInitialized) in
   check bool "contains already" true (String.length s > 0)
 
 let test_masc_error_agent_not_found () =
-  let s = Types.masc_error_to_string (Types.AgentNotFound "claude") in
+  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.NotFound "claude")) in
   check bool "contains claude" true
     (try let _ = Str.search_forward (Str.regexp "claude") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_not_found () =
-  let s = Types.masc_error_to_string (Types.TaskNotFound "task-1") in
+  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.NotFound "task-1")) in
   check bool "contains task-1" true
     (try let _ = Str.search_forward (Str.regexp "task-1") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_already_claimed () =
-  let s = Types.masc_error_to_string (Types.TaskAlreadyClaimed { task_id = "t1"; by = "agent" }) in
+  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" })) in
   check bool "contains owner guidance" true
     (try let _ = Str.search_forward (Str.regexp "currently owned by agent") s 0 in true
      with Not_found -> false)
@@ -1099,65 +1099,65 @@ let test_category_for_tool_general () =
    ============================================================ *)
 
 let test_masc_error_agent_already_joined () =
-  let s = Types.masc_error_to_string (Types.AgentAlreadyJoined "agent1") in
+  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.AlreadyJoined "agent1")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_task_not_claimed () =
-  let s = Types.masc_error_to_string (Types.TaskNotClaimed "t1") in
+  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.NotClaimed "t1")) in
   check bool "contains claim guidance" true
     (try let _ = Str.search_forward (Str.regexp "Claim/start it first") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_invalid_state () =
-  let s = Types.masc_error_to_string (Types.TaskInvalidState "cancelled") in
+  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.InvalidState "cancelled")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_not_open () =
-  let s = Types.masc_error_to_string (Types.PortalNotOpen "agent") in
+  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.NotOpen "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_already_open () =
-  let s = Types.masc_error_to_string (Types.PortalAlreadyOpen { agent = "a1"; target = "a2" }) in
+  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.AlreadyOpen { agent = "a1"; target = "a2" })) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_closed () =
-  let s = Types.masc_error_to_string (Types.PortalClosed "agent") in
+  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.Closed "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_json () =
-  let s = Types.masc_error_to_string (Types.InvalidJson "bad json") in
+  let s = Types.masc_error_to_string (Types.System (Types.System_error.InvalidJson "bad json")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_io_error () =
-  let s = Types.masc_error_to_string (Types.IoError "read failed") in
+  let s = Types.masc_error_to_string (Types.System (Types.System_error.IoError "read failed")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_agent_name () =
-  let s = Types.masc_error_to_string (Types.InvalidAgentName "bad name") in
+  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.InvalidName "bad name")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_task_id () =
-  let s = Types.masc_error_to_string (Types.InvalidTaskId "bad id") in
+  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.InvalidId "bad id")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_file_path () =
-  let s = Types.masc_error_to_string (Types.InvalidFilePath "bad path") in
+  let s = Types.masc_error_to_string (Types.System (Types.System_error.InvalidFilePath "bad path")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_unauthorized () =
-  let s = Types.masc_error_to_string (Types.Unauthorized "missing token") in
+  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Unauthorized "missing token")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_forbidden () =
-  let s = Types.masc_error_to_string (Types.Forbidden { agent = "a1"; action = "reset" }) in
+  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Forbidden { agent = "a1"; action = "reset" })) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_token_expired () =
-  let s = Types.masc_error_to_string (Types.TokenExpired "agent") in
+  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.TokenExpired "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_token () =
-  let s = Types.masc_error_to_string (Types.InvalidToken "bad token") in
+  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.InvalidToken "bad token")) in
   check bool "nonempty" true (String.length s > 0)
 
 (* ============================================================

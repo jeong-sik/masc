@@ -14,6 +14,7 @@ import {
 import { StatusDot } from '../common/status-dot'
 import { StatTile } from '../common/stat-tile'
 import { HeartbeatStrip } from '../common/heartbeat-strip'
+import { statusLabel } from '../../lib/status-label'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
 import type { HeartbeatState } from '../../lib/heartbeat-history'
 
@@ -112,7 +113,7 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
               ${PROVIDER_IDS.map(pid => {
                 const dot = liveStatusDot(pid, liveProviders)
                 const hb = statusToSlots(dot)
-                const label = dot ? `${PROVIDER_LABELS[pid] ?? pid}: ${dot}` : `${PROVIDER_LABELS[pid] ?? pid}: no data`
+                const label = dot ? `${PROVIDER_LABELS[pid] ?? pid}: ${statusLabel(dot)}` : `${PROVIDER_LABELS[pid] ?? pid}: 데이터 없음`
                 return html`
                   <th key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5">
                     <${HeartbeatStrip} history=${hb} slots=${HB_SLOTS} ariaLabel=${label} />

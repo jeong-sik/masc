@@ -51,7 +51,9 @@ export function CascadeTrace() {
         </span>
       </div>
 
-      ${CASCADE_TRACES.map(trace => html`
+      ${CASCADE_TRACES.map(trace => {
+        const totalMs = trace.steps.reduce((s, st) => s + st.ms, 0)
+        return html`
         <div key=${trace.id} class="border border-[var(--color-border-default)] rounded overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 bg-[var(--white-4)] border-b border-[var(--color-border-default)]">
             <div class="flex items-center gap-2">
@@ -60,7 +62,7 @@ export function CascadeTrace() {
                 ${cascadeTierLabel(trace.tier)}
               </span>
             </div>
-            <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(trace.steps.reduce((s, st) => s + st.ms, 0))} total</span>
+            <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(totalMs)} total</span>
           </div>
           <div class="flex items-stretch px-2 py-2">
             ${trace.steps.map((step, i) => {
@@ -72,7 +74,8 @@ export function CascadeTrace() {
             })}
           </div>
         </div>
-      `)}
+        `
+      })}
     </div>
   `
 }

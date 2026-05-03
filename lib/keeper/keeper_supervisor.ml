@@ -365,6 +365,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
         (match write_meta ctx.config synced with
          | Ok () -> ()
          | Error msg ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_write_meta_failures
+             ~labels:[("keeper", meta.name); ("phase", "presence_sync")]
+             ();
            Log.Keeper.warn
              "supervisor presence sync: write_meta failed for %s: %s"
              meta.name msg);
@@ -418,10 +422,18 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
    with
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", resumed_meta.name); ("phase", "reconcile_resume_cas_race")]
+         ();
        Log.Keeper.warn
          "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
          resumed_meta.name err
    | Error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", resumed_meta.name); ("phase", "reconcile_resume")]
+         ();
        Log.Keeper.error
          "%s: reconcile gate resume write_meta failed: %s"
          resumed_meta.name err);

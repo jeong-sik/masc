@@ -49,6 +49,10 @@ let handle_keeper_down ctx args : tool_result =
          ((match write_meta ctx.config retained with
            | Ok () -> ()
            | Error err ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:[("keeper", name); ("phase", "keeper_down")]
+                 ();
                Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
           Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name

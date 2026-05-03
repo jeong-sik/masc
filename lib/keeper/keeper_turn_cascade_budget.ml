@@ -492,10 +492,18 @@ let pause_keeper_for_overflow
    with
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "overflow_pause_cas_race")]
+         ();
        Log.Keeper.warn
          "%s: overflow pause write_meta lost CAS race after retries: %s"
          meta.name err
    | Error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "overflow_pause")]
+         ();
        Log.Keeper.error
          "%s: overflow pause write_meta failed: %s"
          meta.name err);

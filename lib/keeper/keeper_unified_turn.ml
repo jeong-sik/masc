@@ -728,6 +728,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             with
             | Ok () -> ()
             | Error err ->
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_write_meta_failures
+                  ~labels:
+                    [("keeper", entry.meta.name); ("phase", "turn_start")]
+                  ();
                 Log.Keeper.warn
                   "%s: turn-start write_meta_with_merge failed: %s"
                   entry.meta.name err
@@ -1607,6 +1612,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            with
            | Ok () -> ()
            | Error msg ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:
+                   [ ("keeper", updated_meta.name);
+                     ("phase",
+                      if is_version_conflict_error msg
+                      then "turn_failure_cas_race"
+                      else "turn_failure")
+                   ]
+                 ();
                if is_version_conflict_error msg then
                  Log.Keeper.warn
                    "write_meta lost CAS race after retries (turn failure path): %s" msg
@@ -2101,6 +2116,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            with
            | Ok () -> ()
            | Error msg ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:
+                   [ ("keeper", updated_meta.name);
+                     ("phase",
+                      if is_version_conflict_error msg
+                      then "keeper_cycle_cas_race"
+                      else "keeper_cycle")
+                   ]
+                 ();
                if is_version_conflict_error msg then
                  Log.Keeper.warn
                    "write_meta lost CAS race after retries (keeper cycle): %s" msg

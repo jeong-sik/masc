@@ -363,6 +363,151 @@ export const ANTI_PATTERNS: AntiPattern[] = [
   { id: 'H12', category: 'hardcoding', description: 'BFCL score threshold가 상수 아닌 리터럴', location: 'model_selector.ml', risk: 'L' },
 ]
 
+// ── Provider Model Catalog ──────────────────────────────────────
+// Per-provider model listings with context/pricing. Source: supplement research + official docs.
+
+export interface ProviderModel {
+  id: string
+  context: string
+  tier: 'flagship' | 'standard' | 'fast' | 'coding' | 'legacy'
+  inputPrice?: string
+  outputPrice?: string
+  notes?: string
+}
+
+export interface ProviderModelGroup {
+  providerId: string
+  models: ProviderModel[]
+}
+
+export const PROVIDER_MODELS: ProviderModelGroup[] = [
+  {
+    providerId: 'openai',
+    models: [
+      { id: 'gpt-4.1', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal' },
+      { id: 'gpt-4.1-mini', context: '1M', tier: 'standard', inputPrice: '$0.40', outputPrice: '$1.60' },
+      { id: 'gpt-4.1-nano', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
+      { id: 'o4-mini', context: '200K', tier: 'standard', inputPrice: '$1.10', outputPrice: '$4.40', notes: 'Reasoning' },
+    ],
+  },
+  {
+    providerId: 'claude',
+    models: [
+      { id: 'claude-opus-4-7', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'Thinking' },
+      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Thinking' },
+      { id: 'claude-haiku-4-5', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00' },
+    ],
+  },
+  {
+    providerId: 'gemini',
+    models: [
+      { id: 'gemini-2.5-pro', context: '1M', tier: 'flagship', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking' },
+      { id: 'gemini-2.5-flash', context: '1M', tier: 'standard', inputPrice: '$0.15', outputPrice: '$0.60', notes: 'Thinking' },
+      { id: 'gemini-2.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
+    ],
+  },
+  {
+    providerId: 'deepseek',
+    models: [
+      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning' },
+      { id: 'deepseek-v3-0324', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10' },
+      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28' },
+    ],
+  },
+  {
+    providerId: 'qwen35',
+    models: [
+      { id: 'qwen3-235b-a22b', context: '128K', tier: 'flagship', inputPrice: '$0.40', outputPrice: '$1.20', notes: 'MoE, Thinking' },
+      { id: 'qwen3-32b', context: '128K', tier: 'standard', inputPrice: '$0.12', outputPrice: '$0.36' },
+      { id: 'qwen3-8b', context: '128K', tier: 'fast', inputPrice: '$0.02', outputPrice: '$0.06' },
+    ],
+  },
+  {
+    providerId: 'mistral',
+    models: [
+      { id: 'mistral-large-2411', context: '128K', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$6.00' },
+      { id: 'mistral-medium-2505', context: '128K', tier: 'standard', inputPrice: '$0.40', outputPrice: '$2.00' },
+      { id: 'codestral-latest', context: '256K', tier: 'coding', inputPrice: '$0.30', outputPrice: '$0.90', notes: 'Code' },
+    ],
+  },
+  {
+    providerId: 'glm',
+    models: [
+      { id: 'glm-5', context: '200K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'General' },
+      { id: 'glm-5-code', context: '128K', tier: 'coding', inputPrice: '$1.20', outputPrice: '$0.30', notes: 'Coding Plan 전용' },
+      { id: 'glm-4.7', context: '128K', tier: 'standard', inputPrice: '$0.60', outputPrice: '—', notes: 'Coding Plan 기본' },
+      { id: 'glm-4.5-air', context: '128K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: 'Coding Plan 경량' },
+    ],
+  },
+  {
+    providerId: 'kimi',
+    models: [
+      { id: 'kimi-k2.6', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'Multimodal, Thinking' },
+      { id: 'kimi-k2.5', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'SoTA Agent/Code' },
+      { id: 'kimi-k2-thinking', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '장기 사고' },
+      { id: 'kimi-k2-turbo-preview', context: '256K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: '60-100 tok/s' },
+      { id: 'moonshot-v1-128k', context: '128K', tier: 'legacy', inputPrice: '—', outputPrice: '—' },
+    ],
+  },
+  {
+    providerId: 'ollama',
+    models: [
+      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+    ],
+  },
+  {
+    providerId: 'llamacpp',
+    models: [
+      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+    ],
+  },
+]
+
+export function modelTierStyle(tier: ProviderModel['tier']): string {
+  switch (tier) {
+    case 'flagship': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'standard': return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]'
+    case 'fast':     return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'coding':   return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+    case 'legacy':   return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+  }
+}
+
+// ── CLI Transport Comparison ──────────────────────────────────
+// CLI transport implementation details. Source: cli_noninteractive_deep_dive.md.
+
+export interface CliTransportInfo {
+  providerId: string
+  binary: string
+  loc: number
+  promptMode: string
+  streamFormat: string
+  argvThreshold: string
+  notes: string
+}
+
+export const CLI_TRANSPORTS: CliTransportInfo[] = [
+  { providerId: 'claude', binary: 'claude', loc: 1282, promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
+  { providerId: 'gemini_cli', binary: 'gemini', loc: 949, promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
+  { providerId: 'codex_cli', binary: 'codex', loc: 1340, promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', loc: 693, promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: '단일 모델 기본 (kimi-for-coding)' },
+]
+
+// ── GLM Coding Plan Mapping ───────────────────────────────────
+// Claude Code internal env vars → GLM model mapping. Source: supplement research.
+
+export const GLM_CODING_PLAN_MAP: Array<{ envVar: string; glmModel: string; note: string }> = [
+  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'GLM-4.7', note: '최고 성능 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'GLM-4.7', note: '표준 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'GLM-4.5-Air', note: '빠른/경량 코딩' },
+]
+
+export const GLM_WIRING_GAPS: Array<{ area: string; oasCurrent: string; official: string; gap: string }> = [
+  { area: 'Coding 전용 모델', oasCurrent: 'glm-5.1, glm-5, glm-5-turbo (auto 목록)', official: 'GLM-5-Code (별도 모델군)', gap: 'Coding 전용 모델 미식별' },
+  { area: '모델 에일리어스', oasCurrent: 'auto, flash, turbo, vision, air, ocr', official: 'GLM-4.7, GLM-4.5-Air, GLM-5-Code', gap: 'Coding-specific alias 부재' },
+  { area: 'Context ceiling', oasCurrent: '200K (General과 동일)', official: '128K (GLM-5-Code)', gap: 'Context 과다 선언' },
+]
+
 // ── Cascade Traces ────────────────────────────────────────────
 // OAS cascade routing trace scenarios. Source: sec03 cascade flow analysis.
 

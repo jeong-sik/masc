@@ -160,6 +160,26 @@ let test_fsm_guard_curried_fail () =
   in
   assert raised
 
+(* Verify that [wrap_unit] was actually called by the PPX-generated code,
+   not just a bare assert.  The stub tracks invocations. *)
+let test_wrap_unit_routing () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = f_with_guard 5 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "f_with_guard");
+  assert (stage = "guard")
+
+let test_wrap_unit_routing_curried () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = g_curried 2 3 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "g_curried");
+  assert (stage = "guard")
+
 let () =
   test_color_to_tla_symbol ();
   test_color_all_states ();
@@ -176,4 +196,6 @@ let () =
   test_fsm_guard_fail ();
   test_fsm_guard_curried_pass ();
   test_fsm_guard_curried_fail ();
+  test_wrap_unit_routing ();
+  test_wrap_unit_routing_curried ();
   print_endline "ppx_tla cycle 2 + 3 + 12 tests: PASS"

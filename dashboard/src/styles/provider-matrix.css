@@ -1,0 +1,165 @@
+/* provider-matrix.css — Design-system-aligned styles for Provider Capability Matrix.
+   Leverages tokens.css + primitives.css semantic classes.
+   Layout utilities (flex, grid, gap) remain inline via Tailwind. */
+
+/* ════════ TABLE BASE ════════ */
+.pm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-11);
+}
+
+/* ════════ TABLE HEADER ════════ */
+.pm-thead tr {
+  background: var(--color-bg-surface);
+}
+
+.pm-th {
+  border-bottom: 1px solid var(--color-border-default);
+  padding: var(--sp-1h) var(--sp-2);
+  text-align: left;
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-secondary);
+  white-space: nowrap;
+}
+
+.pm-th--center { text-align: center; }
+.pm-th--right  { text-align: right; }
+
+.pm-th--sticky {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: var(--shell-rail-bg, var(--color-bg-surface));
+  border-right: 1px solid var(--color-border-default);
+}
+
+/* ════════ TABLE BODY ════════ */
+.pm-td {
+  border-bottom: 1px solid var(--color-border-default);
+  padding: var(--sp-1h) var(--sp-2);
+}
+
+.pm-td--center { text-align: center; }
+.pm-td--right  { text-align: right; }
+
+.pm-td--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.pm-td--right-border {
+  border-right: 1px solid var(--color-border-default);
+}
+
+/* alternating row — apply to tr */
+.pm-row-alt:nth-child(even) {
+  background: var(--color-bg-hover);
+}
+
+/* ════════ CARD ════════
+   Replaces: border border-[var(--color-border-default)] rounded overflow-hidden */
+.pm-card {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.pm-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sp-3);
+  min-height: 28px;
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+/* ════════ TABLE WRAPPER (scroll container) ════════ */
+.pm-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+}
+
+/* ════════ CATEGORY HEADER ROW ════════ */
+.pm-cat-row td {
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border-default);
+  border-bottom: 1px solid var(--color-border-default);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+/* ════════ FILTER BUTTON ════════
+   Replaces inline px-2 py-0.5 rounded text-[10px] font-mono border */
+.pm-filter {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-2);
+  height: var(--ctrl-h-xs);
+  border-radius: var(--r-1);
+  border: 1px solid var(--color-border-default);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--color-fg-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--motion-swap), background var(--motion-swap), color var(--motion-swap);
+}
+
+.pm-filter:hover {
+  border-color: var(--color-border-strong);
+}
+
+.pm-filter.is-active {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-primary);
+}
+
+/* ════════ CELL BADGE ════════
+   Inline indicator inside matrix cells (support level symbols). */
+.pm-cell-badge {
+  display: inline-block;
+  width: 100%;
+  border-radius: var(--r-1);
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-10);
+  font-family: var(--font-mono);
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+/* ════════ CELL VARIANTS ════════ */
+.pm-td--indent {
+  padding-left: var(--sp-4);
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-primary);
+}
+
+.pm-td--alt-bg {
+  background: var(--color-bg-hover);
+}
+
+/* ════════ CHIP EXTENSIONS ════════
+   Map to primitives.css .chip base for matrix-specific badges. */
+/* ════════ CLI WRAPPER ROW ════════ */
+.pm-row--cli {
+  opacity: 0.85;
+}
+
+.pm-row--cli .pm-td {
+  font-style: italic;
+}
+
+/* ════════ CHIP EXTENSIONS ════════
+   Map to primitives.css .chip base for matrix-specific badges. */
+.chip.sm.is-ghost {
+  background: var(--white-4, var(--color-bg-hover));
+  color: var(--color-fg-muted);
+}

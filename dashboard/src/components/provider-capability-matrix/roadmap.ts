@@ -18,35 +18,31 @@ import {
 
 function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
   return html`
-    <div class="border rounded overflow-hidden ${phaseColor(item.id)}">
-      <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
+    <div class="pm-card ${phaseColor(item.id)}">
+      <div class="pm-card-head">
         <div class="flex items-center gap-2">
-          <span class="text-xs font-bold font-mono">${item.id}</span>
-          <span class="text-xs font-medium">${item.area}</span>
+          <span class="t-label t-bold t-mono">${item.id}</span>
+          <span class="t-label">${item.area}</span>
         </div>
-        <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${item.timeline}</span>
+        <span class="t-micro t-mono t-dim">${item.timeline}</span>
       </div>
-      <div class="px-3 py-2 bg-[var(--shell-rail-bg)] text-[var(--color-fg-primary)]">
-        <p class="text-[11px] leading-snug mb-1.5">${item.goal}</p>
+      <div class="px-3 py-2 bg-[var(--shell-rail-bg)]">
+        <p class="t-caption mb-1.5">${item.goal}</p>
         <div class="flex flex-wrap gap-1 mb-1.5">
           ${item.targetAntiPatterns.map(ap => html`
-            <span key=${ap} class="inline-block rounded px-1 py-px text-[9px] font-mono bg-[var(--bad-10)] text-[var(--bad-light)]">
-              ${ap}
-            </span>
+            <span key=${ap} class="chip sm is-err">${ap}</span>
           `)}
         </div>
-        <div class="flex items-center gap-2 text-[10px]">
-          <span class="text-[var(--color-fg-muted)]">참조:</span>
-          <span class="text-[var(--color-fg-secondary)]">${item.reference}</span>
+        <div class="flex items-center gap-2 t-micro">
+          <span class="t-dim">참조:</span>
+          <span class="t-meta">${item.reference}</span>
         </div>
-        <div class="mt-1 text-[10px] font-medium text-[var(--color-status-ok)]">
-          ${item.effect}
-        </div>
+        <div class="mt-1 t-micro t-ok t-semi">${item.effect}</div>
         ${item.deps.length > 0 ? html`
-          <div class="mt-1 flex items-center gap-1 text-[9px] text-[var(--color-fg-muted)]">
+          <div class="mt-1 flex items-center gap-1 t-micro t-dim">
             <span>선행:</span>
             ${item.deps.map(d => html`
-              <span key=${d} class="rounded px-1 py-px bg-[var(--white-4)] font-mono">${d}</span>
+              <span key=${d} class="chip sm is-ghost">${d}</span>
             `)}
           </div>
         ` : null}
@@ -58,11 +54,11 @@ function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
 function DependencyGraph() {
   const phases = ROADMAP_ITEMS.map(r => r.id)
   return html`
-    <div class="flex items-center gap-1 text-[10px] font-mono flex-wrap">
+    <div class="flex items-center gap-1 t-micro t-mono flex-wrap">
       ${phases.map((p, i) => html`
         <span key=${p} class="inline-flex items-center gap-0.5">
-          ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)] px-0.5">→</span>` : null}
-          <span class="rounded px-1.5 py-0.5 ${phaseColor(p)}">${p}</span>
+          ${i > 0 ? html`<span class="t-disabled px-0.5">→</span>` : null}
+          <span class="chip sm ${phaseColor(p)}">${p}</span>
         </span>
       `)}
     </div>
@@ -80,29 +76,29 @@ function formatFte(value: number): string {
 
 function Timeline() {
   return html`
-    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-      <table class="w-full text-xs border-collapse">
-        <thead>
-          <tr class="bg-[var(--white-4)]">
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[50px]">주차</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[60px]">Phase</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">작업</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">산출물</th>
-            <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[70px]">의존</th>
+    <div class="pm-scroll">
+      <table class="pm-table">
+        <thead class="pm-thead">
+          <tr>
+            <th class="pm-th pm-th--right-border min-w-[50px]">주차</th>
+            <th class="pm-th pm-th--right-border min-w-[60px]">Phase</th>
+            <th class="pm-th pm-th--right-border">작업</th>
+            <th class="pm-th pm-th--right-border">산출물</th>
+            <th class="pm-th min-w-[70px]">의존</th>
           </tr>
         </thead>
         <tbody>
           ${PHASE_TIMELINE.map((row, i) => {
             const phaseClass = PHASE_COLORS[row.phase] ?? ''
             return html`
-              <tr key=${i} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[11px] text-[var(--color-fg-muted)]">${row.week}</td>
-                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1">
-                  <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-bold ${phaseClass}">${row.phase}</span>
+              <tr key=${i} class="pm-row-alt">
+                <td class="pm-td pm-td--right-border pm-td--mono t-dim">${row.week}</td>
+                <td class="pm-td pm-td--right-border">
+                  <span class="chip sm ${phaseClass}">${row.phase}</span>
                 </td>
-                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[11px]">${row.work}</td>
-                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-secondary)]">${row.deliverable}</td>
-                <td class="border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[10px] text-[var(--color-fg-muted)]">${row.deps}</td>
+                <td class="pm-td pm-td--right-border t-caption">${row.work}</td>
+                <td class="pm-td pm-td--right-border t-meta">${row.deliverable}</td>
+                <td class="pm-td t-micro t-mono t-dim">${row.deps}</td>
               </tr>
             `
           })}
@@ -122,35 +118,35 @@ function ResourceTable() {
   ) ?? []
 
   return html`
-    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-      <table class="w-full text-xs border-collapse">
-        <thead>
-          <tr class="bg-[var(--white-4)]">
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">트랙</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">범위</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[40px]">인력</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">0–4주</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">4–8주</th>
-            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">8–12주</th>
-            <th class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">12–16주</th>
+    <div class="pm-scroll">
+      <table class="pm-table">
+        <thead class="pm-thead">
+          <tr>
+            <th class="pm-th pm-th--right-border">트랙</th>
+            <th class="pm-th pm-th--right-border">범위</th>
+            <th class="pm-th pm-th--center pm-th--right-border min-w-[40px]">인력</th>
+            <th class="pm-th pm-th--center pm-th--right-border min-w-[55px]">0–4주</th>
+            <th class="pm-th pm-th--center pm-th--right-border min-w-[55px]">4–8주</th>
+            <th class="pm-th pm-th--center pm-th--right-border min-w-[55px]">8–12주</th>
+            <th class="pm-th pm-th--center min-w-[55px]">12–16주</th>
           </tr>
         </thead>
         <tbody>
           ${RESOURCE_ALLOCATION.map((row, i) => html`
-            <tr key=${i} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 font-medium text-[var(--color-fg-primary)]">${row.track}</td>
-              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-secondary)]">${row.scope}</td>
-              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${row.headcount}인</td>
+            <tr key=${i} class="pm-row-alt">
+              <td class="pm-td pm-td--right-border t-semi">${row.track}</td>
+              <td class="pm-td pm-td--right-border t-micro t-meta">${row.scope}</td>
+              <td class="pm-td pm-td--right-border pm-td--center pm-td--mono">${row.headcount}인</td>
               ${row.pct.map((p, j) => html`
-                <td key=${j} class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px] text-[var(--color-fg-muted)]">${p}</td>
+                <td key=${j} class="pm-td pm-td--right-border pm-td--center pm-td--mono t-micro t-dim">${p}</td>
               `)}
             </tr>
           `)}
-          <tr class="bg-[var(--white-4)] font-medium">
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1" colSpan=${2}>합계 FTE</td>
-            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${totalHeadcount}인</td>
+          <tr class="pm-cat-row">
+            <td class="pm-td" colSpan=${2}>합계 FTE</td>
+            <td class="pm-td pm-td--center pm-td--mono">${totalHeadcount}인</td>
             ${phaseTotals.map((total, i) => html`
-              <td key=${i} class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">${formatFte(total)}</td>
+              <td key=${i} class="pm-td pm-td--center pm-td--mono t-micro">${formatFte(total)}</td>
             `)}
           </tr>
         </tbody>
@@ -163,24 +159,22 @@ function SuccessMetrics() {
   return html`
     <div class="grid grid-cols-1 gap-3">
       ${SUCCESS_METRICS.map(m => html`
-        <div key=${m.id} class="border border-[var(--color-border-default)] rounded overflow-hidden">
-          <div class="flex items-center justify-between px-3 py-2 bg-[var(--white-4)] border-b border-[var(--color-border-default)]">
+        <div key=${m.id} class="pm-card">
+          <div class="pm-card-head">
             <div class="flex items-center gap-2">
-              <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${m.title}</span>
-              <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono font-bold bg-[var(--ok-10)] text-[var(--color-status-ok)]">
-                Target: ${m.target}
-              </span>
+              <span class="t-label t-semi">${m.title}</span>
+              <span class="chip sm is-ok">Target: ${m.target}</span>
             </div>
           </div>
           <div class="px-3 py-2">
-            <p class="text-[11px] leading-snug text-[var(--color-fg-secondary)] mb-2">${m.description}</p>
+            <p class="t-caption t-meta mb-2">${m.description}</p>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
               ${Object.entries(m.phases).map(([phase, desc]) => {
                 const phaseClass = PHASE_COLORS[phase] ?? ''
                 return html`
-                  <div key=${phase} class="border border-[var(--color-border-default)] rounded px-2 py-1.5">
-                    <span class="inline-block rounded px-1 py-px text-[9px] font-bold ${phaseClass} mb-1">${phase}</span>
-                    <p class="text-[10px] leading-snug text-[var(--color-fg-muted)]">${desc}</p>
+                  <div key=${phase} class="pm-card px-2 py-1.5">
+                    <span class="chip sm ${phaseClass} mb-1">${phase}</span>
+                    <p class="t-micro t-dim">${desc}</p>
                   </div>
                 `
               })}
@@ -195,12 +189,12 @@ function SuccessMetrics() {
 export function Roadmap() {
   return html`
     <div class="flex flex-col gap-4">
-      <div class="flex items-center gap-4 text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
+      <div class="t-micro t-mono t-dim px-1">
         <span>sec06–07 — P0–P7 순차-병렬 하이브리드 개선 계획 + 16주 구현 로드맵</span>
       </div>
 
       <div>
-        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">의존성 그래프</h4>
+        <h4 class="t-label t-semi mb-2">의존성 그래프</h4>
         <${DependencyGraph} />
       </div>
 
@@ -211,33 +205,27 @@ export function Roadmap() {
       </div>
 
       <div>
-        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">Per-Provider 적용 매트릭스</h4>
-        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec06 Table 6-2 — ✅ 직접 적용, ⚠️ 제한적, ❌ 불가, — 해당 없음</p>
-        <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-          <table class="w-full text-xs border-collapse">
-            <thead>
-              <tr class="bg-[var(--white-4)]">
-                <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[60px]">
-                  항목
-                </th>
+        <h4 class="t-label t-semi mb-2">Per-Provider 적용 매트릭스</h4>
+        <p class="t-micro t-dim mb-2">sec06 Table 6-2 — ✅ 직접 적용, ⚠️ 제한적, ❌ 불가, — 해당 없음</p>
+        <div class="pm-scroll">
+          <table class="pm-table">
+            <thead class="pm-thead">
+              <tr>
+                <th class="pm-th pm-th--sticky min-w-[60px]">항목</th>
                 ${PROVIDER_IDS.map(pid => html`
-                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1.5 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[50px]">
-                    ${PROVIDER_LABELS[pid] ?? pid}
-                  </th>
+                  <th key=${pid} class="pm-th pm-th--center min-w-[50px]">${PROVIDER_LABELS[pid] ?? pid}</th>
                 `)}
               </tr>
             </thead>
             <tbody>
               ${ROADMAP_ITEMS.map((item, i) => html`
-                <tr key=${item.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-                  <td class="sticky left-0 z-10 ${i % 2 === 0 ? 'bg-[var(--shell-rail-bg)]' : 'bg-[var(--white-2)]'} border-r border-b border-[var(--color-border-default)] px-2 py-1 font-mono font-bold text-[11px]">
-                    ${item.id}
-                  </td>
+                <tr key=${item.id} class="pm-row-alt">
+                  <td class="pm-td pm-th--sticky pm-td--mono t-bold">${item.id}</td>
                   ${PROVIDER_IDS.map(pid => {
                     const a = APPLICABILITY_MATRIX[item.id][pid] ?? 'na'
                     return html`
-                      <td key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5 text-center">
-                        <span class="inline-block w-full rounded px-1 py-0.5 text-[10px] font-mono font-bold ${applicabilityCellClass(a)}">
+                      <td key=${pid} class="pm-td pm-td--center">
+                        <span class="pm-cell-badge ${applicabilityCellClass(a)}">
                           ${applicabilitySymbol(a)}
                         </span>
                       </td>
@@ -251,20 +239,20 @@ export function Roadmap() {
       </div>
 
       <div>
-        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">Phase별 구현 타임라인</h4>
-        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 Table 7-1 — 16주 4-Phase 순차-병렬 하이브리드 로드맵</p>
+        <h4 class="t-label t-semi mb-2">Phase별 구현 타임라인</h4>
+        <p class="t-micro t-dim mb-2">sec07 Table 7-1 — 16주 4-Phase 순차-병렬 하이브리드 로드맵</p>
         <${Timeline} />
       </div>
 
       <div>
-        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">리소스 할당</h4>
-        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 Table 7-2 — 3 트랙 × 4 Phase 병렬 진행</p>
+        <h4 class="t-label t-semi mb-2">리소스 할당</h4>
+        <p class="t-micro t-dim mb-2">sec07 Table 7-2 — 3 트랙 × 4 Phase 병렬 진행</p>
         <${ResourceTable} />
       </div>
 
       <div>
-        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">성공 지표</h4>
-        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 §7.3 — 16주 로드맵 완료 판정 기준 (3개 교차 검증 지표)</p>
+        <h4 class="t-label t-semi mb-2">성공 지표</h4>
+        <p class="t-micro t-dim mb-2">sec07 §7.3 — 16주 로드맵 완료 판정 기준 (3개 교차 검증 지표)</p>
         <${SuccessMetrics} />
       </div>
     </div>

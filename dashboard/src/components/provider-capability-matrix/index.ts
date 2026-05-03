@@ -91,7 +91,7 @@ export function ProviderCapabilityMatrix() {
           onChange=${(v: CapView) => { activeView.value = v }}
         />
         ${updatedAt ? html`
-          <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">
+          <span class="t-caption">
             프로바이더 상태: ${updatedAt}
           </span>
         ` : null}
@@ -99,10 +99,10 @@ export function ProviderCapabilityMatrix() {
 
       ${activeView.value === 'providers' ? html`
         <${Card}>
-          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS Provider Capability 정의</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <h3 class="t-title mb-2">OAS Provider Capability 정의</h3>
+          <p class="t-meta mb-3">
             sec02 Table 1 — 12개 런타임 provider kind의 capability flag와 한계값.
-            CLI wrapper 3종은 <code class="font-mono text-[10px] bg-[var(--white-4)] px-1 rounded">usage: strip</code>으로 토큰 카운트를 노출하지 않음.
+            CLI wrapper 3종은 <code class="t-code">usage: strip</code>으로 토큰 카운트를 노출하지 않음.
           </p>
           <${OasProviderTable} />
         <//>
@@ -114,7 +114,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'models' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">Provider 모델 카탈로그</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             Provider별 공식 모델 목록, 가격($/1M tokens), Context 한계, CLI transport 구현 비교.
             GLM Coding Plan은 Claude Code 호환 엔드포인트를 통한 별도 모델 매핑 사용.
           </p>
@@ -123,7 +123,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'cascade' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS Cascade 라우팅 트레이스</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             sec03 분석 — Provider cascade 경로의 4가지 대표 시나리오.
             Rate-limit/Timeout → Cooldown 게이트 → 다음 Provider 순차 시도.
             Exhaustion 시 turn 실패로 보고.
@@ -133,7 +133,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'benchmarks' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">BFCL Function Calling 순위</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             sec04 Table 4.2.2 — 2026년 4월 기준 BFCL V3/V4 성능 순위.
             GLM-4.5(70.85%)과 Claude 계열(70%대)이 스키마 준수에서 상위.
           </p>
@@ -142,7 +142,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'wiring' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">OAS 배선 vs 공식 API 지원</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             OAS가 선언한 capability와 실제 프로바이더 API 동작 사이의 불일치.
             High 영향도 항목은 tool calling 비활성화로 이어져 OAS 라우팅 정확도에 직접 영향.
           </p>
@@ -151,7 +151,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'roadmap' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">P0–P7 개선 로드맵</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             sec06 종합 개선 계획 — 비결정론적 구현 경계를 결정론적으로 전환하는 8개 우선순위.
             P0(Verification Loop)이 기반 인프라로 다른 모든 개선의 토대.
           </p>
@@ -160,7 +160,7 @@ export function ProviderCapabilityMatrix() {
       ` : activeView.value === 'anti-patterns' ? html`
         <${Card}>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)] mb-2">안티패턴 레지스트리</h3>
-          <p class="text-xs text-[var(--color-fg-muted)] mb-3">
+          <p class="t-meta mb-3">
             sec05 분석에서 식별된 32개 안티패턴. Silent Failure가 운영 가시성에 가장 큰 위협.
           </p>
           <${AntiPatternList} />

@@ -1147,13 +1147,9 @@ let run_heartbeat_loop
               ~proactive_warmup_elapsed
               ~shared_context
           in
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"pre"
-            (fun () -> Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
           turn_running := false;
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"post"
-            (fun () -> Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
           r
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),

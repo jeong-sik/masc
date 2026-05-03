@@ -103,10 +103,9 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
             Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
-         FALSE] postcondition. Counter-mode by default. *)
-      Keeper_fsm_guard_runtime.wrap_unit
-        ~action:"HeartbeatTick" ~stage:"post"
-        (fun () -> post_heartbeat_tick ~wakeup);
+         FALSE] postcondition. The [@@fsm_guard] PPX routes the
+         assertion through [wrap_unit ~stage:"guard"] automatically. *)
+      post_heartbeat_tick ~wakeup;
       Woken)
     else if remaining <= 0.0
     then Timeout

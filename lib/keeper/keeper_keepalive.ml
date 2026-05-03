@@ -125,10 +125,10 @@ let set_keeper_paused_state ~agent_name paused =
        if not paused then begin
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
-         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition. *)
-         Keeper_fsm_guard_runtime.wrap_unit
-           ~action:"WakeupSignal" ~stage:"post"
-           (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup)
+         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
+            The [@@fsm_guard] PPX routes the assertion through
+            [wrap_unit ~stage:"guard"] automatically. *)
+         post_wakeup_signal ~wakeup:entry.fiber_wakeup
        end)
 ;;
 
@@ -156,10 +156,10 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
        persist_directive_meta_update entry ~updated_meta;
        (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
           guard pins that the directive successfully attached the
-          [task_id] to the keeper's meta. *)
-       Keeper_fsm_guard_runtime.wrap_unit
-         ~action:"SubmitTask" ~stage:"post"
-         (fun () -> post_submit_task ~meta:updated_meta ~task_id);
+          [task_id] to the keeper's meta. The [@@fsm_guard] PPX
+          routes the assertion through [wrap_unit ~stage:"guard"]
+          automatically. *)
+       post_submit_task ~meta:updated_meta ~task_id;
        wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
@@ -673,9 +673,7 @@ let stop_keepalive ?base_path name =
           even on stop_keepalive — the wakeup atomic must be observable
           as TRUE before the heartbeat fiber consumes its termination
           signal. *)
-       Keeper_fsm_guard_runtime.wrap_unit
-         ~action:"WakeupSignal" ~stage:"post"
-         (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup);
+       post_wakeup_signal ~wakeup:entry.fiber_wakeup;
        (match Atomic.get entry.grpc_close with
        | Some close_fn ->
           (try close_fn () with

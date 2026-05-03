@@ -156,102 +156,20 @@ type t =
   | RateLimitExceeded of rate_limit_error
   | CacheError of cache_error
 
-<<<<<<< HEAD
-let rec to_string = function
-  | NotInitialized -> "MASC not initialized. Use masc_init first."
-  | AlreadyInitialized -> "MASC already initialized."
-  | AgentNotFound name -> Printf.sprintf "Agent not found: %s" name
-  | AgentNotJoined name -> Printf.sprintf "Agent not joined: %s. Use masc_join first." name
-  | AgentAlreadyJoined name -> Printf.sprintf "%s is already in the room" name
-  | TaskNotFound id -> Printf.sprintf "Task not found: %s. Call masc_status to refresh your task list." id
-  | TaskAlreadyClaimed { task_id; by } ->
-      Printf.sprintf
-        "Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
-        task_id by
-  | TaskNotClaimed id ->
-      Printf.sprintf
-        "Task %s is still todo. Claim/start it first, then mark it done."
-        id
-  | TaskInvalidState msg -> Printf.sprintf "Invalid task state: %s" msg
-  | PortalNotOpen agent -> Printf.sprintf "No portal open for %s. Use masc_portal_open first." agent
-  | PortalAlreadyOpen { agent; target } -> Printf.sprintf "Portal already open: %s <-> %s" agent target
-  | PortalClosed agent -> Printf.sprintf "Portal is closed for %s. Use masc_portal_open to reopen." agent
-  | InvalidJson msg -> Printf.sprintf "Invalid JSON: %s" msg
-  | IoError msg -> Printf.sprintf "IO error: %s" msg
-  | InvalidAgentName reason -> Printf.sprintf "Invalid agent name: %s" reason
-  | InvalidTaskId reason -> Printf.sprintf "Invalid task ID: %s" reason
-  | InvalidFilePath reason -> Printf.sprintf "Invalid file path: %s" reason
-  | Unauthorized reason -> Printf.sprintf "Unauthorized: %s" reason
-  | Forbidden { agent; action } -> Printf.sprintf "Forbidden: %s cannot %s" agent action
-  | TokenExpired agent -> Printf.sprintf "Token expired for %s. Use masc_auth_refresh." agent
-  | InvalidToken reason -> Printf.sprintf "Invalid token: %s" reason
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-let rec to_string = function
-  | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
-  | AlreadyInitialized -> "MASC already initialized."
-  | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
-  | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
-  | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
-  | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s. Call masc_status to refresh your task list." id
-  | TaskAlreadyClaimed { task_id; by } ->
-      Printf.sprintf
-        "❌ Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
-        task_id by
-  | TaskNotClaimed id ->
-      Printf.sprintf
-        "❌ Task %s is still todo. Claim/start it first, then mark it done."
-        id
-  | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
-  | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
-  | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
-  | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent
-  | InvalidJson msg -> Printf.sprintf "❌ Invalid JSON: %s" msg
-  | IoError msg -> Printf.sprintf "❌ IO error: %s" msg
-  | InvalidAgentName reason -> Printf.sprintf "❌ Invalid agent name: %s" reason
-  | InvalidTaskId reason -> Printf.sprintf "❌ Invalid task ID: %s" reason
-  | InvalidFilePath reason -> Printf.sprintf "❌ Invalid file path: %s" reason
-  | Unauthorized reason -> Printf.sprintf "🔐 Unauthorized: %s" reason
-  | Forbidden { agent; action } -> Printf.sprintf "🚫 Forbidden: %s cannot %s" agent action
-  | TokenExpired agent -> Printf.sprintf "⏰ Token expired for %s. Use masc_auth_refresh." agent
-  | InvalidToken reason -> Printf.sprintf "🔑 Invalid token: %s" reason
-=======
 let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
   | Portal e -> Portal_error.to_string e
   | System e -> System_error.to_string e
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
   | RateLimitExceeded e ->
-<<<<<<< HEAD
-      Printf.sprintf "Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-      Printf.sprintf "⏳ Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-=======
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
         (show_rate_limit_category e.category) e.current e.limit e.wait_seconds
   | CacheError e -> (match e with
-<<<<<<< HEAD
-      | CacheReadFailed path -> Printf.sprintf "Cache read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "Cache write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "Cache expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "Cache corrupted [path=%s]" path)
-  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
-  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-      | CacheReadFailed path -> Printf.sprintf "❌ Cache: Read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "❌ Cache: Write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "❌ Cache: Expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "❌ Cache: Corrupted [path=%s]" path)
-  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
-  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
-=======
       | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
       | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path
       | CacheExpired { key; age_hours } -> Printf.sprintf "[CacheError] Expired [key=%s, age=%.1fh]" key age_hours
       | CacheCorrupted path -> Printf.sprintf "[CacheError] Corrupted [path=%s]" path)
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
 
 let show = to_string
 

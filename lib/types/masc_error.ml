@@ -220,7 +220,10 @@ let to_yojson err =
   `String (to_string err)
 
 let code = function
+  | Auth (Auth_error.Forbidden _) -> 403
   | Auth _ -> 401
+  | Task (Task_error.NotFound _) -> 404
+  | Agent (Agent_error.NotFound _) -> 404
   | Task _ | Agent _ | Portal _ | System _ -> 400
   | RateLimitExceeded _ -> 429
   | _ -> 500

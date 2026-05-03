@@ -493,7 +493,7 @@ let ensure_sandbox_clone_ready candidate =
       Error
         (System (System_error.IoError
            (Printf.sprintf
-              "sandbox_clone_invalid: %s has a .git marker but is not a usable \               git clone: %s"
+              "sandbox_clone_invalid: %s has a .git marker but is not a usable git clone: %s"
               candidate detail)))
 
 let keeper_toml_path ~config ~agent_name =

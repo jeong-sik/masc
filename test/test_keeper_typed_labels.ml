@@ -97,29 +97,29 @@ let test_pp_failure_reason_includes_payload () =
 
 (* ── Keeper_turn_fsm.turn_state ──────────────────────────────── *)
 
-let all_turn_states : Keeper_turn_fsm.turn_state list =
+let all_turn_states : Keeper_turn_fsm.any_state list =
   [
-    Idle;
-    Phase_gating;
-    Cascade_routing;
-    Awaiting_provider;
-    Streaming;
-    Awaiting_tool_result;
-    Completing;
-    Done;
-    Failed (Failure_runtime_error "x");
-    Cancelled Cancelled_supervisor_stop;
+    Keeper_turn_fsm.Any Idle;
+    Keeper_turn_fsm.Any Phase_gating;
+    Keeper_turn_fsm.Any Cascade_routing;
+    Keeper_turn_fsm.Any Awaiting_provider;
+    Keeper_turn_fsm.Any Streaming;
+    Keeper_turn_fsm.Any Awaiting_tool_result;
+    Keeper_turn_fsm.Any Completing;
+    Keeper_turn_fsm.Any Done;
+    Keeper_turn_fsm.Any (Failed (Failure_runtime_error "x"));
+    Keeper_turn_fsm.Any (Cancelled Cancelled_supervisor_stop);
   ]
 
 let test_turn_state_labels_unique () =
-  let labels = List.map Keeper_turn_fsm.turn_state_label all_turn_states in
+  let labels = List.map Keeper_turn_fsm.any_state_label all_turn_states in
   Alcotest.(check (list string))
     "no duplicate turn_state labels" [] (duplicates labels)
 
 let test_failed_label_carries_reason () =
   let s =
-    Keeper_turn_fsm.turn_state_label
-      (Failed (Failure_cascade_unavailable { base = "b"; resolved = None }))
+    Keeper_turn_fsm.any_state_label
+      (Keeper_turn_fsm.Any (Failed (Failure_cascade_unavailable { base = "b"; resolved = None })))
   in
   Alcotest.(check string)
     "Failed label uses 'failed:' prefix + reason"
@@ -127,7 +127,7 @@ let test_failed_label_carries_reason () =
 
 let test_cancelled_label_carries_reason () =
   let s =
-    Keeper_turn_fsm.turn_state_label (Cancelled Cancelled_fleet_shutdown)
+    Keeper_turn_fsm.any_state_label (Keeper_turn_fsm.Any (Cancelled Cancelled_fleet_shutdown))
   in
   Alcotest.(check string)
     "Cancelled label uses 'cancelled:' prefix + reason"

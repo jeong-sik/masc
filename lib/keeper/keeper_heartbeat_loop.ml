@@ -369,14 +369,38 @@ let run_keepalive_unified_turn
               | Keeper_event_queue.Normal -> "normal"
               | Keeper_event_queue.Low -> "low"
             in
+            let class_str =
+              match Keeper_event_queue.classify stim with
+              | Board_signal -> "board_signal"
+              | Bootstrap -> "bootstrap"
+              | Unsupported _ -> "unsupported"
+            in
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_stimulus_consumed
+              ~labels:[("keeper", meta_after_triage.name); ("class", class_str)] ();
             Log.Keeper.info
-              "turn entry: consumed stimulus stimulus_id=%s urgency=%s payload_len=%d (keeper=%s)"
-              stim.post_id urgency_str
+              "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s payload_len=%d (keeper=%s)"
+              stim.post_id urgency_str class_str
               (String.length stim.payload)
               meta_after_triage.name;
-            Keeper_world_observation.pending_board_event_of_stimulus
-              ~continuity_summary:meta_after_triage.continuity_summary
-              ~meta:meta_after_triage stim
+            (match Keeper_event_queue.classify stim with
+             | Board_signal ->
+                 Keeper_world_observation.pending_board_event_of_stimulus
+                   ~continuity_summary:meta_after_triage.continuity_summary
+                   ~meta:meta_after_triage stim
+             | Bootstrap ->
+                 Log.Keeper.info
+                   "turn entry: bootstrap stimulus consumed (keeper=%s)"
+                   meta_after_triage.name;
+                 None
+             | Unsupported prefix ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_unsupported_stimulus
+                   ~labels:[("keeper", meta_after_triage.name)] ();
+                 Log.Keeper.warn
+                   "turn entry: unsupported stimulus consumed prefix=%S post_id=%s (keeper=%s) — wake→no_signal gap #12684"
+                   prefix stim.post_id meta_after_triage.name;
+                 None)
       in
       let pending_board_events =
         match queued_board_event with

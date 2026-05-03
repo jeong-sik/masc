@@ -218,6 +218,7 @@
         test_per_keeper_token_fallback
         test_auth_strict_mode
         test_keeper_turn_fsm_emit
+        test_keeper_event_queue
         test_gh_api_classification
         test_actionable_path_action
         test_stale_kill_class
@@ -417,6 +418,7 @@
           test_per_keeper_token_fallback
           test_auth_strict_mode
           test_keeper_turn_fsm_emit
+          test_keeper_event_queue
           test_gh_api_classification
           test_actionable_path_action
           test_stale_kill_class

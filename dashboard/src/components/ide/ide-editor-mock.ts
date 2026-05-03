@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useMemo } from 'preact/hooks'
+import { useMemo, useState, useEffect } from 'preact/hooks'
+import { activeIdeFile } from './ide-shell'
 import {
   createCodeDocumentStore,
   type CodeDocumentLine,
@@ -124,13 +125,28 @@ export function IdeEditorMock({
   activeView = 'source',
   activeLayers = EMPTY_ACTIVE_LAYERS,
 }: IdeEditorMockProps) {
+  const [sourceCode, setSourceCode] = useState<string[]>([])
+  
+  useEffect(() => {
+    let canceled = false;
+    fetch('/api/v1/workspace/file?path=' + encodeURIComponent(activeIdeFile.value))
+      .then(r => r.json())
+      .then(d => {
+        if (!canceled && d.ok && d.content) {
+          setSourceCode(d.content.split('\n'));
+        }
+      })
+      .catch(console.error);
+    return () => { canceled = true };
+  }, [activeIdeFile.value]);
+
   const documentStore = useMemo(
     () => createCodeDocumentStore({
-      file_path: IDE_MOCK_FILE_PATH,
+      file_path: activeIdeFile.value,
       language: 'typescript',
-      content: IDE_MOCK_SOURCE,
+      content: sourceCode.length > 0 ? sourceCode : IDE_MOCK_SOURCE,
     }),
-    [],
+    [sourceCode, activeIdeFile.value],
   )
   const ownershipStore = useMemo(() => {
     const store = createKeeperLineOwnershipStore(IDE_MOCK_FILE_PATH)

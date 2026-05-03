@@ -1,3 +1,5 @@
+import { signal } from '@preact/signals'
+export const activeIdeFile = signal<string>('package.json')
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { IdeExplorer } from './ide-explorer'

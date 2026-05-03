@@ -88,7 +88,7 @@ jobs:
             || echo "lighthouse exit=$?"
 
       - name: Upload Lighthouse artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouse-report-${{ github.run_id }}
           path: dashboard/.lighthouseci/

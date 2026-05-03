@@ -437,6 +437,127 @@ export function cascadeTierStyle(tier: CascadeTraceScenario['tier']): string {
   }
 }
 
+// ── P0–P7 Improvement Roadmap ────────────────────────────────────
+// Source: sec06 Table 6-1
+
+export type RoadmapPhase = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7'
+
+export interface RoadmapItem {
+  id: RoadmapPhase
+  area: string
+  goal: string
+  targetAntiPatterns: string[]
+  reference: string
+  effect: string
+  timeline: string
+  deps: RoadmapPhase[]
+}
+
+export const ROADMAP_ITEMS: RoadmapItem[] = [
+  {
+    id: 'P0', area: 'Verification Loop',
+    goal: '모든 tool calling 결과를 JSON Schema로 검증, 실패 시 self-healing 루프',
+    targetAntiPatterns: ['S01-S10', 'F01-F04'],
+    reference: 'Sam Chon Harness, Typia',
+    effect: '복잡한 스키마 tool call 성공률 6.75%→100%',
+    timeline: '1-4주', deps: [],
+  },
+  {
+    id: 'P1', area: 'Context Compaction',
+    goal: 'KV Cache 압축, capability 기반 context ceiling, cache_control 자동화',
+    targetAntiPatterns: ['H04-H05', 'S08'],
+    reference: 'Claude Code compaction',
+    effect: '장기 세션 60-70% 컨텍스트 해제',
+    timeline: '2-6주', deps: ['P0'],
+  },
+  {
+    id: 'P2', area: 'MCP Integration',
+    goal: 'CLI Provider MCP 활성화, runtime tool discovery, ToolResult 타입 검증',
+    targetAntiPatterns: ['F02-F03', 'M04-M05'],
+    reference: 'MCPMark, Claude Code MCP',
+    effect: 'CLI Provider tool 사용률 0→100%',
+    timeline: '3-8주', deps: ['P0'],
+  },
+  {
+    id: 'P3', area: 'Thinking Unification',
+    goal: 'thinking_control_format capability 필드, provider별 직렬화 표준화',
+    targetAntiPatterns: ['M01-M03', 'S03'],
+    reference: 'BFCL, Gemini thinking config',
+    effect: 'thinking 처리 결정론적 분기 보장',
+    timeline: '2-6주', deps: ['P0'],
+  },
+  {
+    id: 'P4', area: 'Deterministic Output',
+    goal: 'seed 파라미터 지원, temperature=0 한계 문서화, 이미지 입력 처리',
+    targetAntiPatterns: ['H10', 'S05'],
+    reference: 'OpenAI seed docs, PyTorch determinism',
+    effect: '텍스트 전용 프롬프트 재생 가능한 출력',
+    timeline: '4-10주', deps: ['P0', 'P3'],
+  },
+  {
+    id: 'P5', area: 'Anti-pattern Removal',
+    goal: 'Silent Failure→Explicit Error, Fake Fallback→Capability Honesty, String→Metadata, Hardcode→Config',
+    targetAntiPatterns: ['S01-S10', 'F01-F04', 'M01-M06', 'H01-H12'],
+    reference: 'Ch5 분석 결과',
+    effect: '32개 안티패턴 중 28개 제거 (87.5%)',
+    timeline: '2-16주', deps: ['P0', 'P2', 'P4'],
+  },
+  {
+    id: 'P6', area: 'New Provider Support',
+    goal: 'Nemotron API, Gemma 4, Ollama Cloud 지원 추가',
+    targetAntiPatterns: ['H11-H12'],
+    reference: 'NVIDIA NIM docs, Gemma 4 docs',
+    effect: '3개 신규 제공자 지원',
+    timeline: '4-12주', deps: [],
+  },
+  {
+    id: 'P7', area: 'Monitoring & Observability',
+    goal: 'usage tokens 복원, capability drift 감지, per-provider metrics',
+    targetAntiPatterns: ['S05', 'H10-H12'],
+    reference: 'Claude Code metrics',
+    effect: 'provider API 변경 시 24시간 이내 감지',
+    timeline: '4-16주', deps: [],
+  },
+]
+
+export type Applicability = 'full' | 'partial' | 'none' | 'na'
+
+export const APPLICABILITY_MATRIX: Record<RoadmapPhase, Record<string, Applicability>> = {
+  P0: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'partial',codex_cli:'partial' },
+  P1: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P2: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'full',llamacpp:'na',glm:'na',nemotron:'na',kimi:'na',gemini_cli:'full',codex_cli:'full' },
+  P3: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'partial',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'full',kimi:'partial',gemini_cli:'na',codex_cli:'na' },
+  P4: { openai:'full',claude:'none',gemini:'full',deepseek:'partial',qwen35:'partial',mistral:'full',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'partial',kimi:'partial',gemini_cli:'none',codex_cli:'none' },
+  P5: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P6: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'na',llamacpp:'na',glm:'na',nemotron:'full',kimi:'na',gemini_cli:'na',codex_cli:'na' },
+  P7: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+}
+
+export function applicabilitySymbol(a: Applicability): string {
+  switch (a) {
+    case 'full': return '✅'
+    case 'partial': return '⚠️'
+    case 'none': return '❌'
+    case 'na': return '—'
+  }
+}
+
+export function applicabilityCellClass(a: Applicability): string {
+  switch (a) {
+    case 'full': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    case 'partial': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'none': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
+    case 'na': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+  }
+}
+
+export function phaseColor(id: RoadmapPhase): string {
+  const idx = ROADMAP_ITEMS.findIndex(r => r.id === id)
+  if (idx <= 1) return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
+  if (idx <= 4) return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
+  return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)] border-[var(--color-border-default)]'
+}
+
 // ── Shared helpers ──────────────────────────────────────────────
 
 export function supportCellClass(v: FeatureSupport): string {

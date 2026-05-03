@@ -1,4 +1,3 @@
-open Base
 module Hashtbl = Stdlib.Hashtbl
 module Option = Stdlib.Option
 module Result = Stdlib.Result
@@ -278,7 +277,8 @@ let rewrite_posts store =
     let path = persist_path () in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (pst : post) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
+      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
+      Buffer.add_char buf '\n'
     ) store.posts;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()
@@ -291,7 +291,8 @@ let rewrite_comments store =
     let path = comments_path () in
     let buf = Buffer.create 4096 in
     Hashtbl.iter (fun _ (cmt : comment) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
+      Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+      Buffer.add_char buf '\n'
     ) store.comments;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()
@@ -519,7 +520,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
     |> List.filteri (fun idx _ -> idx < scan_limit)
     |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
            Stdlib.incr scanned;
-           if Option.equal Poly.equal stored_kind (Some canonical_kind) then
+           if Option.equal (=) stored_kind (Some canonical_kind) then
              Stdlib.incr unchanged
            else begin
              Stdlib.incr changed;
@@ -570,7 +571,7 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
     (* Apply filters on the pre-sorted list *)
     let filtered = match visibility_filter with
       | None -> sorted_all
-      | Some v -> List.filter (fun (p : post) -> Poly.equal p.visibility v) sorted_all
+      | Some v -> List.filter (fun (p : post) -> (=) p.visibility v) sorted_all
     in
     let filtered = match hearth with
       | None -> filtered

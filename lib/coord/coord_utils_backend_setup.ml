@@ -196,7 +196,7 @@ let resolve_server_default_base_path path = resolve_masc_base_path path
 let is_unresolved_template value =
   let v = String.trim value in
   (String.length v >= 2 && v.[0] = '{' && v.[1] = '{')
-  || Base.String.is_prefix v ~prefix:"op://"
+  || String.starts_with v ~prefix:"op://"
 
 let env_opt name =
   match Sys.getenv_opt name with

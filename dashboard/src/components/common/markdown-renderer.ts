@@ -10,91 +10,7 @@ import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 import type MermaidDefault from 'mermaid'
-
-// ── Lazy shiki loader ────────────────────────────────────────
-interface DashboardHighlighter {
-  getLoadedLanguages(): string[]
-  loadLanguage(...langs: unknown[]): Promise<void>
-  codeToHtml(code: string, options: { lang: string; theme: string }): string
-}
-
-type ShikiLanguageModule = { default: unknown | unknown[] }
-type ShikiLanguageLoader = () => Promise<ShikiLanguageModule>
-
-const SHIKI_THEME = 'vitesse-dark'
-const SHIKI_LANG_ALIASES: Record<string, string> = {
-  js: 'javascript',
-  jsx: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  py: 'python',
-  sh: 'bash',
-  shell: 'bash',
-  zsh: 'bash',
-  yml: 'yaml',
-  md: 'markdown',
-}
-const SHIKI_LANG_LOADERS: Record<string, ShikiLanguageLoader> = {
-  bash: () => import('shiki/langs/bash.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  ocaml: () => import('shiki/langs/ocaml.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-}
-
-let shikiPromise: Promise<DashboardHighlighter> | null = null
-let loadedShikiLanguages = new Set<string>()
-
-function getShiki(): Promise<DashboardHighlighter> {
-  if (!shikiPromise) {
-    shikiPromise = Promise.all([
-      import('shiki/core'),
-      import('shiki/engine/javascript'),
-      import('shiki/themes/vitesse-dark.mjs'),
-    ]).then(async ([shiki, engine, theme]) => {
-      loadedShikiLanguages = new Set()
-      return shiki.createHighlighterCore({
-        themes: [theme.default],
-        langs: [],
-        engine: engine.createJavaScriptRegexEngine(),
-      })
-    }).catch((err) => {
-      shikiPromise = null  // allow retry on next call
-      loadedShikiLanguages = new Set()
-      throw err
-    })
-  }
-  return shikiPromise
-}
-
-function normalizeShikiLang(lang: string): string {
-  const normalized = lang.trim().toLowerCase()
-  return SHIKI_LANG_ALIASES[normalized] ?? normalized
-}
-
-async function ensureShikiLanguage(highlighter: DashboardHighlighter, lang: string): Promise<string> {
-  const normalized = normalizeShikiLang(lang)
-  if (normalized === 'text') return 'text'
-  const loader = SHIKI_LANG_LOADERS[normalized]
-  if (!loader) return 'text'
-  if (loadedShikiLanguages.has(normalized) || highlighter.getLoadedLanguages().includes(normalized)) {
-    return normalized
-  }
-  const module = await loader()
-  const registrations = Array.isArray(module.default) ? module.default : [module.default]
-  await highlighter.loadLanguage(...registrations)
-  loadedShikiLanguages.add(normalized)
-  return normalized
-}
+import { highlightCodeHtml } from './shiki-highlighter'
 
 // ── Lazy mermaid loader ──────────────────────────────────────
 type MermaidApi = typeof MermaidDefault
@@ -152,17 +68,6 @@ const PURIFY_CONFIG = {
 
 function sanitize(raw: string): string {
   return DOMPurify.sanitize(raw, PURIFY_CONFIG)
-}
-
-// Shiki generates <span style="color: ..."> for syntax tokens.
-// Allow `style` only when sanitizing trusted Shiki output.
-const SHIKI_PURIFY_CONFIG = {
-  ALLOWED_TAGS: ['pre', 'code', 'span'],
-  ALLOWED_ATTR: ['class', 'style'],
-}
-
-function sanitizeShikiHtml(raw: string): string {
-  return DOMPurify.sanitize(raw, SHIKI_PURIFY_CONFIG)
 }
 
 function sanitizeMermaidSvg(raw: string): SVGElement | null {
@@ -277,8 +182,6 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
 
     let cancelled = false
     void (async () => {
-      let highlighter: DashboardHighlighter | null = null
-      
       for (const codeEl of codeBlocks) {
         if (cancelled) break
         if (codeEl.dataset.highlighted) continue
@@ -294,23 +197,10 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
             break
           }
         }
-        
-        if (!highlighter) {
-          highlighter = await getShiki()
+
+        try {
+          const safeHtml = await highlightCodeHtml(code, lang)
           if (cancelled) break
-        }
-
-        try {
-          lang = await ensureShikiLanguage(highlighter, lang)
-        } catch {
-          lang = 'text'
-        }
-        
-        if (cancelled) break
-
-        try {
-          const rawHtml = highlighter.codeToHtml(code, { lang, theme: SHIKI_THEME })
-          const safeHtml = sanitizeShikiHtml(rawHtml)
 
           const div = document.createElement('div')
           div.innerHTML = safeHtml

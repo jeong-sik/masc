@@ -67,6 +67,26 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/code-document-store.ts` adds a typed read-only source document store with file/language metadata, CRLF normalization, line lookup, and bounded line parsing.
   - `src/components/ide/ide-editor-mock.ts` now consumes the code document store alongside RFC 0019 ownership data instead of embedding pre-numbered editor rows directly in the renderer.
 
+- **IDE syntax renderer substrate**
+  - `src/components/common/shiki-highlighter.ts` promotes the markdown Shiki loader/sanitizer into a shared dashboard boundary with block and line-level highlighting APIs.
+  - `src/components/ide/ide-code-renderer.ts` renders read-only editor rows from sanitized Shiki line HTML while preserving the code document and RFC 0019 ownership contracts.
+
+- **IDE LAYERS deep-link substrate**
+  - `design-system/headless-core/layered-overlay.ts` now accepts external active-layer snapshots for URL hydration while preserving RFC 0020 exclusive-layer semantics.
+  - `src/components/ide/ide-shell.ts` persists the LAYERS bar to the route `layers=` param, so editor overlay state survives deep links and view-tab changes.
+
+- **IDE overlay rendering affordances**
+  - `src/components/ide/ide-shell.ts` now passes active view/layer route state into the editor pane instead of leaving LAYERS as toolbar-only state.
+  - `src/components/ide/ide-editor-mock.ts` renders read-only active-overlay summaries and line-level affordance chips from the code document and RFC 0019 ownership snapshots.
+
+- **IDE view-mode rendering**
+  - `src/components/ide/ide-editor-mock.ts` now renders distinct source, split diff, unified diff, and blame bodies instead of changing only the toolbar label.
+  - The split/unified views preview the `normalizeTools` tool-call cleanup diff, while blame view adds a keeper timeline strip over the ownership-backed source rows.
+
+- **IDE shared annotation seed**
+  - `src/components/ide/ide-mock-data.ts` centralizes the mock source document, keeper ownership events, anchored rail threads, and layer annotations.
+  - The editor overlay chips and CONVERSATION rail now resolve against the same line anchors, replacing divergent regex/comment/refactor heuristics in the editor fixture.
+
 ### Removed — Hand-written CSS purge across all surfaces
 
 - **Preview surface** — PR #11250

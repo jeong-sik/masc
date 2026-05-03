@@ -8,15 +8,15 @@
 // event twice: deltas land in the store via [applyDelta], raw pushes
 // via the [routeServerPushEvent] call inside [handleRawPush].
 //
-// This flag lets operators turn the parallel mode off and run WS-only,
-// eliminating the duplication once the WS transport is trusted in a
-// given environment.  Default is false so existing deployments keep the
-// safety net until explicitly opted in.
+// This flag controls the WS-only mode.
+// As of recent updates, WS-only mode is the default (true) to reduce
+// overhead and redundancy. You can opt-out by setting it to false.
 //
 // Precedence (first match wins):
-//   1. window.__MASC_DASHBOARD_WS_ONLY__ === true   (runtime injection)
-//   2. import.meta.env.VITE_DASHBOARD_WS_ONLY === 'true'  (build time)
-//   3. false
+//   1. window.__MASC_DASHBOARD_WS_ONLY__ === false  (runtime injection)
+//   2. window.__MASC_DASHBOARD_WS_ONLY__ === true   (runtime injection)
+//   3. import.meta.env.VITE_DASHBOARD_WS_ONLY === 'false' (build time)
+//   4. true
 
 interface CutoverWindow extends Window {
   __MASC_DASHBOARD_WS_ONLY__?: unknown
@@ -24,8 +24,9 @@ interface CutoverWindow extends Window {
 
 export function dashboardWsOnlyEnabled(globalRef: Window = window): boolean {
   const runtime = (globalRef as CutoverWindow).__MASC_DASHBOARD_WS_ONLY__
-  if (runtime === true) return true
   if (runtime === false) return false
+  if (runtime === true) return true
   const env = import.meta.env?.VITE_DASHBOARD_WS_ONLY
-  return env === 'true' || env === '1'
+  if (env === 'false' || env === '0') return false
+  return true
 }

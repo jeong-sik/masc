@@ -90,7 +90,7 @@ let test_running_with_custom_base () =
 let test_tool_required_turn_preserves_routed_cascade () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
-      ~effective_cascade:"big_three" ~tool_requirement:"required"
+      ~effective_cascade:"big_three" ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
   check string "required tool turns preserve routed cascade"
     "big_three" r.effective_cascade;
@@ -102,7 +102,7 @@ let test_tool_required_turn_preserves_local_recovery () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
       ~effective_cascade:Masc_mcp.Keeper_config.local_recovery_cascade_name
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
   check string "required tool turns preserve local recovery"
     Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade

@@ -276,10 +276,10 @@ let require_repository_root_with_git config =
     Ok root
   | `Missing ->
     Error
-      (IoError
+      (System (System_error.IoError
          (Printf.sprintf
             "Worktree isolation requires repository root with .git: %s (current base path: %s)"
-            root config.base_path))
+            root config.base_path)))
 
 let ensure_worktree_path root worktree_name =
   let worktrees_dir = Filename.concat root ".worktrees" in
@@ -287,7 +287,7 @@ let ensure_worktree_path root worktree_name =
   if Filename.dirname worktree_path = worktrees_dir then
     Ok (worktree_path, worktrees_dir)
   else
-    Error (IoError "Invalid worktree path: must be created under .worktrees/")
+    Error (System (System_error.IoError "Invalid worktree path: must be created under .worktrees/"))
 
 let safe_file_exists path =
   try Sys.file_exists path with
@@ -411,11 +411,11 @@ let restore_sandbox_clone_checkout candidate =
   in
   if checkout_status <> Unix.WEXITED 0 then
     Error
-      (IoError
+      (System (System_error.IoError
          (Printf.sprintf
             "sandbox_clone_checkout_restore_failed: could not restore tracked \
              files in %s: %s"
-            candidate (trim_output_detail checkout_output)))
+            candidate (trim_output_detail checkout_output))))
   else
     match inspect_sandbox_clone candidate with
     | Ready ->
@@ -425,18 +425,18 @@ let restore_sandbox_clone_checkout candidate =
               worktree creation.")
     | Needs_checkout relpath ->
         Error
-          (IoError
+          (System (System_error.IoError
              (Printf.sprintf
                 "sandbox_clone_checkout_restore_failed: %s is still missing \
                  tracked path %s after checkout."
-                candidate relpath))
+                candidate relpath)))
     | Broken_git detail ->
         Error
-          (IoError
+          (System (System_error.IoError
              (Printf.sprintf
                 "sandbox_clone_checkout_restore_failed: %s is still not a \
                  usable git clone after checkout: %s"
-                candidate detail))
+                candidate detail)))
 
 let ensure_sandbox_clone_ready candidate =
   match inspect_sandbox_clone candidate with
@@ -444,11 +444,10 @@ let ensure_sandbox_clone_ready candidate =
   | Needs_checkout _ -> restore_sandbox_clone_checkout candidate
   | Broken_git detail ->
       Error
-        (IoError
+        (System (System_error.IoError
            (Printf.sprintf
-              "sandbox_clone_invalid: %s has a .git marker but is not a usable \
-               git clone: %s"
-              candidate detail))
+              "sandbox_clone_invalid: %s has a .git marker but is not a usable \               git clone: %s"
+              candidate detail)))
 
 let keeper_toml_path ~config ~agent_name =
   let keeper_name = Playground_paths.sanitize_keeper_name agent_name in
@@ -727,11 +726,11 @@ let infer_task_repo_name config ~agent_name ~task_id =
       | [ candidate ] -> Ok (Some candidate.name)
       | _ ->
           Error
-            (IoError
+            (System (System_error.IoError
                (Printf.sprintf
                   "ambiguous_task_repo: task %s is not in backlog and sandbox has multiple repos [%s]"
                   task_id
-                  (String.concat ", " (List.map (fun c -> c.name) candidates)))))
+                  (String.concat ", " (List.map (fun c -> c.name) candidates))))))
   | Some task -> (
       match candidates with
       | [] -> (
@@ -775,12 +774,12 @@ let infer_task_repo_name config ~agent_name ~task_id =
                | [ name ] -> Ok (Some name)
                | many ->
                    Error
-                     (IoError
+                     (System (System_error.IoError
                         (Printf.sprintf
                            "ambiguous_task_repo: task %s has no sandbox \
                             clone, and task evidence mentions multiple \
                             workspace repos [%s]"
-                           task_id (String.concat ", " many)))))
+                           task_id (String.concat ", " many))))))
       | [ candidate ] -> Ok (Some candidate.name)
       | _ ->
           let tokens = tokenize_repo_evidence (task_repo_text task) in
@@ -808,18 +807,18 @@ let infer_task_repo_name config ~agent_name ~task_id =
                 |> List.map (fun (_, candidate) -> candidate.name)
               in
               Error
-                (IoError
+                (System (System_error.IoError
                    (Printf.sprintf
                       "ambiguous_task_repo: task %s matches multiple repos with equal score [%s]"
-                      task_id (String.concat ", " tied)))
+                      task_id (String.concat ", " tied))))
           | _ ->
               Error
-                (IoError
+                (System (System_error.IoError
                    (Printf.sprintf
                       "ambiguous_task_repo: task %s has no repo evidence; sandbox repos=[%s]"
                       task_id
                       (String.concat ", "
-                         (List.map (fun c -> c.name) candidates)))))
+                         (List.map (fun c -> c.name) candidates))))))
 
 let rec rm_rf path =
   if safe_file_exists path then
@@ -844,33 +843,33 @@ let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
         "keeper_shell op=git_clone url=\"https://github.com/<org>/<repo>.git\" \
          path=\"repos/<repo>\"" )
   in
-  IoError
+  System (System_error.IoError
     (Printf.sprintf
        "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
         (expected %s). Recovery: %s"
-       agent_name repos_dir rel_target clone_hint)
+       agent_name repos_dir rel_target clone_hint))
 
 let workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
     ~search_root =
-  IoError
+  System (System_error.IoError
     (Printf.sprintf
        "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
         and no workspace git repo named %s was found under %s. Recovery: \
         keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" \
         path=\"repos/%s\""
-       agent_name repos_dir repo_name search_root repo_name repo_name)
+       agent_name repos_dir repo_name search_root repo_name repo_name))
 
 let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
-  IoError
+  System (System_error.IoError
     (Printf.sprintf
        "ambiguous_workspace_repo: found multiple git repos named %s under %s: \
         [%s]. Auto-provision is blocked until the repo is disambiguated; use \
         keeper_shell op=git_clone explicitly."
-       repo_name search_root (String.concat ", " matches))
+       repo_name search_root (String.concat ", " matches)))
 
 let partial_clone_error ~clone_path ~msg =
   rm_rf clone_path;
-  IoError msg
+  System (System_error.IoError msg)
 
 let git_origin_url root =
   match run_argv_with_status [ "git"; "-C"; root; "remote"; "get-url"; "origin" ] with
@@ -907,29 +906,29 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
           |> Result.map (fun repair_note -> (clone_path, repair_note))
         else
           Error
-            (IoError
+            (System (System_error.IoError
                (Printf.sprintf
                   "sandbox_clone_conflict: %s already exists under %s but is not \
                    a git clone. Remove or repair it, or use keeper_shell \
                    op=git_clone explicitly."
-                  repo_name repos_dir))
+                  repo_name repos_dir)))
       else
         (match git_origin_url source_root with
          | None ->
              Error
-               (IoError
+               (System (System_error.IoError
                   (Printf.sprintf
                      "auto_provision_clone_failed: workspace repo %s has no origin remote. \
                       Sandbox auto-provision requires cloning from origin, not from the local checkout."
-                     source_root))
+                     source_root)))
          | Some origin_url -> (
              match validate_clone_origin_url ~base_path:config.base_path origin_url with
              | Error err ->
                  Error
-                   (IoError
+                   (System (System_error.IoError
                       (Printf.sprintf
                          "auto_provision_clone_failed: origin %s rejected by clone policy: %s"
-                         origin_url err))
+                         origin_url err)))
              | Ok () ->
                  let origin_url = normalize_github_clone_url origin_url in
                  let status, output =
@@ -962,10 +961,10 @@ let link_worktree_to_task config ~task_id ~worktree_info =
   let backlog_file = Filename.concat (tasks_dir config) "backlog.json" in
   let json = read_json config backlog_file in
   match backlog_of_yojson json with
-  | Error e -> Error (IoError e)
+  | Error e -> Error (System (System_error.IoError e))
   | Ok backlog ->
       if backlog.tasks = [] then
-        Error (IoError "Backlog not found")
+        Error (System (System_error.IoError "Backlog not found"))
       else
         let found = ref false in
         let new_tasks = List.map (fun (task : task) ->
@@ -975,7 +974,7 @@ let link_worktree_to_task config ~task_id ~worktree_info =
           end else task
         ) backlog.tasks in
         if not !found then
-          Error (TaskNotFound task_id)
+          Error (Task (Task_error.NotFound task_id))
         else begin
           let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
           write_json config backlog_file (backlog_to_yojson new_backlog);
@@ -991,9 +990,9 @@ let link_worktree_to_task config ~task_id ~worktree_info =
            sandbox repo clone is required. *)
 let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
-    Error NotInitialized
+    Error (System System_error.NotInitialized)
   else if not (is_git_repo config) then
-    Error (IoError "Not a git repository. MASC v2 requires .git directory for worktree isolation.")
+    Error (System (System_error.IoError "Not a git repository. MASC v2 requires .git directory for worktree isolation."))
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
   | Error e, _ -> Error e
   | _, Error e -> Error e
@@ -1003,10 +1002,10 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
       match repo_name with
       | Some name when String.trim name <> "" && not (safe_repo_name name) ->
           Error
-            (IoError
+            (System (System_error.IoError
                (Printf.sprintf
                   "invalid_repo_name: %S must be a single repo directory name under repos/"
-                  name))
+                  name)))
       | Some name when String.trim name <> "" -> Ok (Some name)
       | _ -> infer_task_repo_name config ~agent_name ~task_id
     in
@@ -1076,7 +1075,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             if link_task then begin
               match link_worktree_to_task config ~task_id ~worktree_info:wt_info with
               | Ok () -> ""
-              | Error (TaskNotFound _) -> "\n  Note: Task not found in backlog, worktree not linked"
+              | Error (Task (Task_error.NotFound _)) -> "\n  Note: Task not found in backlog, worktree not linked"
               | Error _ -> "\n  Note: Could not link worktree to task"
             end else ""
           in
@@ -1091,7 +1090,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             let link_note = maybe_link_task () in
             Ok
               (Printf.sprintf
-                 "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
+                 "Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
                   Repo: %s%s%s\n\nNext: cd %s"
                  worktree_path branch_name repo_name race_note link_note
                  worktree_path)
@@ -1106,11 +1105,11 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
               existing_worktree_ok ()
             else
               Error
-                (IoError
+                (System (System_error.IoError
                    (Printf.sprintf
                       "worktree_path_conflict: %s already exists but is not a \
                        usable git worktree. Remove or repair it before retrying."
-                      worktree_path))
+                      worktree_path)))
           end else begin
             (* Fetch origin first; stale remotes must be explicit, not hidden.
                Use the longer git_fetch_timeout_sec budget — the default
@@ -1124,8 +1123,8 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             in
             if fetch_exit <> 0 then
               Error
-                (IoError
-                   "Failed to fetch origin before worktree creation. Verify network/auth and retry so the task starts from the latest remote ref.")
+                (System (System_error.IoError
+                   "Failed to fetch origin before worktree creation. Verify network/auth and retry so the task starts from the latest remote ref."))
             else match Coord_git.resolve_base_branch root base_branch with
             | Error e -> Error e
             | Ok (resolved_base, fallback_from) ->
@@ -1179,7 +1178,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                     agent_name branch_name worktree_path repo_name task_id (now_iso ()) in
                   log_event config (Yojson.Safe.from_string event);
 
-                  Ok (Printf.sprintf "✅ Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
+                  Ok (Printf.sprintf "Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
                       worktree_path branch_name repo_name note
                       (provision_note ^ link_note) worktree_path)
                 end
@@ -1188,8 +1187,8 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                 else begin
                   rm_rf worktree_path;
                   let detail = String.trim git_output in
-                  Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s: %s"
-                    resolved_base (if detail = "" then "(no output)" else detail)))
+                  Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s: %s"
+                    resolved_base (if detail = "" then "(no output)" else detail))))
                 end
           end
   end
@@ -1197,7 +1196,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
 (** Remove worktree - Result version *)
 let worktree_remove_r config ~agent_name ~task_id : string masc_result =
   if not (is_initialized config) then
-    Error NotInitialized
+    Error (System System_error.NotInitialized)
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
   | Error e, _ -> Error e
   | _, Error e -> Error e
@@ -1238,10 +1237,10 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
       | Some root -> Ok root
       | None ->
         Error
-          (IoError
+          (System (System_error.IoError
              (Printf.sprintf
                 "Worktree %s not found under sandbox repo clones in %s"
-                worktree_name repos_dir))
+                worktree_name repos_dir)))
     in
     match resolve_existing_worktree_root () with
     | Error e -> Error e
@@ -1253,7 +1252,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
             let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
 
             if not (Sys.file_exists worktree_path) then
-              Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
+              Error (System (System_error.IoError (Printf.sprintf "Worktree not found: %s" worktree_path)))
             else begin
               (* Remove worktree *)
               let exit_code = run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path] in
@@ -1274,15 +1273,21 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 log_event config (Yojson.Safe.from_string event);
 
                 (* Return result with post-processing status *)
-                let msg = Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
+                let msg = Printf.sprintf "Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
                   worktree_path branch_name branch_status prune_status in
                 if branch_exit <> 0 || prune_exit <> 0 then
+<<<<<<< HEAD
+                  Error (IoError (msg ^ "\n   Post-processing had failures"))
+||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
                   Error (IoError (msg ^ "\n   ⚠️ Post-processing had failures"))
+=======
+                  Error (System (System_error.IoError (msg ^ "\n   ⚠️ Post-processing had failures")))
+>>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
                 else
                   Ok msg
               end
               else
-                Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
+                Error (System (System_error.IoError "Failed to remove worktree. It may have uncommitted changes."))
 	    end
     end
 

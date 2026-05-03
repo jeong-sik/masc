@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -47,7 +46,7 @@ let handle_dashboard ctx args =
   match Dashboard.scope_of_string_opt scope_arg with
   | None ->
       (false,
-       Printf.sprintf "❌ Invalid dashboard scope '%s' (expected: %s)"
+       Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
          scope_arg
          (String.concat " | " Dashboard.valid_scope_strings))
   | Some scope ->
@@ -65,7 +64,7 @@ let handle_gc ctx args =
   let gc_result = Coord.gc ctx.config ~days () in
   let expired = 0 in
   let decision_note =
-    if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired
+    if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
     else ""
   in
   (true, gc_result ^ decision_note)
@@ -92,11 +91,11 @@ let strip_mcp_prefix name =
 let handle_tool_help _ctx args =
   let raw_name = String.trim (get_string args "tool_name" "") in
   if String.equal raw_name "" then
-    (false, "❌ tool_name is required")
+    (false, "tool_name is required")
   else
     let tool_name = strip_mcp_prefix raw_name in
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
-    | None -> (false, Printf.sprintf "❌ unknown tool: %s" raw_name)
+    | None -> (false, Printf.sprintf "unknown tool: %s" raw_name)
     | Some entry ->
         (true, Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 

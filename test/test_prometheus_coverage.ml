@@ -105,6 +105,20 @@ let test_inc_counter_auto_register () =
   (* Counter is auto-registered if not exists *)
   ()
 
+let test_metric_key_avoids_label_boundary_collision () =
+  let name1 = "test_metric_key_collision_ab" in
+  let labels1 = [("c", "")] in
+  let name2 = "test_metric_key_collision_a" in
+  let labels2 = [("bc", "")] in
+  Prometheus.inc_counter name1 ~labels:labels1 ();
+  Prometheus.inc_counter name2 ~labels:labels2 ~delta:2.0 ();
+  check (option (float 0.001)) "first series"
+    (Some 1.0)
+    (Prometheus.get_metric_value name1 ~labels:labels1 ());
+  check (option (float 0.001)) "second series"
+    (Some 2.0)
+    (Prometheus.get_metric_value name2 ~labels:labels2 ())
+
 (* ============================================================
    set_gauge Tests
    ============================================================ *)
@@ -398,6 +412,8 @@ let () =
       test_case "with delta" `Quick test_inc_counter_with_delta;
       test_case "with labels" `Quick test_inc_counter_with_labels;
       test_case "auto register" `Quick test_inc_counter_auto_register;
+      test_case "label boundary collision" `Quick
+        test_metric_key_avoids_label_boundary_collision;
     ];
     "set_gauge", [
       test_case "basic" `Quick test_set_gauge_basic;

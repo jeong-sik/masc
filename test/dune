@@ -225,6 +225,7 @@
         test_provider_error
         test_keeper_synthetic_marker
         test_keeper_turn_fsm_wired_sites
+        test_effective_oas_env
         )
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
@@ -423,6 +424,7 @@
           test_provider_error
           test_keeper_synthetic_marker
           test_keeper_turn_fsm_wired_sites
+          test_effective_oas_env
           )
  (libraries masc_test_deps multimodal))
 
@@ -1073,6 +1075,7 @@
 (include stanzas/test_join_required_guard_counter.inc)
 (include stanzas/test_k2_pipeline_e2e.inc)
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
+(include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 (include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
 (include stanzas/test_keeper_cascade_auto_pause_task074.inc)
@@ -1162,3 +1165,8 @@
 (include stanzas/test_transport_bridge_seal.inc)
 (include stanzas/test_work_as_heartbeat.inc)
 (include stanzas/test_worker_safety_gates.inc)
+
+(test
+ (name test_dashboard_yjs)
+ (modules test_dashboard_yjs)
+ (libraries masc_test_deps))

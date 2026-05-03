@@ -57,12 +57,12 @@ let incr_gh_exit_class (c : Gh_exit_class.t) =
    bare reason name. *)
 let bare_reason s =
   let strip prefix =
-    match Base.String.chop_prefix s ~prefix with
-    | Some rest -> rest
-    | None -> s
+    if String.starts_with ~prefix s then
+      String.sub s (String.length prefix) (String.length s - String.length prefix)
+    else s
   in
   strip "too_complex:" |> fun s ->
-  if Base.String.is_prefix s ~prefix:"parse_aborted:"
+  if String.starts_with s ~prefix:"parse_aborted:"
   then "__parse_aborted__"
   else s
 

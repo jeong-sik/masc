@@ -94,6 +94,27 @@ let test_accept_rejected_non_recoverable () =
       (Printf.sprintf "Accept_rejected should stay None, got %s" reason)
   | None -> ()
 
+(* Regression: auto-recoverable cascade exhaustion must still be
+   classified as cascade_exhausted so that the unified turn loop's
+   [counts_toward_crash] condition correctly increments the failure
+   counter.  If is_auto_recoverable but NOT is_cascade_exhausted,
+   the keeper loops forever without auto-pause. *)
+let test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted () =
+  let cases =
+    [ (KT.Candidates_filtered_after_cycles, "Candidates_filtered_after_cycles")
+    ; (KT.Max_turns_exceeded, "Max_turns_exceeded")
+    ]
+  in
+  List.iter (fun (reason, label) ->
+      let err = make_cascade_exhausted reason in
+      (* These are auto-recoverable *)
+      check bool (label ^ " is auto-recoverable") true
+        (KEC.is_auto_recoverable_turn_error err);
+      (* But they MUST also be cascade_exhausted *)
+      check bool (label ^ " is cascade_exhausted") true
+        (KEC.is_cascade_exhausted_error err)
+    ) cases
+
 let test_catalog_rotation_preserves_order_without_base_injection () =
   let err = make_cascade_exhausted KT.All_providers_failed in
   match
@@ -101,7 +122,7 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       ~rotation_cascades:[ "catalog_first"; "base_only" ]
       ~base_cascade:"base_only"
       ~effective_cascade:"tool_use_strict"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_use_strict" ]
       err
   with
@@ -115,6 +136,8 @@ let () =
     [
       ( "recoverable_cascade_failure_reason",
         [
+          test_case "auto-recoverable cascade is still cascade_exhausted" `Quick
+            test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
           test_case "All_providers_failed is recoverable" `Quick

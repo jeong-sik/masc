@@ -29,7 +29,7 @@ let test_of_string_unknown_returns_none () =
       Alcotest.fail "of_string should return None for unknown label"
 
 let test_classify_invalid_token () =
-  match Aek.classify (Types.InvalidToken "x") with
+  match Aek.classify (Types.Auth (Types.Auth_error.InvalidToken "x")) with
   | Aek.Token_mismatch -> ()
   | other ->
       Alcotest.failf
@@ -37,7 +37,7 @@ let test_classify_invalid_token () =
         (Aek.to_string other)
 
 let test_classify_token_expired () =
-  match Aek.classify (Types.TokenExpired "x") with
+  match Aek.classify (Types.Auth (Types.Auth_error.TokenExpired "x")) with
   | Aek.Token_expired -> ()
   | other ->
       Alcotest.failf
@@ -45,7 +45,7 @@ let test_classify_token_expired () =
         (Aek.to_string other)
 
 let test_classify_unauthorized () =
-  match Aek.classify (Types.Unauthorized "x") with
+  match Aek.classify (Types.Auth (Types.Auth_error.Unauthorized "x")) with
   | Aek.Unauthorized -> ()
   | other ->
       Alcotest.failf
@@ -53,7 +53,7 @@ let test_classify_unauthorized () =
         (Aek.to_string other)
 
 let test_classify_forbidden () =
-  match Aek.classify (Types.Forbidden { agent = "a"; action = "b" }) with
+  match Aek.classify (Types.Auth (Types.Auth_error.Forbidden { agent = "a"; action = "b" })) with
   | Aek.Forbidden -> ()
   | other ->
       Alcotest.failf
@@ -61,7 +61,7 @@ let test_classify_forbidden () =
         (Aek.to_string other)
 
 let test_classify_agent_not_found () =
-  match Aek.classify (Types.AgentNotFound "x") with
+  match Aek.classify (Types.Agent (Types.Agent_error.NotFound "x")) with
   | Aek.Agent_not_found -> ()
   | other ->
       Alcotest.failf
@@ -69,7 +69,7 @@ let test_classify_agent_not_found () =
         (Aek.to_string other)
 
 let test_classify_io_error () =
-  match Aek.classify (Types.IoError "x") with
+  match Aek.classify (Types.System (Types.System_error.IoError "x")) with
   | Aek.Io_error -> ()
   | other ->
       Alcotest.failf
@@ -77,7 +77,7 @@ let test_classify_io_error () =
         (Aek.to_string other)
 
 let test_classify_invalid_json () =
-  match Aek.classify (Types.InvalidJson "x") with
+  match Aek.classify (Types.System (Types.System_error.InvalidJson "x")) with
   | Aek.Invalid_json -> ()
   | other ->
       Alcotest.failf
@@ -88,7 +88,7 @@ let test_classify_unmodelled_falls_to_other () =
   (* IoError is not auth-relevant and intentionally falls through
      to [Other]. If a future PR moves it under an explicit arm, this
      test is the breakpoint. *)
-  match Aek.classify (Types.IoError "disk") with
+  match Aek.classify (Types.System (Types.System_error.IoError "disk")) with
   | Aek.Other -> ()
   | other ->
       Alcotest.failf

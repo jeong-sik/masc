@@ -177,7 +177,7 @@ let process_directive ~agent_name directive =
   | "wakeup" ->
     Log.Keeper.debug "directive: waking up %s" agent_name;
     wakeup_keeper_by_agent_name ~agent_name
-  | s when String.length s > 6 && String.sub s 0 6 = "claim:" ->
+  | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     (match Keeper_id.Task_id.of_string task_id with
      | Ok parsed_task_id ->

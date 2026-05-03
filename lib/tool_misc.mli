@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_misc — miscellaneous MASC tool handlers.
 

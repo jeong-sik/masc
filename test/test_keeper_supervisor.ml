@@ -51,6 +51,22 @@ let test_backoff_delay_cap () =
   let d10 = Sup.backoff_delay 10 in
   check (float 0.1) "attempt 10 capped at 300" 300.0 d10
 
+let test_auto_resume_first_delay_capped () =
+  let delay =
+    Sup.next_auto_resume_after_sec
+      ~initial_sec:7200.0 ~max_sec:3600.0 None
+  in
+  check (option (float 0.1)) "first delay capped at max"
+    (Some 3600.0) delay
+
+let test_auto_resume_disabled () =
+  let delay =
+    Sup.next_auto_resume_after_sec
+      ~initial_sec:0.0 ~max_sec:3600.0 (Some 1800.0)
+  in
+  check (option (float 0.1)) "initial <= 0 disables auto-resume"
+    None delay
+
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
 let test_keep_last_n_under_limit () =
@@ -748,7 +764,351 @@ let test_non_storm_crashed_restarts_normally () =
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
+(* ── Phase 3: self-healing circuit breaker ──────────────────── *)
+
+(* Test: storm pause sets [auto_resume_after_sec] in meta. *)
+let test_storm_pause_sets_auto_resume_after_sec () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "storm-auto-resume-setter" in
+      let meta = make_meta name in
+      (* Ensure no prior auto_resume_after_sec. *)
+      check bool "initial auto_resume_after_sec = None"
+        true (meta.auto_resume_after_sec = None);
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (* After storm pause, meta must have auto_resume_after_sec set
+         (initial value: 3600s from env default or test env override). *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true" true m.paused;
+           check bool "auto_resume_after_sec set (Some _)"
+             true (Option.is_some m.auto_resume_after_sec);
+           (* updated_at must be refreshed by the pause write so Phase 3.5
+              timer (now - updated_at) is anchored to the pause time, not to
+              some earlier heartbeat write. *)
+           (match Coord_resilience.Time.parse_iso8601_opt m.updated_at with
+            | None ->
+                fail (Printf.sprintf "updated_at not parseable as ISO-8601: %s"
+                        m.updated_at)
+            | Some paused_ts ->
+                check bool "updated_at refreshed on pause (within last 5s)"
+                  true (Unix.time () -. paused_ts < 5.0))
+       | Ok None -> fail "meta missing after storm pause"
+       | Error err -> fail ("read_meta failed: " ^ err)))
+
+(* Test: exponential back-off doubles on successive auto-pauses. *)
+let test_auto_resume_after_sec_doubles_on_repause () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "backoff-doubles" in
+      (* Simulate a keeper that was already auto-paused with 1h delay. *)
+      let initial_meta =
+        { (make_meta name) with
+          auto_resume_after_sec = Some 3600.0;
+        }
+      in
+      (match KT.write_meta config initial_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name initial_meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (* Back-off must double: 3600 -> 7200. *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true" true m.paused;
+           (match m.auto_resume_after_sec with
+            | Some sec ->
+                check (float 0.1) "auto_resume_after_sec doubled to 7200"
+                  7200.0 sec
+            | None -> fail "auto_resume_after_sec should be Some after repause")
+       | Ok None -> fail "meta missing after repause"
+       | Error err -> fail ("read_meta failed: " ^ err)))
+
+(* Test: Phase 3.5 sweep auto-resumes a keeper whose timer has elapsed. *)
+let test_sweep_auto_resumes_after_backoff () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "auto-resume-keeper" in
+      (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
+         delay.  Since 7200 > 3600 the sweep should clear [paused]. *)
+      let two_hours_ago =
+        let t = Unix.gmtime (Unix.time () -. 7200.0) in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let paused_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = Some 3600.0;
+          updated_at = two_hours_ago;
+        }
+      in
+      (match KT.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let baseline_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (* meta.paused must be cleared after the back-off timer elapsed. *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = false after auto-resume"
+             false m.paused;
+           (* auto_resume_after_sec is retained (ready for next pause). *)
+           check bool "auto_resume_after_sec retained for next cycle"
+             true (Option.is_some m.auto_resume_after_sec)
+       | Ok None -> fail "meta missing after auto-resume"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      let after_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+      in
+      check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
+        (baseline_auto_resume +. 1.0) after_auto_resume)
+
+(* Test: operator-paused keeper ([auto_resume_after_sec = None]) is NOT
+   auto-resumed by the sweep — only the human can clear it. *)
+let test_operator_pause_not_auto_resumed () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "operator-paused-keeper" in
+      (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
+      let two_hours_ago =
+        let t = Unix.gmtime (Unix.time () -. 7200.0) in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let paused_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = None;   (* operator pause *)
+          updated_at = two_hours_ago;
+        }
+      in
+      (match KT.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let baseline_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (* meta.paused must remain true: operator pauses need human action. *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused stays true for operator pause"
+             true m.paused
+       | Ok None -> fail "meta missing"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      let after_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+      in
+      check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
+        baseline_auto_resume after_auto_resume)
+
+(* Regression test: initial delay is capped at max_sec even when
+   MASC_KEEPER_AUTO_RESUME_INITIAL_SEC > MASC_KEEPER_AUTO_RESUME_MAX_SEC.
+   The None -> initial_sec path must apply Float.min max_sec initial_sec. *)
+let test_initial_auto_resume_capped_at_max () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "initial-cap-regression" in
+      (* meta has no prior auto_resume_after_sec (first auto-pause). *)
+      let meta = make_meta name in
+      check bool "precondition: auto_resume_after_sec = None"
+        true (meta.auto_resume_after_sec = None);
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      (* Use explicit values because Env_config values are module-level
+         bindings and cannot be reloaded per test. *)
+      let initial_sec = 35996400.0 in
+      let max_sec = 3600.0 in
+      let capped = Float.min max_sec initial_sec in
+      check (float 0.001) "Float.min max_sec initial_sec = max_sec"
+        3600.0 capped;
+      check bool "initial > max is captured by Float.min"
+        true (initial_sec > max_sec && capped = max_sec);
+      (* Also exercise the production path directly by constructing the
+         same expression the supervisor uses, without relying on env-lazy
+         module values that can't be reloaded per-test. *)
+      let auto_resume_after_sec =
+        Sup.next_auto_resume_after_sec ~initial_sec ~max_sec
+          meta.auto_resume_after_sec
+      in
+      (match auto_resume_after_sec with
+       | None -> fail "expected Some after storm pause"
+       | Some v ->
+           check (float 0.001)
+             "first auto-pause delay capped at max_sec even when initial > max"
+             3600.0 v);
+      ignore (sw, reg))
+
 (* ── Test runner ────────────────────────────────────────── *)
+
+let test_persisted_blocker_survives_unregister () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "auto-pause-blocker-keeper" in
+      let meta = make_meta name in
+      let meta = { meta with runtime = { meta.runtime with last_blocker = "test-blocker"; last_blocker_class = Some KT.Turn_timeout } } in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ KT.context =
+        { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
+      in
+      Sup.sweep_and_recover ctx;
+      
+      (* Check if blocker is persisted *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check string "meta.runtime.last_blocker" "test-blocker" m.runtime.last_blocker;
+           check bool "meta.runtime.last_blocker_class" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+       | Ok None -> fail "meta missing after storm pause"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      
+      (* Unregister the keeper *)
+      Reg.unregister ~base_path:config.base_path name;
+      
+      (* Read again and verify *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check string "meta.runtime.last_blocker after unregister" "test-blocker" m.runtime.last_blocker;
+           check bool "meta.runtime.last_blocker_class after unregister" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+       | Ok None -> fail "meta missing after unregister"
+       | Error err -> fail ("read_meta failed: " ^ err)))
 
 let () =
   run "keeper_supervisor" [
@@ -756,6 +1116,10 @@ let () =
       test_case "attempt 0 = base" `Quick test_backoff_delay_attempt_0;
       test_case "exponential growth" `Quick test_backoff_delay_exponential;
       test_case "cap at max" `Quick test_backoff_delay_cap;
+      test_case "first auto-resume delay capped at max" `Quick
+        test_auto_resume_first_delay_capped;
+      test_case "auto-resume disabled by zero initial delay" `Quick
+        test_auto_resume_disabled;
     ];
     "keep_last_n", [
       test_case "under limit" `Quick test_keep_last_n_under_limit;
@@ -807,5 +1171,19 @@ let () =
         test_unresolved_watchdog_stopped_budget_loop_is_reaped;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
+    ];
+    "self_healing_circuit_breaker", [
+      test_case "storm pause sets auto_resume_after_sec" `Quick
+        test_storm_pause_sets_auto_resume_after_sec;
+      test_case "auto_resume_after_sec doubles on successive auto-pauses" `Quick
+        test_auto_resume_after_sec_doubles_on_repause;
+      test_case "sweep auto-resumes keeper when timer elapsed" `Quick
+        test_sweep_auto_resumes_after_backoff;
+      test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
+        test_operator_pause_not_auto_resumed;
+      test_case "initial delay capped at max_sec when initial > max (regression)" `Quick
+        test_initial_auto_resume_capped_at_max;
+      test_case "persisted blocker survives unregister" `Quick
+        test_persisted_blocker_survives_unregister;
     ];
   ]

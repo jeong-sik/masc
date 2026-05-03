@@ -16,6 +16,26 @@
 
 type label = string * string
 
+let add_key_segment buf s =
+  Buffer.add_string buf (string_of_int (String.length s));
+  Buffer.add_char buf ':';
+  Buffer.add_string buf s
+
+let labels_key (labels : label list) =
+  let buf = Buffer.create 32 in
+  List.iter (fun (k, v) ->
+    add_key_segment buf k;
+    add_key_segment buf v
+  ) labels;
+  Buffer.contents buf
+
+let metric_key name labels =
+  let encoded_labels = labels_key labels in
+  let buf = Buffer.create (String.length name + String.length encoded_labels + 16) in
+  add_key_segment buf name;
+  Buffer.add_string buf encoded_labels;
+  Buffer.contents buf
+
 type metric_type =
   | Counter
   | Gauge
@@ -87,19 +107,19 @@ let last_deadlock_backtrace_for_test () =
 (** {1 Metric Registration} *)
 
 let register_counter ~name ~help ?(labels=[]) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels })
 
 let register_gauge ~name ~help ?(labels=[]) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels })
 
 let register_histogram ~name ~help ?(labels=[]) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels })
@@ -107,7 +127,7 @@ let register_histogram ~name ~help ?(labels=[]) () =
 (** {1 Metric Updates} *)
 
 let inc_counter name ?(labels=[]) ?(delta=1.0) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- m.value +. delta
@@ -121,7 +141,7 @@ let inc_counter name ?(labels=[]) ?(delta=1.0) () =
         })
 
 let set_gauge name ?(labels=[]) value =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- value
@@ -135,7 +155,7 @@ let set_gauge name ?(labels=[]) value =
         })
 
 let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     match Hashtbl.find_opt metrics key with
     | Some m -> m.value <- m.value +. delta
@@ -153,7 +173,7 @@ let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
 
 (** Get current metric value by name + labels (if any). *)
 let get_metric_value name ?(labels=[]) () =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
   with_lock (fun () ->
     Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value))
 
@@ -171,8 +191,8 @@ let metric_total name =
     Tracks cumulative sum in the metric value; a matching _count counter
     is auto-created for computing averages. *)
 let observe_histogram name ?(labels=[]) value =
-  let key = name ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
-  let count_key = name ^ "_count" ^ (List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels) in
+  let key = metric_key name labels in
+  let count_key = metric_key (name ^ "_count") labels in
   with_lock (fun () ->
     (match Hashtbl.find_opt metrics key with
      | Some m -> m.value <- m.value +. value
@@ -664,6 +684,8 @@ let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
+let metric_llm_provider_capability_drops =
+  "masc_llm_provider_capability_drops_total"
 
 (* Domain-specific counters not yet constant-ised. *)
 let metric_anti_rationalization_fallback =
@@ -702,6 +724,12 @@ let metric_keeper_supervisor_cleanup_failures =
 let metric_keeper_stale_watchdog_tick_failures =
   "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
+(* Self-healing circuit breaker: incremented each time [sweep_and_recover]
+   auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
+   means the system is self-healing; a zero rate while keepers accumulate
+   [auto_resume_after_sec] means the sweep is not firing or the meta write
+   is failing. Labels: keeper. *)
+let metric_keeper_auto_resumed_total = "masc_keeper_auto_resumed_total"
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
    that an external wakeup_keeper call cut a Skip_idle backoff sleep
@@ -1036,6 +1064,9 @@ let init () =
   add metric_llm_provider_http_status
     "Total HTTP responses from LLM providers, labeled by provider, model, and status code"
     Counter;
+  add metric_llm_provider_capability_drops
+    "Total OAS capability drops from LLM providers, labeled by model and field"
+    Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here
      gives them a HELP description in /metrics output and a zero-value
@@ -1060,6 +1091,11 @@ let init () =
     "Total keeper transitions to Dead phase after the supervisor exhausts \
      max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
      actionable: the supervisor will not retry the keeper."
+    Counter;
+  add metric_keeper_auto_resumed_total
+    "Total keepers auto-resumed by the self-healing circuit breaker after \
+     the back-off timer elapsed. Labeled by keeper. A positive rate means \
+     the system is self-healing from transient provider outages."
     Counter;
   add metric_keeper_supervisor_cleanup_failures
     "Total supervisor finally-cleanup failures suppressed to avoid \
@@ -1534,9 +1570,6 @@ let to_prometheus_text () =
         Hashtbl.replace histogram_parents name true
     ) ms
   ) by_name;
-  let label_key labels =
-    List.fold_left (fun acc (k, v) -> acc ^ k ^ v) "" labels
-  in
   Hashtbl.iter (fun name ms ->
     let is_histogram_count =
       let suf = "_count" in
@@ -1551,17 +1584,17 @@ let to_prometheus_text () =
     match ms with
     | [] -> ()
     | m :: _ ->
-      Buffer.add_string buf (Printf.sprintf "# HELP %s %s\n" name m.help);
+      Printf.bprintf buf "# HELP %s %s\n" name m.help;
       (match m.metric_type with
        | Histogram ->
          (* No bucket distribution is tracked, so emit as summary
             (sum + count) which is the closest valid Prometheus type. *)
-         Buffer.add_string buf (Printf.sprintf "# TYPE %s summary\n" name);
+         Printf.bprintf buf "# TYPE %s summary\n" name;
          List.iter (fun (metric : metric) ->
            let ls = labels_to_string metric.labels in
            Buffer.add_string buf
              (Printf.sprintf "%s_sum%s %g\n" name ls metric.value);
-           let count_key = name ^ "_count" ^ label_key metric.labels in
+           let count_key = metric_key (name ^ "_count") metric.labels in
            let count_val =
              with_lock (fun () ->
                match Hashtbl.find_opt metrics count_key with
@@ -1575,8 +1608,8 @@ let to_prometheus_text () =
          Buffer.add_string buf
            (Printf.sprintf "# TYPE %s %s\n" name (type_to_string m.metric_type));
          List.iter (fun (metric : metric) ->
-           Buffer.add_string buf (Printf.sprintf "%s%s %g\n"
-             metric.name (labels_to_string metric.labels) metric.value)
+           Printf.bprintf buf "%s%s %g\n"
+             metric.name (labels_to_string metric.labels) metric.value
          ) ms)
   ) by_name;
   Buffer.contents buf

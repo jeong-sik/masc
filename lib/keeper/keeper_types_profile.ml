@@ -616,7 +616,7 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
   List.filter_map
     (fun (k, v) ->
       if String.length k > prefix_len
-         && String.sub k 0 prefix_len = oas_env_key_prefix
+         && String.starts_with k ~prefix:oas_env_key_prefix
       then
         let suffix = String.sub k prefix_len (String.length k - prefix_len) in
         if oas_env_key_is_allowed suffix then
@@ -1055,7 +1055,7 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let oas_env_prefix_len = String.length oas_env_prefix in
   let starts_with_oas_env k =
     String.length k > oas_env_prefix_len
-    && String.sub k 0 oas_env_prefix_len = oas_env_prefix
+    && String.starts_with k ~prefix:oas_env_prefix
   in
   doc
   |> List.map fst
@@ -1426,11 +1426,24 @@ let effective_oas_env pairs =
     | Some value -> oas_env_truthy value
     | None -> false
   in
+  let pairs =
+    if
+      gemini_mcp_disabled
+      && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
+    then
+      pairs @ [ ("OAS_GEMINI_APPROVAL_MODE", "plan") ]
+    else
+      pairs
+  in
+  (* Enable Gemini CLI MCP by default: when not explicitly disabled and
+     no operator override exists, inject the "masc" server name so the
+     Gemini CLI transport's --allowed-mcp-server-names flag allows the
+     MASC MCP server instead of the __oas_no_mcp__ sentinel. *)
   if
-    gemini_mcp_disabled
-    && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
+    not gemini_mcp_disabled
+    && not (oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" pairs)
   then
-    pairs @ [ ("OAS_GEMINI_APPROVAL_MODE", "plan") ]
+    pairs @ [ ("OAS_GEMINI_ALLOWED_MCP", "masc") ]
   else
     pairs
 
@@ -1439,6 +1452,7 @@ type keeper_oas_context = {
   gemini_mcp_disabled : bool;
   gemini_approval_mode : string option;
   gemini_approval_mode_derived : bool;
+  gemini_allowed_mcp_derived : bool;
   claude_mcp_config : string option;
 }
 
@@ -1448,6 +1462,7 @@ let empty_keeper_oas_context =
     gemini_mcp_disabled = false;
     gemini_approval_mode = None;
     gemini_approval_mode_derived = false;
+    gemini_allowed_mcp_derived = false;
     claude_mcp_config = None;
   }
 
@@ -1485,11 +1500,16 @@ let keeper_oas_context_of_defaults (defaults : keeper_profile_defaults) :
       then Some {|{"mcpServers":{}}|}
       else None
   in
+  let gemini_allowed_mcp_derived =
+    not gemini_mcp_disabled
+    && not (oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" defaults.oas_env)
+  in
   {
     env_pairs;
     gemini_mcp_disabled;
     gemini_approval_mode;
     gemini_approval_mode_derived;
+    gemini_allowed_mcp_derived;
     claude_mcp_config;
   }
 

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_local_runtime_probe — Native Ollama timing and warm-state
     diagnostics.

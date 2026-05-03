@@ -112,6 +112,7 @@ type turn_reason =
   | Task_backlog of { unclaimed : int; failed : int }
   | Task_reactive_cooldown_elapsed
   | Never_started
+  | Min_interval_elapsed
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
@@ -192,6 +193,14 @@ val board_signal_wake_reason :
   meta:Keeper_types.keeper_meta ->
   signal:Board_dispatch.keeper_board_signal ->
   string option
+
+(** Convert a queued Event Layer stimulus back into structured board activity
+    for the next keeper prompt. Returns [None] for non-board stimuli. *)
+val pending_board_event_of_stimulus :
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  Keeper_event_queue.stimulus ->
+  pending_board_event option
 
 (** Read the best available continuity summary for a keeper.
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)

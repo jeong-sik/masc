@@ -1,30 +1,22 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { IdeExplorer } from './ide-explorer'
-import { IdeEditorMock } from './ide-editor-mock'
+import { IdeEditorMock, type IdeEditorView } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
-import { IdeToolbar } from './ide-toolbar'
+import { IdePresenceStrip } from './ide-presence-strip'
+import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
+import { WorldVisualizer } from '../world-visualizer'
+import { COCKPIT_FRAME_SRC, shouldLoadCockpitFrame } from '../cockpit/cockpit-frame'
 import { navigate, route } from '../../router'
+import {
+  parseActive,
+  serializeActive,
+} from '../../../design-system/headless-core/layered-overlay'
 
-// PR-3: 4-pane CODE mode shell with editor toolbar (view tabs + LAYERS
-// toggle, RFC 0020 controller). Layout matches the cockpit IdePlane
-// prototype's grid (`design-system/ui_kits/cockpit/cockpit.css`
-// `.ide-v2-tree / .ide-v2-center / .ide-v2-right / .ide-v2-terminal`);
-// production tokens are v0.4 Semantic-tier only.
-//
-// Each child mock cites the implementation PR that replaces it:
-//   EXPLORER          -> Phase 2 PR-4 (file-tree-store, RFC 0014)
-//   editor            -> Phase 2 PR-5 (Shiki + RFC 0019 blame)
-//   CONVERSATION rail -> Phase 2 PR-6 (RFC 0021)
-//   ACTIVITY          -> Phase 2 PR-6 (sse-store-backed stream)
-//   INTERJECT         -> Phase 2 PR-7 (keeper-actions wiring)
-//
-// Audit reference:
-//   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
-
-type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
+type ViewTab = IdeEditorView
+const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
   const normalized = raw
@@ -37,8 +29,57 @@ function viewFromRoute(raw: string | null | undefined): ViewTab {
   return 'source'
 }
 
+function layersFromRoute(raw: string | null | undefined): ReadonlySet<string> {
+  return parseActive(raw ?? '', IDE_LAYER_KINDS)
+}
+
+function paramsWithLayers(
+  params: Record<string, string>,
+  view: ViewTab,
+  activeLayers: ReadonlySet<string>,
+): Record<string, string> {
+  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
+  const serialized = serializeActive(activeLayers)
+  if (serialized) {
+    next.layers = serialized
+  } else {
+    delete next.layers
+  }
+  return next
+}
+
+function CockpitPreview() {
+  if (!shouldLoadCockpitFrame()) {
+    return html`
+      <section
+        aria-label="MASC Cockpit preview"
+        class="min-h-0 border-t border-solid border-[var(--color-border-divider)] bg-black"
+      />
+    `
+  }
+
+  return html`
+    <section
+      aria-label="MASC Cockpit preview"
+      class="grid min-h-0 grid-rows-[auto_1fr] border-t border-solid border-[var(--color-border-divider)] bg-black"
+    >
+      <div
+        class="border-b border-solid border-[rgba(255,255,255,0.12)] px-[var(--sp-3)] py-[var(--sp-2)] [font:var(--type-eyebrow)] text-[rgba(255,255,255,0.68)]"
+      >
+        MASC Cockpit
+      </div>
+      <iframe
+        src=${COCKPIT_FRAME_SRC}
+        class="h-full min-h-0 w-full border-0"
+        title="MASC Dream IDE Cockpit"
+      />
+    </section>
+  `
+}
+
 export function IdeShell() {
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+  const activeLayers = layersFromRoute(route.value.params.layers)
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)
@@ -50,14 +91,18 @@ export function IdeShell() {
     navigate('code', { ...route.value.params, section: 'ide-shell', view: next })
   }
 
+  const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
+    navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
+  }
+
   return html`
     <section
       class="ide-plane-shell"
       role="region"
-      aria-label="Code IDE shell (Phase 1 PR-3 — toolbar + 4-pane mock)"
+      aria-label="Code IDE shell"
       style=${{
         display: 'grid',
-        gridTemplateRows: 'auto auto 1fr auto',
+        gridTemplateRows: 'auto auto auto 1fr auto',
         background: 'var(--color-bg-page)',
         color: 'var(--color-fg-primary)',
         minHeight: 'calc(100vh - var(--h-topbar) - var(--h-kpi))',
@@ -77,10 +122,18 @@ export function IdeShell() {
       >
         <span style=${{ color: 'var(--color-fg-secondary)' }}>코드 IDE</span>
         <span>·</span>
-        <span>* runtime / main / nick0cave@dkr-a1 / improver@wt-run-47</span>
+        <${IdePresenceStrip} />
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
       </header>
-      <${IdeToolbar} activeView=${activeView} onViewChange=${handleViewChange} />
+      <${IdeToolbar}
+        activeView=${activeView}
+        activeLayers=${activeLayers}
+        onViewChange=${handleViewChange}
+        onLayersChange=${handleLayersChange}
+      />
+      <div class="border-b border-solid border-[var(--color-border-divider)]">
+        <${WorldVisualizer} />
+      </div>
       <div
         class="ide-plane-grid"
         role="presentation"
@@ -91,8 +144,16 @@ export function IdeShell() {
         <div class="ide-plane-tree">
           <${IdeExplorer} />
         </div>
-        <div class="ide-plane-editor" style=${{ minHeight: 0 }}>
-          <${IdeEditorMock} />
+        <div
+          class="ide-plane-editor"
+          style=${{
+            display: 'grid',
+            gridTemplateRows: 'minmax(280px, 1fr) minmax(260px, 38vh)',
+            minHeight: 0,
+          }}
+        >
+          <${IdeEditorMock} activeView=${activeView} activeLayers=${activeLayers} />
+          <${CockpitPreview} />
         </div>
         <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>
           <${IdeConversationRailMock} />

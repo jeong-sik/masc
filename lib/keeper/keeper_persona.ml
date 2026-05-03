@@ -34,7 +34,7 @@ let handle_persona_save = Authoring.handle_persona_save
 
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with
-  | Error e -> (false, "❌ " ^ e)
+  | Error e -> (false, "" ^ e)
   | Ok (persona, resolved_args) ->
       let errors = validate_resolved_keeper_create_json resolved_args in
       let dry_run = get_bool args "dry_run" false in

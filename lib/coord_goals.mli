@@ -1,4 +1,3 @@
-open Base
 
 (** Coord_goals — Goal-management MCP tool handlers.
 

@@ -387,6 +387,41 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"
                  meta.name reason_desc meta.cascade_name window_count;
                if window_count >= escalation_threshold then begin
+                 let cascade_recovered () =
+                   match ctx.net with
+                   | None -> false
+                   | Some net ->
+                       (match Cascade_catalog_runtime.resolve_named_providers_strict
+                                ~sw:ctx.sw ~net ~cascade_name:meta.cascade_name () with
+                        | Error _ -> false
+                        | Ok candidates ->
+                            let healthy =
+                              Cascade_health_filter.filter_healthy ~sw:ctx.sw
+                                ~net candidates
+                            in
+                            let has_recovery_evidence
+                                (p : Llm_provider.Provider_config.t) =
+                              let provider_key = p.model_id in
+                              match
+                                Cascade_health_tracker.provider_info
+                                  Cascade_health_tracker.global
+                                  ~provider_key
+                              with
+                              | None -> false
+                              | Some info ->
+                                  info.events_in_window > 0
+                                  && info.success_rate > 0.0
+                                  && (not info.in_cooldown)
+                                  && Result.is_ok
+                                       (Cascade_health_tracker.check_circuit_breaker
+                                          Cascade_health_tracker.global
+                                          ~provider_key)
+                            in
+                            List.exists has_recovery_evidence healthy)
+                 in
+                 if cascade_recovered () then
+                   Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name meta.cascade_name
+                 else begin
                  Prometheus.inc_counter
                    "masc_keeper_stale_termination_threshold_breached_total"
                    ~labels:[ ("keeper", meta.name) ]
@@ -412,6 +447,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     See issue #10765."
                    meta.name window_count termination_window_sec
                    escalation_threshold
+               end
                end;
                (* #10765 phase 2: fleet batch detection.  See module-level
                   comment on [batch_terminations] for rationale. *)

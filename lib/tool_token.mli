@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_token — parse-once proof that a tool name exists in a dispatch table.
 

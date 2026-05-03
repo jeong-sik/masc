@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "d2fbca05ef748f8eed5f2bd9732e95cf95606498",
-  "pinned_version": "v0.187.6",
+  "pinned_sha": "2920d6127d02c8069e7bd94e7ac666c431c389f9",
+  "pinned_version": "v0.187.7",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -34,6 +34,7 @@
     "metrics_fields": [
       "on_cache_hit",
       "on_cache_miss",
+      "on_capability_drop",
       "on_error",
       "on_http_status",
       "on_request_end",

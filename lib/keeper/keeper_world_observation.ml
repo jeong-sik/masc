@@ -65,6 +65,7 @@ type turn_reason =
   | Task_backlog of { unclaimed : int; failed : int }
   | Task_reactive_cooldown_elapsed
   | Never_started
+  | Min_interval_elapsed
 
 type skip_reason =
   | Keeper_paused
@@ -89,6 +90,7 @@ let turn_reason_to_string = function
   | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
+  | Min_interval_elapsed -> "min_interval_elapsed"
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
@@ -552,6 +554,119 @@ let board_signal_wake_reason
          | `Never | `No_new_external -> None)
     | Board_dispatch.Board_post_created -> None
 
+let json_string_member name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let json_string_null_member name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some `Null | None -> None
+  | _ -> None
+
+let board_signal_kind_of_string = function
+  | "post_created" -> Some Board_dispatch.Board_post_created
+  | "comment_added" -> Some Board_dispatch.Board_comment_added
+  | _ -> None
+
+let board_signal_of_stimulus_payload payload =
+  try
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields
+      when Option.equal String.equal
+             (json_string_member "source" fields)
+             (Some "board_signal") ->
+        (match
+           ( json_string_member "kind" fields,
+             json_string_member "post_id" fields,
+             json_string_member "author" fields,
+             json_string_member "title" fields,
+             json_string_member "content" fields )
+         with
+         | Some kind, Some post_id, Some author, Some title, Some content ->
+             Option.map
+               (fun kind ->
+                 {
+                   Board_dispatch.kind;
+                   post_id;
+                   author;
+                   title;
+                   content;
+                   hearth = json_string_null_member "hearth" fields;
+                 })
+               (board_signal_kind_of_string kind)
+         | _ -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
+let pending_board_event_of_board_signal ~continuity_summary ~(meta : keeper_meta)
+    ~(arrived_at : float) (signal : Board_dispatch.keeper_board_signal) :
+    pending_board_event =
+  let self_tokens = self_identity_tokens meta in
+  let matched = board_signal_match ~continuity_summary ~meta ~signal in
+  let post_snapshot =
+    match Board_dispatch.get_post ~post_id:signal.post_id with
+    | Ok post -> Some post
+    | Error _ -> None
+  in
+  let title, preview, hearth, post_kind, updated_at =
+    match post_snapshot with
+    | Some (post : Board.post) ->
+        ( post.title,
+          short_preview ~max_len:80 post.content,
+          post.hearth,
+          post.post_kind,
+          post.updated_at )
+    | None ->
+        ( signal.title,
+          short_preview ~max_len:80 signal.content,
+          signal.hearth,
+          Board.Human_post,
+          arrived_at )
+  in
+  let self_commented, new_external_since, latest_external_author,
+      latest_external_preview =
+    match signal.kind with
+    | Board_dispatch.Board_post_created -> (false, 0, None, None)
+    | Board_dispatch.Board_comment_added ->
+        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+         | `New_external (count, author, preview) ->
+             (true, count, Some author, Some preview)
+         | `No_new_external ->
+             ( true,
+               0,
+               Some signal.author,
+               Some (short_preview ~max_len:60 signal.content) )
+         | `Never ->
+             ( false,
+               1,
+               Some signal.author,
+               Some (short_preview ~max_len:60 signal.content) ))
+  in
+  {
+    post_id = signal.post_id;
+    author = signal.author;
+    title;
+    preview;
+    hearth;
+    post_kind;
+    updated_at;
+    explicit_mention = matched.explicit_mention;
+    matched_targets = matched.matched_targets;
+    self_commented;
+    new_external_since;
+    latest_external_author;
+    latest_external_preview;
+  }
+
+let pending_board_event_of_stimulus ~continuity_summary ~(meta : keeper_meta)
+    (stimulus : Keeper_event_queue.stimulus) : pending_board_event option =
+  board_signal_of_stimulus_payload stimulus.payload
+  |> Option.map
+       (pending_board_event_of_board_signal ~continuity_summary ~meta
+          ~arrived_at:stimulus.arrived_at)
+
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
@@ -993,6 +1108,31 @@ let keeper_cycle_decision
         let proactive_work_ready =
           proactive_work_signal_present ~meta observation
         in
+        (* Phase 1 — Bootstrap bypass: keeper has never completed a scheduled
+           autonomous turn (last_ts <= 0.0, so since_last = max_int). Fire
+           immediately without requiring work signals or time gates, so a
+           fresh keeper always gets at least one warm-up turn regardless of
+           observable backlog state.  This breaks the "no signal → no turn →
+           no signal" bootstrap deadlock. *)
+        let is_bootstrap = since_last_scheduled_autonomous = max_int in
+        (* Phase 2 — Minimum proactive cadence: even with no observable work
+           signals, fire a housekeeping turn once the minimum interval has
+           elapsed.  Default: 900s (15 min).  Prevents permanent silence when
+           external events never arrive and decouples liveness from signal
+           availability.  Controlled by MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
+           / keeper.proactive.min_interval_sec. *)
+        let proactive_min_interval_sec =
+          Keeper_config.keeper_proactive_min_interval_sec ()
+        in
+        let min_interval_elapsed =
+          (* Exclude the bootstrap case: when is_bootstrap is true, the bootstrap
+             bypass already fires the turn and emits Never_started.  Using
+             min_interval_elapsed here would also set Min_interval_elapsed on a
+             bootstrap turn, which is misleading — the two paths are mutually
+             exclusive by design. *)
+          not is_bootstrap
+          && since_last_scheduled_autonomous >= proactive_min_interval_sec
+        in
         (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
            has elapsed, skip the idle_gate check. task_reactive_cooldown is
            already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
@@ -1000,10 +1140,12 @@ let keeper_cycle_decision
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
         let should_run =
-          proactive_work_ready
-          && (backlog_fresh
-              || backlog_elapsed
-              || (idle_gate_elapsed && cooldown_elapsed))
+          is_bootstrap
+          || min_interval_elapsed
+          || (proactive_work_ready
+              && (backlog_fresh
+                  || backlog_elapsed
+                  || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let provider_cooldown_remaining_sec =
           if should_run
@@ -1037,8 +1179,10 @@ let keeper_cycle_decision
             let run_reasons =
               [
                 Some Scheduled_autonomous_turn;
-                (if since_last_scheduled_autonomous = max_int
+                (if is_bootstrap
                  then Some Never_started else None);
+                (if min_interval_elapsed
+                 then Some Min_interval_elapsed else None);
                 (if idle_gate_elapsed
                  then Some (Idle_cooldown_elapsed
                               { idle_sec = observation.idle_seconds;

@@ -182,6 +182,17 @@ module KeeperSupervisor = struct
       are removed from disk. Default: 86400 (24 hours). *)
   let paused_cleanup_ttl_sec =
     Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+
+  (** Initial auto-resume backoff delay after an auto-pause (seconds).
+      On every successive auto-pause the delay doubles, capped at
+      [auto_resume_max_sec].  Default: 3600 (1 hour).
+      Set to 0 to disable the self-healing circuit breaker. *)
+  let auto_resume_initial_sec =
+    Float.max 0.0 (get_float ~default:3600.0 "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC")
+
+  (** Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). *)
+  let auto_resume_max_sec =
+    Float.max 3600.0 (get_float ~default:86400.0 "MASC_KEEPER_AUTO_RESUME_MAX_SEC")
 end
 
 (** {1 Keeper Poll Intervals}

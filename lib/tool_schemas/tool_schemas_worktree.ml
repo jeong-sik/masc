@@ -45,6 +45,7 @@ masc_worktree_remove.";
         ]);
       ]);
       ("required", `List [`String "task_id"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -65,6 +66,7 @@ After completing work in a worktree created by masc_worktree_create.";
         ]);
       ]);
       ("required", `List [`String "task_id"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -75,6 +77,7 @@ Pair with masc_worktree_remove to clean up stale entries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

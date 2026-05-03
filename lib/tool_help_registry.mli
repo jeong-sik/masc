@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_help_registry — derived per-tool help entries.
 

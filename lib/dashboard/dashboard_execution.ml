@@ -54,11 +54,15 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.kee
     [
       ("disposition", member "disposition");
       ("disposition_reason", member "disposition_reason");
+      ("operator_disposition", member "operator_disposition");
+      ("operator_disposition_reason", member "operator_disposition_reason");
       ("needs_attention", member "needs_attention");
       ("attention_reason", member "attention_reason");
       ("next_human_action", member "next_human_action");
       ("approval_state", member "approval");
       ("execution_summary", member "execution");
+      ("latest_terminal_reason", member "latest_terminal_reason");
+      ("latest_next_action", member "latest_next_action");
       ("latest_causal_event", member "latest_causal_event");
     ]
 
@@ -138,10 +142,180 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
               in
               let fields = assoc_upsert fields "diagnostic" diagnostic in
               let fields = assoc_upsert fields "trust" trust in
+              let fields = assoc_upsert fields "runtime_trust" trust in
               `Assoc fields
           | Ok None | Error _ -> keeper_json)
       | _ -> keeper_json)
   | _ -> keeper_json
+
+let bool_field ?(default = false) key json =
+  match member_assoc key json with
+  | `Bool value -> value
+  | _ -> default
+
+let keeper_runtime_trust_json keeper =
+  match member_assoc "runtime_trust" keeper with
+  | `Assoc _ as trust -> trust
+  | _ -> member_assoc "trust" keeper
+
+let lowercase_json_string key json =
+  string_field_opt key json |> Option.map String.lowercase_ascii
+
+let terminal_reason_json trust =
+  member_assoc "latest_terminal_reason" trust
+
+let terminal_reason_code trust =
+  terminal_reason_json trust |> string_field_opt "code"
+
+let terminal_reason_severity trust =
+  terminal_reason_json trust |> lowercase_json_string "severity"
+
+let terminal_reason_requires_attention trust =
+  match terminal_reason_severity trust with
+  | Some ("bad" | "warn") -> true
+  | _ -> (
+      match terminal_reason_code trust |> Option.map String.lowercase_ascii with
+      | Some ("success" | "completed") | None -> false
+      | Some _ -> true)
+
+let trust_disposition_requires_attention trust =
+  match lowercase_json_string "disposition" trust with
+  | Some ("alert" | "pause") -> true
+  | _ -> false
+
+let keeper_queue_severity keeper trust =
+  match terminal_reason_severity trust with
+  | Some "bad" -> "bad"
+  | Some "warn" -> "warn"
+  | _ -> (
+      match lowercase_json_string "disposition" trust with
+      | Some "alert" -> "bad"
+      | Some "pause" -> "warn"
+      | _ ->
+          if Option.is_some (string_field_opt "runtime_blocker_class" keeper) then
+            "bad"
+          else
+            "warn")
+
+let first_text values =
+  List.find_map
+    (function
+      | Some value ->
+          let compacted = compact_text value in
+          if compacted = "" then None else Some compacted
+      | None -> None)
+    values
+
+let keeper_queue_summary keeper trust =
+  let terminal = terminal_reason_json trust in
+  first_text
+    [
+      string_field_opt "attention_reason" trust;
+      string_field_opt "summary" terminal;
+      string_field_opt "runtime_blocker_summary" keeper;
+      string_field_opt "operator_disposition_reason" trust;
+      string_field_opt "disposition_reason" trust;
+      string_field_opt "latest_next_action" trust;
+      Some "keeper needs operator attention";
+    ]
+  |> Option.value ~default:"keeper needs operator attention"
+
+let keeper_queue_last_seen keeper trust =
+  let latest_causal = member_assoc "latest_causal_event" trust in
+  let last_seen_at =
+    latest_iso_timestamp
+      [
+        string_field_opt "ts" latest_causal;
+        string_field_opt "observed_at" latest_causal;
+        string_field_opt "last_autonomous_action_at" keeper;
+        string_field_opt "last_heartbeat" keeper;
+        string_field_opt "updated_at" keeper;
+        string_field_opt "created_at" keeper;
+      ]
+  in
+  (last_seen_at, parse_iso_opt last_seen_at |> Option.value ~default:0.0)
+
+let build_keeper_execution_queue keepers =
+  keepers
+  |> List.filter_map (fun keeper ->
+         match string_field_opt "name" keeper with
+         | None -> None
+         | Some keeper_name ->
+             let trust = keeper_runtime_trust_json keeper in
+             let trust_needs_attention =
+               bool_field "needs_attention" trust
+               || trust_disposition_requires_attention trust
+               || terminal_reason_requires_attention trust
+             in
+             let runtime_blocked =
+               Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+             in
+             if not (trust_needs_attention || runtime_blocked) then None
+             else
+               let severity = keeper_queue_severity keeper trust in
+               let summary = keeper_queue_summary keeper trust in
+               let last_seen_at, last_seen_ts = keeper_queue_last_seen keeper trust in
+               let terminal_code = terminal_reason_code trust in
+               let next_human_action =
+                 match string_field_opt "next_human_action" trust with
+                 | Some _ as value -> value
+                 | None ->
+                     (match string_field_opt "latest_next_action" trust with
+                      | Some _ as value -> value
+                      | None ->
+                          terminal_reason_json trust
+                          |> string_field_opt "next_action")
+               in
+               let intervene_handoff =
+                 handoff_json ~surface:"intervene"
+                   ~label:"Keeper 상태 보기"
+                   ~target_type:"keeper"
+                   ~target_id:keeper_name
+                   ~focus_kind:"keeper"
+                   ()
+               in
+               let command_handoff =
+                 handoff_json ~surface:"command"
+                   ~command_surface:"agents"
+                   ~label:"Keeper 원인 보기"
+                   ~target_type:"keeper"
+                   ~target_id:keeper_name
+                   ~focus_kind:"keeper"
+                   ()
+               in
+               Some
+                 {
+                   severity_rank = severity_rank severity;
+                   last_seen_ts;
+                   json =
+                     `Assoc
+                       [
+                         ("id", `String ("keeper-" ^ keeper_name));
+                         ("kind", `String "keeper");
+                         ("severity", `String severity);
+                         ("status", member_assoc "status" keeper);
+                         ("summary", `String summary);
+                         ("target_type", `String "keeper");
+                         ("target_id", `String keeper_name);
+                         ("linked_session_id", `Null);
+                         ("linked_operation_id", `Null);
+                         ("last_seen_at", json_string_option last_seen_at);
+                         ("attention_reason", member_assoc "attention_reason" trust);
+                         ("next_human_action", json_string_option next_human_action);
+                         ("terminal_reason_code", json_string_option terminal_code);
+                         ("runtime_trust", trust);
+                         ("top_handoff", command_handoff);
+                         ("intervene_handoff", intervene_handoff);
+                         ("command_handoff", command_handoff);
+                       ];
+                 })
+
+let merge_execution_queue left right =
+  (left @ right)
+  |> List.sort (fun left right ->
+         let by_severity = Int.compare right.severity_rank left.severity_rank in
+         if by_severity <> 0 then by_severity
+         else Float.compare right.last_seen_ts left.last_seen_ts)
 
 let model_map_of_keeper_rows keepers =
   let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
@@ -309,6 +483,10 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         | _ -> []
       in
       let t_after_enrich = Time_compat.now () in
+      let execution_queue =
+        merge_execution_queue execution_queue
+          (build_keeper_execution_queue keepers)
+      in
       Eio.Fiber.yield ();
       (* Load tasks/agents/messages — needed for worker_support_briefs.
          In light mode, tasks and messages are NOT serialized in the

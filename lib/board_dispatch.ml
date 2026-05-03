@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -95,14 +94,14 @@ let start_flusher_actor ~sw store =
           (try Board.flush_dirty store
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Flush failed: %s" (Exn.to_string exn))
+           | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
       | Board_types.Sweep ->
           (try
              let swept = Board.sweep store in
              ignore swept
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Sweep failed: %s" (Exn.to_string exn))
+           | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
     done
   )
 
@@ -128,7 +127,13 @@ let set_keeper_board_signal_hook hook =
 
 let emit_keeper_board_signal signal =
   match Atomic.get keeper_board_signal_hook with
-  | Some hook -> hook signal
+  | Some hook ->
+      (try hook signal
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.BoardLog.error "Keeper board signal hook failed: %s"
+             (Printexc.to_string exn))
   | None -> ()
 
 let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None
@@ -161,7 +166,9 @@ let init_jsonl () =
 
 let reset_for_test () =
   Atomic.set backend_state Uninitialized;
-  Atomic.set flusher_started false
+  Atomic.set flusher_started false;
+  Atomic.set keeper_board_signal_hook None;
+  Atomic.set board_sse_hook None
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
@@ -280,7 +287,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
     let posts =
       match visibility_filter with
       | Some visibility ->
-          List.filter (fun (post : Board.post) -> Poly.equal post.visibility visibility) posts
+          List.filter (fun (post : Board.post) -> (=) post.visibility visibility) posts
       | None -> posts
     in
     match hearth with
@@ -296,7 +303,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
     |> (match post_kind_filter with
        | Some kind ->
            List.filter
-             (fun (p : Board.post) -> Poly.equal (Board.classify_post_kind p) kind)
+             (fun (p : Board.post) -> (=) (Board.classify_post_kind p) kind)
        | None -> Stdlib.Fun.id)
   in
   match backend () with

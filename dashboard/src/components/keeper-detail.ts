@@ -221,6 +221,13 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || keeper.trust?.disposition_reason?.trim()
     || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
+  const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
+  const latestTerminalCode = latestTerminalReason?.code?.trim() || null
+  const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
+  const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
+  const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
+  const shouldShowOperatorDispositionReason =
+    operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
   const runtimeProofStatus =
     executionSummary?.runtime_proof_status?.trim()
@@ -436,6 +443,16 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          : null}
+        ${latestTerminalCode
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
+          : null}
+        ${latestNextAction
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
+          : null}
+        ${/* Show receipt-level operator cause when it adds detail beyond trustSummary. */
+          shouldShowOperatorDispositionReason
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
           : null}
         ${trustDisposition
           ? html`

@@ -169,18 +169,18 @@ let resolve_base_branch root base_branch =
     | Some resolved -> Ok (resolved, None)
     | None ->
         Error
-          (IoError
-             "Base branch auto-detect failed: no origin/HEAD, origin/main, origin/master, or origin/develop found.")
+          (System (System_error.IoError
+             "Base branch auto-detect failed: no origin/HEAD, origin/main, origin/master, or origin/develop found."))
   else if remote_branch_exists root base_branch then Ok (base_branch, None)
   else
     match List.find_opt (remote_branch_exists root) (auto_base_branch_candidates root) with
     | Some fallback -> Ok (fallback, Some base_branch)
     | None ->
         Error
-          (IoError
+          (System (System_error.IoError
              (Printf.sprintf
                 "Base branch origin/%s not found and no origin/HEAD, origin/main, origin/master, or origin/develop fallback detected."
-                base_branch))
+                base_branch)))
 
 (* ============================================ *)
 (* Worktree Operations                          *)
@@ -189,10 +189,10 @@ let resolve_base_branch root base_branch =
 (** Create worktree for agent *)
 let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_git_repo ~base_path) then
-    Error (IoError "Not a git repository. MASC v2 requires .git directory for worktree isolation.")
+    Error (System (System_error.IoError "Not a git repository. MASC v2 requires .git directory for worktree isolation."))
   else
     match git_root ~base_path with
-    | None -> Error (IoError "Cannot determine git root")
+    | None -> Error (System (System_error.IoError "Cannot determine git root"))
     | Some root ->
         let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
@@ -204,7 +204,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
 
         if Sys.file_exists worktree_path then
           Ok
-            (Printf.sprintf "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
+            (Printf.sprintf "Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
                worktree_path branch_name worktree_path)
         else (
           (* Fetch origin first; never create from a silently stale remote ref.
@@ -217,7 +217,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               ["git"; "-C"; root; "fetch"; "origin"]
           in
           if fetch_exit <> 0 then
-            Error (IoError "Failed to fetch origin before worktree creation.")
+            Error (System (System_error.IoError "Failed to fetch origin before worktree creation."))
           else match resolve_base_branch root base_branch with
           | Error e -> Error e
           | Ok (resolved_base, fallback_from) ->
@@ -245,21 +245,21 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               if exit_code = 0 then
                 Ok
                   (Printf.sprintf
-                     "✅ Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
+                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
                      worktree_path branch_name note worktree_path)
-              else Error (IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base)))
+              else Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base))))
 
 (** Remove worktree after work is merged *)
 let remove ~base_path ~agent_name ~task_id : string masc_result =
   match git_root ~base_path with
-  | None -> Error (IoError "Cannot determine git root")
+  | None -> Error (System (System_error.IoError "Cannot determine git root"))
   | Some root ->
       let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
       let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
       let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
 
       if not (Sys.file_exists worktree_path) then
-        Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
+        Error (System (System_error.IoError (Printf.sprintf "Worktree not found: %s" worktree_path)))
       else
         let exit_code =
           run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path]
@@ -274,12 +274,20 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
             |> List.filter_map Fun.id
           in
           let msg =
-            Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name
+            Printf.sprintf "Worktree removed: %s\n   Branch: %s" worktree_path branch_name
           in
           match warnings with
           | [] -> Ok msg
+<<<<<<< HEAD
+          | ws -> Ok (msg ^ "\n    Warnings: " ^ String.concat "; " ws))
+        else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
+||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
           | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
         else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
+=======
+          | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
+        else Error (System (System_error.IoError "Failed to remove worktree. It may have uncommitted changes."))
+>>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
 
 (** List all worktrees in the repository *)
 let list ~base_path =

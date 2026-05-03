@@ -81,6 +81,21 @@ val resolve_named_providers :
   unit ->
   (Llm_provider.Provider_config.t list, string) result
 
+val resolve_named_providers_strict :
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?provider_filter:string list ->
+  ?require_tool_choice_support:bool ->
+  ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
+  cascade_name:string ->
+  unit ->
+  (Llm_provider.Provider_config.t list, string) result
+(** Strict variant of {!resolve_named_providers} for execution paths.
+    Provider filter resolution fails closed instead of silently
+    broadening to the full provider set. *)
+
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

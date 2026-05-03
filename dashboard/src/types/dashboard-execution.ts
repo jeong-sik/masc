@@ -249,7 +249,7 @@ export interface ServerBuildIdentity {
 type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
 type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
 type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
-type DashboardExecutionQueueKind = 'session' | 'operation'
+type DashboardExecutionQueueKind = 'session' | 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
   active_sessions?: number
@@ -289,6 +289,10 @@ export interface DashboardExecutionQueueItem {
   linked_session_id?: string | null
   linked_operation_id?: string | null
   last_seen_at?: string | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  terminal_reason_code?: string | null
+  runtime_trust?: GoalKeeperTrustSummary | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -599,19 +603,43 @@ export interface GoalKeeperTrustApprovalState {
 
 export interface GoalKeeperTrustExecutionSummary {
   tool_contract_result?: string | null
+  runtime_proof_status?: string | null
+  required_tools?: string[] | null
+  missing_required_tools?: string[] | null
+  requested_tools?: string[] | null
+  tools_used?: string[] | null
+  requested_tool_count?: number | null
+  tools_used_count?: number | null
+  provider_attempt_count?: number | null
+  provider_fallback_applied?: boolean | null
+  provider_selected_model?: string | null
+  cascade_outcome?: string | null
   sandbox_summary?: string | null
+  sandbox_root?: string | null
   mutation_guard_summary?: string | null
   latest_receipt_at?: string | null
+}
+
+export interface GoalKeeperTrustTerminalReason {
+  code?: string | null
+  source?: string | null
+  severity?: 'ok' | 'warn' | 'bad' | string | null
+  summary?: string | null
+  next_action?: string | null
 }
 
 export interface GoalKeeperTrustSummary {
   disposition?: string | null
   disposition_reason?: string | null
+  operator_disposition?: string | null
+  operator_disposition_reason?: string | null
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null
   approval_state?: GoalKeeperTrustApprovalState | null
   execution_summary?: GoalKeeperTrustExecutionSummary | null
+  latest_terminal_reason?: GoalKeeperTrustTerminalReason | null
+  latest_next_action?: string | null
   latest_causal_event?: GoalKeeperTrustLatestEvent | null
 }
 

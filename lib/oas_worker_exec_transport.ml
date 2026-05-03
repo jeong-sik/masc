@@ -605,13 +605,53 @@ let resolve_tool_lane_for_oas_tools
   let runtime_tool_names =
     dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
   in
+  (* #12676: When all tools were bound-actor and got stripped for codex_cli,
+     runtime_tool_names is empty. The keeper still needs an MCP connection so
+     it can discover and call non-bound tools dynamically. Build a minimal
+     connect-only policy with the server URL and auth but no allowed_tool_names
+     — codex_cli will see the MCP server without per-tool approval overrides. *)
   let runtime_mcp_policy =
-    runtime_mcp_policy_of_tool_names
-      ?agent_name:requested_agent_name
-      ~allow_keeper_internal:(keeper_internal_tool_names <> [])
-      runtime_tool_names
-    |> runtime_mcp_policy_for_provider ~provider_cfg
-         ~agent_name:(Option.value ~default:"" requested_agent_name)
+    if runtime_tool_names = [] && codex_keeper_bound_actor_tools <> [] then
+      (* Minimal connect-only policy: server + auth, empty allowed_tool_names.
+         Codex_cli will connect to MCP but have no pre-approved tools. *)
+      let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
+      let per_keeper_token =
+        match env_token, requested_agent_name with
+        | None, Some name ->
+            let base_path = Env_config_core.base_path () in
+            Auth.load_raw_token base_path ~agent_name:name
+        | _ -> None
+      in
+      let auth_headers =
+        match env_token, per_keeper_token with
+        | Some raw, _ -> [ ("Authorization", "Bearer " ^ raw) ]
+        | None, Some raw -> [ ("Authorization", "Bearer " ^ raw) ]
+        | None, None -> []
+      in
+      Some
+        { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+          servers =
+            [
+              Llm_provider.Llm_transport.Http_server
+                { name = "masc";
+                  url = Env_config_runtime.Local_runtime.mcp_url ();
+                  headers = auth_headers;
+                };
+            ];
+          allowed_server_names = [ "masc" ];
+          allowed_tool_names = [];
+          strict = false;
+          disable_builtin_tools = false;
+        }
+      |> runtime_mcp_policy_for_provider ~provider_cfg
+           ~agent_name:(Option.value ~default:"" requested_agent_name)
+    else
+      runtime_mcp_policy_of_tool_names
+        ?agent_name:requested_agent_name
+        ~allow_keeper_internal:(keeper_internal_tool_names <> [])
+        runtime_tool_names
+      |> runtime_mcp_policy_for_provider ~provider_cfg
+           ~agent_name:(Option.value ~default:"" requested_agent_name)
   in
   match runtime_mcp_policy with
   | Some runtime_mcp_policy

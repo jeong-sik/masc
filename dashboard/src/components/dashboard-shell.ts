@@ -5,6 +5,8 @@ import { useEffect } from 'preact/hooks'
 import type { RouteState } from '../types'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
+import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
+import { dashboardWsConnected } from '../dashboard-ws-state'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
@@ -48,6 +50,7 @@ const LazyConnectors = lazy(async () => ({ default: (await import('./connector-s
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
+const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>Loading ${label}...<//>`
@@ -93,7 +96,8 @@ export function describeReconnecting(args: {
 }
 
 export function ConnectionStatus() {
-  const isConnected = connected.value
+  const wsOnly = dashboardWsOnlyEnabled()
+  const isConnected = wsOnly ? dashboardWsConnected.value : connected.value
   const snap = missionSnapshot.value
   const attentionCount = snap?.attention_queue?.length ?? 0
   const reconn = reconnectCount.value
@@ -354,7 +358,8 @@ export function dashboardRouteBoundaryKey(routeState: RouteState): string {
 }
 
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
-  const live = connected.value
+  const wsOnly = dashboardWsOnlyEnabled()
+  const live = wsOnly ? dashboardWsConnected.value : connected.value
   const snap = missionSnapshot.value
   const sessions = snap?.sessions ?? []
   let blockers = 0
@@ -534,6 +539,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('Lab')}>
           <${LazyLabSurface} />
+        <//>
+      `
+    case 'cockpit':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Cockpit')}>
+          <${LazyCockpit} />
         <//>
       `
     case 'code':

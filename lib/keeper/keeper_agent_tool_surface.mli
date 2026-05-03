@@ -13,11 +13,21 @@ val unexpected_tool_partial_warn_mu : Eio.Mutex.t
 val should_log_unexpected_tool_partial_once :
   keeper_name:string -> unexpected_tool_names:string list -> bool
 
+(** Whether tools are required, optional, or absent for this turn. *)
+type tool_requirement =
+  | Required
+  | Optional
+  | No_tools
+
+val tool_requirement_to_string : tool_requirement -> string
+val tool_requirement_of_string : string -> tool_requirement option
+val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
+
 (** Diagnostic surface metrics emitted into trajectory entries. *)
 type tool_surface_metrics =
   { turn_lane : string
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -46,7 +56,7 @@ type computed_tool_surface =
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list

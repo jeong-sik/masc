@@ -23,13 +23,13 @@ let status config =
     | "" -> state.project
     | name -> name
   in
-  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
+  Printf.bprintf buf "🏢 Cluster: %s\n" cluster_name;
   if cluster_name <> state.project then
-    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
-  Buffer.add_string buf (Printf.sprintf "📍 Namespace: %s (flattened)\n" current_room);
-  Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" config.base_path);
+    Printf.bprintf buf "Project: %s\n" state.project;
+  Printf.bprintf buf "📍 Namespace: %s (flattened)\n" current_room;
+  Printf.bprintf buf "📁 Path: %s\n" config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-  Buffer.add_string buf "📌 Players:\n";
+  Buffer.add_string buf "Players:\n";
 
   (* List agents (bounded for responsiveness) *)
   let agents_path = agents_dir config in
@@ -64,7 +64,7 @@ let status config =
     let total_agents = List.length agents in
     let shown_agents = take max_agents_display agents in
     List.iter (fun (name, icon, task) ->
-      Buffer.add_string buf (Printf.sprintf "  %s %s → %s\n" icon name task)
+      Printf.bprintf buf "  %s %s → %s\n" icon name task
     ) shown_agents;
     if total_agents > max_agents_display then
       Buffer.add_string buf
@@ -73,7 +73,7 @@ let status config =
            (total_agents - max_agents_display))
   end;
 
-  Buffer.add_string buf "\n📋 Quest Board:\n";
+  Buffer.add_string buf "\nQuest Board:\n";
 
   let sorted_tasks = List.sort (fun a b -> compare a.priority b.priority) backlog.tasks in
   let active_tasks, done_count, cancelled_count =
@@ -90,7 +90,7 @@ let status config =
   List.iter (fun task ->
     let status_icon = Types.task_status_icon task.task_status in
     let assignee = Types.task_display_assignee task.task_status in
-    Buffer.add_string buf (Printf.sprintf "  %s %s: %s (%s)\n" status_icon task.id task.title assignee)
+    Printf.bprintf buf "  %s %s: %s (%s)\n" status_icon task.id task.title assignee
   ) shown_active_tasks;
 
   if active_tasks = [] then
@@ -108,9 +108,9 @@ let status config =
   (* Message summary: use cumulative sequence to avoid heavy directory scans *)
   let total_messages = max 0 state.message_seq in
   if total_messages > 0 then begin
-    Buffer.add_string buf (Printf.sprintf "\n💬 Messages: %d (cumulative)\n" total_messages);
+    Printf.bprintf buf "\nMessages: %d (cumulative)\n" total_messages;
     Buffer.add_string buf "   Use masc_messages for recent details\n"
   end else
-    Buffer.add_string buf "\n💬 Messages: 0\n";
+    Buffer.add_string buf "\nMessages: 0\n";
 
   Buffer.contents buf

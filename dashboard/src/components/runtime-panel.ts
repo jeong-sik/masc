@@ -33,11 +33,13 @@ import { CascadeConfigPanel } from './cascade-config-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { CostDashboard, type CostView } from './cost-dashboard'
 import { CascadeInspector } from './cascade-inspector'
+import { ProviderCapabilityMatrix } from './provider-capability-matrix'
 
 type RuntimeView =
   | 'default'
   | 'cascade'
   | 'providers'
+  | 'capability'
   | 'cost'
   | 'audit'
   | 'heuristics'
@@ -50,6 +52,7 @@ const RUNTIME_VIEWS: RuntimeView[] = [
   'default',
   'cascade',
   'providers',
+  'capability',
   'cost',
   'audit',
   'heuristics',
@@ -72,6 +75,7 @@ const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
   { key: 'cascade', label: 'Cascade' },
   { key: 'providers', label: '프로바이더' },
+  { key: 'capability', label: '기능 매트릭스' },
   { key: 'cost', label: '비용 / 지연' },
   { key: 'audit', label: '감사' },
   { key: 'heuristics', label: '휴리스틱' },
@@ -115,6 +119,8 @@ export function RuntimePanel() {
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
+        : view === 'capability'
+          ? html`<${ProviderCapabilityMatrix} />`
         : costView
           ? html`<${CostDashboard} view=${costView} />`
         : view === 'inspector'

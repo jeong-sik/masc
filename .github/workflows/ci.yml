@@ -203,7 +203,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/types/)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.allowlist$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/)'; then
             lint=true
           fi
 
@@ -211,11 +211,11 @@ jobs:
             dashboard=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health_snapshot=true
           fi
 
@@ -430,7 +430,7 @@ jobs:
           GITHUB_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh
+          chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh scripts/base-policy-audit.sh
           zero_sha="0000000000000000000000000000000000000000"
           baseline_ref=""
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
@@ -729,6 +729,9 @@ jobs:
 
       - name: Run OCaml docstring bare escape-quote lint
         run: bash scripts/lint/no-docstring-escape-quote.sh
+
+      - name: Run dashboard hardcoded-color lint
+        run: bash scripts/lint/no-hardcoded-colors-dashboard.sh
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain

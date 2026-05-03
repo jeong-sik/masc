@@ -2,6 +2,7 @@
 // Sticky app shell with tab routing and live status rail
 
 import { html } from 'htm/preact'
+import { WorldVisualizer } from './components/world-visualizer'
 import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
@@ -285,7 +286,7 @@ export function App() {
 
         <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
           <div class="h-full overflow-y-auto p-4">
-            <${DashboardMain} />
+            <div class="flex-none border-b border-solid border-[var(--color-border-default)]"><${WorldVisualizer} /></div><${DashboardMain} />
           </div>
         </main>
       </div>

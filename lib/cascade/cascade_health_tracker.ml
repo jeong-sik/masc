@@ -529,6 +529,21 @@ let is_in_cooldown t ~provider_key =
         false
       end)
 
+let check_circuit_breaker t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> Ok ()
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      if state.cooldown_until > now then
+        let remaining = max 0 (int_of_float (Float.ceil (state.cooldown_until -. now))) in
+        Error (Printf.sprintf "provider cooldown active; retry in %ds" remaining)
+      else begin
+        if state.cooldown_until > 0.0 then
+          state.cooldown_until <- 0.0;
+        Ok ()
+      end)
+
 (** Compute effective weight for a provider.
 
     [effective_weight = config_weight * success_rate]

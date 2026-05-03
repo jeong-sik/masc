@@ -81,6 +81,31 @@ let test_create_and_get_post () =
           Alcotest.(check string) "content matches"
             "dispatch test post" fetched.content
 
+let test_keeper_signal_hook_failure_does_not_abort_create_post () =
+  Board_dispatch.set_keeper_board_signal_hook (fun _ ->
+      failwith "keeper signal hook failed");
+  match
+    Board_dispatch.create_post ~author:"test-agent"
+      ~content:"post must survive keeper wake failure"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      Alcotest.(check string) "content persisted despite hook failure"
+        "post must survive keeper wake failure" post.content
+
+let test_keeper_signal_hook_cancellation_propagates () =
+  Board_dispatch.set_keeper_board_signal_hook (fun _ ->
+      raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")));
+  let raised = ref false in
+  (try
+     ignore
+       (Board_dispatch.create_post ~author:"test-agent"
+          ~content:"cancel should propagate through keeper wake hook"
+          ~post_kind:Board.Human_post ());
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  Alcotest.(check bool) "cancellation propagated" true !raised
+
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
   match Board_dispatch.create_post ~author:"sangsu"
@@ -534,6 +559,10 @@ let () =
     ];
     "posts", [
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
+      Alcotest.test_case "keeper hook failure does not abort create" `Quick
+        (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
+      Alcotest.test_case "keeper hook cancellation propagates" `Quick
+        (with_eio test_keeper_signal_hook_cancellation_propagates);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);

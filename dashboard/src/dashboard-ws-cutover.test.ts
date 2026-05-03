@@ -19,8 +19,8 @@ describe('dashboardWsOnlyEnabled', () => {
     vi.unstubAllEnvs()
   })
 
-  it('defaults to false when neither runtime nor build flag is set', () => {
-    expect(dashboardWsOnlyEnabled()).toBe(false)
+  it('defaults to true when neither runtime nor build flag is set', () => {
+    expect(dashboardWsOnlyEnabled()).toBe(true)
   })
 
   it('returns true when runtime window flag is explicitly true', () => {
@@ -36,21 +36,21 @@ describe('dashboardWsOnlyEnabled', () => {
 
   it('falls through to build flag when runtime flag is not a boolean', () => {
     originalWindow.__MASC_DASHBOARD_WS_ONLY__ = 'maybe'
-    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', 'true')
-    expect(dashboardWsOnlyEnabled()).toBe(true)
+    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', 'false')
+    expect(dashboardWsOnlyEnabled()).toBe(false)
   })
 
-  it('accepts "true" or "1" as affirmative build flag values', () => {
-    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', 'true')
-    expect(dashboardWsOnlyEnabled()).toBe(true)
-    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', '1')
-    expect(dashboardWsOnlyEnabled()).toBe(true)
+  it('accepts "false" or "0" as negative build flag values', () => {
+    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', 'false')
+    expect(dashboardWsOnlyEnabled()).toBe(false)
+    vi.stubEnv('VITE_DASHBOARD_WS_ONLY', '0')
+    expect(dashboardWsOnlyEnabled()).toBe(false)
   })
 
-  it('treats other build flag values as false', () => {
+  it('treats other build flag values as true', () => {
     vi.stubEnv('VITE_DASHBOARD_WS_ONLY', 'yes')
-    expect(dashboardWsOnlyEnabled()).toBe(false)
+    expect(dashboardWsOnlyEnabled()).toBe(true)
     vi.stubEnv('VITE_DASHBOARD_WS_ONLY', '')
-    expect(dashboardWsOnlyEnabled()).toBe(false)
+    expect(dashboardWsOnlyEnabled()).toBe(true)
   })
 })

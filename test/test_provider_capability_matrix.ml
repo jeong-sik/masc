@@ -14,9 +14,11 @@
        a subprocess that doesn't read them, and the turn would
        silently degrade.
 
-    2. CLI providers advertise runtime MCP only when their transport
-       accepts request-scoped MCP/tool events. Gemini CLI is static-config
-       only and must not be routed into a required-tool turn.
+    2. CLI providers always advertise runtime MCP.  All CLI kinds
+       (Claude Code, Gemini CLI, Kimi CLI, Codex CLI) use runtime MCP
+       for tool invocation, not inline function-calling.
+       [normalize_cli_provider_caps] forces this contract regardless of
+       OAS-level defaults.
 
     The CLI list is exhaustively typed via [match] so adding a
     new CLI variant fails compilation here, not at runtime when
@@ -101,9 +103,9 @@ let test_cli_no_inline_tools () =
     cli_kinds
 
 let expected_cli_runtime_mcp = function
-  | PC.Gemini_cli -> false
-  | Claude_code | Kimi_cli | Codex_cli -> true
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope ->
+  | PC.Claude_code | PC.Gemini_cli | PC.Kimi_cli | PC.Codex_cli -> true
+  | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Gemini | PC.Glm
+  | PC.DashScope ->
       false
 
 let test_cli_runtime_mcp_lane () =

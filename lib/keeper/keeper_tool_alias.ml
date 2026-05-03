@@ -86,9 +86,9 @@ let public_masc_to_internal name =
   Hashtbl.find_opt public_masc_to_internal_tbl name
 
 let strip_mcp_masc_prefix name =
-  match Base.String.chop_prefix name ~prefix:"mcp__masc__" with
-  | Some rest -> rest
-  | None -> name
+  if String.starts_with ~prefix:"mcp__masc__" name then
+    String.sub name 11 (String.length name - 11)
+  else name
 
 let canonicalize_one_observed name =
   let stripped = strip_mcp_masc_prefix name in

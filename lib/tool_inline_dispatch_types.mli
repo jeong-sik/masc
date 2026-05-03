@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_inline_dispatch_types — shared types for inline dispatch modules.
 

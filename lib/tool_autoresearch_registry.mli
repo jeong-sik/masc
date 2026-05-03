@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_autoresearch_registry — loop registry, pending hypothesis
     queue, and per-loop code-generator override state for the

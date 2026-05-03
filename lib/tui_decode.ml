@@ -335,7 +335,7 @@ let parse_keeper_chat_response response =
     | [] -> Ok ()
     | raw_line :: rest ->
         let line = trim raw_line in
-        if String.length line > 6 && String.sub line 0 6 = "data: " then (
+        if String.length line > 6 && String.starts_with line ~prefix:"data: " then (
           let payload = String.sub line 6 (String.length line - 6) |> trim in
           if payload = "[DONE]" || payload = "" then consume_sse rest
           else

@@ -526,20 +526,20 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
 
   (* Mission Statement *)
   Buffer.add_string buf "---\n[INSTITUTIONAL MEMORY - Cultural Inheritance]\n\n";
-  Buffer.add_string buf (Printf.sprintf "🏛️ **Mission**: %s\n" inst.identity.mission);
-  Buffer.add_string buf (Printf.sprintf "📅 Generation: %d | Founded: %s\n\n"
+  Printf.bprintf buf "🏛️ **Mission**: %s\n" inst.identity.mission;
+  Printf.bprintf buf "📅 Generation: %d | Founded: %s\n\n"
     inst.identity.generation
     (let t = Unix.gmtime inst.identity.founded_at in
-     Printf.sprintf "%04d-%02d-%02d" (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday));
+     Printf.sprintf "%04d-%02d-%02d" (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday);
 
   (* Cultural Values *)
   if inst.culture <> [] then begin
     Buffer.add_string buf "**Core Values** (inherited from predecessors):\n";
     List.iter (fun (v : cultural_value) ->
-      Buffer.add_string buf (Printf.sprintf "  • %s (%.0f%% weight): %s\n"
-        v.name (v.weight *. 100.0) v.description);
+      Printf.bprintf buf "  • %s (%.0f%% weight): %s\n"
+        v.name (v.weight *. 100.0) v.description;
       if v.anti_patterns <> [] then
-        Buffer.add_string buf (Printf.sprintf "    ⚠️ Avoid: %s\n" (String.concat ", " v.anti_patterns))
+        Printf.bprintf buf "    Avoid: %s\n" (String.concat ", " v.anti_patterns)
     ) (List.sort (fun a b -> compare b.weight a.weight) inst.culture |> List.filteri (fun i _ -> i < 3))
   end;
 
@@ -557,12 +557,12 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
       |> List.filteri (fun i _ -> i < max_patterns)
     in
     List.iter (fun (p : pattern) ->
-      Buffer.add_string buf (Printf.sprintf "  📋 %s (%.0f%% success, %d uses)\n"
-        p.name (p.success_rate *. 100.0) p.usage_count);
-      Buffer.add_string buf (Printf.sprintf "     Trigger: %s\n" p.trigger);
+      Printf.bprintf buf "  %s (%.0f%% success, %d uses)\n"
+        p.name (p.success_rate *. 100.0) p.usage_count;
+      Printf.bprintf buf "     Trigger: %s\n" p.trigger;
       if List.length p.steps <= 3 then
         List.iter (fun step ->
-          Buffer.add_string buf (Printf.sprintf "     → %s\n" step)
+          Printf.bprintf buf "     → %s\n" step
         ) p.steps
     ) sorted_patterns
   end;
@@ -570,14 +570,14 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
   (* Onboarding Steps *)
   Buffer.add_string buf "\n**Onboarding** (your first steps):\n";
   List.iteri (fun i step ->
-    Buffer.add_string buf (Printf.sprintf "  %d. %s\n" (i + 1) step)
+    Printf.bprintf buf "  %d. %s\n" (i + 1) step
   ) inst.succession.onboarding_steps;
 
   (* Alumni Network *)
   if inst.alumni <> [] then begin
     let recent_alumni = List.filteri (fun i _ -> i < 3) inst.alumni in
-    Buffer.add_string buf (Printf.sprintf "\n👥 Recent predecessors: %s\n"
-      (String.concat ", " recent_alumni))
+    Printf.bprintf buf "\n👥 Recent predecessors: %s\n"
+      (String.concat ", " recent_alumni)
   end;
 
   Buffer.add_string buf "---\n";
@@ -608,7 +608,9 @@ let format_for_welcome (inst : institution) : string =
     if mission = "" then "(not defined)"
     else String_util.utf8_safe ~max_bytes:80 ~suffix:"..." mission |> String_util.to_string
   in
-  Buffer.add_string buf ("🏛️ Mission: " ^ mission_short ^ "\n");
+  Buffer.add_string buf "🏛️ Mission: ";
+  Buffer.add_string buf mission_short;
+  Buffer.add_char buf '\n';
 
   (* Top 3 values - compact *)
   if inst.culture <> [] then begin
@@ -617,13 +619,19 @@ let format_for_welcome (inst : institution) : string =
       |> List.filteri (fun i _ -> i < 3)
     in
     let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
-    Buffer.add_string buf ("💎 Values: " ^ String.concat ", " value_names ^ "\n")
+    Buffer.add_string buf "Values: ";
+    Buffer.add_string buf (String.concat ", " value_names);
+    Buffer.add_char buf '\n'
   end;
 
   (* One procedural tip - pattern match for safety *)
   (match List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural with
    | best :: _ ->
-       Buffer.add_string buf ("💡 Tip: " ^ best.name ^ " → " ^ best.trigger ^ "\n")
+       Buffer.add_string buf "Tip: ";
+       Buffer.add_string buf best.name;
+       Buffer.add_string buf " → ";
+       Buffer.add_string buf best.trigger;
+       Buffer.add_char buf '\n'
    | [] -> ());
 
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";

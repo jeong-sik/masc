@@ -51,7 +51,7 @@ let encode_with_header ~(used_dict : bool) (orig_size : int) (compressed : strin
 let decode_header (data : string) : (int * string * bool) option =
   if String.length data < 8 then None
   (* Check dictionary header FIRST (ZSTDD) *)
-  else if Base.String.is_prefix data ~prefix:magic_dict then begin
+  else if String.starts_with data ~prefix:magic_dict then begin
     (* Dictionary header: ZSTDD *)
     let orig_size =
       (Char.code data.[5] lsl 24) lor

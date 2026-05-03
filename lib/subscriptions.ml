@@ -70,7 +70,7 @@ module SubscriptionStore = struct
     let bytes = Mirage_crypto_rng.generate 8 in
     let buf = Buffer.create 16 in
     for i = 0 to String.length bytes - 1 do
-      Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+      Printf.bprintf buf "%02x" (Char.code (String.get bytes i))
     done;
     Printf.sprintf "sub_%s" (Buffer.contents buf)
 

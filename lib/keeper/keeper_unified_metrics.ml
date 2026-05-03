@@ -332,7 +332,7 @@ let coverage_reason_of_result
     in
     match result.usage_reported, telemetry_reported with
     | false, false ->
-        if String.equal result.tool_surface.tool_requirement "none"
+        if result.tool_surface.tool_requirement = Keeper_agent_tool_surface.No_tools
            && structurally_unmetered_provider provider
         then Some "text_only_unmetered"
         else Some "missing_usage_and_inference"
@@ -534,13 +534,15 @@ let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
   let requirement, required_tool_names, missing_required_tool_names =
     match result with
     | Some r ->
-        ( r.tool_surface.tool_requirement,
+        ( Some r.tool_surface.tool_requirement,
           r.tool_surface.required_tool_names,
           r.tool_surface.missing_required_tool_names )
-    | None -> ("unknown", [], [])
+    | None -> (None, [], [])
   in
   `Assoc
-    [ ("requirement", `String requirement)
+    [ ("requirement", match requirement with
+      | Some r -> Keeper_agent_tool_surface.tool_requirement_to_yojson r
+      | None -> `String "unknown")
     ; ( "required_tool_names",
         `List (List.map (fun value -> `String value) required_tool_names) )
     ; ( "missing_required_tool_names",
@@ -831,7 +833,7 @@ let append_decision_record
                 [
                   ("turn_lane", `String r.tool_surface.turn_lane);
                   ("tool_surface_class", `String r.tool_surface.tool_surface_class);
-                  ("tool_requirement", `String r.tool_surface.tool_requirement);
+                  ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
                   ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
                   ( "tool_surface_fallback_used",
@@ -955,8 +957,7 @@ let append_decision_record
                 | Some e when String.length e > 0 ->
                   let e_lower = String.lowercase_ascii e in
                   let starts_with prefix =
-                    String.length e_lower >= String.length prefix
-                    && String.sub e_lower 0 (String.length prefix) = prefix
+                    String.starts_with e_lower ~prefix
                   in
                   let contains needle =
                     string_contains_substring ~needle e_lower

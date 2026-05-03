@@ -398,12 +398,12 @@ let test_rate_limit_config_roundtrip () =
 
 let test_masc_error_to_string () =
   check bool "NotInitialized" true
-    (String.length (Types.masc_error_to_string Types.NotInitialized) > 0);
+    (String.length (Types.masc_error_to_string (Types.System Types.System_error.NotInitialized)) > 0);
   check bool "AgentNotFound" true
-    (String.length (Types.masc_error_to_string (Types.AgentNotFound "test")) > 0);
+    (String.length (Types.masc_error_to_string (Types.Agent (Types.Agent_error.NotFound "test"))) > 0);
   check bool "TaskAlreadyClaimed" true
     (String.length (Types.masc_error_to_string
-      (Types.TaskAlreadyClaimed { task_id = "t1"; by = "agent" })) > 0);
+      (Types.Task (Types.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" }))) > 0);
   check bool "RateLimitExceeded" true
     (String.length (Types.masc_error_to_string
       (Types.RateLimitExceeded {

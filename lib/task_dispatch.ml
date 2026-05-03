@@ -82,9 +82,12 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
 let validate_transition ~(current : task_status) ~(next : task_status) ~task_id =
   match current, next with
   | Done _, Done _ | Done _, Cancelled _ | Cancelled _, Done _ | Cancelled _, Cancelled _ ->
-      Error (TaskInvalidState
-        (Printf.sprintf "task %s: cannot transition from %s to %s"
-           task_id (task_status_to_string current) (task_status_to_string next)))
+      Error (Task (Task_error.InvalidState
+               (Printf.sprintf
+                  "task %s: cannot transition from %s to %s"
+                  task_id
+                  (task_status_to_string current)
+                  (task_status_to_string next))))
   | _ -> Ok ()
 
 (** Update task status (claim, start, complete, cancel) *)
@@ -94,7 +97,7 @@ let update_status config ~task_id ~status =
       let backlog = Coord.read_backlog config in
       let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
       (match task_opt with
-       | None -> Error (TaskNotFound task_id)
+       | None -> Error (Task (Task_error.NotFound task_id))
        | Some t ->
           match validate_transition ~current:t.task_status ~next:status ~task_id with
           | Error e -> Error e

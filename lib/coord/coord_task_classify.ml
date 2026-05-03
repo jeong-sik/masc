@@ -210,12 +210,12 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
            ; "ts", `String (now_iso ())
            ]);
       Error
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "Task %s requires tool(s) unavailable to %s: %s"
               task.id
               agent_name
-              (String.concat ", " missing))))
+              (String.concat ", " missing)))))
 ;;
 
 let default_verification_evidence_refs =

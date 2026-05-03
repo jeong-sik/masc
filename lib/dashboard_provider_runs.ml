@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -270,7 +269,7 @@ let provider_snapshots () : provider_snapshot list =
   let managed =
     Provider_adapter.direct_adapters
     |> List.filter (fun (a : Provider_adapter.adapter) ->
-         not (Poly.equal a.runtime_kind Provider_adapter.Local)
+         not ((=) a.runtime_kind Provider_adapter.Local)
          && Option.is_some a.default_model_id)
     |> List.map provider_snapshot_of_adapter
   in

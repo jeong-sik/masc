@@ -264,7 +264,7 @@ let apply_mapping ~keeper_id ~base_path ~repositories =
 (* Path normalization for prefix comparison. *)
 let normalize_path_for_prefix_check path =
   let p = String.trim path in
-  if String.length p > 0 && p.[String.length p - 1] = '/' then
+  if String.ends_with ~suffix:"/" p then
     String.sub p 0 (String.length p - 1)
   else p
 

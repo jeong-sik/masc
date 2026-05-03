@@ -67,6 +67,7 @@ export default defineConfig(({ command }) => {
             '/mcp': { target: proxyTarget },
             '/sse': { target: proxyTarget },
             '/ws': { target: proxyTarget },
+            '/yjs': { target: proxyTarget, ws: true },
           },
         }
       : undefined,

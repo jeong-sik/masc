@@ -1,0 +1,28 @@
+# Allowlist for scripts/lint/no-hardcoded-colors-dashboard.sh
+#
+# Each entry is a path:line key that suppresses a known pre-existing
+# hardcoded-color violation in Canvas 2D or Cytoscape.js contexts.
+#
+# Format:
+#   path:line   — line-anchored. Update the line number when upstream
+#                 insertions/deletions shift it; the stale-check catches
+#                 entries that no longer map to a real violation.
+#
+# These are intentional allowlist entries (technical debt or prototype code).
+# New violations must NOT be added here — fix them instead.
+# See fix options in the script header.
+#
+# ── git-graph-view.ts — Cytoscape stylesheet (11 violations) ──────────────
+dashboard/src/components/git-graph-view.ts:77
+dashboard/src/components/git-graph-view.ts:108
+dashboard/src/components/git-graph-view.ts:116
+dashboard/src/components/git-graph-view.ts:120
+dashboard/src/components/git-graph-view.ts:131
+dashboard/src/components/git-graph-view.ts:132
+dashboard/src/components/git-graph-view.ts:136
+dashboard/src/components/git-graph-view.ts:144
+dashboard/src/components/git-graph-view.ts:145
+dashboard/src/components/git-graph-view.ts:151
+dashboard/src/components/git-graph-view.ts:152
+# ── activity-heatmap-draw.ts — Canvas background fill (1 violation) ───────
+dashboard/src/components/activity-heatmap-draw.ts:56

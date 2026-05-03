@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -154,10 +153,10 @@ let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string
 let validate_path config path =
   try
     if String.contains path '\x00' then
-      Error (IoError "Path contains null byte")
+      Error (System (System_error.IoError "Path contains null byte"))
     else
     match Coord_git.git_root ~base_path:config.Coord.base_path with
-    | None -> Error (IoError "Not in a git repository")
+    | None -> Error (System (System_error.IoError "Not in a git repository"))
     | Some git_root ->
     let absolute_path =
       if Filename.is_relative path then
@@ -188,10 +187,10 @@ let validate_path config path =
       | _ -> within canonical_root canonical
     in
     if allowed then Ok canonical
-    else Error (IoError "Path traversal detected: access outside git root")
+    else Error (System (System_error.IoError "Path traversal detected: access outside git root"))
   with
-  | Invalid_argument msg -> Error (IoError msg)
-  | exn -> Error (IoError (Stdlib.Printexc.to_string exn))
+  | Invalid_argument msg -> Error (System (System_error.IoError msg))
+  | exn -> Error (System (System_error.IoError (Stdlib.Printexc.to_string exn)))
 
 (* #6637 iter11 — per-agent playground containment for code-read tools.
 
@@ -237,10 +236,10 @@ let validate_read_path ~agent_name config path =
                (racy deletion, or a broken symlink). Treat as a
                containment failure rather than silently accepting. *)
             Error
-              (IoError
+              (System (System_error.IoError
                  (Printf.sprintf
                     "target path %S is not accessible (dangling \
-                     symlink or racy deletion)" path))
+                     symlink or racy deletion)" path)))
       with
       | Error e -> Error e
       | Ok canonical ->
@@ -271,13 +270,13 @@ let validate_read_path ~agent_name config path =
           try Ok (Unix.realpath playground_tree_abs_raw) with
           | Unix.Unix_error _ ->
               Error
-                (IoError
+                (System (System_error.IoError
                    (Printf.sprintf
                       "keeper playground tree %S does not exist; cannot \
                        validate cross-keeper containment. Clone via \
                        keeper_shell op=git_clone to provision your \
                        playground first. See #6527/#6637."
-                      playground_tree_rel))
+                      playground_tree_rel)))
         with
         | Error e -> Error e
         | Ok playground_tree_canonical ->
@@ -309,13 +308,13 @@ let validate_read_path ~agent_name config path =
               try Ok (Unix.realpath own_abs_raw) with
               | Unix.Unix_error _ ->
                   Error
-                    (IoError
+                    (System (System_error.IoError
                        (Printf.sprintf
                           "keeper playground bundle %S does not exist \
                            yet; cannot validate containment. Provision \
                            via git_clone or masc_worktree_create first. \
                            See #6527/#6637."
-                          own_rel_trailing))
+                          own_rel_trailing)))
             with
             | Error e -> Error e
             | Ok own_canonical ->
@@ -323,13 +322,13 @@ let validate_read_path ~agent_name config path =
                    || String.starts_with ~prefix:(own_canonical ^ "/") canonical
                 then Ok canonical
                 else
-                  Error (IoError (Printf.sprintf
+                  Error (System (System_error.IoError (Printf.sprintf
                     "cross-keeper playground read blocked: agent=%S tried to \
                      read path %S which is under another keeper's playground. \
                      Only %s is readable for this caller; reads outside your \
                      own playground must target the shared codebase (lib/, \
                      test/, config/, etc.). See #6527/#6637."
-                    agent_name path own_rel_trailing))
+                    agent_name path own_rel_trailing)))
 
 
 (* Handler: masc_code_search - Search code using ripgrep *)
@@ -342,9 +341,9 @@ let handle_code_search ctx args =
   let max_results = get_int args "max_results" 50 in
 
   if String.equal query "" then
-    (false, "❌ Query required: 'query' parameter")
+    (false, "Query required: 'query' parameter")
   else if String.equal (String.trim path) "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     (* Validate path first *)
     let search_path_result =
@@ -433,7 +432,7 @@ let handle_code_search ctx args =
             "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
              try simplifying the query or set is_regex=true with a valid regex."
         in
-        (false, Printf.sprintf "❌ %s\nrg output: %s" hint
+        (false, Printf.sprintf "%s\nrg output: %s" hint
            (if String.equal trimmed_out "" then "(empty)"
             else String_util.utf8_safe ~max_bytes:303 ~suffix:"..." trimmed_out |> String_util.to_string))
     | status, output ->
@@ -452,20 +451,20 @@ let handle_code_symbols ctx args =
   let path = get_string args "path" "" in
 
   if String.equal path "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "❌ File not found: %s" path)
+          (false, Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "❌ Binary file detected")
+          (false, "Binary file detected")
         else begin
           (* Read file and extract symbols *)
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -519,7 +518,7 @@ let handle_code_symbols ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end
@@ -531,19 +530,19 @@ let handle_code_read ctx args =
   let limit = get_int args "limit" 100 in
 
   if String.equal path "" then
-    (false, "❌ Path required: 'path' parameter")
+    (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "❌ File not found: %s" path)
+          (false, Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "❌ Binary file detected")
+          (false, "Binary file detected")
         else begin
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -574,7 +573,7 @@ let handle_code_read ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end

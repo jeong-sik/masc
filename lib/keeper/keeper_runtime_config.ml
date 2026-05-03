@@ -34,6 +34,8 @@ let key_to_env =
     "heartbeat.board_debounce_sec",     "MASC_KEEPER_BOARD_DEBOUNCE_SEC";
     "heartbeat.board_generic_wakeup_limit", "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
+    (* [proactive] *)
+    "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";

@@ -384,6 +384,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             const diagnosticState = row.diagnostic_health_state?.trim().toLowerCase() ?? null
             const rowHint =
               row.runtime_blocker_summary
+              ?? row.runtime_trust_reason
               ?? (
                 diagnosticState
                 && diagnosticState !== 'healthy'
@@ -430,6 +431,18 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   </span>
                   ${row.decision_required
                     ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
+                    : null}
+                  ${row.terminal_reason_code
+                    ? html`
+                      <span
+                        class=${row.terminal_reason_severity === 'bad'
+                          ? 'rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]'
+                          : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
+                        title=${row.runtime_trust_next_action ?? row.runtime_trust_reason ?? row.terminal_reason_code}
+                      >
+                        ${row.terminal_reason_code}
+                      </span>
+                    `
                     : null}
                 </div>
                 ${row.goal_label

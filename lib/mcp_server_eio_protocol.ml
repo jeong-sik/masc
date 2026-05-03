@@ -680,7 +680,7 @@ let handle_request
                  with
                  | Invalid_argument msg
                    when contains_casefold msg "masc not initialized" ->
-                     make_error ~id (-32603) (Types.masc_error_to_string Types.NotInitialized)
+                     make_error ~id (-32603) (Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->
                        let err = Printexc.to_string exn in
@@ -699,8 +699,7 @@ type transport_mode =
 
 let detect_mode first_line =
   let lower = String.lowercase_ascii first_line in
-  if String.length lower >= 14 &&
-     String.sub lower 0 14 = "content-length" then
+  if String.starts_with lower ~prefix:"content-length" then
     Framed
   else
     LineDelimited

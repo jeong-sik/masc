@@ -59,12 +59,14 @@ let count_substring haystack needle =
     in
     loop 0 0
 
-(** Documented floor: 11 wired sites in [keeper_unified_turn.ml]
-    after Steps 4b/4c/4d/4g/4i/4j.  Composition:
+(** Documented floor: 15 wired sites in [keeper_unified_turn.ml]
+    after Steps 4b/4c/4d/4g/4i/4j + SupervisorRequestsStop/HonorStopSignal.  Composition:
 
     | Step | site                                                  | count |
     |------|-------------------------------------------------------|-------|
     | 4c   | run_keeper_cycle entry [Idle -> Phase_gating]         | 1     |
+    | fix  | SupervisorRequestsStop at entry [Phase_gating -> Phase_gating] | 1 |
+    | fix  | HonorStopSignal at entry [Phase_gating -> Cancelled supervisor_stop] | 1 |
     | 4b   | phase-gate skip [Phase_gating -> Done]                | 1     |
     | 4g   | phase pass [Phase_gating -> Cascade_routing]          | 1     |
     | 4b   | ollama saturated failure                              | 1     |
@@ -72,11 +74,13 @@ let count_substring haystack needle =
     | 4g   | livelock Started [Cascade_routing -> Awaiting_provider] | 1   |
     | 4b   | livelock Blocked                                      | 1     |
     | 4i   | run_turn pre-call [Awaiting_provider -> Streaming]    | 1     |
+    | fix  | SupervisorRequestsStop in Eio.Cancel [Streaming -> Streaming] | 1 |
     | 4j   | retry_loop exhaustion [Streaming -> Failed]           | 1     |
     | 4d   | stop_reason [Streaming -> Completing]                 | 1     |
     | 4c   | success exit [Completing -> Done]                     | 1     |
+    | Cycle 1b-iv | Eio.Cancel HonorStopSignal [Streaming -> Cancelled supervisor_stop] | 1 |
     *)
-let documented_floor = 11
+let documented_floor = 15
 
 let test_emit_call_count_floor () =
   let path = locate_keeper_unified_turn () in

@@ -386,6 +386,19 @@ val filter_healthy :
   Llm_provider.Provider_config.t list ->
   Llm_provider.Provider_config.t list
 
+type health_filter_rejection =
+  Cascade_health_filter.health_filter_rejection =
+  | All_missing_api_key of int
+  | All_local_unhealthy of { local_count : int; cloud_count : int }
+
+val health_filter_rejection_to_string : health_filter_rejection -> string
+
+val filter_healthy_strict :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  Llm_provider.Provider_config.t list ->
+  (Llm_provider.Provider_config.t list, health_filter_rejection) result
+
 (** {1 Context Window Resolution} *)
 
 (** Resolve the Kimi context window from the OAS capability SSOT.
@@ -441,11 +454,26 @@ val filter_by_capabilities :
     Joins all {!Llm_provider.Types.Text} blocks. Useful for accept validators. *)
 val text_of_response : Llm_provider.Types.api_response -> string
 
+type provider_filter_rejection =
+  | Filter_matched_none of { filter : string list; available_kinds : string list }
+
+val provider_filter_rejection_to_string : provider_filter_rejection -> string
+
 val apply_provider_filter :
   provider_filter:string list option ->
   label:string ->
   Llm_provider.Provider_config.t list ->
   Llm_provider.Provider_config.t list
+
+val apply_provider_filter_strict :
+  provider_filter:string list option ->
+  label:string ->
+  Llm_provider.Provider_config.t list ->
+  (Llm_provider.Provider_config.t list, provider_filter_rejection) result
+(** Strict variant of {!apply_provider_filter}. Returns [Error] when
+    the explicit provider_filter matches no available providers instead
+    of silently broadening to the full set. Use for execution paths
+    where provider drift must surface as a typed blocker. *)
 
 (** {1 Local Capacity Query} *)
 

@@ -16,10 +16,31 @@ let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names 
         Hashtbl.replace unexpected_tool_partial_warned key ();
         true))
 
+type tool_requirement =
+  | Required
+  | Optional
+  | No_tools
+
+let tool_requirement_to_string = function
+  | Required -> "required"
+  | Optional -> "optional"
+  | No_tools -> "none"
+
+let tool_requirement_of_string = function
+  | "required" -> Some Required
+  | "optional" -> Some Optional
+  | "none" -> Some No_tools
+  | _ -> None
+
+let tool_requirement_to_yojson = function
+  | Required -> `String "required"
+  | Optional -> `String "optional"
+  | No_tools -> `String "none"
+
 type tool_surface_metrics =
   { turn_lane : string
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
@@ -46,7 +67,7 @@ type computed_tool_surface =
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list

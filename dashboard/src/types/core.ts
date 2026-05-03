@@ -282,12 +282,24 @@ export interface KeeperTrustExecutionSummary {
   latest_receipt_at?: string | null
 }
 
+export interface KeeperTrustTerminalReason {
+  code?: string | null
+  source?: string | null
+  severity?: 'ok' | 'warn' | 'bad' | string | null
+  summary?: string | null
+  next_action?: string | null
+}
+
 export interface KeeperTrustSummary {
   disposition?: string | null
   disposition_reason?: string | null
+  operator_disposition?: string | null
+  operator_disposition_reason?: string | null
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null
+  latest_terminal_reason?: KeeperTrustTerminalReason | null
+  latest_next_action?: string | null
   approval_state?: KeeperTrustApprovalState | null
   execution_summary?: KeeperTrustExecutionSummary | null
   latest_causal_event?: KeeperTrustLatestEvent | null

@@ -43,13 +43,13 @@ let of_string = function
   | _ -> None
 
 let classify : Types.t -> t = function
-  | Types.InvalidToken _ -> Token_mismatch
-  | Types.TokenExpired _ -> Token_expired
-  | Types.Unauthorized _ -> Unauthorized
-  | Types.Forbidden _ -> Forbidden
-  | Types.AgentNotFound _ -> Agent_not_found
-  | Types.IoError _ -> Io_error
-  | Types.InvalidJson _ -> Invalid_json
+  | Types.Auth (Types.Auth_error.InvalidToken _) -> Token_mismatch
+  | Types.Auth (Types.Auth_error.TokenExpired _) -> Token_expired
+  | Types.Auth (Types.Auth_error.Unauthorized _) -> Unauthorized
+  | Types.Auth (Types.Auth_error.Forbidden _) -> Forbidden
+  | Types.Agent (Types.Agent_error.NotFound _) -> Agent_not_found
+  | Types.System (Types.System_error.IoError _) -> Io_error
+  | Types.System (Types.System_error.InvalidJson _) -> Invalid_json
   | _ -> Other
 
 let all =

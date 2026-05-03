@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_task_schemas — MCP tool schema definitions for task operations.
 

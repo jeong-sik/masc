@@ -1,4 +1,3 @@
-open Base
 
 (** Dashboard_tool_host_events — typed surface for the
     `client_tool_host_failure` HTTP report and the matching

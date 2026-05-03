@@ -285,6 +285,7 @@ val metric_tool_call : string
 val metric_tool_call_duration : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
+val metric_llm_provider_capability_drops : string
 val metric_board_truncated_posts : string
 val metric_anti_rationalization_fallback : string
 val metric_anti_rationalization_excuse_pattern : string
@@ -314,8 +315,10 @@ val metric_keeper_fsm_edge_transitions : string
     Bumped once per [Keeper_turn_fsm.emit_transition] call so
     operators can chart turn-state distribution per keeper.
     Labels:
-    - [from] — previous [turn_state_label] ("-" if absent)
-    - [to]   — new [turn_state_label]
+    - [from]   — previous [turn_state_label] ("-" if absent)
+    - [to]     — new [turn_state_label]
+    - [action] — TLA+ action name (e.g. "PhaseGateSkip", "ContractOk");
+                 "unknown" when the edge is not in [classify_transition].
     - [keeper] — keeper name
 
     Distinct from [metric_keeper_fsm_edge_transitions], which
@@ -381,6 +384,14 @@ val metric_keeper_dead_total : string
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:
     by construction Dead means the supervisor gave up and no further
     restart will be attempted. *)
+
+val metric_keeper_auto_resumed_total : string
+(** Total keepers auto-resumed by the self-healing circuit breaker in
+    [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
+    timer elapsed.  Labeled by [keeper].  A positive rate indicates the
+    system is self-healing from transient provider outages without operator
+    intervention.  A sustained zero rate while [auto_resume_after_sec] is
+    set in meta files indicates a sweep or meta-write regression. *)
 
 val metric_keeper_skip_idle_wake_resumed : string
 

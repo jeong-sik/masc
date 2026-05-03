@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_agent_timeline — Per-agent activity timeline + summary.
 

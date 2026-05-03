@@ -168,7 +168,7 @@ let fallback_cascade_for_unavailable_profile
 
 let degraded_retry_after_recoverable_error
     ~(effective_cascade : string)
-    ~(tool_requirement : string)
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
     Keeper_cascade_profile.normalize_declared_name effective_cascade
@@ -180,7 +180,7 @@ let degraded_retry_after_recoverable_error
         fallback_reason;
       }
   in
-  if String.equal tool_requirement "required"
+  if tool_requirement = Required
      || String.equal normalized_effective Keeper_config.local_only_cascade_name
      || String.equal normalized_effective
           Keeper_config.local_recovery_cascade_name
@@ -293,7 +293,7 @@ let required_tool_rotation_candidate name =
 
 let legacy_degraded_rotation_candidates
     ~(base_cascade : string)
-    ~(tool_requirement : string) =
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_base = normalized_cascade_name base_cascade in
   let default_cascade =
     normalized_cascade_name Keeper_config.default_cascade_name
@@ -301,9 +301,9 @@ let legacy_degraded_rotation_candidates
   let local_recovery_cascade =
     normalized_cascade_name Keeper_config.local_recovery_cascade_name
   in
-  if String.equal tool_requirement "required" then
-    [ normalized_base; default_cascade ]
-  else
+  match tool_requirement with
+  | Required -> [ normalized_base; default_cascade ]
+  | Optional | No_tools ->
     [ normalized_base; default_cascade; local_recovery_cascade ]
 
 let normalize_rotation_candidates candidates =
@@ -318,7 +318,7 @@ let degraded_rotation_candidates
     ~(fallback_hint : string option)
     ~(base_cascade : string)
     ~(effective_cascade : string)
-    ~(tool_requirement : string) =
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_effective = normalized_cascade_name effective_cascade in
   let raw_candidates =
     match rotation_cascades with
@@ -338,7 +338,7 @@ let degraded_rotation_candidates
   candidates
   |> List.filter (fun candidate ->
          (not (String.equal candidate normalized_effective))
-         && (not (String.equal tool_requirement "required")
+         && (tool_requirement <> Required
              || required_tool_rotation_candidate candidate))
 
 let degraded_rotation_after_recoverable_error
@@ -346,7 +346,7 @@ let degraded_rotation_after_recoverable_error
     ?fallback_hint
     ~(base_cascade : string)
     ~(effective_cascade : string)
-    ~(tool_requirement : string)
+    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_cascades : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   match recoverable_cascade_failure_reason err with

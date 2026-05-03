@@ -35,6 +35,45 @@ let registry_failure_reason_of_terminal_reason
            { code = terminal_reason.code; detail })
   | _ -> None
 
+let record_streaming_cancelled_observation
+    ~(config : Coord.config)
+    ~(run_meta : keeper_meta)
+    ~(run_generation : int)
+    ~(cascade_name : Keeper_execution_receipt.cascade_name)
+    ~(keeper_turn_id : int)
+    () : unit =
+  let fiber_stop_set =
+    match Keeper_registry.get ~base_path:config.base_path run_meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  if fiber_stop_set then
+    (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
+       turn about to cancel cooperatively. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:run_meta.name ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      Keeper_turn_fsm.Streaming;
+  let terminal_reason_code =
+    if fiber_stop_set then "supervisor_stop" else "external_cancel"
+  in
+  record_pre_dispatch_terminal_observation
+    ~config
+    ~meta:run_meta
+    ~generation:run_generation
+    ~cascade_name
+    ~outcome:"cancelled"
+    ~terminal_reason_code
+    ~activity_kind:"keeper.turn_cancelled"
+    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~keeper_turn_id
+    ();
+  (* FSM: HonorStopSignal — cooperative cancel. *)
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:run_meta.name ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
@@ -97,6 +136,45 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~keeper_name:meta.name ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Idle
     Keeper_turn_fsm.Phase_gating;
+  (* SupervisorRequestsStop / HonorStopSignal — check stop signal at turn entry.
+     If the supervisor set [fiber_stop] between the [should_run_turn] gate in the
+     heartbeat loop and this point, honor it cooperatively before any I/O is issued.
+     Satisfies the FSM contract: active state observed → SupervisorRequestsStop
+     (Phase_gating → Phase_gating, stop signal acknowledged) then HonorStopSignal
+     (Phase_gating → Cancelled supervisor_stop). *)
+  let supervisor_stop_at_entry =
+    match Keeper_registry.get ~base_path:registry_base_path meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  if supervisor_stop_at_entry then begin
+    Log.Keeper.info ~keeper_name:meta.name ~turn_id:keeper_turn_id
+      "%s: supervisor stop signal observed at turn entry — honoring (phase_gating)"
+      meta.name;
+    (* FSM: SupervisorRequestsStop — stop signal raised while in active state *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Phase_gating
+      Keeper_turn_fsm.Phase_gating;
+    record_pre_dispatch_terminal_observation
+      ~config
+      ~meta
+      ~generation
+      ~cascade_name:
+        (Keeper_execution_receipt.cascade_name_of_string meta.cascade_name)
+      ~outcome:"cancelled"
+      ~terminal_reason_code:"supervisor_stop"
+      ~activity_kind:"keeper.turn_cancelled"
+      ~trajectory_outcome:(Trajectory.Gated "supervisor_stop")
+      ~keeper_turn_id
+      ();
+    (* FSM: HonorStopSignal — cooperative cancel at phase_gating *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Phase_gating
+      (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop);
+    Ok meta
+  end else
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       let phase_string = Keeper_state_machine.phase_to_string phase in
@@ -740,8 +818,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             if
               Keeper_agent_run.should_require_tools_for_initial_turn
                 ~max_turns ~turn_affordances
-            then "required"
-            else "optional"
+            then Keeper_agent_tool_surface.Required
+            else Keeper_agent_tool_surface.Optional
           in
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
@@ -806,29 +884,23 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      just disappears from the operator's timeline).
 
                      Emit a minimal cancelled receipt + matching FSM
-                     Cancelled transition before re-raising. The cancel
-                     reason is conservatively classified as
-                     [Cancelled_supervisor_stop] because Eio.Cancel does
-                     not expose the originating cancel context here;
-                     refining this via supervisor / fleet flag inspection
-                     is a follow-up. *)
-                  record_pre_dispatch_terminal_observation
+                     Cancelled transition before re-raising.  When
+                     [fiber_stop] is confirmed set in the registry the
+                     cancellation came from the supervisor cooperative-stop
+                     path: emit SupervisorRequestsStop (Streaming →
+                     Streaming) to record the signal-raised window, then
+                     HonorStopSignal (Streaming → Cancelled supervisor_stop).
+                     For other Eio cancellations (switch teardown, timeout)
+                     [fiber_stop] is false and we skip straight to
+                     HonorStopSignal with the same conservative cancel
+                     reason. *)
+                  record_streaming_cancelled_observation
                     ~config
-                    ~meta:run_meta
-                    ~generation:run_generation
+                    ~run_meta
+                    ~run_generation
                     ~cascade_name:execution.cascade_name
-                    ~outcome:"cancelled"
-                    ~terminal_reason_code:"external_cancel"
-                    ~activity_kind:"keeper.turn_cancelled"
-                    ~trajectory_outcome:
-                      (Trajectory.Gated "external_cancel")
                     ~keeper_turn_id
                     ();
-                  Keeper_turn_fsm.emit_transition
-                    ~keeper_name:meta.name ~turn_id:keeper_turn_id
-                    ~prev:Keeper_turn_fsm.Streaming
-                    (Keeper_turn_fsm.Cancelled
-                       Keeper_turn_fsm.Cancelled_supervisor_stop);
                   raise e)
           in
           let fail_open_rotation_cascades =
@@ -901,6 +973,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               in
               match
                 resolve_bounded_oas_timeout_budget_with_turn_budget
+                  ~is_retry
                   ~reserve_degraded_retry_budget
                   ~max_turns
                   ~estimated_input_tokens:prompt_timeout_estimate_tokens
@@ -1056,6 +1129,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   mark_terminal_error err;
                   Error err
                 end else
+                  (* Budget gate: check whether there is enough wall-clock
+                     remaining to schedule a degraded cascade retry.  The
+                     gate always uses per-attempt semantics (fresh floor) for
+                     the candidate because, by definition, every degraded
+                     retry is itself a retry — even when the failing attempt
+                     was the first attempt (is_retry=false here). *)
                   match
                     next_fail_open_cascade_for_turn_with_budget
                       ?rotation_cascades:fail_open_rotation_cascades
@@ -1555,8 +1634,19 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              the keeper fiber for a transient API blip is an overreaction
              that causes unnecessary restarts and context loss.
              Only persistent errors (auth failure, config error, context
-             overflow after compaction) increment the crash counter. *)
-          if not is_auto_recoverable then
+             overflow after compaction) increment the crash counter.
+
+             EXCEPTION: cascade exhaustion errors always increment the
+             counter regardless of auto-recoverable classification.
+             Auto-recoverable cascade subtypes (Candidates_filtered_after_cycles,
+             Max_turns_exceeded) were skipping the counter, preventing
+             auto-pause from ever triggering. The keeper would loop
+             indefinitely on a broken cascade without operator notification.
+             Retry eligibility != failure tracking. *)
+          let counts_toward_crash =
+            not is_auto_recoverable || EC.is_cascade_exhausted_error err
+          in
+          if counts_toward_crash then
             Keeper_registry.increment_turn_failures ~base_path meta.name
           else
             Log.Keeper.info
@@ -1991,7 +2081,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              between the cycle's read and its write. #9764 / #9769:
              field-level merge preserves heartbeat-owned fields from
              disk so the retry does not clobber concurrent heartbeat
-             writes (previous "caller wins" retry was losing the race). *)
+             writes (previous "caller wins" retry was losing the race).
+             Self-healing circuit breaker: clear [auto_resume_after_sec]
+             so a successful turn resets the exponential back-off to the
+             initial delay for the next auto-pause cycle. *)
+          let updated_meta =
+            if updated_meta.auto_resume_after_sec <> None
+            then { updated_meta with auto_resume_after_sec = None }
+            else updated_meta
+          in
           (match
              write_meta_with_merge
                ~merge:Keeper_meta_merge.heartbeat_fields_from_disk

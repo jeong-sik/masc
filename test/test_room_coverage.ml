@@ -473,7 +473,7 @@ let test_release_hard_stop_blocks_direct_reclaim () =
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Types.masc_error_to_string e));
     match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-    | Error (Types.TaskInvalidState message) ->
+    | Error (Types.Task (Types.Task_error.InvalidState message)) ->
         Alcotest.(check bool) "direct claim blocked by do_not_reclaim_reason" true
           (str_contains message "blocked from re-claim")
     | Error e ->
@@ -653,7 +653,7 @@ let test_cancel_task_nonexistent () =
   with_test_env (fun config ->
     let result = Coord.cancel_task_r config ~agent_name:"claude" ~task_id:"task-999" ~reason:"" in
     match result with
-    | Error Types.TaskNotFound _ -> ()
+    | Error (Types.Task (Types.Task_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -665,7 +665,7 @@ let test_cancel_done_task () =
 
     let result = Coord.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:"" in
     match result with
-    | Error Types.TaskInvalidState _ -> ()
+    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -722,7 +722,7 @@ let test_transition_invalid () =
     (* Try to start without claiming first *)
     let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Start () in
     match result with
-    | Error Types.TaskInvalidState _ -> ()
+    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -734,7 +734,7 @@ let test_transition_version_mismatch () =
     let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001"
                    ~action:Types.Claim ~expected_version:999 () in
     match result with
-    | Error Types.TaskInvalidState _ -> ()
+    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
   )
 
@@ -1196,7 +1196,7 @@ let test_transition_done_r_not_claimed () =
 
     let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     match result with
-    | Error (Types.TaskInvalidState msg) ->
+    | Error (Types.Task (Types.Task_error.InvalidState msg)) ->
         Alcotest.(check bool) "mentions todo state" true (str_contains msg "todo")
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
@@ -1205,7 +1205,7 @@ let test_transition_done_r_not_found () =
   with_test_env (fun config ->
     let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     match result with
-    | Error Types.TaskNotFound _ -> ()
+    | Error (Types.Task (Types.Task_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -1226,7 +1226,7 @@ let test_claim_task_r_already_claimed () =
 
     let result = Coord.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
-    | Error Types.TaskAlreadyClaimed _ -> ()
+    | Error (Types.Task (Types.Task_error.AlreadyClaimed _)) -> ()
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed"
   )
 
@@ -1321,7 +1321,7 @@ let test_update_agent_not_found () =
   with_test_env (fun config ->
     let result = Coord.update_agent_r config ~agent_name:"nonexistent" ~status:"active" () in
     match result with
-    | Error Types.AgentNotFound _ -> ()
+    | Error (Types.Agent (Types.Agent_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected AgentNotFound"
   )
 

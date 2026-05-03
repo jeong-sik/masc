@@ -1,4 +1,3 @@
-open Base
 
 (** Compile-time verified tool name identifiers.
 

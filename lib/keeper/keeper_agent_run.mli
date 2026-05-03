@@ -46,10 +46,12 @@ type ctx_composition_metrics =
   ; segments : (string * prompt_segment_metrics) list
   }
 
+type tool_requirement = Keeper_agent_tool_surface.tool_requirement
+
 type tool_surface_metrics =
   { turn_lane : string
   ; tool_surface_class : string
-  ; tool_requirement : string
+  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool

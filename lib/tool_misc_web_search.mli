@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_misc_web_search — Web search MCP tool with multi-provider
     fallback chain.

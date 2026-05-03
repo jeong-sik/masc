@@ -13,7 +13,7 @@ import { navigate } from '../router'
 
 // --- Prometheus text format parser ---
 
-interface ParsedMetric {
+export interface ParsedMetric {
   name: string
   help: string
   type: string

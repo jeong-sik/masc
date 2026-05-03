@@ -208,6 +208,16 @@ let test_applies_turn_execution_overrides () =
     (Some "90")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
+let test_applies_proactive_min_interval_override () =
+  let doc = parse_or_fail "[proactive]\nmin_interval_sec = 1234\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied count" 1 count;
+  check (option string) "proactive min interval"
+    (Some "1234")
+    (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides)
+
 let test_applies_watchdog_overrides () =
   let doc = parse_or_fail
     "[watchdog]\n\
@@ -515,6 +525,7 @@ let () =
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
+        ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
         ; test_case "applies watchdog overrides" `Quick test_applies_watchdog_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs

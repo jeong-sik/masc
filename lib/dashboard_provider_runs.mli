@@ -1,4 +1,3 @@
-open Base
 
 (** Dashboard_provider_runs — Single-agent provider runs for the
     operator dashboard.

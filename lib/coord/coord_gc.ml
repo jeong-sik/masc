@@ -25,13 +25,13 @@ let heartbeat config ~agent_name =
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "💓 %s heartbeat updated" actual_name
+          Printf.sprintf "%s heartbeat updated" actual_name
       | Error e ->
           Log.Coord.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
-          Printf.sprintf "⚠ Invalid agent file for %s" actual_name
+          Printf.sprintf "Invalid agent file for %s" actual_name
     )
   end else
-    Printf.sprintf "⚠ Agent %s not found" agent_name
+    Printf.sprintf "Agent %s not found" agent_name
 
 (** Cleanup zombie agents - removes stale agents.
     [keeper_threshold_sec] and [agent_threshold_sec] control the inactivity
@@ -48,7 +48,7 @@ let cleanup_zombies
     if Sys.file_exists agents_path then [ agents_path ] else []
   in
   if scan_paths = [] then
-    "📋 No agents directory"
+    "No agents directory"
   else begin
     (* Phase 1: Detect zombie agents (no side effects) *)
     let zombie_entries = ref [] in (* (name, path) list *)
@@ -99,7 +99,7 @@ let cleanup_zombies
     ) scan_paths;
 
     if !zombie_entries = [] then
-      "✅ No zombie agents found"
+      "No zombie agents found"
     else begin
       (* Phase 2: Transition status to Inactive + stop heartbeats + stop keeper fibers.
          Note: If later phases fail (task release or file deletion), the agent
@@ -185,10 +185,10 @@ let cleanup_zombies
         else Printf.sprintf ", released %d orphan task(s)" (List.length !released_tasks)
       in
       if skipped > 0 then
-        Printf.sprintf "🧟 Cleaned %d/%d zombie(s): %s%s (⚠ %d skipped due to errors)"
+        Printf.sprintf "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
           cleaned total (String.concat ", " !successfully_cleaned) task_note skipped
       else
-        Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s%s"
+        Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
           cleaned (String.concat ", " !successfully_cleaned) task_note
     end
   end
@@ -238,9 +238,9 @@ let gc config ?(days=7) () =
       version = backlog.version + 1;
     } in
     write_backlog config new_backlog;
-    results := Printf.sprintf "📦 Archived %d stale task(s) (older than %d days)" !stale_count days :: !results
+    results := Printf.sprintf "Archived %d stale task(s) (older than %d days)" !stale_count days :: !results
   end else
-    results := Printf.sprintf "✅ No stale tasks (threshold: %d days)" days :: !results;
+    results := Printf.sprintf "No stale tasks (threshold: %d days)" days :: !results;
 
   (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in
@@ -295,21 +295,21 @@ let gc config ?(days=7) () =
 
   if !old_msg_count > 0 || !preserved_count > 0 then begin
     if !old_msg_count > 0 then
-      results := Printf.sprintf "🗑️ Deleted %d old message(s) (older than %d days)" !old_msg_count days :: !results;
+      results := Printf.sprintf "Deleted %d old message(s) (older than %d days)" !old_msg_count days :: !results;
     if !preserved_count > 0 then
-      results := Printf.sprintf "🔒 Preserved %d message(s) referencing open tasks" !preserved_count :: !results
+      results := Printf.sprintf "Preserved %d message(s) referencing open tasks" !preserved_count :: !results
   end else
-    results := Printf.sprintf "✅ No old messages (threshold: %d days)" days :: !results;
+    results := Printf.sprintf "No old messages (threshold: %d days)" days :: !results;
 
   (* 4. Cleanup backend pubsub - no-op for filesystem backend *)
   let pubsub_cleanup_count = ref 0 in
   (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
    | Ok count when count > 0 ->
        pubsub_cleanup_count := count;
-       results := Printf.sprintf "🗃️ Cleaned %d pubsub message(s) from backend" count :: !results
+       results := Printf.sprintf "Cleaned %d pubsub message(s) from backend" count :: !results
    | Ok _ -> ()  (* No messages to clean *)
    | Error e ->
-       results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
+       results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
   (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
         and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
@@ -373,9 +373,9 @@ let gc config ?(days=7) () =
     ) entries
   end;
   if !keeper_orphan_count > 0 then
-    results := Printf.sprintf "🧹 Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
+    results := Printf.sprintf "Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
   else
-    results := "✅ No orphan keeper files" :: !results;
+    results := "No orphan keeper files" :: !results;
 
   (* 6. Archive completed/interrupted team sessions older than N days *)
   let session_archive_count = ref 0 in
@@ -411,23 +411,23 @@ let gc config ?(days=7) () =
     )
   end;
   if !session_archive_count > 0 then
-    results := Printf.sprintf "📦 Archived %d completed/interrupted/cancelled team session(s)" !session_archive_count :: !results
+    results := Printf.sprintf "Archived %d completed/interrupted/cancelled team session(s)" !session_archive_count :: !results
   else
-    results := "✅ No team sessions to archive" :: !results;
+    results := "No team sessions to archive" :: !results;
 
   (* 7. Hard-delete board artifacts (via hooks) *)
   let board_artifact_count = (Atomic.get Coord_hooks.cleanup_board_artifacts_fn) () in
   if board_artifact_count > 0 then
     results :=
-      Printf.sprintf "🧽 Removed %d board artifact post(s)"
+      Printf.sprintf "Removed %d board artifact post(s)"
         board_artifact_count
       :: !results
   else
-    results := "✅ No board artifacts" :: !results;
+    results := "No board artifacts" :: !results;
 
   (* 9. Coord archival removed — rooms are flattened (#4638).
      Startup migration (migrate_room_to_flat) moves active room to root. *)
-  results := "✅ Rooms flattened (no room archival needed)" :: !results;
+  results := "Rooms flattened (no room archival needed)" :: !results;
 
   log_event config (`Assoc [
     ("type", `String "gc");

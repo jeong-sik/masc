@@ -1,5 +1,3 @@
-open Base
-
 (** Tool_compact — placeholder tool module.
 
     No-op schemas and dispatch. Used when compact mode disables tools.

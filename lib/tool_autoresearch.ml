@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -408,7 +407,7 @@ let handle_inject (ctx : context) args =
         match Hashtbl.find_opt active_loops id with
         | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
         | Some state ->
-          if not (Poly.equal state.status Autoresearch.Running) then
+          if not ((=) state.status Autoresearch.Running) then
             `Assoc [("error", `String "Loop is not running")]
           else begin
             let state = { state with queued_hypothesis = Some hypothesis } in

@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_access_policy — shared allow/deny selector ADT for runtime tool policies.
 

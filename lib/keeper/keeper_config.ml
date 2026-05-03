@@ -527,6 +527,17 @@ let keeper_proactive_min_cooldown_sec_rp =
 let keeper_proactive_min_cooldown_sec () : int =
   Runtime_params.get keeper_proactive_min_cooldown_sec_rp
 
+let keeper_proactive_min_interval_sec_rp =
+  _rp_int ~key:"keeper.proactive.min_interval_sec"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC"
+                          ~default:900 ~min_v:60 ~max_v:86400)
+    ~min_v:60 ~max_v:86400
+    ~description:"Minimum proactive turn interval (seconds). Keeper fires a \
+                  housekeeping turn at least this often, even with no observable \
+                  work signals." ()
+let keeper_proactive_min_interval_sec () : int =
+  Runtime_params.get keeper_proactive_min_interval_sec_rp
+
 let keeper_proactive_task_cooldown_divisor_rp =
   _rp_int ~key:"keeper.proactive.task_cooldown_divisor"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_PROACTIVE_TASK_COOLDOWN_DIVISOR"

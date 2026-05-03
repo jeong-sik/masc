@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -137,16 +136,16 @@ let status_summary_string
   let current_room = "default" in
 
   let buf = Buffer.create 256 in
-  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" effective_cluster_name);
+  Printf.bprintf buf "🏢 Cluster: %s\n" effective_cluster_name;
   if not (String.equal effective_cluster_name state.project) then
-    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
+    Printf.bprintf buf "Project: %s\n" state.project;
   Buffer.add_string buf
     (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
-  Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
+  Printf.bprintf buf "📁 Path: %s\n" ctx.config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf
     (Printf.sprintf
-       "⚡ Snapshot: agents=%d zombies=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
+       "Snapshot: agents=%d zombies=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
        agent_count zombie_count (List.length active_tasks) todo_count claimed_count
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
@@ -167,32 +166,32 @@ let status_summary_string
   (match planning_state.planning_missing_task with
   | Some task_id ->
       Buffer.add_string buf
-        (Printf.sprintf "📝 Planning: missing=yes | task=%s\n" task_id)
+        (Printf.sprintf "Planning: missing=yes | task=%s\n" task_id)
   | None -> ());
   (match planning_state.deliverable_conflict_task with
   | Some task_id ->
       Buffer.add_string buf
-        (Printf.sprintf "📝 Planning: deliverable_conflict=yes | task=%s\n"
+        (Printf.sprintf "Planning: deliverable_conflict=yes | task=%s\n"
            task_id)
   | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf
-      (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"
+      (Printf.sprintf "Credential: required=yes | available=%s | candidates=%s\n"
          (bool_flag credential_state.credential_available)
          (String.concat "," credential_state.credential_candidates));
   (match suggested_next with [] -> () | _ ->
     Buffer.add_string buf
-      (Printf.sprintf "💡 Suggested next: %s\n"
+      (Printf.sprintf "Suggested next: %s\n"
          (String.concat " -> " suggested_next)));
   (match attention_items with
   | [] -> ()
   | _ ->
-    Buffer.add_string buf "\n⚠️ Attention:\n";
+    Buffer.add_string buf "\nAttention:\n";
     List.iter
       (fun item ->
-        Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
+        Printf.bprintf buf "  - %s\n" item)
       attention_items);
-  Buffer.add_string buf "📌 Players:\n";
+  Buffer.add_string buf "Players:\n";
   (match shown_agents with
   | [] ->
       Buffer.add_string buf "  (no agents)\n"
@@ -213,13 +212,13 @@ let status_summary_string
           (Printf.sprintf
              "  … and %d more agents (use masc_who for full list)\n"
              (agent_count - max_agents_display)));
-  Buffer.add_string buf "\n📋 Quest Board:\n";
+  Buffer.add_string buf "\nQuest Board:\n";
   List.iter
     (fun (task : Types.task) ->
       Coord_query.safe_yield ();
       let (status_icon, status_label) =
         if List.exists (String.equal task.id) todo_conflict_task_ids then
-          ("⚠️", "todo_conflict")
+          ("warning", "todo_conflict")
         else
           task_status_badge task.task_status
       in
@@ -242,8 +241,8 @@ let status_summary_string
   let total_messages = max 0 state.message_seq in
   if total_messages > 0 then begin
     Buffer.add_string buf
-      (Printf.sprintf "\n💬 Messages: %d (cumulative)\n" total_messages);
+      (Printf.sprintf "\nMessages: %d (cumulative)\n" total_messages);
     Buffer.add_string buf "   Use masc_messages for recent details\n"
   end else
-    Buffer.add_string buf "\n💬 Messages: 0\n";
+    Buffer.add_string buf "\nMessages: 0\n";
   Buffer.contents buf

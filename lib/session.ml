@@ -390,7 +390,7 @@ let status_string registry =
     "📡 No agents connected."
   else begin
     let buf = Buffer.create 256 in
-    Buffer.add_string buf (Printf.sprintf "📡 Connected agents (%d):\n" (List.length statuses));
+    Printf.bprintf buf "📡 Connected agents (%d):\n" (List.length statuses);
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     List.iter (fun status ->
@@ -401,7 +401,7 @@ let status_string registry =
       let listening = status |> U.member "listening" |> U.to_bool in
       let idle_info = if idle > 30 then Printf.sprintf "(idle %ds)" idle else "" in
       let listen_info = if listening then "리스닝중" else "" in
-      Buffer.add_string buf (Printf.sprintf "  %s %s %s %s\n" icon name listen_info idle_info)
+      Printf.bprintf buf "  %s %s %s %s\n" icon name listen_info idle_info
     ) statuses;
 
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
@@ -409,7 +409,7 @@ let status_string registry =
 
     let inactive = get_inactive_agents registry ~threshold:Coord_resilience.default_warning_threshold in
     if inactive <> [] then begin
-      Buffer.add_string buf "\n\n⚠️ **INACTIVE AGENTS**: ";
+      Buffer.add_string buf "\n\n**INACTIVE AGENTS**: ";
       Buffer.add_string buf (String.concat ", " inactive);
       Buffer.add_string buf "\n   @mention으로 깨워주세요!"
     end;
@@ -464,7 +464,7 @@ module McpSessionStore = struct
         let bytes = Mirage_crypto_rng.generate 16 in
         let buf = Buffer.create 32 in
         for i = 0 to String.length bytes - 1 do
-          Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+          Printf.bprintf buf "%02x" (Char.code (String.get bytes i))
         done;
         let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
         Eio.Promise.resolve p id;
@@ -474,7 +474,7 @@ module McpSessionStore = struct
         let bytes = Mirage_crypto_rng.generate 16 in
         let buf = Buffer.create 32 in
         for i = 0 to String.length bytes - 1 do
-          Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+          Printf.bprintf buf "%02x" (Char.code (String.get bytes i))
         done;
         let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
         let session = {

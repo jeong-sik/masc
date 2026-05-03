@@ -47,6 +47,7 @@ Pass category to filter results to a single section.";
           ("description", `String "Filter by config category");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -72,6 +73,7 @@ Use from the initiating side before calling masc_webrtc_answer from the answerin
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -97,6 +99,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
         ]);
       ]);
       ("required", `List [`String "offer_id"; `String "agent_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -116,6 +119,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
           ("default", `String "all");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -130,6 +134,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
           ("description", `String "Age threshold in days (default: 7)");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -138,6 +143,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -154,6 +160,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
           ("maximum", `Int 100);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -168,6 +175,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
         ]);
       ]);
       ("required", `List [`String "tool_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -191,6 +199,7 @@ Uses configured web-search providers with structured fallback behavior and retur
         ]);
       ]);
       ("required", `List [`String "query"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -210,6 +219,7 @@ Uses configured web-search providers with structured fallback behavior and retur
           ("default", `Bool true);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -252,6 +262,7 @@ will be added here when their handlers land.";
         ]);
       ]);
       ("required", `List [`String "section"]);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

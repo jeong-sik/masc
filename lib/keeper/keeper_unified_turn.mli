@@ -50,6 +50,7 @@ type oas_timeout_budget_resolution = {
 }
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  is_retry:bool ->
   reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
@@ -57,6 +58,7 @@ val resolve_bounded_oas_timeout_budget_with_turn_budget :
   oas_timeout_budget_resolution option
 
 val oas_retry_budget_available_for_turn :
+  is_retry:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
@@ -80,7 +82,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_cascades:string list ->
   estimated_input_tokens:int ->
   max_turns:int ->
@@ -207,10 +209,22 @@ val next_fail_open_cascade_for_turn :
   ?rotation_cascades:string list ->
   base_cascade:string ->
   effective_cascade:string ->
-  tool_requirement:string ->
+  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   attempted_cascades:string list ->
   Agent_sdk.Error.sdk_error ->
   Keeper_error_classify.degraded_retry option
+
+(** Record the streaming-cancel observation shared by the Eio.Cancel handler.
+    Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
+    a live provider cancellation. *)
+val record_streaming_cancelled_observation :
+  config:Coord.config ->
+  run_meta:Keeper_types.keeper_meta ->
+  run_generation:int ->
+  cascade_name:Keeper_execution_receipt.cascade_name ->
+  keeper_turn_id:int ->
+  unit ->
+  unit
 
 val run_keeper_cycle :
   config:Coord.config ->

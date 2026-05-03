@@ -16,6 +16,7 @@ let schemas : tool_schema list = [
           ("description", `String "If provided, creates a task with this title, claims it, and sets it as current_task. Omit to just join without a task.");
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -37,6 +38,7 @@ Check masc_status after joining to see active agents and available tasks.";
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -55,6 +57,7 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -78,6 +81,7 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -101,6 +105,7 @@ Tip: Search for '@your-name' in results to find mentions.";
           ("default", `Int 10);
         ]);
       ]);
+      ("additionalProperties", `Bool false);
     ];
   };
   {
@@ -113,6 +118,7 @@ Tip: Use capabilities to find the right agent for @mentions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
     ];
   };
 ]

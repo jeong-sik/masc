@@ -42,10 +42,7 @@ let with_loops_rw f = Eio.Mutex.use_rw ~protect:true loops_mu (fun () -> f ())
 (** Execute [f] under shared read lock on the loops registry. *)
 let with_loops_ro f = Eio.Mutex.use_ro loops_mu (fun () -> f ())
 
-let generate_loop_id () =
-  let rnd = Mirage_crypto_rng.generate 4 in
-  let hex = List.fold_left (fun acc s -> acc ^ s) "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i)))) in
-  "ar-" ^ hex
+let generate_loop_id () = Random_id.prefixed ~prefix:"ar-" ~bytes:4
 
 let option_first_some left right =
   match left with Some _ -> left | None -> right

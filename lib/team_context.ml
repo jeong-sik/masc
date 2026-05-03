@@ -95,20 +95,20 @@ let to_prompt_section ctx =
     let buf = Buffer.create 512 in
     Buffer.add_string buf "--- Team Context ---\n";
     if String.trim ctx.team_goal <> "" then
-      Buffer.add_string buf (Printf.sprintf "Goal: %s\n" ctx.team_goal);
+      Printf.bprintf buf "Goal: %s\n" ctx.team_goal;
     (match truncate_list max_decisions ctx.prior_decisions with
      | [] -> ()
      | decisions ->
          Buffer.add_string buf "\nPrior decisions:\n";
          List.iter
-           (fun d -> Buffer.add_string buf (Printf.sprintf "- %s\n" d))
+           (fun d -> Printf.bprintf buf "- %s\n" d)
            decisions);
     (match truncate_list max_findings ctx.shared_findings with
      | [] -> ()
      | findings ->
          Buffer.add_string buf "\nTeam findings:\n";
          List.iter
-           (fun f -> Buffer.add_string buf (Printf.sprintf "- %s\n" f))
+           (fun f -> Printf.bprintf buf "- %s\n" f)
            findings);
     (match ctx.active_workers with
      | [] -> ()

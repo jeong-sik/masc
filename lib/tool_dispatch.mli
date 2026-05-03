@@ -1,4 +1,3 @@
-open Base
 
 (** Central Tool Dispatch Registry.
 

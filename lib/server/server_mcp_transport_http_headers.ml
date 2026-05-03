@@ -63,9 +63,7 @@ let body_jsonrpc_method body_str =
 
 let is_notification_method method_ =
   let prefix = "notifications/" in
-  let prefix_len = String.length prefix in
-  String.length method_ >= prefix_len
-  && String.sub method_ 0 prefix_len = prefix
+  String.starts_with method_ ~prefix
 
 let is_initialize_method method_ = String.equal method_ "initialize"
 

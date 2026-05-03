@@ -326,6 +326,68 @@ let test_observe_uses_precollected_board_events () =
       check bool "board event schedules turn" true
         (WO.should_run_keeper_cycle ~meta:minimal_meta obs))
 
+let test_board_signal_stimulus_becomes_pending_board_event () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let post =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author:"alice"
+            ~title:"Need test-keeper"
+            ~content:"@test-keeper please react from the queued stimulus"
+            ~post_kind:Masc_mcp.Board.Human_post ()
+        with
+        | Ok post -> post
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      let post_id = Masc_mcp.Board.Post_id.to_string post.id in
+      let payload =
+        `Assoc
+          [
+            ("source", `String "board_signal");
+            ("kind", `String "post_created");
+            ("post_id", `String post_id);
+            ("author", `String "alice");
+            ("title", `String "Need test-keeper");
+            ( "content",
+              `String "@test-keeper please react from the queued stimulus" );
+            ("hearth", `Null);
+            ("wake_reason", `String "explicit_mention");
+          ]
+        |> Yojson.Safe.to_string
+      in
+      let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+        {
+          post_id;
+          urgency = Masc_mcp.Keeper_event_queue.Immediate;
+          arrived_at = Time_compat.now ();
+          payload;
+        }
+      in
+      match
+        WO.pending_board_event_of_stimulus
+          ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta stimulus
+      with
+      | None -> fail "queued board stimulus was not converted"
+      | Some event ->
+          check string "post id" post_id event.post_id;
+          check string "author" "alice" event.author;
+          check string "title from board snapshot" "Need test-keeper" event.title;
+          check bool "explicit mention" true event.explicit_mention;
+          check (list string) "matched target" [ "test-keeper" ]
+            event.matched_targets;
+          check bool "schedules turn" true
+            (WO.should_run_keeper_cycle ~meta:minimal_meta
+               { base_observation with pending_board_events = [ event ] }))
+
 let test_observe_splits_absolute_and_claimable_backlog () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1121,6 +1183,229 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
+(* Phase 1 — Bootstrap bypass *)
+
+let test_bootstrap_turn_fires_when_never_started () =
+  (* A keeper with last_ts <= 0.0 (never started) should always run a turn
+     even when there are no work signals, no tasks, and the idle gate has
+     not elapsed.  This breaks the bootstrap deadlock. *)
+  let meta =
+    { minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
+  check bool "bootstrap: should_run=true when never started" true decision.should_run;
+  check bool "bootstrap: Never_started reason emitted" true
+    (match decision.verdict with
+     | WO.Run { reasons = (first, rest) } ->
+         List.mem WO.Never_started (first :: rest)
+     | WO.Skip _ -> false);
+  check int "bootstrap: since_last_scheduled_autonomous = max_int" max_int
+    (Option.value ~default:(-1) decision.since_last_scheduled_autonomous)
+
+let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
+  let meta =
+    { minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 600; cooldown_sec = 900 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta obs
+  in
+  check string "bootstrap channel is scheduled_autonomous" "scheduled_autonomous"
+    (WO.channel_to_string decision.channel)
+
+let test_provider_cooldown_blocks_bootstrap_turn () =
+  let meta =
+    { minimal_meta with
+      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      proactive =
+        { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = 0.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta obs
+  in
+  check bool "provider cooldown blocks bootstrap turn" false decision.should_run;
+  check bool "bootstrap cooldown skip reason emitted" true
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest) } ->
+         List.exists
+           (function
+             | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+             | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
+
+(* Phase 2 — Minimum proactive cadence *)
+
+let test_min_interval_fires_without_work_signal () =
+  (* After proactive_min_interval_sec has elapsed since the last turn,
+     the keeper should fire a housekeeping turn even when there are no
+     observable work signals. *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                (* 1000s > 900s min_interval, so the elapsed condition triggers *)
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval elapsed fires turn" true decision.should_run;
+    check bool "Min_interval_elapsed reason emitted" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false))
+
+let test_min_interval_does_not_fire_before_elapsed () =
+  (* With since_last = 500s and min_interval = 900s, the keeper should
+     NOT get a free housekeeping turn (no work signals present either). *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                (* 500s < 900s min_interval, so not-yet-elapsed condition holds *)
+                last_ts = Time_compat.now () -. 500.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval not yet elapsed: should_run=false" false decision.should_run;
+    check bool "No_signal reason present when interval pending" true
+      (match decision.verdict with
+       | WO.Skip { reasons = (first, rest) } ->
+           List.exists (function WO.No_signal -> true | _ -> false)
+             (first :: rest)
+       | WO.Run _ -> false))
+
+let test_min_interval_never_fires_for_bootstrap () =
+  (* The Min_interval_elapsed path must not fire when is_bootstrap = true
+     (since_last = max_int).  The bootstrap bypass covers that case and
+     emits Never_started, not Min_interval_elapsed. *)
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = 0.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "bootstrap does not emit Min_interval_elapsed" false
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false);
+    check bool "bootstrap emits Never_started" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Never_started (first :: rest)
+       | WO.Skip _ -> false))
+
+let test_provider_cooldown_blocks_min_interval_turn () =
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    let meta =
+      { minimal_meta with
+        cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+        ~meta obs
+    in
+    check bool "provider cooldown blocks min-interval turn" false decision.should_run;
+    check bool "min-interval cooldown skip reason emitted" true
+      (match decision.verdict with
+       | WO.Skip { reasons = (first, rest) } ->
+           List.exists
+             (function
+               | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+               | _ -> false)
+             (first :: rest)
+       | WO.Run _ -> false))
+
 let test_runtime_trust_snapshot_tolerates_null_telemetry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1783,7 +2068,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
   {
     turn_lane = "tool_optional";
     tool_surface_class = "mixed";
-    tool_requirement = "optional";
+    tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Optional;
     visible_tool_count = 0;
     tool_gate_enabled = false;
     tool_surface_fallback_used = false;
@@ -3163,6 +3448,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "done");
+          ("action", "PhaseGateSkip");
           ("keeper", meta.name);
         ]
       in
@@ -3170,6 +3456,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         [
           ("from", "phase_gating");
           ("to", "cancelled:phase_gate_close");
+          ("action", "HonorStopSignal");
           ("keeper", meta.name);
         ]
       in
@@ -3261,6 +3548,88 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
             Yojson.Safe.Util.(
               trajectory_summary |> member "outcome" |> member "reason"
               |> to_string))
+
+let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      KR.clear ();
+      let meta = make_meta "streaming-supervisor-stop-keeper" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let entry = KR.register ~base_path:base_dir meta.name meta in
+      Atomic.set entry.fiber_stop true;
+      let supervisor_request_labels =
+        [
+          ("from", "streaming");
+          ("to", "streaming");
+          ("action", "SupervisorRequestsStop");
+          ("keeper", meta.name);
+        ]
+      in
+      let honor_stop_labels =
+        [
+          ("from", "streaming");
+          ("to", "cancelled:supervisor_stop");
+          ("action", "HonorStopSignal");
+          ("keeper", meta.name);
+        ]
+      in
+      let supervisor_request_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:supervisor_request_labels
+          ()
+      in
+      let honor_stop_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:honor_stop_labels
+          ()
+      in
+      UT.record_streaming_cancelled_observation
+        ~config
+        ~run_meta:meta
+        ~run_generation:meta.runtime.generation
+        ~cascade_name:
+          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+             meta.cascade_name)
+        ~keeper_turn_id:meta.runtime.usage.total_turns
+        ();
+      let supervisor_request_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:supervisor_request_labels
+          ()
+      in
+      let honor_stop_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:honor_stop_labels
+          ()
+      in
+      check (float 0.0)
+        "streaming supervisor stop emits SupervisorRequestsStop"
+        (supervisor_request_before +. 1.0)
+        supervisor_request_after;
+      check (float 0.0)
+        "streaming supervisor stop emits HonorStopSignal"
+        (honor_stop_before +. 1.0)
+        honor_stop_after;
+      match Masc_mcp.Keeper_execution_receipt.latest_json config meta.name with
+      | None -> fail "expected streaming cancel execution receipt"
+      | Some receipt ->
+          check string "streaming cancel receipt outcome" "receipt_cancelled"
+            Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+          check string "streaming cancel terminal reason" "supervisor_stop"
+            Yojson.Safe.Util.(
+              receipt |> member "terminal_reason_code" |> to_string))
 
 let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "keeper cycle creates trajectory accumulator" true
@@ -3680,7 +4049,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quo
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "hard quota degraded retry"
@@ -3690,7 +4059,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Resumable_cli_session
             {
@@ -3707,7 +4076,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Admission_queue_timeout
             {
@@ -3723,7 +4092,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
   in
@@ -3734,7 +4103,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Oas_timeout_budget
             {
@@ -3751,7 +4120,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_cascade_max_turns_error ())
   in
   expect_degraded_retry "max turns degraded retry"
@@ -3761,7 +4130,7 @@ let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       (wrapped_claude_limit_error ())
   in
   check bool "required tool turn stays terminal" true
@@ -3771,7 +4140,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_only_cascade_name
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   check bool "local_only does not broaden further" true
@@ -3781,7 +4150,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery 
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:KC.local_recovery_cascade_name
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   check bool "local_recovery does not broaden further" true
@@ -3810,7 +4179,7 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -3822,7 +4191,7 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [ "tool_rerank"; KC.default_cascade_name ]
       (wrapped_claude_limit_error ())
@@ -3835,7 +4204,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [
           "tool_rerank";
@@ -3852,7 +4221,7 @@ let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -3864,7 +4233,7 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (wrapped_claude_limit_error ())
   in
@@ -3876,7 +4245,7 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -3894,7 +4263,7 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
         ]
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [
           "tool_rerank";
@@ -3912,7 +4281,7 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
       ~rotation_cascades:[ "resilient_profile" ]
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -3925,7 +4294,7 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
       ~rotation_cascades:[ KC.local_recovery_cascade_name; "required_safe" ]
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -3938,7 +4307,7 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
       ~rotation_cascades:[ KC.local_recovery_cascade_name ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -3951,7 +4320,7 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
       ~rotation_cascades:[ KC.local_recovery_cascade_name; " big_three " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
-      ~tool_requirement:"required"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
@@ -3964,7 +4333,7 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
       ~rotation_cascades:[ ""; " tool_rerank "; " catalog_next "; "catalog_next" ]
       ~base_cascade:" tool_rerank "
       ~effective_cascade:"tool_rerank"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "tool_rerank" ]
       (wrapped_claude_limit_error ())
   in
@@ -3978,7 +4347,7 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
@@ -3992,7 +4361,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
         [ "ollama_only"; "local_with_kimi_coding_with_glm" ]
       (wrapped_claude_limit_error ())
@@ -4007,7 +4376,7 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
@@ -4867,15 +5236,16 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
 let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
-      ~reserve_degraded_retry_budget:true ~estimated_input_tokens:2_000
-      ~max_turns:4 ~remaining_turn_budget_s:1200.0
+      ~is_retry:false ~reserve_degraded_retry_budget:true
+      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~remaining_turn_budget_s:500.0
   with
   | Some budget ->
       check (float 0.01)
         "first attempt keeps half the usable turn budget for fallback"
-        592.5 budget.effective_timeout_sec;
-      check (float 0.01) "remaining budget records post-guard usable budget"
-        1185.0 budget.remaining_turn_budget_sec;
+        242.5 budget.effective_timeout_sec;
+      check (float 0.01) "remaining budget records raw wall-clock remaining"
+        500.0 budget.remaining_turn_budget_sec;
       check string "source records retry reserve"
         "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
@@ -4893,8 +5263,8 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
   in
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
-      ~reserve_degraded_retry_budget:false ~estimated_input_tokens:2_000
-      ~max_turns:4
+      ~is_retry:false ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:1200.0
   with
   | None -> fail "expected timeout budget"
@@ -4944,7 +5314,7 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
@@ -4965,11 +5335,11 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
       ~effective_cascade:"underdog"
-      ~tool_requirement:"optional"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
-      ~remaining_turn_budget_s:20.0
+      ~remaining_turn_budget_s:0.0
       (oas_timeout_budget_error ())
   with
   | UT.Degraded_retry_budget_exhausted retry ->
@@ -4979,6 +5349,103 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
         retry.fallback_reason
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+
+(* Regression: GitHub #12675 — per-attempt retry budget.
+   When is_retry=true, the budget resolution must provide a fresh
+   minimum execution budget even when wall-clock remaining is very
+   small (simulating a retry after a long first-attempt timeout).
+   Without the fix, near-zero remaining_turn_budget_s caused the
+   retry OAS call to time out before the model began processing. *)
+let test_per_attempt_retry_budget_with_near_zero_remaining () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:3.0
+  with
+  | None -> fail "is_retry=true must provide budget even with tiny remaining"
+  | Some budget ->
+      check bool "effective >= min_oas_timeout_budget_sec" true
+        (budget.effective_timeout_sec >= 15.0);
+      check string "source indicates per-attempt retry"
+        "ok"
+        (if String.equal budget.source "adaptive_per_attempt_retry"
+            || String.equal budget.source "override_per_attempt_retry"
+         then "ok" else budget.source)
+
+let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:1200.0
+  with
+  | None -> fail "is_retry=true should resolve with healthy remaining"
+  | Some budget ->
+      check bool "effective capped by min(adaptive, remaining)" true
+        (budget.effective_timeout_sec <= 1200.0)
+
+let test_non_retry_still_refuses_tiny_budget () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:false
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:20.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "is_retry=false should refuse budget when remaining < guard + min"
+
+let test_per_attempt_retry_refuses_zero_remaining () =
+  (* Wall-clock gate: a retry with 0.0s remaining would be immediately
+     cancelled by the outer turn timeout — resolver must return None. *)
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:0.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "is_retry=true with 0.0s remaining should return None"
+
+let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
+  (* Regression: GitHub #12675 — this simulates the real call-site scenario:
+     a *first-attempt* failure (is_retry=false at the call site) triggers
+     degraded-retry scheduling when wall-clock remaining is very small (3s).
+
+     Before the fix, the gate received the current attempt's is_retry=false
+     and evaluated budget using the non-retry guard+reserve path, which
+     rejected the degraded retry because remaining (3s) < guard+min (30s).
+     The fix removes the is_retry parameter from the gate and always evaluates
+     the *candidate* (which is always a retry) with per-attempt semantics. *)
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
+      ~attempted_cascades:[ "underdog" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:3.0
+      (oas_timeout_budget_error ())
+  with
+  | UT.Degraded_retry_allowed retry ->
+      check string "retry cascade" KC.local_recovery_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "oas_timeout_budget"
+        retry.fallback_reason
+  | UT.Degraded_retry_budget_exhausted _ ->
+      fail "degraded retry should be allowed even with tiny remaining"
+  | UT.No_degraded_retry -> fail "expected degraded retry"
 
 let test_pure_local_labels_detection () =
   check bool "ollama-only cascade is pure local" true
@@ -6429,6 +6896,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
+          test_case "queued board stimulus becomes board event" `Quick
+            test_board_signal_stimulus_becomes_pending_board_event;
           test_case "splits absolute and claimable backlog" `Quick
             test_observe_splits_absolute_and_claimable_backlog;
           test_case "default keepers ignore unmatched non-mention board events" `Quick
@@ -6495,6 +6964,20 @@ let () =
             test_task_backlog_cooldown_applies_noop_backoff_once;
           test_case "fresh backlog update bypasses cooldown" `Quick
             test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update;
+          test_case "bootstrap: fires when keeper never started" `Quick
+            test_bootstrap_turn_fires_when_never_started;
+          test_case "bootstrap: channel is scheduled_autonomous" `Quick
+            test_bootstrap_turn_emits_scheduled_autonomous_channel;
+          test_case "bootstrap: provider cooldown blocks first turn" `Quick
+            test_provider_cooldown_blocks_bootstrap_turn;
+          test_case "min interval: fires without work signal after interval" `Quick
+            test_min_interval_fires_without_work_signal;
+          test_case "min interval: does not fire before elapsed" `Quick
+            test_min_interval_does_not_fire_before_elapsed;
+          test_case "min interval: never fires for bootstrap turn" `Quick
+            test_min_interval_never_fires_for_bootstrap;
+          test_case "min interval: provider cooldown blocks turn" `Quick
+            test_provider_cooldown_blocks_min_interval_turn;
 	          test_case "runtime trust snapshot tolerates null telemetry" `Quick
 	            test_runtime_trust_snapshot_tolerates_null_telemetry;
 	          test_case "runtime trust snapshot surfaces terminal reason" `Quick
@@ -6896,6 +7379,16 @@ let () =
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick
             test_degraded_retry_budget_gate_blocks_exhausted_budget;
+          test_case "per-attempt retry budget with near-zero remaining (#12675)" `Quick
+            test_per_attempt_retry_budget_with_near_zero_remaining;
+          test_case "per-attempt retry budget capped by healthy remaining" `Quick
+            test_per_attempt_retry_budget_capped_by_remaining_when_healthy;
+          test_case "non-retry still refuses tiny budget" `Quick
+            test_non_retry_still_refuses_tiny_budget;
+          test_case "per-attempt retry refuses zero remaining (#12675)" `Quick
+            test_per_attempt_retry_refuses_zero_remaining;
+          test_case "degraded retry gate allows retry with tiny remaining (#12675)" `Quick
+            test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining;
           test_case "pure local label detection" `Quick
             test_pure_local_labels_detection;
           test_case "pure local context clamp" `Quick
@@ -6930,6 +7423,8 @@ let () =
         [
           test_case "run_keeper_cycle skips paused keeper" `Quick
             test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "streaming cancel records supervisor stop" `Quick
+            test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set;
           test_case "run_keeper_cycle records trajectory contract" `Quick
             test_run_keeper_cycle_records_trajectory_source_contract;
           test_case "pre-tool gates record durable attempt telemetry" `Quick

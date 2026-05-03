@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -335,7 +334,7 @@ type archetype =
   | Melchior   (** 🔬 Scientist - technical analysis, implementation *)
   | Balthasar  (** 🪞 Mirror - ethics, value alignment, review *)
   | Casper     (** ♟️ Strategist - planning, coordination *)
-  | Athena     (** 🧠 Reasoner - logic, math, deep thinking *)
+  | Athena     (** Reasoner - logic, math, deep thinking *)
   | Generalist (** 🌐 No specialization *)
 
 let archetype_to_string = function

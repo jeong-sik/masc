@@ -108,7 +108,7 @@ module FileSystem = struct
       Error (InvalidKey "Slash not allowed (use ':' as separator)")
     else if key.[0] = ':' then
       Error (InvalidKey "Key cannot start with ':'")
-    else if key.[String.length key - 1] = ':' then
+    else if String.ends_with ~suffix:":" key then
       Error (InvalidKey "Key cannot end with ':'")
     else
       (* Check segments *)
@@ -120,7 +120,7 @@ module FileSystem = struct
               Error (InvalidKey "Consecutive colons not allowed")
             else if seg = "." || seg = ".." then
               Error (InvalidKey "Path traversal detected")
-            else if Base.String.is_prefix seg ~prefix:".." then
+            else if String.starts_with seg ~prefix:".." then
               Error (InvalidKey "Path traversal detected")
             else
               (* Blocklist: reject only dangerous characters, allow UTF-8 *)
@@ -197,7 +197,7 @@ module FileSystem = struct
   let _decompress = Compression.decompress_auto
 
   let has_zstd_header content =
-    Base.String.is_prefix content ~prefix:"ZSTD"
+    String.starts_with content ~prefix:"ZSTD"
 
   let decompress_with_context ~context content =
     let had_header = has_zstd_header content in
@@ -330,7 +330,7 @@ module FileSystem = struct
     | Ok () ->
         let segments = String.split_on_char ':' prefix in
         let complete_segments =
-          if prefix <> "" && prefix.[String.length prefix - 1] = ':' then
+          if prefix <> "" && String.ends_with ~suffix:":" prefix then
             List.filter (fun segment -> segment <> "") segments
           else
             match List.rev segments with
@@ -810,8 +810,7 @@ module Memory = struct
   let list_keys t ~prefix =
     with_lock t (fun () ->
       let keys = Hashtbl.fold (fun k _ acc ->
-        if String.length k >= String.length prefix &&
-           String.sub k 0 (String.length prefix) = prefix then
+        if String.starts_with k ~prefix then
           k :: acc
         else acc
       ) t.data [] in

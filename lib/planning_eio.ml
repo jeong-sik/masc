@@ -339,7 +339,7 @@ let resolve_task_id (config : Coord.config) ~task_id : (string, string) result =
 
 (** Format error entry for display *)
 let format_error_entry i (e : error_entry) =
-  let status = if e.resolved then "✅" else "❌" in
+  let status = if e.resolved then "done" else "open" in
   let ctx_str = match e.context with Some c -> Printf.sprintf " (%s)" c | None -> "" in
   Printf.sprintf "%d. %s [%s] **%s**%s: %s" (i+1) status e.timestamp e.error_type ctx_str e.message
 

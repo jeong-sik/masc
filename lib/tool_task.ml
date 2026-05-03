@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -129,7 +128,7 @@ let build_verdict_sse_payload
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
-  if String.equal task_id "" then Error (Types.TaskNotFound "")
+  if String.equal task_id "" then Error (Types.Task (Types.Task_error.NotFound ""))
   else Ok task_id
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
@@ -373,33 +372,33 @@ let strict_release_requires_handoff = function
 let completion_state_error ~(task_id : string) ~(agent_name : string)
     ~(task_opt : Types.task option) =
   match task_opt with
-  | None -> Some (Types.TaskNotFound task_id)
+  | None -> Some (Types.Task (Types.Task_error.NotFound task_id))
   | Some task ->
     match task.task_status with
     | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
       if String.equal assignee agent_name then
         None
       else
-        Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
-    | Types.Todo -> Some (Types.TaskNotClaimed task_id)
+        Some (Types.Task (Types.Task_error.AlreadyClaimed { task_id; by = assignee }))
+    | Types.Todo -> Some (Types.Task (Types.Task_error.NotClaimed task_id))
     | Types.Done { assignee; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
-              task_id assignee))
+              task_id assignee)))
     | Types.Cancelled { cancelled_by; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
-              task_id cancelled_by))
+              task_id cancelled_by)))
     | Types.AwaitingVerification { assignee; _ } ->
       Some
-        (Types.TaskInvalidState
+        (Types.Task (Types.Task_error.InvalidState
            (Printf.sprintf
               "task %s is awaiting verification by %s; approve or reject before marking done"
-              task_id assignee))
+              task_id assignee)))
 
 let persisted_contract_rejection ~(ctx : context)
     ~(task_opt : Types.task option) ~(notes : string) =
@@ -551,8 +550,8 @@ let handle_batch_add_tasks ctx args =
 
 let handle_claim ?agent_tool_names ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else if not (Poly.equal (args |> member "agent_role") `Null) then
+    result_to_response (Error (Types.Agent (Types.Agent_error.NotJoined ctx.agent_name)))
+  else if not ((=) (args |> member "agent_role") `Null) then
     (false, "agent_role is no longer supported")
   else
   let task_id = get_string args "task_id" "" in
@@ -599,10 +598,10 @@ let handle_claim_next ?agent_tool_names ctx _args =
         sync_planning_current_task_with_owned_task ctx;
         append_claim_observation message ~now:(Time_compat.now ())
           ~agent_name:ctx.agent_name ~task_id
-    | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-        Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count
-    | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+        Printf.sprintf "No eligible tasks available (blocked/excluded: %d)" excluded_count
+    | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
   in
   (true, message)
 
@@ -816,13 +815,13 @@ and handle_transition ?agent_tool_names ctx args =
   match handoff_context with
   | Error error -> (false, error)
   | Ok handoff_context ->
-  if Poly.equal action Types.Release && strict_release_requires_handoff task_opt
+  if (=) action Types.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
     (false, "Strict task release requires handoff_context.summary")
   else
   let completion_state_error =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
     else
       None
@@ -836,7 +835,7 @@ and handle_transition ?agent_tool_names ctx args =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
   let persisted_gate_rejection =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -851,7 +850,7 @@ and handle_transition ?agent_tool_names ctx args =
     (false, reason)
   | None ->
   let review_gate_rejection =
-    if Poly.equal action Types.Done_action && not force then
+    if (=) action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -881,7 +880,7 @@ and handle_transition ?agent_tool_names ctx args =
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
   let action =
-    if Poly.equal action Types.Done_action
+    if (=) action Types.Done_action
        && Env_config_runtime.Verification.fsm_enabled ()
        && completion_owned_by_caller
     then
@@ -916,7 +915,7 @@ and handle_transition ?agent_tool_names ctx args =
   let max_cas_retries = 3 in
   let cas_retry_delay_s = 0.05 in
   let is_version_mismatch = function
-    | Error (Types.TaskInvalidState msg) ->
+    | Error (Types.Task (Types.Task_error.InvalidState msg)) ->
         let prefix = "Version mismatch" in
         String.length msg >= String.length prefix
         && String.equal (Stdlib.String.sub msg 0 (String.length prefix)) prefix

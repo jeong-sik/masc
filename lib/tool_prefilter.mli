@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_prefilter — TF-IDF cosine similarity for tool relevance scoring.
 

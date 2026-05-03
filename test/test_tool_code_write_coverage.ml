@@ -410,7 +410,7 @@ let contains needle haystack =
 let error_msg result =
   match result with
   | Ok _ -> ""
-  | Error (Types.IoError m) -> m
+  | Error (Types.System (Types.System_error.IoError m)) -> m
   | Error _ -> "<non-IoError>"
 
 let make_config base_path : Masc_mcp.Coord.config =

@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
+import { IDE_MOCK_RELATED_LINE, IDE_MOCK_THREADS } from './ide-mock-data'
 
 describe('IdeConversationRailMock', () => {
   it('renders the RFC 0021 anchored thread rail mock', () => {
@@ -12,8 +13,8 @@ describe('IdeConversationRailMock', () => {
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('CONVERSATION (RFC 0021 anchored thread rail mock)')
     expect(container.textContent).toContain('CONVERSATION')
-    expect(container.textContent).toContain('5')
-    expect(container.textContent).toContain('router.ts:35')
+    expect(container.textContent).toContain(String(IDE_MOCK_THREADS.length))
+    expect(container.textContent).toContain(`router.ts:${IDE_MOCK_RELATED_LINE}`)
     expect(container.textContent).toContain('2 related')
     expect(container.textContent).toContain('FLAG')
     expect(container.textContent).toContain('nick0cave')

@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -164,7 +163,7 @@ let prepare_keeper_up_identity ctx args =
           Ok (prepared_args, identity_reseed)
       | Error _ as err -> err)
   | Ok None -> Ok (args, None)
-  | Error err -> Error (Printf.sprintf "❌ %s" err)
+  | Error err -> Error (Printf.sprintf "%s" err)
 
 let startup_not_ready_error_json elapsed =
   `Assoc
@@ -344,7 +343,7 @@ let prepare_passive_keeper_identity ctx args =
             Ok (with_keeper_name args updated_meta.name, identity_reseed)
         | Error _ as err -> err)
     | Ok None -> Ok (args, None)
-    | Error err -> Error (Printf.sprintf "❌ %s" err)
+    | Error err -> Error (Printf.sprintf "%s" err)
 
 let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
@@ -358,7 +357,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
     (false, startup_not_ready_error_json elapsed)
   end else
   match Keeper_exec_persona.resolved_keeper_args_from_persona args with
-  | Error e -> (false, "❌ " ^ e)
+  | Error e -> (false, "" ^ e)
   | Ok (persona, resolved_args) ->
       let dry_run = get_bool args "dry_run" false in
       if dry_run then
@@ -373,7 +372,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         (true, Yojson.Safe.to_string json)
       else
         match Keeper_exec_persona.render_keeper_toml_from_resolved_args resolved_args with
-        | Error e -> (false, "❌ " ^ e)
+        | Error e -> (false, "" ^ e)
         | Ok _ ->
         let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
@@ -381,7 +380,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         else
           match Keeper_exec_persona.persist_keeper_toml_from_resolved_args resolved_args with
           | Error e ->
-              (false, "❌ keeper created but durable config write failed: " ^ e)
+              (false, "keeper created but durable config write failed: " ^ e)
           | Ok durable_config ->
           let created_json =
             try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
@@ -429,10 +428,10 @@ let resolve_keeper_name ctx args =
        | Some stripped ->
            Error
              (Printf.sprintf
-                "❌ keeper not found: %s (also tried %s)"
+                "keeper not found: %s (also tried %s)"
                 name stripped)
-       | None -> Error (Printf.sprintf "❌ keeper not found: %s" name))
-  | Error err -> Error (Printf.sprintf "❌ %s" err)
+       | None -> Error (Printf.sprintf "keeper not found: %s" name))
+  | Error err -> Error (Printf.sprintf "%s" err)
 
 let handle_keeper_msg ctx args : tool_result =
   match resolve_keeper_name ctx args with
@@ -490,8 +489,8 @@ let resolve_keeper_meta ctx args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved ctx.config name with
   | Ok (Some (_resolved_name, meta)) -> Ok meta
-  | Ok None -> Error (Printf.sprintf "❌ keeper not found: %s" name)
-  | Error err -> Error (Printf.sprintf "❌ %s" err)
+  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
+  | Error err -> Error (Printf.sprintf "%s" err)
 
 let default_keeper_model_label (meta : keeper_meta) =
   match String.trim meta.runtime.usage.last_model_used with
@@ -1425,7 +1424,7 @@ let handle_keeper_clear ctx args : tool_result =
               (* Keep only system-role messages *)
               List.filter
                 (fun (m : Agent_sdk.Types.message) ->
-                   Poly.equal m.role Llm_provider.Types.System)
+                   (=) m.role Llm_provider.Types.System)
                 existing_messages
             else
               []

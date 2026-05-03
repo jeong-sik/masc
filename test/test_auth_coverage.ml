@@ -274,7 +274,7 @@ let test_same_origin_browser_request_rejects_missing_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected Unauthorized when Origin header is missing"
-  | Error (Types.Unauthorized _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
   | Error e -> fail (Printf.sprintf "expected Unauthorized, got %s" (Types.masc_error_to_string e))
 
 let test_same_origin_browser_request_allows_matching_origin () =
@@ -303,7 +303,7 @@ let test_same_origin_browser_request_rejects_cross_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected cross-origin browser request to be rejected"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
 let test_same_origin_https_tunnel_same_host () =
@@ -360,7 +360,7 @@ let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected non-allowlisted loopback cross-port request to be rejected"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
 let test_same_origin_rejects_different_explicit_port_on_public_host () =
@@ -375,7 +375,7 @@ let test_same_origin_rejects_different_explicit_port_on_public_host () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected different-port public host request to be rejected"
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
 let test_same_origin_allows_explicit_default_port_https () =
@@ -977,7 +977,7 @@ let test_resolve_agent_name_rejects_invalid_token () =
         SA.resolve_agent_name_for_auth
           ~base_path:dir request ~token:(Some invalid_token)
       with
-      | Error (Types.InvalidToken _) -> ()
+      | Error (Types.Auth (Types.Auth_error.InvalidToken _)) -> ()
       | Error e -> failf "expected InvalidToken, got %s" (Types.masc_error_to_string e)
       | Ok _ -> fail "expected invalid token failure")
 
@@ -1073,7 +1073,7 @@ let test_resolve_agent_name_rejects_internal_keeper_without_name () =
       let request = Httpun.Request.create ~headers `POST "/mcp" in
       match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
       | Ok _ -> fail "expected missing keeper name header to be rejected"
-      | Error (Types.Unauthorized msg) ->
+      | Error (Types.Auth (Types.Auth_error.Unauthorized msg)) ->
           check bool "mentions keeper header" true
             (Astring.String.is_infix ~affix:"x-masc-keeper-name" msg)
       | Error e -> fail (Types.masc_error_to_string e))

@@ -1,4 +1,3 @@
-open Base
 
 (** MASC Dashboard — operator-first status visualization.
 

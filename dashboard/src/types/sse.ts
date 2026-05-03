@@ -267,6 +267,7 @@ export interface RouteState {
 }
 
 export type TabId =
+  | 'cockpit'
   | 'overview'
   | 'monitoring'
   | 'command'
@@ -277,6 +278,7 @@ export type TabId =
   | 'logs'
 
 export const VALID_TABS: TabId[] = [
+  'cockpit',
   'overview',
   'monitoring',
   'command',

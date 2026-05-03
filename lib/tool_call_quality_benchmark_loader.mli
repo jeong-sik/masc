@@ -1,4 +1,3 @@
-open Base
 
 (** Tool_call_quality_benchmark_loader — JSON loaders for the
     benchmark case set and the evidence-runs file.

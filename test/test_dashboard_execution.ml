@@ -450,7 +450,11 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
-let append_execution_receipt config ~keeper_name =
+let append_execution_receipt ?(outcome = "ok")
+    ?(terminal_reason_code = "completed")
+    ?(tool_contract_result = "satisfied")
+    ?(stop_reason = Some "completed")
+    config ~keeper_name =
   let meta =
     match Lib.Keeper_types.read_meta config keeper_name with
     | Ok (Some meta) -> meta
@@ -468,8 +472,8 @@ let append_execution_receipt config ~keeper_name =
       turn_count = Some 3;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
-      outcome = "ok";
-      terminal_reason_code = "completed";
+      outcome;
+      terminal_reason_code;
       response_text_present = true;
       model_used = Some "custom:mock";
       requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
@@ -478,12 +482,12 @@ let append_execution_receipt config ~keeper_name =
       canonical_tools = [ "keeper_fs_read" ];
       unexpected_tools = [ "WebSearch" ];
       tools_used = [ "keeper_fs_read" ];
-      tool_contract_result = "satisfied";
+      tool_contract_result;
       tool_surface =
         {
           turn_lane = "tool";
           tool_surface_class = "mixed";
-          tool_requirement = "required";
+          tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 2;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -525,7 +529,7 @@ let append_execution_receipt config ~keeper_name =
             recorded_at = ended_at;
           };
         ];
-      stop_reason = Some "completed";
+      stop_reason;
       error_kind = None;
       error_message = None;
       started_at;
@@ -800,6 +804,54 @@ let test_execution_trust_surfaces_latest_receipt () =
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "cascade_outcome" |> to_string))))
 
+let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Eio.Switch.run (fun sw ->
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            append_execution_receipt config ~keeper_name:"sangsu"
+              ~outcome:"error"
+              ~terminal_reason_code:"required_tool_use_unsatisfied"
+              ~tool_contract_result:"violated"
+              ~stop_reason:(Some "completion_contract_violation:require_tool_use");
+            let execution_json =
+              Lib.Dashboard_execution.json
+                ~config
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~proc_mgr:None
+                ()
+            in
+            let open Yojson.Safe.Util in
+            let keeper_item =
+              execution_json |> member "execution_queue" |> to_list
+              |> List.find (fun row ->
+                     row |> member "kind" |> to_string = "keeper"
+                     && row |> member "target_id" |> to_string = "sangsu")
+            in
+            check string "keeper queue item exposes target" "sangsu"
+              (keeper_item |> member "target_id" |> to_string);
+            check string "keeper queue item exposes terminal reason"
+              "required_tool_use_unsatisfied"
+              (keeper_item |> member "terminal_reason_code" |> to_string);
+            check string "keeper queue item carries runtime trust terminal reason"
+              "required_tool_use_unsatisfied"
+              (keeper_item |> member "runtime_trust"
+             |> member "latest_terminal_reason"
+             |> member "code" |> to_string);
+            check bool "keeper queue item exposes next action" true
+              (keeper_item |> member "next_human_action" <> `Null))))
+
 let test_execution_trust_surfaces_coverage_gap_health () =
   let dir = test_dir () in
   Fun.protect
@@ -962,6 +1014,8 @@ let () =
             test_dashboard_execution_surfaces_keeper_diagnostic;
           Alcotest.test_case "execution trust surfaces latest receipt" `Quick
             test_execution_trust_surfaces_latest_receipt;
+          Alcotest.test_case "execution queue surfaces keeper runtime trust" `Quick
+            test_dashboard_execution_queue_surfaces_keeper_runtime_trust;
           Alcotest.test_case "execution trust surfaces coverage gap health" `Quick
             test_execution_trust_surfaces_coverage_gap_health;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick

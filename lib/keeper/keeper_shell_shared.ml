@@ -518,8 +518,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
      slash so we can append "/repos/..." cleanly. *)
   let playground_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let playground =
-    if String.length playground_bundle > 0
-       && playground_bundle.[String.length playground_bundle - 1] = '/'
+    if String.ends_with ~suffix:"/" playground_bundle
     then String.sub playground_bundle 0 (String.length playground_bundle - 1)
     else playground_bundle
   in

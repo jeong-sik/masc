@@ -1,4 +1,3 @@
-open Base
 
 (** Board_core_classify — post visibility / kind converters and
     classification.

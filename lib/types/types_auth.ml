@@ -43,7 +43,8 @@ let agent_role_of_yojson = function
   | `String s -> agent_role_of_string s
   | _ -> Error "Expected string for agent_role"
 
-let valid_agent_role_strings = ["worker"; "admin"]
+let all_agent_roles = [ Worker; Admin ]
+let valid_agent_role_strings = List.map agent_role_to_string all_agent_roles
 
 (** Agent credential - used for token-based auth *)
 type agent_credential = {

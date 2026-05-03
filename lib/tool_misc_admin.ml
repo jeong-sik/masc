@@ -1,4 +1,3 @@
-open Base
 module Format = Stdlib.Format
 module Map = Stdlib.Map
 module Set = Stdlib.Set
@@ -88,7 +87,7 @@ let auth_snapshot_json ctx =
            `Assoc
              [
                ("agent_name", `String cred.agent_name);
-               ("admin", `Bool (Poly.equal cred.role Types.Admin));
+               ("admin", `Bool ((=) cred.role Types.Admin));
                ("created_at", `String cred.created_at);
                ("expires_at", json_string_option cred.expires_at);
              ])
@@ -290,8 +289,8 @@ let handle_tool_admin_update ctx args =
   match section with
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
-      if not (Poly.equal (U.member "default_role" args) `Null) then
-        (false, "❌ default_role is no longer supported")
+      if not ((=) (U.member "default_role" args) `Null) then
+        (false, "default_role is no longer supported")
       else
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -306,7 +305,7 @@ let handle_tool_admin_update ctx args =
         | None -> Ok current.token_expiry_hours
       in
       (match expiry_hours with
-      | Error err -> (false, "❌ " ^ err)
+      | Error err -> (false, err)
       | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with

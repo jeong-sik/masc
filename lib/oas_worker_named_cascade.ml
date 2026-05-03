@@ -39,7 +39,7 @@ let resolve_cascade_providers ?provider_filter
     ?(require_tool_support = false)
     ?runtime_mcp_policy
     ~cascade_name () =
-  Cascade_runtime.resolve_named_providers_result ?provider_filter
+  Cascade_runtime.resolve_named_providers_result_strict ?provider_filter
     ?runtime_mcp_policy
     ~require_tool_choice_support ~require_tool_support ~cascade_name ()
 

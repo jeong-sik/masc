@@ -370,6 +370,11 @@ let cascade_metrics_for_candidates
       ~on_error:(fun ~model_id ~error ->
         ensure_terminal_attempt capture ~candidate_cfgs ~model_id
           ~latency_ms:None ~error:(Some error))
+      ~on_capability_drop:(fun ~model_id ~field ->
+        (* The explicit cascade metrics object bypasses the global
+           Llm_metric_bridge sink, so capability-drop telemetry must be
+           forwarded here just like latency and HTTP status. *)
+        Llm_metric_bridge.emit_capability_drop ~model_id ~field)
       ~on_http_status:(fun ~provider ~model_id ~status ->
         (* Forward HTTP status to the Prometheus counter. When callers
            pass this per-call metrics sink explicitly (cascade

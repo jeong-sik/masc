@@ -1,5 +1,5 @@
 // Roadmap — P0–P7 improvement priority visualization.
-// Shows dependency graph, per-provider applicability, and timeline.
+// Shows dependency graph, per-provider applicability, phase timeline, and resource allocation.
 
 import { html } from 'htm/preact'
 import {
@@ -7,6 +7,9 @@ import {
   PROVIDER_IDS,
   PROVIDER_LABELS,
   APPLICABILITY_MATRIX,
+  PHASE_TIMELINE,
+  PHASE_COLORS,
+  RESOURCE_ALLOCATION,
   applicabilitySymbol,
   applicabilityCellClass,
   phaseColor,
@@ -65,11 +68,85 @@ function DependencyGraph() {
   `
 }
 
+function Timeline() {
+  return html`
+    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+      <table class="w-full text-xs border-collapse">
+        <thead>
+          <tr class="bg-[var(--white-4)]">
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[50px]">주차</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[60px]">Phase</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">작업</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">산출물</th>
+            <th class="border-b border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[70px]">의존</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${PHASE_TIMELINE.map((row, i) => {
+            const phaseClass = PHASE_COLORS[row.phase] ?? ''
+            return html`
+              <tr key=${i} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[11px] text-[var(--color-fg-muted)]">${row.week}</td>
+                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1">
+                  <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-bold ${phaseClass}">${row.phase}</span>
+                </td>
+                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[11px]">${row.work}</td>
+                <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-secondary)]">${row.deliverable}</td>
+                <td class="border-b border-[var(--color-border-default)] px-2 py-1 font-mono text-[10px] text-[var(--color-fg-muted)]">${row.deps}</td>
+              </tr>
+            `
+          })}
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
+function ResourceTable() {
+  return html`
+    <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
+      <table class="w-full text-xs border-collapse">
+        <thead>
+          <tr class="bg-[var(--white-4)]">
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">트랙</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">범위</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[40px]">인력</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">0–4주</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">4–8주</th>
+            <th class="border-b border-r border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">8–12주</th>
+            <th class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-medium text-[var(--color-fg-secondary)] min-w-[55px]">12–16주</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${RESOURCE_ALLOCATION.map((row, i) => html`
+            <tr key=${i} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
+              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 font-medium text-[var(--color-fg-primary)]">${row.track}</td>
+              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-fg-secondary)]">${row.scope}</td>
+              <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">${row.headcount}인</td>
+              ${row.pct.map((p, j) => html`
+                <td key=${j} class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px] text-[var(--color-fg-muted)]">${p}</td>
+              `)}
+            </tr>
+          `)}
+          <tr class="bg-[var(--white-4)] font-medium">
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1" colSpan=${2}>합계</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[11px]">4인</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">330%</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">340%</td>
+            <td class="border-r border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">310%</td>
+            <td class="border-b border-[var(--color-border-default)] px-2 py-1 text-center font-mono text-[10px]">240%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
 export function Roadmap() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-4 text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
-        <span>sec06 Table 6-1 — P0–P7 순차-병렬 하이브리드 개선 계획</span>
+        <span>sec06–07 — P0–P7 순차-병렬 하이브리드 개선 계획 + 16주 구현 로드맵</span>
       </div>
 
       <div>
@@ -121,6 +198,18 @@ export function Roadmap() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div>
+        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">Phase별 구현 타임라인</h4>
+        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 Table 7-1 — 16주 4-Phase 순차-병렬 하이브리드 로드맵</p>
+        <${Timeline} />
+      </div>
+
+      <div>
+        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">리소스 할당</h4>
+        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 Table 7-2 — 3 트랙 × 4 Phase 병렬 진행</p>
+        <${ResourceTable} />
       </div>
     </div>
   `

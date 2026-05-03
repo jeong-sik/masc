@@ -553,6 +553,48 @@ export function phaseColor(id: RoadmapPhase): string {
   return 'bg-[var(--white-4)] text-[var(--color-fg-secondary)] border-[var(--color-border-default)]'
 }
 
+// ── Phase Timeline (sec07 Table 7-1) ──────────────────────────
+
+export interface PhaseMilestone {
+  week: string
+  phase: string
+  work: string
+  deliverable: string
+  deps: string
+}
+
+export const PHASE_TIMELINE: PhaseMilestone[] = [
+  { week: '0–1', phase: 'Phase 1', work: 'P0-1: Function Calling Harness 핵심 루프', deliverable: 'ToolValidationLoop 모듈, 최대 3회 retry', deps: '—' },
+  { week: '1–2', phase: 'Phase 1', work: 'P0-2: PPX 기반 컴파일 시점 타입-스키마 검증', deliverable: 'SchemaViolationError 타입', deps: 'P0-1' },
+  { week: '2–3', phase: 'Phase 1', work: 'P0-3: Per-provider 통합 테스트 스위트 (13 provider × 5 scenario)', deliverable: 'Integration test suite', deps: 'P0-1' },
+  { week: '3–4', phase: 'Phase 1', work: 'P5-1: S01–S05, F01–F02 안티패턴 제거', deliverable: 'CapabilityDrop, FallbackTriggered 이벤트', deps: 'P0-1' },
+  { week: '4–5', phase: 'Phase 2', work: 'P1-1: cache_control 자동화', deliverable: 'system/tool cache 삽입 최적화', deps: 'Phase 1' },
+  { week: '5–6', phase: 'Phase 2', work: 'P1-2: Context Reducer ceiling (target = max_tokens × 0.5)', deliverable: '동적 compaction budget, 최근 4turn 보존', deps: 'P1-1' },
+  { week: '6–7', phase: 'Phase 2', work: 'P3-1: thinking_control_format 4-variant capability', deliverable: '25필드 capability 레코드, 문자열 매칭 제거', deps: 'Phase 1' },
+  { week: '7–8', phase: 'Phase 2', work: 'P3-2: Provider별 thinking 직렬화 표준화', deliverable: 'thinking_config 공통 타입, wire format 매핑', deps: 'P3-1' },
+  { week: '8–9', phase: 'Phase 3', work: 'P2-1: CLI Provider MCP 활성화', deliverable: 'validate strict mode, cross-tool context', deps: 'Phase 1' },
+  { week: '9–10', phase: 'Phase 3', work: 'P2-2: Ollama runtime tool discovery (/api/show)', deliverable: '동적 ollama_capabilities 오버라이드', deps: 'P2-1' },
+  { week: '10–11', phase: 'Phase 3', work: 'P6-1: Nemotron API, Gemma 4 추가', deliverable: '2개 신규 capability 집합', deps: 'Phase 1' },
+  { week: '11–12', phase: 'Phase 3', work: 'P6-2: Ollama Cloud + ToolResult schema validation', deliverable: 'Ollama Cloud 지원, ToolResultValidationError', deps: 'P6-1, P2-2' },
+  { week: '12–13', phase: 'Phase 4', work: 'P4-1: supports_seed, supports_seed_with_images', deliverable: '27필드 capability 레코드', deps: 'Phase 1–2' },
+  { week: '13–14', phase: 'Phase 4', work: 'P4-2: temperature=0 한계 문서화, 이미지 seed 무효화', deliverable: '결정론 제한 경고 (warn_once)', deps: 'P4-1' },
+  { week: '14–15', phase: 'Phase 4', work: 'P7-1: Usage tokens 복원 + Capability drift 감지', deliverable: 'Usage 추출, CapabilityDriftAlert', deps: 'Phase 1–3' },
+  { week: '15–16', phase: 'Phase 4', work: 'P7-2: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-1' },
+]
+
+export const PHASE_COLORS: Record<string, string> = {
+  'Phase 1': 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+  'Phase 2': 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
+  'Phase 3': 'bg-[var(--info-10)] text-[var(--color-status-info)]',
+  'Phase 4': 'bg-[var(--white-4)] text-[var(--color-fg-secondary)]',
+}
+
+export const RESOURCE_ALLOCATION = [
+  { track: 'OAS 코어 수정', scope: 'Backend 직렬화/파싱, Capabilities, Config', headcount: 2, pct: ['100%', '80%', '50%', '30%'] },
+  { track: 'MASC 확장', scope: 'Provider_tool_support, Cascade, Metrics', headcount: 1, pct: ['50%', '80%', '100%', '80%'] },
+  { track: '인프라', scope: 'Integration test, CI/CD, Grafana, Prometheus', headcount: 1, pct: ['80%', '100%', '100%', '100%'] },
+]
+
 // ── Shared helpers ──────────────────────────────────────────────
 
 export function supportCellClass(v: FeatureSupport): string {

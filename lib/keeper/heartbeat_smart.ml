@@ -70,6 +70,11 @@ let should_emit ~config ~agent_status ~last_activity ~last_heartbeat =
       Emit
     else
       (* Calculate next emit time *)
+      let max_silence = 900.0 in
+    if time_since_last >= max_silence then
+      Emit
+    else
+      (* Calculate next emit time *)
       let next_emit = last_heartbeat +. interval in
       Skip_idle next_emit
 

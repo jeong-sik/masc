@@ -187,6 +187,26 @@ export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
   gemini_cli: 'cli', codex_cli: 'cli',
 }
 
+// Provider category (Cloud API / CLI / Local). Source: sec01 §1.2.
+export type ProviderCategory = 'cloud' | 'cli' | 'local'
+
+export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
+  openai: 'cloud', claude: 'cloud', gemini: 'cloud', deepseek: 'cloud',
+  qwen35: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
+  ollama: 'local', llamacpp: 'local', glm: 'cloud',
+  gemini_cli: 'cli', codex_cli: 'cli',
+}
+
+// Feature grouping by functional category. Source: sec01 §1.3 Table.
+export const FEATURE_CATEGORIES: Array<{ id: string; label: string; featureIds: string[] }> = [
+  { id: 'tool-use', label: 'Tool Use / Function Calling', featureIds: ['tool-calling', 'parallel-tools', 'tool-choice', 'streaming-tools'] },
+  { id: 'thinking', label: 'Thinking / Reasoning', featureIds: ['thinking', 'interleaved-thinking'] },
+  { id: 'structured-output', label: 'Structured Output', featureIds: ['structured-output', 'constrained-decoding'] },
+  { id: 'sampling', label: 'Sampling & Reproducibility', featureIds: ['seed'] },
+  { id: 'context', label: 'Context & Caching', featureIds: ['prompt-caching', 'max-context'] },
+  { id: 'extended', label: 'Multimodal / Extended', featureIds: ['multimodal', 'mcp', 'code-execution', 'computer-use'] },
+]
+
 export function computeMatrixSummary() {
   let native = 0, partial = 0, unsupported = 0, total = 0
   for (const feat of FEATURES) {

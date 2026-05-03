@@ -620,31 +620,50 @@ let parse_guard_expression ~loc s =
       "[@@fsm_guard]: payload is not a valid OCaml boolean expression: %S"
       s
 
-(* OCaml 5.4 / ppxlib 0.37 unified function representation:
-   [Pexp_function (params, constraint_, body)] where [body] is either
-   [Pfunction_body expr] (right-hand expression of [let f x y = expr])
-   or [Pfunction_cases cases] (pattern-matching [function]).
+(* Build [Keeper_fsm_guard_runtime.wrap_unit ~action:<s> ~stage:"guard" <thunk>]. *)
+let make_wrap_unit_call ~loc ~action_str thunk =
+  let open Asttypes in
+  let lid : Longident.t Location.loc =
+    { Location.txt = Longident.Ldot (Longident.Lident "Keeper_fsm_guard_runtime", "wrap_unit"); loc }
+  in
+  let wrap_unit_ref = Ast_builder.Default.pexp_ident ~loc lid in
+  let action_label = Ast_builder.Default.estring ~loc action_str in
+  let stage_label = Ast_builder.Default.estring ~loc "guard" in
+  Ast_builder.Default.pexp_apply ~loc wrap_unit_ref
+    [ (Labelled "action", action_label)
+    ; (Labelled "stage", stage_label)
+    ; (Nolabel, thunk)
+    ]
 
-   For [Pfunction_body], inject the assert at the head of [expr] so the
-   guard fires per application of the innermost lambda — partial
-   applications do not trigger.
+(* Generate: [wrap_unit ~action ~stage (fun () -> assert expr); body]
+   The assert is isolated inside a unit thunk so that [wrap_unit] can
+   catch [Assert_failure] and bump a Prometheus counter.  The original
+   body follows as a sequence expression so its return type is preserved.
 
-   For [Pfunction_cases] and non-function expressions, sequence the
-   assert before the expression itself; the timing differs (per
-   binding-creation rather than per call) but no equivalent injection
-   point is portable across the unified representation. *)
-let inject_into_body assert_expr expr =
+   Result for [let f x = body [@@fsm_guard "expr"]]:
+     let f x =
+       (Keeper_fsm_guard_runtime.wrap_unit ~action:"f" ~stage:"guard"
+          (fun () -> assert (expr)));
+       body
+*)
+let inject_wrapped_body ~action_str assert_expr expr =
+  let loc = expr.pexp_loc in
+  let wrap_assert_as_unit =
+    let thunk =
+      Ast_builder.Default.pexp_fun ~loc Asttypes.Nolabel None
+        (Ast_helper.Pat.any ~loc ()) assert_expr
+    in
+    make_wrap_unit_call ~loc ~action_str thunk
+  in
   match expr.pexp_desc with
   | Pexp_function (params, constraint_, Pfunction_body body) ->
       let new_body =
         Ast_builder.Default.pexp_sequence ~loc:body.pexp_loc
-          assert_expr body
+          wrap_assert_as_unit body
       in
-      { expr with
-        pexp_desc =
-          Pexp_function (params, constraint_, Pfunction_body new_body); }
+      { expr with pexp_desc = Pexp_function (params, constraint_, Pfunction_body new_body) }
   | _ ->
-      Ast_builder.Default.pexp_sequence ~loc:expr.pexp_loc assert_expr expr
+      Ast_builder.Default.pexp_sequence ~loc wrap_assert_as_unit expr
 
 let fsm_guard_attr =
   Attribute.declare "ppx_tla.fsm_guard"
@@ -666,7 +685,12 @@ class fsm_guard_mapper =
           let assert_expr =
             Ast_builder.Default.pexp_assert ~loc parsed
           in
-          let new_expr = inject_into_body assert_expr vb.pvb_expr in
+          let action_str =
+            match vb.pvb_pat.ppat_desc with
+            | Ppat_var { txt } -> txt
+            | _ -> "_"
+          in
+          let new_expr = inject_wrapped_body ~action_str assert_expr vb.pvb_expr in
           { vb with pvb_expr = new_expr }
   end
 

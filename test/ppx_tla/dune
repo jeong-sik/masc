@@ -1,4 +1,5 @@
 (tests
  (names test_basic test_records test_gadt test_phantom_param)
+ (modules test_basic test_records test_gadt test_phantom_param keeper_fsm_guard_runtime)
  (preprocess
   (pps ppx_tla)))

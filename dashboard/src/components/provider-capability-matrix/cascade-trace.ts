@@ -60,7 +60,7 @@ export function CascadeTrace() {
                 ${cascadeTierLabel(trace.tier)}
               </span>
             </div>
-            <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(trace.totalMs)} total</span>
+            <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(trace.steps.reduce((s, st) => s + st.ms, 0))} total</span>
           </div>
           <div class="flex items-stretch px-2 py-2">
             ${trace.steps.map((step, i) => {

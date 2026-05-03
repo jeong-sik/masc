@@ -15,7 +15,7 @@ val parse_iso_opt : string option -> float option
 (** {1 Strings} *)
 
 val first_some : 'a option -> 'a option -> 'a option
-(** Re-export of [Base.Option.first_some]. *)
+(** Return the first [Some], or the second. *)
 
 val string_contains : needle:string -> string -> bool
 (** Case-sensitive substring test. *)
@@ -27,7 +27,7 @@ val trim_to_option : string -> string option
 (** [Some s] for non-empty trimmed text, [None] otherwise. *)
 
 val dedup_strings : string list -> string list
-(** Order-preserving deduplication via [Base.Set]. *)
+(** Order-preserving deduplication via local [String_set]. *)
 
 val compact_text : ?max_len:int -> string -> string
 (** Collapse newlines/whitespace into single spaces, then truncate to a

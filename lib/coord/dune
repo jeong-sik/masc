@@ -57,6 +57,5 @@
   uri
   uuidm
   digestif
-  masc_random_id
-  base)
+  masc_random_id)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

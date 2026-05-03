@@ -127,6 +127,27 @@ let test_validate_empty_allowed_rejects_non_github () =
   | Error _ -> ()
   | Ok () -> fail "non-GitHub URL must be rejected even with empty allowed_orgs"
 
+let test_validate_empty_allowed_allows_local_origin_under_base () =
+  with_temp_dir "coord-worktree-policy-validate-local" @@ fun base ->
+  write_canonical_policy base (policy_with_orgs []);
+  let local_origin = Filename.concat base ".remote.git" in
+  mkdir_p local_origin;
+  (check (result unit string)) "local origin under base_path is allowed"
+    (Ok ())
+    (CW.validate_clone_origin_url ~base_path:base local_origin)
+
+let test_validate_empty_allowed_rejects_local_origin_outside_base () =
+  with_temp_dir "coord-worktree-policy-validate-local-base" @@ fun base ->
+  with_temp_dir "coord-worktree-policy-validate-local-outside" @@ fun outside ->
+  write_canonical_policy base (policy_with_orgs []);
+  let local_origin = Filename.concat outside ".remote.git" in
+  mkdir_p local_origin;
+  match CW.validate_clone_origin_url ~base_path:base local_origin with
+  | Error reason ->
+      check bool "mentions outside base_path" true
+        (contains ~needle:"outside base_path" reason)
+  | Ok () -> fail "local origin outside base_path must be rejected"
+
 let test_validate_empty_allowed_applies_denied_repos () =
   with_temp_dir "coord-worktree-policy-validate-denied" @@ fun base ->
   write_canonical_policy base
@@ -166,6 +187,10 @@ let () =
             test_validate_empty_allowed_allows_supported_github;
           test_case "empty allowed_orgs rejects non-GitHub" `Quick
             test_validate_empty_allowed_rejects_non_github;
+          test_case "empty allowed_orgs allows local origin under base" `Quick
+            test_validate_empty_allowed_allows_local_origin_under_base;
+          test_case "empty allowed_orgs rejects local origin outside base" `Quick
+            test_validate_empty_allowed_rejects_local_origin_outside_base;
           test_case "empty allowed_orgs applies denied repos" `Quick
             test_validate_empty_allowed_applies_denied_repos;
           test_case "non-empty allowed_orgs rejects other org" `Quick

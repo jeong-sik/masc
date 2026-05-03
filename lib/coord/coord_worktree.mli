@@ -63,7 +63,8 @@ val validate_clone_origin_url :
 (** Validate [origin_url] against the policy at [base_path].  Used before
     auto-provisioning a sandbox clone from a workspace repo.  Missing policy
     fails closed; an explicitly empty [allowed_orgs] list allows any supported
-    GitHub ["org/repo"] URL subject to [denied_repos]. *)
+    GitHub ["org/repo"] URL subject to [denied_repos].  Existing local origins
+    are accepted only when their realpath stays under [base_path]. *)
 
 (** {1 Repository discovery / shape checks} *)
 

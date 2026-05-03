@@ -743,6 +743,10 @@ let metric_keeper_skip_idle_wake_resumed =
   "masc_keeper_skip_idle_wake_resumed_total"
 let metric_keeper_event_queue_override =
   "masc_keeper_event_queue_override_total"
+let metric_keeper_stimulus_consumed =
+  "masc_keeper_stimulus_consumed_total"
+let metric_keeper_unsupported_stimulus =
+  "masc_keeper_unsupported_stimulus_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 let metric_keeper_restart_attempts =
   "masc_keeper_restart_attempts_total"
@@ -1118,6 +1122,17 @@ let init () =
      masc_keeper_skip_idle_wake_resumed: skip-idle-resumed measures the \
      fiber_wakeup hint path, this measures the queue payload path. \
      Labels: keeper."
+    Counter;
+  add metric_keeper_stimulus_consumed
+    "Total stimuli consumed at turn entry, classified by stimulus_class. \
+     Labels: keeper, class (board_signal|bootstrap|unsupported). \
+     Pairs with masc_keeper_unsupported_stimulus_total for unsupported-only \
+     drill-down with payload prefix."
+    Counter;
+  add metric_keeper_unsupported_stimulus
+    "Unsupported stimuli consumed at turn entry — the dequeued payload \
+     did not match any known stimulus class. Each increment represents a \
+     wake -> no_signal gap per #12684. Labels: keeper."
     Counter;
   add metric_keeper_near_exhaustion_total
     "Total keeper restart attempts at restart_count = max_restarts - 1, \

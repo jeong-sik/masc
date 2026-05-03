@@ -416,6 +416,17 @@ val metric_keeper_event_queue_override : string
     MissedWakeup (KeeperHeartbeat.tla bug action).
     Labels: [keeper]. *)
 
+val metric_keeper_stimulus_consumed : string
+(** Total stimuli consumed at turn entry, classified by [stimulus_class].
+    Labels: [keeper], [class] (board_signal|bootstrap|unsupported).
+    Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
+    drill-down with payload prefix. *)
+
+val metric_keeper_unsupported_stimulus : string
+(** Unsupported stimuli consumed at turn entry — the dequeued payload
+    did not match any known stimulus class. Each increment represents a
+    wake -> no_signal gap per #12684. Labels: [keeper]. *)
+
 val metric_keeper_near_exhaustion_total : string
 (** Total times a keeper restart attempt landed at
     [restart_count = max_restarts - 1], i.e. one attempt away from Dead.

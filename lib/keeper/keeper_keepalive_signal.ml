@@ -377,10 +377,17 @@ let dispatch_keepalive_event_with_audit
       event
   =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_with_audit_and_log
-      ~base_path:ctx.config.base_path
-      ~snapshot
-      ~events_fired
-      ~selected_event
-      keeper_name
-      event)
+    (match Keeper_registry.dispatch_event_with_audit_and_log
+       ~base_path:ctx.config.base_path
+       ~snapshot
+       ~events_fired
+       ~selected_event
+       keeper_name
+       event
+     with
+     | Ok _ -> ()
+     | Error err ->
+         Log.Keeper.warn
+           "%s: keepalive late-event dispatch rejected: %s"
+           keeper_name
+           (Keeper_state_machine.transition_error_to_string err))

@@ -51,9 +51,16 @@ let handle_keeper_down ctx args : tool_result =
            | Error err ->
                Prometheus.inc_counter
                  Prometheus.metric_keeper_write_meta_failures
-                 ~labels:[("keeper", name); ("phase", "keeper_down")]
+                 ~labels:[("keeper", name);
+                          ("phase",
+                           if Keeper_meta_store.is_version_conflict_error err
+                           then "keeper_down_cas_race"
+                           else "keeper_down")]
                  ();
-               Log.Keeper.error "keeper_down write_meta failed: %s" err);
+               if Keeper_meta_store.is_version_conflict_error err then
+                 Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
+               else
+                 Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
           Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name
             Keeper_state_machine.Operator_pause));

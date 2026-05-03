@@ -25,7 +25,7 @@ type activity_entity = { kind: string; id: string }
 let force_release_task_fn
   : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) Atomic.t
   = Atomic.make (fun _config ~agent_name:_ ~task_id:_ () ->
-      Error (Types.TaskInvalidState "Coord_hooks: force_release_task_fn not connected"))
+      Error (Types.Task (Types.Task_error.InvalidState "Coord_hooks: force_release_task_fn not connected")))
 
 (* ============================================ *)
 (* New callback refs (Phase 4A)                 *)

@@ -152,7 +152,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
   : string Types.masc_result
   =
   let open Result.Syntax in
-  let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
+  let* () = if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized) else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -165,19 +165,19 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
   let agent_path = Filename.concat (agents_dir config) filename in
   let agent_joined = path_exists config agent_path in
   let* () =
-    if not agent_joined then Error (Types.AgentNotJoined actual_name) else Ok ()
+    if not agent_joined then Error (Types.Agent (Types.Agent_error.NotJoined actual_name)) else Ok ()
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with
-    | Error msg -> Error (Types.IoError msg)
+    | Error msg -> Error (Types.System (Types.System_error.IoError msg))
     | Ok backlog ->
       (try
          (* Check role constraint before attempting claim *)
          let target_task = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
          let* task =
            match target_task with
-           | None -> Error (Types.TaskNotFound task_id)
+           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
            | Some task -> Ok task
          in
          let* () =
@@ -191,8 +191,8 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
            | None -> Ok ()
            | Some r ->
              Error
-               (Types.TaskInvalidState
-                  (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
+               (Types.Task (Types.Task_error.InvalidState
+                  (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
          in
          (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)
@@ -227,8 +227,8 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          in
          let new_tasks = List.rev new_tasks in
          match claim_state with
-         | `Not_found -> Error (Types.TaskNotFound task_id)
-         | `Claimed_by other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
+         | `Not_found -> Error (Types.Task (Types.Task_error.NotFound task_id))
+         | `Claimed_by other -> Error (Types.Task (Types.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
            Ok (Printf.sprintf "Task %s is already claimed by you" task_id)
          | `Claimed_ok ->
@@ -286,7 +286,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
            Ok (Printf.sprintf "%s claimed %s" agent_name task_id)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Types.IoError (Printexc.to_string e))))
+       | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
 ;;
 
 (** Unified task transition (single entrypoint).

@@ -80,9 +80,9 @@ let is_transient_agent_name name =
   || Nickname.is_dictionary_generated_nickname name
 
 let silent_auth_token_error_kind = function
-  | Types.InvalidToken _ -> "token_mismatch"
-  | Types.TokenExpired _ -> "token_expired"
-  | Types.Unauthorized _ -> "unauthorized"
+  | Types.Auth (Types.Auth_error.InvalidToken _) -> "token_mismatch"
+  | Types.Auth (Types.Auth_error.TokenExpired _) -> "token_expired"
+  | Types.Auth (Types.Auth_error.Unauthorized _) -> "unauthorized"
   | _ -> "other"
 
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =

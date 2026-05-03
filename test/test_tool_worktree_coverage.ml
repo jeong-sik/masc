@@ -642,7 +642,7 @@ let test_worktree_path_rejects_traversal_name () =
   match Masc_mcp.Coord.ensure_worktree_path root "../escape" with
   | Ok (worktree_path, _) ->
       fail ("expected invalid worktree path, got: " ^ worktree_path)
-  | Error (Types.IoError msg) ->
+  | Error (Types.System (Types.System_error.IoError msg)) ->
       check_contains "message mentions invalid worktree path"
         "Invalid worktree path" msg
   | Error err ->

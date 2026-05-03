@@ -150,8 +150,8 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
        | Some agent_name -> Ok (Some agent_name)
        | None ->
            Error
-             (Types.Unauthorized
-                "Internal keeper auth requires x-masc-keeper-name header."))
+             (Types.Auth (Types.Auth_error.Unauthorized
+                "Internal keeper auth requires x-masc-keeper-name header.")))
   | Some t -> (
       match Auth.resolve_agent_from_token base_path ~token:t with
       | Ok agent_name -> Ok (Some agent_name)
@@ -441,9 +441,9 @@ let ensure_same_origin_browser_request request :
   | None ->
     if allow_anonymous_mutations then Ok ()
     else
-      Error (Types.Unauthorized
+      Error (Types.Auth (Types.Auth_error.Unauthorized
         "Authentication required: provide a bearer token or Origin header. \
-         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development.")
+         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."))
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),
@@ -471,9 +471,9 @@ let ensure_same_origin_browser_request request :
               (match Httpun.Headers.get request.Httpun.Request.headers "host" with
                | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
             Error
-              (Types.Forbidden
+              (Types.Auth (Types.Auth_error.Forbidden
                  { agent = "browser";
-                   action = "cross-origin HTTP mutation" }))
+                   action = "cross-origin HTTP mutation" })))
       | _ ->
           Log.Auth.debug
             "same-origin check failed: origin=%S host=%s"
@@ -481,13 +481,13 @@ let ensure_same_origin_browser_request request :
             (match Httpun.Headers.get request.Httpun.Request.headers "host" with
              | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
           Error
-            (Types.Forbidden
+            (Types.Auth (Types.Auth_error.Forbidden
                { agent = "browser";
-                 action = "cross-origin HTTP mutation" }))
+                 action = "cross-origin HTTP mutation" })))
 
 let http_status_of_auth_error = function
-  | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized
-  | Types.Forbidden _ -> `Forbidden
+  | Types.Auth (Types.Auth_error.Unauthorized _ | Types.Auth_error.InvalidToken _ | Types.Auth_error.TokenExpired _) -> `Unauthorized
+  | Types.Auth (Types.Auth_error.Forbidden _) -> `Forbidden
   | _ -> `Internal_server_error
 
 (** Server state - initialized at startup *)
@@ -689,7 +689,7 @@ let authorize_permission_request ~base_path ~permission request :
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
-  | Error msg -> Error (Types.Unauthorized msg)
+  | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -700,8 +700,8 @@ let authorize_permission_request ~base_path ~permission request :
             && agent_name_opt = None
           then
             Error
-              (Types.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
+              (Types.Auth (Types.Auth_error.Unauthorized
+                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
           else
             Auth.check_permission base_path ~agent_name ~token ~permission)
 
@@ -721,7 +721,7 @@ let authorize_tool_request ~base_path ~tool_name request :
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with
-  | Error msg -> Error (Types.Unauthorized msg)
+  | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -732,8 +732,8 @@ let authorize_tool_request ~base_path ~tool_name request :
             && agent_name_opt = None
           then
             Error
-              (Types.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
+              (Types.Auth (Types.Auth_error.Unauthorized
+                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
           else
             Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 
@@ -742,18 +742,18 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
   let auth_cfg = Auth.load_auth_config base_path in
   if not auth_cfg.enabled then
     Error
-      (Types.Unauthorized
-         "HTTP mutation requires room auth enabled with require_token=true.")
+      (Types.Auth (Types.Auth_error.Unauthorized
+         "HTTP mutation requires room auth enabled with require_token=true."))
   else if not auth_cfg.require_token then
     Error
-      (Types.Unauthorized
-         "HTTP mutation requires bearer token auth (require_token=true).")
+      (Types.Auth (Types.Auth_error.Unauthorized
+         "HTTP mutation requires bearer token auth (require_token=true)."))
   else
     match auth_token_from_request request with
     | None ->
         Error
-          (Types.Unauthorized
-             "Authentication required. Use 'Authorization: Bearer <token>' header.")
+          (Types.Auth (Types.Auth_error.Unauthorized
+             "Authentication required. Use 'Authorization: Bearer <token>' header."))
     | Some token -> (
         match Auth.find_credential_by_token base_path ~token with
         | Error err -> Error err
@@ -762,11 +762,11 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
               Ok cred.agent_name
             else
               Error
-                (Types.Forbidden
+                (Types.Auth (Types.Auth_error.Forbidden
                    {
                      agent = cred.agent_name;
                      action = Types.show_permission permission;
-                   }))
+                   })))
 
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path

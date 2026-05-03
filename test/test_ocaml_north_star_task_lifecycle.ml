@@ -72,7 +72,7 @@ let expect_ok label = function
 ;;
 
 let expect_invalid_transition label = function
-  | Error (Types.TaskInvalidState msg) -> msg
+  | Error (Types.Task (Types.Task_error.InvalidState msg)) -> msg
   | Error err -> fail (label ^ ": unexpected error " ^ Types.masc_error_to_string err)
   | Ok msg -> fail (label ^ ": unexpectedly succeeded: " ^ msg)
 ;;

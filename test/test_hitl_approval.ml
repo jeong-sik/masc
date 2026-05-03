@@ -821,7 +821,7 @@ let test_approval_get_rejects_worker_role () =
     Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"worker"
       ~role:Types.Worker ~tool_name:"masc_approval_get"
   with
-  | Error (Types.Forbidden _) -> ()
+  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
   | Error err ->
       Alcotest.fail
         (Printf.sprintf "expected forbidden, got %s"

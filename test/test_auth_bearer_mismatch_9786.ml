@@ -80,7 +80,7 @@ let test_cross_agent_mismatch_advances_counter () =
     Auth.verify_token dir ~agent_name:"agent-a-9786" ~token:"token-b-raw"
   in
   (match result with
-   | Error (Types.Unauthorized _) -> ()
+   | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
    | Error e ->
      Alcotest.failf "expected Unauthorized, got: %s"
        (Types.masc_error_to_string e)

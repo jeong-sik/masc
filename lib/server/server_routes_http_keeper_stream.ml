@@ -57,7 +57,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     | exn ->
         let err = Printexc.to_string exn in
         if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-          (false, Types.masc_error_to_string Types.NotInitialized)
+          (false, Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
         else (
           Log.Mcp.error "tools/call crashed: %s" err;
           (false, Printf.sprintf "Internal error: %s" err))
@@ -288,7 +288,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     | exn ->
         let err = Printexc.to_string exn in
         if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-          (false, Types.masc_error_to_string Types.NotInitialized)
+          (false, Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
         else (
           Log.Mcp.error "tools/call crashed (stream): %s" err;
           (false, Printf.sprintf "Internal error: %s" err))

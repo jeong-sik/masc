@@ -91,22 +91,22 @@ let validate_agent_name_r name : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
   match Validation.Agent_id.validate name with
   | Ok _ -> Ok name
-  | Error msg -> Error (InvalidAgentName msg)
+  | Error msg -> Error (Agent (Agent_error.InvalidName msg))
 
 let validate_task_id_r id : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
   match Validation.Task_id.validate id with
   | Ok _ -> Ok id
-  | Error msg -> Error (InvalidTaskId msg)
+  | Error msg -> Error (Task (Task_error.InvalidId msg))
 
 let validate_file_path_r path : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
-  if String.length path > 500 then Error (InvalidFilePath "too long (max 500 chars)")
+  if String.length path > 500 then Error (System (System_error.InvalidFilePath "too long (max 500 chars)"))
   else if contains_substring path "<" || contains_substring path ">" then
-    Error (InvalidFilePath "invalid characters (security)")
+    Error (System (System_error.InvalidFilePath "invalid characters (security)"))
   else match Validation.Safe_path.validate_relative path with
   | Ok _ -> Ok path
-  | Error msg -> Error (InvalidFilePath msg)
+  | Error msg -> Error (System (System_error.InvalidFilePath msg))
 
 (* ============================================ *)
 (* Ensure initialized                           *)
@@ -118,7 +118,7 @@ let ensure_initialized config =
 
 let ensure_initialized_r config : (unit, masc_error) result =
   if is_initialized config then Ok ()
-  else Error NotInitialized
+  else Error (System System_error.NotInitialized)
 
 (* ============================================ *)
 (* File I/O helpers                             *)
@@ -515,9 +515,9 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
     (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
     Error
-      (IoError
+      (System (System_error.IoError
          (Printf.sprintf "Failed to acquire distributed lock for %s"
-            path))
+            path)))
   end
 
 let with_file_lock_impl ?clock config path f =

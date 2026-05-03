@@ -33,7 +33,7 @@ let transition_task_r
   : string Types.masc_result
   =
   let open Result.Syntax in
-  let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
+  let* () = if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized) else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -50,23 +50,23 @@ let transition_task_r
   with_file_lock config backlog_path (fun () ->
     try
       match read_backlog_r config with
-      | Error msg -> Error (Types.IoError msg)
+      | Error msg -> Error (Types.System (Types.System_error.IoError msg))
       | Ok backlog ->
         let* () =
           match expected_version with
           | Some v when backlog.version <> v ->
             Error
-              (Types.TaskInvalidState
+              (Types.Task (Types.Task_error.InvalidState
                  (Printf.sprintf
                     "Version mismatch (expected %d, got %d)"
                     v
-                    backlog.version))
+                    backlog.version)))
           | _ -> Ok ()
         in
         let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
         let* task =
           match task_opt with
-          | None -> Error (Types.TaskNotFound task_id)
+          | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
         let* () =
@@ -86,8 +86,8 @@ let transition_task_r
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
           | Types.Claim, Some r ->
             Error
-              (Types.TaskInvalidState
-                 (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
+              (Types.Task (Types.Task_error.InvalidState
+                 (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
           | _ -> Ok ()
         in
         let now = now_iso () in
@@ -112,16 +112,16 @@ let transition_task_r
           | Ok decision -> Ok decision
           | Error Coord_task_lifecycle.Self_approval ->
             Error
-              (Types.TaskInvalidState
-                 "Self-approval not allowed: verifier must be a different agent")
+              (Types.Task (Types.Task_error.InvalidState
+                 "Self-approval not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Self_rejection ->
             Error
-              (Types.TaskInvalidState
-                 "Self-rejection not allowed: verifier must be a different agent")
+              (Types.Task (Types.Task_error.InvalidState
+                 "Self-rejection not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Verification_disabled ->
             Error
-              (Types.TaskInvalidState
-                 "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)")
+              (Types.Task (Types.Task_error.InvalidState
+                 "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
           | Error Coord_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -182,7 +182,7 @@ let transition_task_r
               | _ -> ""
             in
             Error
-              (Types.TaskInvalidState
+              (Types.Task (Types.Task_error.InvalidState
                  (Printf.sprintf
                     "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
                     (task_status_to_string task.task_status)
@@ -191,7 +191,7 @@ let transition_task_r
                     agent_name
                     assignee_hint
                     actions_hint
-                    remediation))
+                    remediation)))
         in
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
@@ -210,20 +210,20 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.IoError
+                 (Types.System (Types.System_error.IoError
                     (Printf.sprintf
                        "verification request creation failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
-                       e)))
+                       e))))
           | Types.Submit_for_verification, _, _, Some _ ->
             Error
-              (Types.TaskInvalidState
+              (Types.Task (Types.Task_error.InvalidState
                  (Printf.sprintf
                     "submit_for_verification did not produce AwaitingVerification \
                      for task %s"
-                    task_id))
+                    task_id)))
           | ( Types.Claim
             | Types.Start
             | Types.Done_action
@@ -263,13 +263,13 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.IoError
+                 (Types.System (Types.System_error.IoError
                     (Printf.sprintf
                        "verification verdict persistence failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
-                       e)))
+                       e))))
           | ( Types.Reject_verification,
               Types.AwaitingVerification { verification_id; _ },
               Some prepare ) ->
@@ -284,20 +284,20 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.IoError
+                 (Types.System (Types.System_error.IoError
                     (Printf.sprintf
                        "verification verdict persistence failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
-                       e)))
+                       e))))
           | (Types.Approve_verification | Types.Reject_verification), _, Some _ ->
             Error
-              (Types.TaskInvalidState
+              (Types.Task (Types.Task_error.InvalidState
                  (Printf.sprintf
                     "verification verdict action did not start from AwaitingVerification \
                      for task %s"
-                    task_id))
+                    task_id)))
           | ( Types.Claim
             | Types.Start
             | Types.Done_action
@@ -723,7 +723,7 @@ let transition_task_r
                (task_status_to_string new_status)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Types.IoError (Printexc.to_string e)))
+    | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e))))
 ;;
 
 (** Release task back to backlog - transition wrapper *)
@@ -769,18 +769,18 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_
 (** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
   if not (is_initialized config)
-  then Error Types.NotInitialized
+  then Error (Types.System Types.System_error.NotInitialized)
   else (
     let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
         match read_backlog_r config with
-        | Error msg -> Error (Types.IoError msg)
+        | Error msg -> Error (Types.System (Types.System_error.IoError msg))
         | Ok backlog ->
           let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
           (match task_opt with
-           | None -> Error (Types.TaskNotFound task_id)
+           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
            | Some task ->
              (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
              let can_cancel =
@@ -794,11 +794,11 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
              if not can_cancel
              then
                Error
-                 (Types.TaskInvalidState
+                 (Types.Task (Types.Task_error.InvalidState
                     (Printf.sprintf
                        "Cannot cancel task %s (already done/cancelled or owned by \
                         another agent)"
-                       task_id))
+                       task_id)))
              else (
                let new_tasks =
                  List.map
@@ -917,7 +917,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                Ok (Printf.sprintf "%s cancelled %s" agent_name task_id)))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))))
+      | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
 ;;
 
 (* Scheduling functions are in Coord_task_schedule.
@@ -944,16 +944,16 @@ let link_task_execution_artifacts_r
   : string Types.masc_result
   =
   if not (is_initialized config)
-  then Error Types.NotInitialized
+  then Error (Types.System Types.System_error.NotInitialized)
   else (
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
         match read_backlog_r config with
-        | Error msg -> Error (Types.IoError msg)
+        | Error msg -> Error (Types.System (Types.System_error.IoError msg))
         | Ok backlog ->
           (match List.find_opt (fun (task : task) -> task.id = task_id) backlog.tasks with
-           | None -> Error (Types.TaskNotFound task_id)
+           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
            | Some task ->
              let existing_contract =
                ensure_task_contract_for_verification
@@ -1031,5 +1031,5 @@ let link_task_execution_artifacts_r
              Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))))
+      | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
 ;;

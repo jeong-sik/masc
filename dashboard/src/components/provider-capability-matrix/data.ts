@@ -595,6 +595,56 @@ export const RESOURCE_ALLOCATION = [
   { track: '인프라', scope: 'Integration test, CI/CD, Grafana, Prometheus', headcount: 1, pct: ['80%', '100%', '100%', '100%'] },
 ]
 
+// ── Success Metrics (sec07 §7.3) ──────────────────────────────
+// Three cross-cutting success indicators for the 16-week roadmap.
+
+export interface SuccessMetric {
+  id: string
+  title: string
+  target: string
+  description: string
+  phases: Record<string, string>
+}
+
+export const SUCCESS_METRICS: SuccessMetric[] = [
+  {
+    id: 'bfcl-accuracy',
+    title: 'BFCL 90%+ Tool Use Accuracy',
+    target: '90%',
+    description: '주요 6개 제공자(OpenAI, Claude, Gemini, DeepSeek, Qwen, Mistral)의 OAS 파이프라인 정확도. 모델 자체 성능이 아닌 직렬화→전송→파싱→검증 파이프라인의 정확도를 측정.',
+    phases: {
+      'Phase 1': '13 providers × 5 scenario = 65 test cases 100% pass',
+      'Phase 2': 'thinking 복합 스키마 검증 성공률 95%+',
+      'Phase 3': 'CLI Provider MCP E2E 성공률 100%, 신규 3 provider 통합 테스트 100%',
+      'Phase 4': 'BFCL V4 Simple/Parallel/Relevance 6 provider 전체 90%+',
+    },
+  },
+  {
+    id: 'zero-silent-failure',
+    title: 'Zero Silent Failure',
+    target: '0건',
+    description: '모든 비정상 동작이 WARN+ 로그 레벨로 기록, Prometheus 메트릭이나 structured event로 포착. masc_capability_drop_total, masc_fallback_triggered_total counter 기준.',
+    phases: {
+      'Phase 1': 'S01–S05 (5건) Silent Failure 완전 제거 → counter 증가 0',
+      'Phase 2': 'S06–S08 제거, F01–F04 Fake Fallback 제거',
+      'Phase 3': 'S09–S10 제거, M01–M06 String Match 중 3건 제거',
+      'Phase 4': '잔여 안티패턴 제거 완료 (28/32 = 87.5%), Grafana "Zero Silent Failure" panel OK',
+    },
+  },
+  {
+    id: 'capability-accuracy',
+    title: 'Capability Accuracy 100%',
+    target: '100%',
+    description: 'Llm_provider.Capabilities 레코드 각 필드가 실제 API 동작과 일치. capability_mismatch rejection 비율 < 1%.',
+    phases: {
+      'Phase 1': 'supports_tools, supports_tool_choice 통합 테스트 100% pass',
+      'Phase 2': 'thinking_control_format 4-variant 정합성 검증',
+      'Phase 3': 'supports_seed, supports_seed_with_images 선언 정합성',
+      'Phase 4': 'emits_usage_tokens 정합성 + drift 감지 24h 이내',
+    },
+  },
+]
+
 // ── Shared helpers ──────────────────────────────────────────────
 
 export function supportCellClass(v: FeatureSupport): string {

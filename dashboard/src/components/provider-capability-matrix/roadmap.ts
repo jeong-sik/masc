@@ -10,6 +10,7 @@ import {
   PHASE_TIMELINE,
   PHASE_COLORS,
   RESOURCE_ALLOCATION,
+  SUCCESS_METRICS,
   applicabilitySymbol,
   applicabilityCellClass,
   phaseColor,
@@ -142,6 +143,39 @@ function ResourceTable() {
   `
 }
 
+function SuccessMetrics() {
+  return html`
+    <div class="grid grid-cols-1 gap-3">
+      ${SUCCESS_METRICS.map(m => html`
+        <div key=${m.id} class="border border-[var(--color-border-default)] rounded overflow-hidden">
+          <div class="flex items-center justify-between px-3 py-2 bg-[var(--white-4)] border-b border-[var(--color-border-default)]">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${m.title}</span>
+              <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono font-bold bg-[var(--ok-10)] text-[var(--color-status-ok)]">
+                Target: ${m.target}
+              </span>
+            </div>
+          </div>
+          <div class="px-3 py-2">
+            <p class="text-[11px] leading-snug text-[var(--color-fg-secondary)] mb-2">${m.description}</p>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+              ${Object.entries(m.phases).map(([phase, desc]) => {
+                const phaseClass = PHASE_COLORS[phase] ?? ''
+                return html`
+                  <div key=${phase} class="border border-[var(--color-border-default)] rounded px-2 py-1.5">
+                    <span class="inline-block rounded px-1 py-px text-[9px] font-bold ${phaseClass} mb-1">${phase}</span>
+                    <p class="text-[10px] leading-snug text-[var(--color-fg-muted)]">${desc}</p>
+                  </div>
+                `
+              })}
+            </div>
+          </div>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 export function Roadmap() {
   return html`
     <div class="flex flex-col gap-4">
@@ -210,6 +244,12 @@ export function Roadmap() {
         <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">리소스 할당</h4>
         <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 Table 7-2 — 3 트랙 × 4 Phase 병렬 진행</p>
         <${ResourceTable} />
+      </div>
+
+      <div>
+        <h4 class="text-xs font-semibold text-[var(--color-fg-primary)] mb-2">성공 지표</h4>
+        <p class="text-[10px] text-[var(--color-fg-muted)] mb-2">sec07 §7.3 — 16주 로드맵 완료 판정 기준 (3개 교차 검증 지표)</p>
+        <${SuccessMetrics} />
       </div>
     </div>
   `

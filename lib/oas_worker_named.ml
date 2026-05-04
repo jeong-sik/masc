@@ -209,6 +209,14 @@ let run_named
                   Provider_tool_support.provider_debug_label provider_cfg);
                ]
                ();
+             (* §7.3.2 Zero Silent Failure: feed the unified fallback
+                counter so the dashboard panel sees a single numerator
+                across all fallback classes (cross_cascade,
+                cascade_empty, capability_drop, …). *)
+             Llm_metric_bridge.emit_fallback_triggered
+               ~kind:"cross_cascade"
+               ~detail:
+                 (Printf.sprintf "%s->%s" cascade_name source_cascade);
              Log.Misc.info
                "cascade %s: cross-cascade fallback to %s from %s \
                 (original had no tool-capable providers)"

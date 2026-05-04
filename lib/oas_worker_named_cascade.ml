@@ -265,11 +265,16 @@ let filter_candidate_providers_for_tool_support
          which provider/reason combination drove the drop. *)
       List.iter
         (fun (provider_cfg, reason) ->
+          let reason_label = filter_rejection_reason_label reason in
           Llm_metric_bridge.emit_capability_drop
             ~model_id:provider_cfg.Llm_provider.Provider_config.model_id
-            ~field:
-              (Printf.sprintf "cascade_empty:%s"
-                 (filter_rejection_reason_label reason)))
+            ~field:(Printf.sprintf "cascade_empty:%s" reason_label);
+          (* §7.3.2 Zero Silent Failure: also feed the unified
+             fallback counter so the dashboard panel sees a single
+             numerator across all fallback classes. *)
+          Llm_metric_bridge.emit_fallback_triggered
+            ~kind:"cascade_empty"
+            ~detail:reason_label)
         rejected;
       if cascade_empty_should_emit_first ~label ~signature then
         Log.Misc.error

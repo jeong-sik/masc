@@ -25,21 +25,11 @@
   50% { box-shadow: 0 0 8px 2px rgb(var(--info-glow) / .3); }
 }
 
-@keyframes avatar-particle {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-12px) scale(0); opacity: 0; }
-}
-
 /* ── Agent state animations ────────────────────────────── */
 
 @keyframes workingPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .15); }
   50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .25); }
-}
-
-@keyframes warnBlink {
-  0%, 100% { border-color: rgb(var(--warn-glow) / .28); }
-  50% { border-color: rgb(var(--warn-glow) / .5); }
 }
 
 @keyframes blocker-pulse {
@@ -49,23 +39,9 @@
 
 /* ── Component keyframes (consolidated) ──────────────────── */
 
-@keyframes fadeSlide {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.75; }
-}
-
-@keyframes orchestraFlow {
-  to { stroke-dashoffset: -40; }
-}
-
-@keyframes orchestraPulse {
-  0%, 100% { transform: scale(1); opacity: 0.92; }
-  50% { transform: scale(1.06); opacity: 1; }
 }
 
 @keyframes livePulse {
@@ -78,24 +54,9 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes keeper-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-@keyframes pulse-ring {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
 @keyframes pipeline-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
   50% { box-shadow: 0 0 4px 1px rgb(var(--info-glow) / .25); }
-}
-
-@keyframes pipeline-badge-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
 }
 
 @keyframes keeperPulse {

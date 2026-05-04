@@ -907,6 +907,22 @@ let handle_crash_auto_pause (ctx : _ context)
          | Some cls -> blocker_class_to_string cls
          | None -> reason_tag
        in
+       (* Task-138 §"Max no-task-progress 30min = release claimed":
+          when the supervisor pauses a keeper because the same blocker
+          class is looping (stale_storm or oas_timeout_budget_loop),
+          the keeper is no longer making progress on its claimed task.
+          Releasing [current_task_id] here lets a peer pick the task
+          up while this keeper sits in [paused=true] back-off.
+
+          Without this release the diagnostic state is "executor.json:
+          current_task_id=task-147, paused=true, last_blocker_class=
+          oas_timeout_budget" — task is stuck forever because (a) this
+          keeper cannot run while paused and (b) other keepers see the
+          claim and skip.  The released task ID is not separately audited
+          here; [last_blocker_class] + [last_blocker] in [runtime] already
+          carry the pause reason, and Prometheus
+          [keeper_paused_total] is incremented below.
+          Discovered 2026-05-05 fleet-stuck. *)
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
@@ -915,6 +931,7 @@ let handle_crash_auto_pause (ctx : _ context)
               paused = true;
               auto_resume_after_sec;
               updated_at = now_iso ();
+              current_task_id = None;
               runtime =
                 { meta.runtime with
                   last_blocker = blocker_text;

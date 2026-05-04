@@ -419,7 +419,7 @@ export interface OasProviderCap {
 export const OAS_PROVIDER_CAPS: OasProviderCap[] = [
   { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 1_000_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'kimi',           label: 'Kimi',           kind: 'Kimi',           maxContext: 262_144,  maxOutput: 32_768, tools: true,  toolChoice: true,  reasoning: true,  vision: false, topK: false, usage: 'emit' },
-  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: false, usage: 'emit' },
+  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: false, vision: true,  topK: false, usage: 'emit' },
   { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'ollama',         label: 'Ollama',         kind: 'Ollama',         maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: false, reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 1_000_000, maxOutput: 65_536, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },

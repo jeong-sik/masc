@@ -62,18 +62,22 @@ interface BlameBlock {
   readonly kind: string
 }
 
-async function fetchBlame(path: string): Promise<BlameBlock[]> {
+async function fetchBlame(path: string, keeper = ''): Promise<BlameBlock[]> {
   try {
-    const res = await fetch('/api/v1/git/blame?path=' + encodeURIComponent(path))
+    const params = new URLSearchParams({ path })
+    if (keeper) params.set('keeper', keeper)
+    const res = await fetch('/api/v1/git/blame?' + params.toString())
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data) ? data : []
   } catch { return [] }
 }
 
-async function fetchDiff(path: string, baseRef = 'HEAD'): Promise<UnifiedDiffRow[]> {
+async function fetchDiff(path: string, baseRef = 'HEAD', keeper = ''): Promise<UnifiedDiffRow[]> {
   try {
-    const res = await fetch('/api/v1/git/diff?path=' + encodeURIComponent(path) + '&base_ref=' + encodeURIComponent(baseRef))
+    const params = new URLSearchParams({ path, base_ref: baseRef })
+    if (keeper) params.set('keeper', keeper)
+    const res = await fetch('/api/v1/git/diff?' + params.toString())
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data.unified) ? data.unified : []
@@ -134,7 +138,7 @@ export function IdeEditorMock({
 
   useEffect(() => {
     let cancelled = false
-    fetchBlame(activeIdeFile.value).then(blocks => {
+    fetchBlame(activeIdeFile.value, keeperName).then(blocks => {
       if (cancelled) return
       ownershipStore.reset(activeIdeFile.value)
       for (const block of blocks) {
@@ -149,16 +153,16 @@ export function IdeEditorMock({
       }
     })
     return () => { cancelled = true }
-  }, [activeIdeFile.value, ownershipStore])
+  }, [activeIdeFile.value, keeperName, ownershipStore])
 
   const [diffRows, setDiffRows] = useState<UnifiedDiffRow[]>([])
   useEffect(() => {
     let cancelled = false
-    fetchDiff(activeIdeFile.value).then(rows => {
+    fetchDiff(activeIdeFile.value, 'HEAD', keeperName).then(rows => {
       if (!cancelled) setDiffRows(rows)
     })
     return () => { cancelled = true }
-  }, [activeIdeFile.value])
+  }, [activeIdeFile.value, keeperName])
 
   const document = documentStore.document()
   const lines = documentStore.lines()

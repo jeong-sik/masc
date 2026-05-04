@@ -1880,34 +1880,17 @@ let init () =
   add metric_sse_external_subscribers
     "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
 
-  add metric_keeper_turn_livelock_blocks
-    "Total livelock-block events where keeper found a turn already in-progress      during unified_turn start. Labels: keeper." Counter;
-  add metric_keeper_turn_timeout_committed
-    "Total wall-clock timeout events after tools were committed but before      response completed. Labels: keeper." Counter;
-  add metric_keeper_turn_error_after_tools
-    "Total errors after tool calls were committed in unified_turn.      Labels: keeper." Counter;
-  add metric_keeper_cascade_sync_failures
-    "Total failures to sync cascade state during turn pause/rejection.      Labels: keeper, site." Counter;
-  add metric_keeper_thinking_persist_failures
-    "Total failures persisting thinking content to disk. Labels: keeper." Counter;
-  add metric_keeper_checkpoint_failures
-    "Total checkpoint save/restore failures. Labels: keeper, operation." Counter;
-  add metric_keeper_memory_write_failures
-    "Total failures writing keeper memory to disk. Labels: keeper." Counter;
-  add metric_keeper_write_meta_cycle_failures
-    "Total CAS-race or write failures in write_meta during turn cycle.      Labels: keeper." Counter;
-  add metric_keeper_alert_persist_failures
-    "Total failures persisting alert notifications. Labels: keeper." Counter;
-  add metric_keeper_metrics_sse_failures
-    "Total failures pushing metrics via SSE to dashboard. Labels: keeper." Counter;
-  add metric_keeper_dispatch_event_failures
-    "Total failures dispatching state events to keeper event bus.      Labels: keeper, event." Counter;
-  add metric_keeper_session_cleanup_failures
-    "Total failures cleaning up keeper session directories on shutdown." Counter;
-  add metric_keeper_chat_store_failures
-    "Total failures in keeper chat store append/load operations.      Labels: operation." Counter;
-  add metric_keeper_observation_query_failures
-    "Total failures in world observation queries (backlog, agents, board).      Labels: operation." Counter;
+  (* The keeper turn / cascade / persistence-failure metrics
+     (turn_livelock_blocks .. session_cleanup_failures, plus
+     chat_store_failures and observation_query_failures) are registered
+     earlier in init() — see line ~1171 for turn_livelock_blocks and
+     lines ~1579-1628 for the rest, with detailed help text. Because
+     `add` is no-op when the name already exists, every help string
+     in this duplicate block was silently dropped, while still making
+     the file look like every metric had two declaration sites with
+     conflicting documentation. The original block is removed so
+     edits to help/labels land on the canonical site instead of a
+     dead one. *)
   add metric_keeper_stale_termination_total
     "Total stale watchdog terminations (all classes). Labels: keeper." Counter;
   add metric_keeper_stale_termination_by_class
@@ -1951,7 +1934,7 @@ let init () =
   add metric_keeper_stay_silent_loop_detected
     "Stay-silent loop detector triggered. Labels: keeper." Counter;
   add metric_keeper_usage_trust
-    "Keeper usage trust level. Labels: keeper, trust." Counter;
+    "Keeper usage trust outcome. Labels: keeper, outcome." Counter;
   add metric_keeper_usage_anomaly_reason
     "Keeper usage anomaly reason. Labels: keeper, reason." Counter;
   add metric_keeper_config_env_parse_failures

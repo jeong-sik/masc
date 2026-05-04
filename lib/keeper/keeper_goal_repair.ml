@@ -88,6 +88,10 @@ let repair_keeper (config : Coord.config) (name : string) : (repair_action, stri
           let updated = { meta with active_goal_ids = [ goal.Goal_store.id ] } in
           (match Keeper_types.write_meta config updated with
            | Error e ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:[("keeper", name); ("phase", "goal_repair")]
+                 ();
                Error (Printf.sprintf "write_meta failed: %s" e)
            | Ok () ->
                Ok { keeper_name = name; goal_id = goal.Goal_store.id; goal_title = title })

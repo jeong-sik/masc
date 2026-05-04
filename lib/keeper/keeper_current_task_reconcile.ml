@@ -97,6 +97,10 @@ let sync_current_task_id_from_backlog ~(config : Coord.config)
      with
      | Ok () -> ()
      | Error msg ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "reconcile_task_id")]
+         ();
        Log.Keeper.warn
          "keeper:%s failed to persist reconciled current_task_id=%s: %s"
          meta.name

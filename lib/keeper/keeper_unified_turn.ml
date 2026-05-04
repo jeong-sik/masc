@@ -347,7 +347,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ();
               (match Eio_context.get_clock_opt () with
                | Some clock ->
-                   (try Eio.Time.sleep clock (saturation_skip_sleep_duration ())
+                   (try Eio.Time.sleep clock (saturation_skip_sleep_duration ());
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
@@ -672,13 +672,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 event_bus_drain_cancel := Some cc;
                 let rec loop () =
                   try
-                    ignore (drain_turn_event_bus ~site:"background_poll" ())
+                    ignore (drain_turn_event_bus ~site:"background_poll" ());
                   with
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn ->
                     Log.Keeper.warn
                       "%s: keeper_turn event-bus drain failed: %s"
                       meta.name (Printexc.to_string exn);
+                    Prometheus.inc_counter
+                      Prometheus.metric_keeper_event_bus_drain
+                      ~labels:[("keeper", meta.name); ("site", "turn_drain")]
+                      ();
                   (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
                      of events per tool cycle (ToolCalled / ToolResult /
                      ToolCompleted + assistant / usage).  With 0.25s
@@ -790,7 +794,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | e ->
              Log.Keeper.warn
                "%s: unsubscribe_event_bus in turn cleanup raised: %s"
-               meta.name (Printexc.to_string e));
+               meta.name (Printexc.to_string e);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_turn_cleanup_failures
+               ~labels:[("keeper", meta.name); ("site", "unsubscribe_event_bus")]
+               ());
           (try
              Keeper_registry.mark_turn_finished
                ~base_path:config.base_path meta.name
@@ -799,7 +807,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | e ->
              Log.Keeper.warn
                "%s: mark_turn_finished in turn cleanup raised: %s"
-               meta.name (Printexc.to_string e))
+               meta.name (Printexc.to_string e);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_turn_cleanup_failures
+               ~labels:[("keeper", meta.name); ("site", "mark_turn_finished")]
+               ());
         in
         match
         Keeper_exec_context.timed (fun () ->
@@ -949,7 +961,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   "%s: all cascades exhausted (terminal) — last_err=%s \
                    attempt=%d attempted_cascades=[%s]"
                   meta.name (Agent_sdk.Error.to_string err) attempt
-                  (String.concat ", " attempted_cascades)
+                  (String.concat ", " attempted_cascades);
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_oas_execution_errors
+                  ~labels:[("keeper", meta.name); ("phase", "cascade_exhausted")]
+                  ()
               end
               else begin
                 Keeper_registry.set_turn_phase
@@ -1058,6 +1074,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_turn_error_after_tools
+                    ~labels:[("keeper", meta.name); ("reason", reason)]
+                    ();
                   mark_terminal_error err;
                   Error err
                 end else if committed_tools <> [] then begin
@@ -1377,6 +1397,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 meta.name
                 (String.concat ", " committed_tools)
                 msg;
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_turn_timeout_committed
+                ~labels:[("keeper", meta.name)]
+                ();
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
@@ -1511,6 +1535,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                " (transient, cooldown preserved)"
              else "")
             (short_preview e_str);
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_oas_execution_errors
+            ~labels:[("keeper", meta.name); ("phase", "cycle_failed")]
+            ();
           let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
               ~previous_state:previous_social_state
@@ -1916,7 +1944,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  ] ();
                Log.Keeper.error
                  "write metrics snapshot failed after keeper cycle: %s"
-                 (Printexc.to_string exn));
+                 (Printexc.to_string exn);
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_turn_metrics_snapshot_failures
+                 ~labels:[("keeper", meta.name); ("site", "post_cycle")]
+                 ());
           let turn_mode = Keeper_unified_metrics.turn_mode_of_result result in
           let turn_mode_label =
             Keeper_unified_metrics.turn_mode_to_string turn_mode

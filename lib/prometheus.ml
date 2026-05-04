@@ -1003,6 +1003,8 @@ let metric_keeper_meta_read_failures =
   "masc_keeper_meta_read_failures_total"
 let metric_keeper_recurring_failures =
   "masc_keeper_recurring_failures_total"
+let metric_keeper_turn_cleanup_failures =
+  "masc_keeper_turn_cleanup_failures_total"
 
 (** {1 Built-in Metrics} *)
 
@@ -1393,7 +1395,7 @@ let init () =
     Counter;
   add metric_keeper_turn_metrics_snapshot_failures
     "Total metrics snapshot write failures after keeper turns. \
-     Labeled by keeper and channel."
+     Labeled by keeper and site."
     Counter;
   add metric_keeper_oas_execution_errors
     "Total OAS execution errors (non-cancellation) in keeper_llm_bridge. \
@@ -1777,6 +1779,8 @@ let init () =
     "Meta read failures after turn (none returned, read error). Labels: keeper, phase." Counter;
   add metric_keeper_recurring_failures
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
+  add metric_keeper_turn_cleanup_failures
+    "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, site." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

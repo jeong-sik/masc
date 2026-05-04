@@ -537,7 +537,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                      ] ();
                    Prometheus.inc_counter
                      Prometheus.metric_keeper_turn_metrics_snapshot_failures
-                     ~labels:[("keeper", updated_meta.name); ("channel", "turn")]
+                     ~labels:[("keeper", updated_meta.name); ("site", "turn")]
                      ();
                    Log.Keeper.error
                      "write metrics snapshot failed after keeper_msg turn: %s"

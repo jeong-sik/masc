@@ -156,13 +156,13 @@ module Http_client = struct
           else
             Terminal_http code
       | Llm_provider.Http_client.AcceptRejected { reason } -> (
-          (* All current [retryable_error] codes represent per-provider
-             failures where a different cascade hop may succeed.  A future
-             terminal code (e.g. a global account suspension) would map to
-             [Accept_rejected_terminal] by adding a branch here. *)
+          (* All [retryable_error] codes are per-provider — a different cascade
+             hop may succeed.  The type name encodes this intent: any variant
+             returned by [classify_accept_rejected] should advance the cascade.
+             If a future code should NOT cascade, it belongs in a different
+             type (or the call-site match should be extended at that point). *)
           match classify_accept_rejected reason with
-          | Some (Parse_error | Model_unsupported | Request_rejected | Startup_crash) ->
-              Accept_rejected_capability_mismatch
+          | Some _ -> Accept_rejected_capability_mismatch
           | None -> Accept_rejected_terminal)
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required

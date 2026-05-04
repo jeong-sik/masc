@@ -240,6 +240,8 @@ let retryable_error_to_string = function
   | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
   | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
   | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"
+  (* Adding a new [retryable_error] variant will produce a [warn-error +8]
+     compile error here, ensuring this helper stays synchronised. *)
 
 let test_classify_accept_rejected_model_unsupported () =
   let reason = "codex_cli does not support runtime_mcp_auth headers" in

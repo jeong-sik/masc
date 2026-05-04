@@ -32,7 +32,7 @@ const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/doc
 const DECK_PANEL = 'overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
 const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
 const DECK_CARD = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
-const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
+const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
 const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const BRASS_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
@@ -162,7 +162,7 @@ function KeeperToolActivity() {
             keeper가 최근 사용한 도구와 활동 현황. 상세는 keeper 클릭.
           </div>
         </div>
-        <span class="ml-auto inline-flex items-center ${DECK_CHIP} font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-secondary)]">
+        <span class="ml-auto inline-flex items-center ${DECK_CHIP} font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">
           ${totalToolTurns} calls
         </span>
       </summary>

@@ -265,7 +265,7 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
       <aside class="min-h-[12rem] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         ${selected ? html`
           <div class="grid gap-2 text-sm">
-            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">선택</div>
+            <div class="text-2xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">선택</div>
             <div class="font-mono text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">${selected.label}</div>
             <dl class="grid gap-1 text-2xs text-[var(--color-fg-muted)]">
               <div class="flex justify-between gap-3"><dt>종류</dt><dd class="text-[var(--color-fg-secondary)]">${selected.kind}</dd></div>

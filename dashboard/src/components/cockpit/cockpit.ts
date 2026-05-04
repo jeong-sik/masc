@@ -5,7 +5,7 @@ import { COCKPIT_FRAME_SRC, shouldLoadCockpitFrame } from './cockpit-frame'
 export function Cockpit() {
   return html`
     <div class="flex h-full w-full flex-col bg-black">
-      <div class="flex-none border-b border-solid border-[#333]">
+      <div class="flex-none border-b border-solid border-[var(--color-border-default)]">
         <${WorldVisualizer} />
       </div>
 

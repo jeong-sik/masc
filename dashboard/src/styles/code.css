@@ -338,7 +338,7 @@ body[data-mode="split"] .zone-deck { display: none; }
   position: absolute;
   left: 4px; width: 2px;
   background: var(--brass-3);
-  border-radius: 1px;
+  border-radius: var(--r-00);
   pointer-events: none;
   opacity: 0.35;
   transition: opacity var(--t-fast), top var(--t-med), height var(--t-med);
@@ -832,7 +832,7 @@ body:not(.term-open) .code-term { display: none; }
 .term-toggle.is-active { color: var(--brass-1); border-color: var(--brass-3); background: var(--color-bg-hover); }
 .term-toggle .t-glyph {
   display: inline-block; width: 8px; height: 8px;
-  border: 1px solid currentColor; border-radius: 1px;
+  border: 1px solid currentColor; border-radius: var(--r-00);
   position: relative;
 }
 .term-toggle .t-glyph::before {

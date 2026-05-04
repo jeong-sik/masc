@@ -82,7 +82,7 @@ export function MemoryGraph({ nodes, edges, onSelectNode, testId }: MemoryGraphP
               text-anchor="middle"
               dy="4"
               class="text-xs fill-[var(--color-fg-primary)] pointer-events-none"
-              style="font-size: 10px;"
+              style="font-size: var(--fs-10);"
             >
               ${n.label.slice(0, 3)}
             </text>

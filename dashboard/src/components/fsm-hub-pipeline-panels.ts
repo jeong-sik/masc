@@ -317,7 +317,7 @@ export function HeroPhase({
     >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--color-fg-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">KSM</span></div>
+          <div class="text-3xs font-semibold tracking-[var(--track-sub)] text-[var(--color-fg-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">KSM</span></div>
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${displayState(snapshot.phase)}
           </div>
@@ -408,7 +408,7 @@ export function PipelineStep({
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
-            <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--color-fg-muted)]">${label}</span>
+            <span class="text-3xs font-semibold tracking-[var(--track-wide)] text-[var(--color-fg-muted)]">${label}</span>
             ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`

@@ -98,7 +98,7 @@ export function DataFlowGraph({ nodes, edges, onSelectNode, testId }: DataFlowGr
               y=${n.height / 2 + 4}
               text-anchor="middle"
               class="text-xs fill-[var(--color-fg-primary)] pointer-events-none"
-              style="font-size: 10px;"
+              style="font-size: var(--fs-10);"
             >
               ${n.label}
             </text>

@@ -30,6 +30,14 @@ val effective_provider_attempt_timeout_s :
   Llm_provider.Provider_config.t ->
   float option
 
+(** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
+    supplied a value, otherwise injects
+    [Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec]. Used at
+    every {!run_model_by_label} / {!run_model_with_masc_tools} entry so a
+    single-agent dashboard run cannot block forever on a stalled HTTP
+    stream. *)
+val apply_stream_idle_timeout_default : float option -> float option
+
 (** {1 Named cascade execution} *)
 
 val run_named :

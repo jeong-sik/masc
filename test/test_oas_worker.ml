@@ -1210,6 +1210,20 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
       Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
+let test_apply_stream_idle_timeout_default_passes_through_caller_value () =
+  let provided = Some 7.5 in
+  let result = Oas_worker_named.apply_stream_idle_timeout_default provided in
+  Alcotest.(check (option (float 0.0001)))
+    "explicit Some passes through unchanged" provided result
+
+let test_apply_stream_idle_timeout_default_injects_keepalive_default () =
+  let result = Oas_worker_named.apply_stream_idle_timeout_default None in
+  let expected =
+    Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+  in
+  Alcotest.(check (option (float 0.0001)))
+    "omitted timeout receives keepalive default" expected result
+
 let test_oas_worker_exec_build_default_priority_unset () =
   let config =
     Oas_worker_exec.default_config
@@ -4040,6 +4054,10 @@ let () =
         test_oas_worker_exec_build_applies_retry_policy;
       Alcotest.test_case "oas_worker applies stream idle timeout" `Quick
         test_oas_worker_exec_build_applies_stream_idle_timeout;
+      Alcotest.test_case "apply_stream_idle_timeout_default passes Some through" `Quick
+        test_apply_stream_idle_timeout_default_passes_through_caller_value;
+      Alcotest.test_case "apply_stream_idle_timeout_default injects keepalive default for None" `Quick
+        test_apply_stream_idle_timeout_default_injects_keepalive_default;
       Alcotest.test_case "oas_worker default priority remains unset" `Quick
         test_oas_worker_exec_build_default_priority_unset;
       Alcotest.test_case "oas_worker applies explicit priority" `Quick

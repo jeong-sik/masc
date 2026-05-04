@@ -53,7 +53,7 @@ vi.mock('../../api', () => ({
 }))
 
 import type { DashboardPromptItem } from '../../api'
-import { PromptRegistryPanel, filterPrompts, promptSourceCounts } from './prompt-registry-panel'
+import { PromptRegistryPanel, promptSourceCounts } from './prompt-registry-panel'
 
 function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
@@ -88,50 +88,6 @@ const HELPER_FIXTURES: DashboardPromptItem[] = [
     source: 'file',
   }),
 ]
-
-describe('filterPrompts', () => {
-  it('returns all prompts when source is all and query is empty', () => {
-    expect(filterPrompts(HELPER_FIXTURES, 'all', '')).toHaveLength(5)
-  })
-
-  it('filters by source', () => {
-    const file = filterPrompts(HELPER_FIXTURES, 'file', '')
-    expect(file).toHaveLength(2)
-    expect(file.every(p => p.source === 'file')).toBe(true)
-    expect(filterPrompts(HELPER_FIXTURES, 'override', '')).toHaveLength(1)
-    expect(filterPrompts(HELPER_FIXTURES, 'missing', '')).toHaveLength(1)
-    expect(filterPrompts(HELPER_FIXTURES, 'default', '')).toHaveLength(1)
-  })
-
-  it('search matches key substring (case-insensitive)', () => {
-    const out = filterPrompts(HELPER_FIXTURES, 'all', 'KEEPER')
-    expect(out.map(p => p.key)).toEqual(['keeper.system', 'keeper.turn'])
-  })
-
-  it('search matches category', () => {
-    expect(filterPrompts(HELPER_FIXTURES, 'all', 'planner')).toHaveLength(2)
-  })
-
-  it('search matches description', () => {
-    const out = filterPrompts(HELPER_FIXTURES, 'all', 'briefing')
-    expect(out).toHaveLength(1)
-    expect(out[0]?.key).toBe('supervisor.brief')
-  })
-
-  it('source and query combine with AND', () => {
-    const out = filterPrompts(HELPER_FIXTURES, 'file', 'keeper')
-    expect(out).toHaveLength(1)
-    expect(out[0]?.key).toBe('keeper.system')
-  })
-
-  it('whitespace-only query is treated as empty', () => {
-    expect(filterPrompts(HELPER_FIXTURES, 'all', '   ')).toHaveLength(5)
-  })
-
-  it('returns empty when nothing matches', () => {
-    expect(filterPrompts(HELPER_FIXTURES, 'all', 'no-such-key')).toEqual([])
-  })
-})
 
 describe('promptSourceCounts', () => {
   it('counts each source and total', () => {

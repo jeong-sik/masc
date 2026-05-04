@@ -221,6 +221,30 @@ export function computeMatrixSummary() {
   return { native, partial, unsupported, total }
 }
 
+export interface CategoryCoverage {
+  id: string
+  label: string
+  native: number
+  total: number
+  pct: number
+}
+
+export function computeCategoryCoverage(): CategoryCoverage[] {
+  const featById = new Map(FEATURES.map(f => [f.id, f]))
+  return FEATURE_CATEGORIES.map(cat => {
+    let native = 0, total = 0
+    for (const fid of cat.featureIds) {
+      const feat = featById.get(fid)
+      if (!feat) continue
+      for (const pid of PROVIDER_IDS) {
+        if (feat.providers[pid] === '●') native++
+        total++
+      }
+    }
+    return { id: cat.id, label: cat.label, native, total, pct: total > 0 ? Math.round((native / total) * 100) : 0 }
+  })
+}
+
 // ── BFCL Benchmarks ─────────────────────────────────────────────
 // Source: BFCL V4 Leaderboard, gorilla.cs.berkeley.edu (Last Updated: 2026-04-12)
 // 109 models evaluated. Selection: top-performing + MASC-relevant providers.

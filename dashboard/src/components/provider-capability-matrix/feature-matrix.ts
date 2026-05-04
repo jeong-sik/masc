@@ -11,6 +11,7 @@ import {
   FEATURE_CATEGORIES,
   supportHeatBucket,
   computeMatrixSummary,
+  computeCategoryCoverage,
   runtimeProviderToMatrixId,
 } from './data'
 import { StatusDot } from '../common/status-dot'
@@ -115,6 +116,8 @@ function ProviderHeartbeatCell({
 
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
   const summary = useMemo(() => computeMatrixSummary(), [])
+  const catCoverage = useMemo(() => computeCategoryCoverage(), [])
+  const catCoverageMap = useMemo(() => new Map(catCoverage.map(c => [c.id, c])), [catCoverage])
   const cloudCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cloud').length
   const localCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'local').length
   const cliCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cli').length
@@ -176,10 +179,14 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
         <tbody>
           ${FEATURE_CATEGORIES.map(cat => {
             const catFeatures = cat.featureIds.map(id => featById.get(id)).filter(Boolean)
+            const cc = catCoverageMap.get(cat.id)
             return html`
               <tr key=${`cat-${cat.id}`} class="pm-cat-row">
                 <td class="pm-th--sticky" colSpan=${PROVIDER_IDS.length + 1}>
-                  ${cat.label}
+                  <div class="flex items-center justify-between w-full">
+                    <span>${cat.label}</span>
+                    ${cc ? html`<span class="pm-cat-coverage ${cc.pct >= 80 ? 'is-high' : cc.pct >= 50 ? 'is-mid' : 'is-low'}">${cc.pct}%</span>` : null}
+                  </div>
                 </td>
               </tr>
               ${catFeatures.map((feat, j) => {

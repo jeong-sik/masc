@@ -63,6 +63,16 @@ module KeeperSupervisor : sig
   val paused_cleanup_ttl_sec : float
   val auto_resume_initial_sec : float
   val auto_resume_max_sec : float
+  val liveness_recovery_enabled : bool
+  (** #12801 Whether the liveness recovery scan is enabled. *)
+  val liveness_recovery_min_dead_sec : float
+  (** Minimum seconds a keeper must have been Dead before recovery attempt. *)
+  val liveness_recovery_backoff_base_sec : float
+  (** Base backoff delay between liveness recovery attempts (seconds). *)
+  val liveness_recovery_backoff_max_sec : float
+  (** Maximum backoff delay cap for liveness recovery (seconds). *)
+  val liveness_recovery_max_attempts : int
+  (** Maximum total liveness recovery attempts per keeper. *)
 end
 
 (** {1 Stale-turn watchdog} *)

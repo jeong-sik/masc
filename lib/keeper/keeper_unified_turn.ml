@@ -1856,6 +1856,35 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Keeper_stay_silent_loop_detector.record_turn
             ~keeper_name:updated_meta.Keeper_types.name
             ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act;
+          (* #12799: observe consecutive passive-read turns to detect keepers
+             stuck issuing only status/read tools without execution progress.
+             Derive the dominant progress class from the tool names used this
+             turn: if all tools are passive_status / claim_context the streak
+             increments; any execution or completion tool resets it. *)
+          (let progress_class =
+             let names = result.tools_used in
+             if names = [] then
+               (* No tools called: treat as passive.  A turn with no tool
+                  calls is a pure reasoning/text turn — no execution or
+                  task completion occurred, so it counts against the
+                  passive streak rather than resetting it. *)
+               "passive_status"
+             else if List.for_all
+                       (fun name ->
+                          match
+                            Keeper_tool_disclosure.classify_tool_progress name
+                          with
+                          | Keeper_tool_disclosure.Execution
+                          | Keeper_tool_disclosure.Completion -> false
+                          | Keeper_tool_disclosure.Passive_status
+                          | Keeper_tool_disclosure.Claim_context -> true)
+                       names
+             then "passive_status"
+             else "execution"
+           in
+           Keeper_passive_loop_detector.record_turn
+             ~keeper_name:updated_meta.Keeper_types.name
+             ~progress_class);
           (try
              (* Spec: KeeperTaskAcquisition.tla AssignTask vs
                 EmptyQueueSleep — non-empty queue picks "turn"

@@ -73,3 +73,25 @@ val apply_self_preservation :
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Returns the filtered list of entries that should proceed with restart. *)
+
+(** {1 Liveness Recovery} *)
+
+val liveness_recovery_scan : 'a context -> unit
+(** Scan all Dead keepers in [Keeper_registry].  For each Dead keeper whose
+    root cause is not structural ([credential_archived] or
+    [zombie_timeout_reached]) and that has been dead for at least
+    [MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC], attempt to re-register and
+    relaunch the keepalive fiber.  Uses exponential backoff per keeper and a
+    per-keeper attempt budget.  Gated behind
+    [MASC_KEEPER_LIVENESS_RECOVERY_ENABLED] (default: true).
+
+    Emits [metric_keeper_liveness_recovery_attempts] and
+    [metric_keeper_liveness_recovery_outcomes] Prometheus counters. *)
+
+val liveness_recovery_backoff : int -> float
+(** Compute the exponential backoff delay for liveness recovery attempt [n]. *)
+
+val should_attempt_liveness_recovery :
+  now:float -> Keeper_registry.registry_entry -> bool
+(** Pure predicate: true when a Dead keeper passes the eligibility gate for
+    a liveness recovery attempt.  Exposed for tests. *)

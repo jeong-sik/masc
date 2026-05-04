@@ -251,6 +251,11 @@ val metric_keeper_no_tool_provider : string
 val metric_keeper_proactive_outcome : string
 (** #10474: counter classifying each scheduled autonomous cycle outcome.
     Labels: keeper, outcome=[tool_called|noop|error]. *)
+val metric_keeper_passive_loop_detected_total : string
+(** #12799 Total passive-loop detections: keeper completed N consecutive turns
+    using only passive read-only tools, violating the proactive contract.
+    Incremented once per loop episode (streak resets on any execution-progress
+    turn). Labels: [keeper]. *)
 val metric_keeper_ollama_saturation_skip : string
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
     because the keeper's resolved cascade is ollama-only and the
@@ -333,6 +338,9 @@ val metric_anti_rationalization_excuse_pattern : string
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
+val metric_cascade_server_error_skip_total : string
+(** #12797 Total cascade label-ranking skips triggered by recent server-error
+    (5xx) score decay for a provider.  Labels: [provider_key]. *)
 val metric_keeper_invariant_violations : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
@@ -478,6 +486,20 @@ val metric_keeper_restart_attempts : string
 val metric_keeper_restart_outcomes : string
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
+
+val metric_keeper_liveness_recovery_attempts : string
+(** #12801 Total Liveness Recovery Supervisor scan attempts to auto-recover
+    Dead keepers. Increments each time a Dead keeper passes eligibility
+    checks and a recovery is launched. Labels: [keeper]. *)
+
+val metric_keeper_liveness_recovery_outcomes : string
+(** #12801 Total Liveness Recovery Supervisor outcomes. Labels:
+    [keeper, outcome]. Outcome is one of:
+    - [started]: keeper re-registered and fiber launched successfully
+    - [not_running]: keeper re-registered but not in Running state after launch
+    - [meta_missing]: no keeper meta file found — recovery skipped
+    - [meta_read_failed]: meta read I/O error — recovery skipped
+    - [meta_write_failed]: meta write to clear [paused] failed *)
 
 val metric_keeper_oas_timeout_budget_strike : string
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes.

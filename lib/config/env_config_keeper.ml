@@ -193,6 +193,33 @@ module KeeperSupervisor = struct
   (** Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). *)
   let auto_resume_max_sec =
     Float.max 3600.0 (get_float ~default:86400.0 "MASC_KEEPER_AUTO_RESUME_MAX_SEC")
+
+  (** Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers
+      whose root cause has cleared.  Set to false to disable (default: true). *)
+  let liveness_recovery_enabled =
+    get_bool ~default:true "MASC_KEEPER_LIVENESS_RECOVERY_ENABLED"
+
+  (** Minimum time (seconds) a keeper must have been Dead before a liveness
+      recovery attempt is made.  Allows transient root causes (e.g. provider
+      outage) to clear before re-launching.  Default: 300 (5 min). *)
+  let liveness_recovery_min_dead_sec =
+    Float.max 30.0 (get_float ~default:300.0 "MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC")
+
+  (** Base backoff delay (seconds) between liveness recovery attempts per keeper.
+      Exponential: attempt 0 = base, 1 = 2*base, 2 = 4*base, etc.
+      Default: 300 (5 min). *)
+  let liveness_recovery_backoff_base_sec =
+    Float.max 30.0 (get_float ~default:300.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC")
+
+  (** Maximum backoff delay cap (seconds) for liveness recovery.
+      Default: 3600 (1 hour). *)
+  let liveness_recovery_backoff_max_sec =
+    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC")
+
+  (** Maximum total liveness recovery attempts per keeper before giving up
+      permanently.  Default: 5. *)
+  let liveness_recovery_max_attempts =
+    max 1 (get_int ~default:5 "MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS")
 end
 
 (** {1 Keeper Poll Intervals}

@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { IdeEditorMock } from './ide-editor-mock'
 import { IDE_MOCK_RELATED_LINE } from './ide-mock-data'
+import { activeIdeFile } from './ide-shell'
 
 describe('IdeEditorMock', () => {
+  beforeEach(() => {
+    activeIdeFile.value = 'runtime/cascade/router.ts'
+  })
+
   it('renders the code document and RFC 0019 ownership-backed editor mock', () => {
     const container = document.createElement('div')
     render(h(IdeEditorMock, {}), container)

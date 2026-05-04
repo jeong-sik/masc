@@ -18,29 +18,33 @@ import { activeIdeFile } from './ide-shell'
 // Audit reference:
 //   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
 
-const SEED: ReadonlyArray<FileTreeNode> = [
-  { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/cascade', label: 'cascade', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/cascade/router.ts', label: 'router.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: '+14', keeperId: 'nick0cave', hueIndex: 1 },
-  { path: 'runtime/cascade/provider.ts', label: 'provider.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: '+3', keeperId: 'nick0cave', hueIndex: 1 },
-  { path: 'runtime/cascade/turn.ts', label: 'turn.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/cascade/index.ts', label: 'index.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/fsm', label: 'fsm', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/fsm/lifeline.ts', label: 'lifeline.ts', depth: 2, parent: 'runtime/fsm', hasChildren: false, diff: '+8', keeperId: 'sangsu', hueIndex: 5 },
-  { path: 'runtime/fsm/state.ts', label: 'state.ts', depth: 2, parent: 'runtime/fsm', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/tokens', label: 'tokens', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/tokens/registry.ts', label: 'registry.ts', depth: 2, parent: 'runtime/tokens', hasChildren: false, diff: '+12', keeperId: 'masc-improver', hueIndex: 3 },
-  { path: 'runtime/tokens/format.ts', label: 'format.ts', depth: 2, parent: 'runtime/tokens', hasChildren: false, diff: '-2', keeperId: 'masc-improver', hueIndex: 3 },
-  { path: 'package.json', label: 'package.json', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
+const FALLBACK_SEED: ReadonlyArray<FileTreeNode> = [
+  { path: 'dune-project', label: 'dune-project', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
   { path: 'README.md', label: 'README.md', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
 ]
+
+async function fetchTree(depth = 3): Promise<FileTreeNode[]> {
+  try {
+    const res = await fetch(`/api/v1/workspace/tree?depth=${depth}`)
+    if (!res.ok) return FALLBACK_SEED
+    const data = await res.json()
+    if (!Array.isArray(data) || data.length === 0) return FALLBACK_SEED
+    return data as FileTreeNode[]
+  } catch { return FALLBACK_SEED }
+}
 
 export function IdeExplorer() {
   const store = useMemo(() => {
     const s = createFileTreeStore()
-    s.seed(SEED)
+    s.seed(FALLBACK_SEED)
     return s
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchTree().then(nodes => { if (!cancelled) store.seed(nodes) })
+    return () => { cancelled = true }
+  }, [store])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {

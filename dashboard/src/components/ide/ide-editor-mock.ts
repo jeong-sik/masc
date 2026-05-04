@@ -20,6 +20,7 @@ import {
   ideMockAnnotationsForLine,
   type IdeLayerKind,
 } from './ide-mock-data'
+import { languageFromPath } from './language-detection'
 
 // PR-5 precursor: the editor remains a read-only fixture, but source document,
 // blame-by-keeper ownership, view state, and layer affordances now flow through
@@ -55,6 +56,33 @@ interface SplitDiffRow {
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
+
+interface BlameBlock {
+  readonly file_path: string
+  readonly line_start: number
+  readonly line_end: number
+  readonly keeper_id: string
+  readonly timestamp_ms: number
+  readonly kind: string
+}
+
+async function fetchBlame(path: string): Promise<BlameBlock[]> {
+  try {
+    const res = await fetch('/api/v1/git/blame?path=' + encodeURIComponent(path))
+    if (!res.ok) return []
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  } catch { return [] }
+}
+
+async function fetchDiff(path: string, baseRef = 'HEAD'): Promise<UnifiedDiffRow[]> {
+  try {
+    const res = await fetch('/api/v1/git/diff?path=' + encodeURIComponent(path) + '&base_ref=' + encodeURIComponent(baseRef))
+    if (!res.ok) return []
+    const data = await res.json()
+    return Array.isArray(data.unified) ? data.unified : []
+  } catch { return [] }
+}
 
 const VIEW_LABEL: Record<IdeEditorView, string> = {
   source: 'SOURCE',
@@ -143,16 +171,48 @@ export function IdeEditorMock({
   const documentStore = useMemo(
     () => createCodeDocumentStore({
       file_path: activeIdeFile.value,
-      language: 'typescript',
+      language: languageFromPath(activeIdeFile.value),
       content: sourceCode.length > 0 ? sourceCode : IDE_MOCK_SOURCE,
     }),
     [sourceCode, activeIdeFile.value],
   )
   const ownershipStore = useMemo(() => {
-    const store = createKeeperLineOwnershipStore(IDE_MOCK_FILE_PATH)
-    for (const event of IDE_MOCK_OWNERSHIP_EVENTS) store.ingest(event)
+    const store = createKeeperLineOwnershipStore(activeIdeFile.value)
     return store
-  }, [])
+  }, [activeIdeFile.value])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBlame(activeIdeFile.value).then(blocks => {
+      if (cancelled) return
+      if (blocks.length === 0) {
+        for (const event of IDE_MOCK_OWNERSHIP_EVENTS) ownershipStore.ingest(event)
+        return
+      }
+      ownershipStore.reset(activeIdeFile.value)
+      for (const block of blocks) {
+        ownershipStore.ingest({
+          file_path: block.file_path,
+          line_start: block.line_start,
+          line_end: block.line_end,
+          keeper_id: block.keeper_id,
+          timestamp_ms: block.timestamp_ms,
+          kind: block.kind,
+        })
+      }
+    })
+    return () => { cancelled = true }
+  }, [activeIdeFile.value, ownershipStore])
+
+  const [diffRows, setDiffRows] = useState<UnifiedDiffRow[]>([])
+  useEffect(() => {
+    let cancelled = false
+    fetchDiff(activeIdeFile.value).then(rows => {
+      if (!cancelled) setDiffRows(rows.length > 0 ? rows : UNIFIED_DIFF_ROWS)
+    })
+    return () => { cancelled = true }
+  }, [activeIdeFile.value])
+
   const document = documentStore.document()
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
@@ -192,7 +252,7 @@ export function IdeEditorMock({
       ${activeLayerKinds.length > 0
         ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
         : null}
-      ${EditorViewport(activeView, lines, ownership, highlightedLines, activeLayerKinds, keepers)}
+      ${EditorViewport(activeView, lines, ownership, highlightedLines, activeLayerKinds, keepers, diffRows)}
     </div>
   `
 }
@@ -204,9 +264,10 @@ function EditorViewport(
   highlightedLines: ReadonlyArray<string>,
   activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   keepers: ReadonlyArray<string>,
+  diffRows: ReadonlyArray<UnifiedDiffRow>,
 ) {
-  if (activeView === 'split-diff') return SplitDiffView()
-  if (activeView === 'unified') return UnifiedDiffView()
+  if (activeView === 'split-diff') return SplitDiffView(diffRows)
+  if (activeView === 'unified') return UnifiedDiffView(diffRows)
   if (activeView === 'blame') {
     return html`
       <div style=${{ display: 'grid', gridTemplateRows: 'auto 1fr', minHeight: 0 }}>
@@ -280,7 +341,7 @@ function BlameTimeline({
   `
 }
 
-function UnifiedDiffView() {
+function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
   return html`
     <ol
       aria-label="Unified diff preview"
@@ -294,7 +355,7 @@ function UnifiedDiffView() {
         lineHeight: 1.6,
       }}
     >
-      ${UNIFIED_DIFF_ROWS.map(row => html`
+      ${rows.map(row => html`
         <li
           style=${{
             display: 'grid',
@@ -316,7 +377,8 @@ function UnifiedDiffView() {
   `
 }
 
-function SplitDiffView() {
+function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
+  const splitRows: SplitDiffRow[] = buildSplitDiff(rows)
   return html`
     <div
       aria-label="Split diff preview"
@@ -344,7 +406,7 @@ function SplitDiffView() {
         <span style=${{ padding: 'var(--sp-2) var(--sp-3)', borderLeft: '1px solid var(--color-border-divider)' }}>AFTER</span>
       </div>
       <div style=${{ overflow: 'auto' }}>
-        ${SPLIT_DIFF_ROWS.map(row => html`
+        ${splitRows.map(row => html`
           <div
             style=${{
               display: 'grid',
@@ -568,4 +630,37 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
 
 function formatTime(ms: number): string {
   return new Date(ms).toISOString().slice(11, 16)
+}
+
+function buildSplitDiff(rows: ReadonlyArray<UnifiedDiffRow>): SplitDiffRow[] {
+  const result: SplitDiffRow[] = []
+  const adds: UnifiedDiffRow[] = []
+  const deletes: UnifiedDiffRow[] = []
+  for (const row of rows) {
+    if (row.kind === 'context') {
+      flushPending()
+      result.push({
+        before: { kind: 'context', line: row.oldLine, text: row.text },
+        after: { kind: 'context', line: row.newLine, text: row.text },
+      })
+    } else if (row.kind === 'delete') {
+      deletes.push(row)
+    } else if (row.kind === 'add') {
+      adds.push(row)
+    }
+  }
+  flushPending()
+  return result
+
+  function flushPending(): void {
+    const max = Math.max(deletes.length, adds.length)
+    for (let i = 0; i < max; i++) {
+      result.push({
+        before: deletes[i] ? { kind: 'delete', line: deletes[i].oldLine, text: deletes[i].text } : null,
+        after: adds[i] ? { kind: 'add', line: adds[i].newLine, text: adds[i].text } : null,
+      })
+    }
+    deletes.length = 0
+    adds.length = 0
+  }
 }

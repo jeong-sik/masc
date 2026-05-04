@@ -298,7 +298,7 @@ let test_is_http_body_parse_error_no_match () =
 
 let test_is_http_body_parse_error_case_insensitive () =
   (* Marker matching must be case-insensitive per spec. *)
-  let body = "CAN'T FIND CLOSING '}'" in
+  let body = {|{"error": "CAN'T FIND CLOSING '}' in request body"}|} in
   Alcotest.(check bool)
     "is_http_body_parse_error is case-insensitive"
     true

@@ -13,10 +13,12 @@
 
 open Masc_mcp
 
+(* [shared_memory_scope] removed in commit e3f4d82c60 ("refactor: remove
+   shared_memory_scope and all related logic"). Drop from the drift gate so
+   it does not pin a key the JSON serialisation no longer emits. *)
 let target_keys =
   [ "sandbox_profile"
   ; "network_mode"
-  ; "shared_memory_scope"
   ; "tool_preset_source"
   ; "max_checkpoint_messages"
   ; "always_approve"

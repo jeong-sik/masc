@@ -472,7 +472,7 @@ let get_audit_store ?base_path () =
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_approval_queue_failures
-        ~labels:[("keeper", "unknown"); ("site", "audit_store_create")]
+        ~labels:[("keeper", "aggregate"); ("site", "audit_store_create")]
         ();
       Log.Keeper.warn "approval_queue: audit store creation failed: %s"
         (Printexc.to_string exn);
@@ -749,7 +749,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
       | exn ->
         Prometheus.inc_counter
           Prometheus.metric_keeper_approval_queue_failures
-          ~labels:[("keeper", "unknown"); ("site", "resolution_callback")]
+          ~labels:[("keeper", entry.keeper_name); ("site", "resolution_callback")]
           ();
         Log.Keeper.warn
           "approval_queue: resolution callback failed id=%s err=%s"
@@ -954,7 +954,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_approval_queue_failures
-        ~labels:[("keeper", "unknown"); ("site", "remember_rule")]
+        ~labels:[("keeper", entry.keeper_name); ("site", "remember_rule")]
         ();
       Log.Keeper.warn
         "approval_queue: remember rule failed id=%s err=%s"

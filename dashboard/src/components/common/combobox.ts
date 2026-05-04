@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 
-export interface ComboboxOption {
+interface ComboboxOption {
   value: string
   label: string
 }

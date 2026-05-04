@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 
-export interface FlowNode {
+interface FlowNode {
   id: string
   label: string
   x: number
@@ -14,7 +14,7 @@ export interface FlowNode {
   color?: string
 }
 
-export interface FlowEdge {
+interface FlowEdge {
   source: string
   target: string
   value: number

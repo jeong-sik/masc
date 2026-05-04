@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 
-export interface MemoryNode {
+interface MemoryNode {
   id: string
   label: string
   x: number
@@ -12,7 +12,7 @@ export interface MemoryNode {
   color?: string
 }
 
-export interface MemoryEdge {
+interface MemoryEdge {
   source: string
   target: string
   label?: string

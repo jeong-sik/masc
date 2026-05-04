@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 
-export interface FailureEntry {
+interface FailureEntry {
   id: string
   agentId: string
   errorType: string

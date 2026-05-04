@@ -7,7 +7,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { InlineSpinner } from './inline-spinner'
 import type { MarkdownContent } from './markdown-renderer'
 
-export interface MarkdownProps {
+interface MarkdownProps {
   text: string
   class?: string
 }

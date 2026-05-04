@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
-export interface LifecycleTransition {
+interface LifecycleTransition {
   from: string
   to: string
   label: string

@@ -11,14 +11,14 @@ import { AgentTrust, type TrustMetrics } from './agent-trust'
 import { AgentFailure, type FailureType } from './agent-failure'
 import { HumanInTheLoop, type ApprovalRequest } from './human-in-the-loop'
 
-export interface AgentFailureState {
+interface AgentFailureState {
   type: FailureType
   message: string
   retryCount?: number
   maxRetries?: number
 }
 
-export interface AgentCardAgent {
+interface AgentCardAgent {
   id: string
   name: string
   status: string | null | undefined

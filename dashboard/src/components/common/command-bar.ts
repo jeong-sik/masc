@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { useMemo, useRef, useState } from 'preact/hooks'
 
-export interface CommandBarAction {
+interface CommandBarAction {
   id: string
   title: string
   keywords?: string

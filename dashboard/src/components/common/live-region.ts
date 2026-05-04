@@ -6,7 +6,7 @@
 
 import { html } from 'htm/preact'
 
-export interface LiveMessage {
+interface LiveMessage {
   id: string
   text: string
   priority: 'polite' | 'assertive'

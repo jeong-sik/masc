@@ -50,21 +50,7 @@ interface ApiActivityResponse {
   readonly latest_seq?: number
 }
 
-const MOCK_ACTIVITY: ReadonlyArray<RunActivityEvent> = [
-  { id: 'a13', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 41, 18), keeper_id: 'nick0cave', verb: 'flagged', target: 'router.ts:34', detail: 'if:moonshot-tool-choice · blocker' },
-  { id: 'a12', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 40, 2), keeper_id: 'nick0cave', verb: 'edited', target: 'router.ts:35', detail: '+ next.tool_choice = "auto"' },
-  { id: 'a11', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 39, 2), keeper_id: 'operator', verb: 'commented on', target: 'router.ts:26', detail: 'question · resolveCascade' },
-  { id: 'a10', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 37, 11), keeper_id: 'masc-improver', verb: 'edited', target: 'registry.ts:10', detail: '+8 -2 · budgetFor' },
-  { id: 'a09', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 35, 22), keeper_id: 'masc-improver', verb: 'committed', target: 'improver/wt-47', detail: 'fix: init budget map lazily' },
-  { id: 'a08', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 32, 8), keeper_id: 'masc-improver', verb: 'refactored', target: 'registry.ts', detail: 'extracted budgetFor' },
-  { id: 'a07', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 28, 15), keeper_id: 'operator', verb: 'commented on', target: 'registry.ts:10', detail: 'note · log.warn naming' },
-  { id: 'a06', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 22, 41), keeper_id: 'operator', verb: 'approved', target: 'router.ts:60', detail: 'nextStep · budget guard' },
-  { id: 'a05', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 18, 4), keeper_id: 'operator', verb: 'noted', target: 'router.ts:35', detail: 'flag · race on Map init' },
-  { id: 'a04', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 14, 52), keeper_id: 'masc-improver', verb: 'suggested on', target: 'router.ts:16', detail: 'suggest · extract helper' },
-  { id: 'a03', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 9, 11), keeper_id: 'nick0cave', verb: 'edited', target: 'router.ts:34', detail: '+1 -0 · tool_choice guard' },
-  { id: 'a02', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 1, 2, 11), keeper_id: 'operator', verb: 'flagged', target: 'registry.ts:10', detail: 'race condition' },
-  { id: 'a01', run_id: FALLBACK_ROOM_ID, timestamp_ms: Date.UTC(2026, 4, 2, 0, 58, 32), keeper_id: 'operator', verb: 'asked on', target: 'router.ts:26', detail: 'question · resolveCascade' },
-]
+const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 
 function verbFromKind(kind: string): RunActivityVerb {
   return KIND_TO_VERB[kind] ?? DEFAULT_VERB
@@ -102,24 +88,24 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
 async function fetchActivityEvents(): Promise<{ events: ReadonlyArray<RunActivityEvent>; roomId: string }> {
   try {
     const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: MOCK_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
     const data: ApiActivityResponse = await res.json()
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: MOCK_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+      return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
     }
     const roomId = rawEvents[0].room_id || FALLBACK_ROOM_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
     return { events: mapped, roomId }
   } catch {
-    return { events: MOCK_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+    return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
   }
 }
 
 export function IdeActivityMock() {
   const store = useMemo(() => {
     const store = createRunActivityStore(FALLBACK_ROOM_ID)
-    store.seed(MOCK_ACTIVITY)
+    store.seed(EMPTY_ACTIVITY)
     return store
   }, [])
   const [, forceRender] = useState(0)

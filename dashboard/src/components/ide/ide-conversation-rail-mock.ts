@@ -30,23 +30,17 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   suggest: 'var(--color-status-warn, var(--warn))',
 }
 
-const FALLBACK_POSTS: ReadonlyArray<BoardPost> = [
-  { id: 'p-mock-1', title: '', body: "flag: tool schema edge we're seeing in prod - keep tools[] and tool_choice paired.", author_identity: 'nick0cave', votes: 2, comment_count: 2, created_at_iso: '2026-05-02T01:41:18Z' },
-  { id: 'p-mock-2', title: '', body: 'Should normalizeTools also handle tool_choice=none? feels like an edge case.', author_identity: 'operator', votes: 0, comment_count: 1, created_at_iso: '2026-05-02T01:39:02Z' },
-  { id: 'p-mock-3', title: '', body: 'Budget guard reads well. Ship it when tests pass.', author_identity: 'operator', votes: 1, comment_count: 0, created_at_iso: '2026-05-02T01:22:41Z' },
-  { id: 'p-mock-4', title: '', body: 'telemetry event name needs to match the lifeline schema - will rename later.', author_identity: 'operator', votes: 0, comment_count: 0, created_at_iso: '2026-05-02T01:18:04Z' },
-  { id: 'p-mock-5', title: '', body: 'Could you collapse the rest-spread into a small helper? Same pattern appears in provider.ts.', author_identity: 'masc-improver', votes: 0, comment_count: 3, created_at_iso: '2026-05-02T01:14:52Z' },
-]
+const EMPTY_POSTS: ReadonlyArray<BoardPost> = []
 
 async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
   try {
     const res = await fetch('/api/v1/board?limit=20&exclude_system=true&exclude_automation=true')
-    if (!res.ok) return FALLBACK_POSTS
+    if (!res.ok) return EMPTY_POSTS
     const data = await res.json()
     if (Array.isArray(data) && data.length > 0) return data as BoardPost[]
-    return FALLBACK_POSTS
+    return EMPTY_POSTS
   } catch {
-    return FALLBACK_POSTS
+    return EMPTY_POSTS
   }
 }
 
@@ -66,7 +60,7 @@ function boardKindFromPost(post: BoardPost): ThreadKind {
 }
 
 export function IdeConversationRailMock() {
-  const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(FALLBACK_POSTS)
+  const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
   const [focusedId, setFocusedId] = useState<string | null>(null)
 
   useEffect(() => {

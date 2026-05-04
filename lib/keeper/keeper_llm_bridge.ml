@@ -99,7 +99,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s (re-raising; OAS context rollback only; external tool side effects are not reverted)"
       wall bucket inner_str;
-    Prometheus.inc_counter "masc_keeper_oas_cancel_total"
+    Prometheus.inc_counter Prometheus.metric_keeper_oas_cancel
       ~labels:[ ("bucket", bucket) ]
       ();
     Printexc.raise_with_backtrace exn bt

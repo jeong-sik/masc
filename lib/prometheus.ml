@@ -518,6 +518,16 @@ let metric_keeper_reconcile_failures =
   "masc_keeper_reconcile_failures_total"
 let metric_keeper_decision_audit_flush_failures =
   "masc_keeper_decision_audit_flush_failures_total"
+let metric_keeper_oas_cancel =
+  "masc_keeper_oas_cancel_total"
+let metric_keeper_claim_auto_provision =
+  "masc_keeper_claim_auto_provision_total"
+let metric_egress_audit_missing =
+  "masc_egress_audit_missing_total"
+let metric_egress_audit_stale_orphan =
+  "masc_egress_audit_stale_orphan_total"
+let metric_keeper_toml_invalid =
+  "masc_keeper_toml_invalid_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1200,6 +1210,26 @@ let init () =
   add metric_keeper_decision_audit_flush_failures
     "Total decision audit ring-buffer flush failures causing audit data loss. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_oas_cancel
+    "Total OAS execution cancellations in keeper_llm_bridge. \
+     Labeled by bucket (timeout classification)."
+    Counter;
+  add metric_keeper_claim_auto_provision
+    "Total task-claim auto-provision outcomes during keeper bootstrap. \
+     Labeled by outcome and agent_name."
+    Counter;
+  add metric_egress_audit_missing
+    "Total egress audit entries where the keeper has no audit record. \
+     Labeled by keeper."
+    Counter;
+  add metric_egress_audit_stale_orphan
+    "Total egress audit entries that are stale or orphaned. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_toml_invalid
+    "Total keeper TOML config parse failures falling back to persona. \
+     Labeled by keeper and reason."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

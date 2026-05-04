@@ -1630,7 +1630,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     (match keeper_toml_path_opt name with
      | Some _ ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Prometheus.inc_counter "masc_keeper_toml_invalid_total"
+       Prometheus.inc_counter Prometheus.metric_keeper_toml_invalid
          ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
          ()
      | None -> ());

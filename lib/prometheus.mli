@@ -200,6 +200,11 @@ val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string
 val metric_keeper_decision_audit_flush_failures : string
+val metric_keeper_oas_cancel : string
+val metric_keeper_claim_auto_provision : string
+val metric_egress_audit_missing : string
+val metric_egress_audit_stale_orphan : string
+val metric_keeper_toml_invalid : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

@@ -283,6 +283,18 @@ val metric_keeper_passive_loop_detected_total : string
     using only passive read-only tools, violating the proactive contract.
     Incremented once per loop episode (streak resets on any execution-progress
     turn). Labels: [keeper]. *)
+
+val metric_keeper_consecutive_idle : string
+(** Task-138 Current consecutive-idle streak (passive-only turns) per
+    keeper.  Resets to 0 on the next execution/completion turn.  Pairs
+    with [metric_keeper_passive_loop_detected_total]: the counter fires
+    only at the threshold crossing, this gauge lets dashboards see the
+    streak rising before the latch.  Labels: [keeper]. *)
+
+val metric_keeper_last_productive_ts : string
+(** Task-138 Unix timestamp of the most recent productive turn
+    (execution/completion class) per keeper.  Reads as 0 until the
+    keeper has produced anything in this process.  Labels: [keeper]. *)
 val metric_keeper_ollama_saturation_skip : string
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
     because the keeper's resolved cascade is ollama-only and the

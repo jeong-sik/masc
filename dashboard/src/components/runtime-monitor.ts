@@ -19,6 +19,7 @@ import { StatusChip } from './common/status-chip'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -144,12 +145,6 @@ export function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
   return 'ok'
 }
 
-export function fmtCost(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
-  if (value === 0) return '$0'
-  if (value < 0.01) return `$${value.toFixed(4)}`
-  return `$${value.toFixed(2)}`
-}
 
 export function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   const success = metric.success_count ?? metric.entry_count ?? 0
@@ -160,13 +155,6 @@ export function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   return `${pct.toFixed(1)}%`
 }
 
-export function fmtNumber(value?: number | null, digits = 0): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
-  return value.toLocaleString('ko-KR', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })
-}
 
 function fmtTime(tsUnix: number): string {
   if (tsUnix <= 0) return '--'
@@ -174,10 +162,6 @@ function fmtTime(tsUnix: number): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function fmtPct(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
-  return `${(value * 100).toFixed(1)}%`
-}
 
 function sparklineSvg(values: number[], color: string, w = 80, h = 20): string {
   if (values.length < 2) return ''
@@ -246,12 +230,12 @@ function fmtCoverageAwareNumber(
   value?: number | null,
   digits = 0,
 ): string {
-  const formatted = fmtNumber(value, digits)
+  const formatted = formatNumber(value, digits)
   return formatted !== '--' ? formatted : metricMissingLabel(metric)
 }
 
 function fmtCoverageAwareCost(metric: DashboardRuntimeModelMetric, value?: number | null): string {
-  const formatted = fmtCost(value)
+  const formatted = formatCost(value)
   return formatted !== '--' ? formatted : metricMissingLabel(metric)
 }
 
@@ -280,7 +264,7 @@ function fmtRecentEntryNumber(
   value?: number | null,
   digits = 0,
 ): string {
-  const formatted = fmtNumber(value, digits)
+  const formatted = formatNumber(value, digits)
   return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
 }
 
@@ -288,7 +272,7 @@ function fmtRecentEntryCost(
   entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
   value?: number | null,
 ): string {
-  const formatted = fmtCost(value)
+  const formatted = formatCost(value)
   return formatted !== '--' ? formatted : recentEntryMissingLabel(entry)
 }
 
@@ -327,8 +311,8 @@ export function metricCoverageText(metric: DashboardRuntimeModelMetric): string 
     coverageStatusLabel(metric.coverage_status),
     coverageStageLabel(metric.primary_coverage_stage),
     coverageReasonLabel(metric.primary_coverage_reason),
-    `usage ${fmtNumber(usageCount)}/${fmtNumber(successCount)}`,
-    `telemetry ${fmtNumber(telemetryCount)}/${fmtNumber(successCount)}`,
+    `usage ${formatNumber(usageCount)}/${formatNumber(successCount)}`,
+    `telemetry ${formatNumber(telemetryCount)}/${formatNumber(successCount)}`,
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
 }
@@ -420,8 +404,8 @@ export function RuntimeMonitor() {
                   ${provider.discovery
                     ? html`<div class="grid grid-cols-2 gap-3 text-xs text-text-body pt-2 border-t border-card-border/50">
                         <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
-                        <div>ctx · ${fmtNumber(provider.discovery.ctx_size)}</div>
-                        <div>slots · ${fmtNumber(provider.discovery.busy_slots)}/${fmtNumber(provider.discovery.total_slots)}</div>
+                        <div>ctx · ${formatNumber(provider.discovery.ctx_size)}</div>
+                        <div>slots · ${formatNumber(provider.discovery.busy_slots)}/${formatNumber(provider.discovery.total_slots)}</div>
                         <div>model · ${provider.discovery.discovered_model ?? '없음'}</div>
                       </div>`
                     : null}
@@ -437,17 +421,17 @@ export function RuntimeMonitor() {
           <${StatTile}
             label="텔레메트리 윈도우"
             value=${`${metrics?.window_minutes ?? windowMinutes.value}m`}
-            delta=${{ direction: 'flat', text: `항목 ${fmtNumber(metrics?.total_entries ?? 0)}` }}
+            delta=${{ direction: 'flat', text: `항목 ${formatNumber(metrics?.total_entries ?? 0)}` }}
           />
           <${StatTile}
             label="추적 중인 모델"
             value=${String(metrics?.models.length ?? 0)}
-            delta=${{ direction: 'flat', text: `오류 ${fmtNumber(metrics?.total_error_entries ?? 0)}` }}
+            delta=${{ direction: 'flat', text: `오류 ${formatNumber(metrics?.total_error_entries ?? 0)}` }}
           />
           <${StatTile}
             label="총 비용"
-            value=${fmtCost(sumNullable((metrics?.models ?? []).map(m => m.total_cost_usd)))}
-            delta=${{ direction: 'flat', text: `${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
+            value=${formatCost(sumNullable((metrics?.models ?? []).map(m => m.total_cost_usd)))}
+            delta=${{ direction: 'flat', text: `${formatNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
           />
         </div>
         <div class="flex items-center justify-end mb-2">
@@ -490,7 +474,7 @@ export function RuntimeMonitor() {
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-text-strong">${metric.model_id}</strong>
-                      <span class="text-xs text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
+                      <span class="text-xs text-text-muted">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
                       ${metricCoverageText(metric)
                         ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}
@@ -508,25 +492,25 @@ export function RuntimeMonitor() {
                       />
                       ${metric.avg_tok_per_sec != null
                         ? html`<${StatusChip}
-                            label=${`${fmtNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
+                            label=${`${formatNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
                             tone=${'ok'}
                           />`
                         : null}
                       ${metric.prompt_avg_tok_per_sec != null
                         ? html`<${StatusChip}
-                            label=${`${fmtNumber(metric.prompt_avg_tok_per_sec, 1)} tok/s prefill`}
+                            label=${`${formatNumber(metric.prompt_avg_tok_per_sec, 1)} tok/s prefill`}
                             tone=${'ok'}
                           />`
                         : null}
                       ${metric.hw_decode_avg_tok_per_sec != null
                         ? html`<${StatusChip}
-                            label=${`${fmtNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
+                            label=${`${formatNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
                             tone=${'ok'}
                           />`
                         : null}
                       ${metric.thinking_fraction != null
                         ? html`<${StatusChip}
-                            label=${`think ${fmtNumber((metric.thinking_fraction ?? 0) * 100, 0)}%`}
+                            label=${`think ${formatNumber((metric.thinking_fraction ?? 0) * 100, 0)}%`}
                             tone=${(metric.thinking_fraction ?? 0) > 0.5 ? 'warn' : 'ok'}
                           />`
                         : null}
@@ -538,12 +522,12 @@ export function RuntimeMonitor() {
                     <div>cost · ${fmtCoverageAwareCost(metric, metric.total_cost_usd)}</div>
                     <div>input/output · ${fmtCoverageAwareNumber(metric, metric.total_input_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_output_tokens)}</div>
                     <div>reasoning/cache · ${fmtCoverageAwareNumber(metric, metric.total_reasoning_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_cache_read_tokens)}</div>
-                    <div>tools · ${fmtNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${fmtNumber(metric.total_tool_calls)})</div>
+                    <div>tools · ${formatNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${formatNumber(metric.total_tool_calls)})</div>
                     ${metric.prompt_p50_tok_per_sec != null || metric.prompt_p95_tok_per_sec != null
-                      ? html`<div class="col-span-3 text-text-muted">prefill tok/s p50/p95 · ${fmtNumber(metric.prompt_p50_tok_per_sec, 1)} / ${fmtNumber(metric.prompt_p95_tok_per_sec, 1)} (prompt_eval only; complements wall + hw rows)</div>`
+                      ? html`<div class="col-span-3 text-text-muted">prefill tok/s p50/p95 · ${formatNumber(metric.prompt_p50_tok_per_sec, 1)} / ${formatNumber(metric.prompt_p95_tok_per_sec, 1)} (prompt_eval only; complements wall + hw rows)</div>`
                       : null}
                     ${metric.hw_decode_p50_tok_per_sec != null
-                      ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${fmtNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${fmtNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
+                      ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${formatNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${formatNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
                       : null}
                   </div>
                   ${(() => {
@@ -576,11 +560,11 @@ export function RuntimeMonitor() {
                         ? cacheRead + inputTokens
                         : null
                     return html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1">
-                      cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)
+                      cost ${fmtCoverageAwareCost(metric, metric.total_cost_usd)} · cache savings ${formatPct1(cacheRatio)} (${fmtCoverageAwareNumber(metric, cacheRead)} / ${fmtCoverageAwareNumber(metric, totalIn)} tokens)
                     </div>`
                   })()}
                   ${(metric.error_count ?? 0) > 0
-                    ? html`<div class="text-2xs text-[var(--status-bad)] mt-1">errors ${fmtNumber(metric.error_count)} / success ${fmtNumber(metric.success_count)}</div>`
+                    ? html`<div class="text-2xs text-[var(--status-bad)] mt-1">errors ${formatNumber(metric.error_count)} / success ${formatNumber(metric.success_count)}</div>`
                     : null}
                   ${(metric.top_tools ?? []).length > 0
                     ? html`<div class="flex flex-wrap gap-1 mt-1">
@@ -612,7 +596,7 @@ export function RuntimeMonitor() {
                                     <div>${fmtTime(re.ts_unix)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
-                                    <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${fmtNumber(re.latency_ms, 0)}ms`}</div>
+                                    <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${formatNumber(re.latency_ms, 0)}ms`}</div>
                                     <div>${fmtRecentEntryNumber(re, re.prompt_tok_per_sec, 1)}</div>
                                     <div>${fmtRecentEntryCost(re, re.cost_usd)}</div>
                                     <div>${re.tools_count}</div>

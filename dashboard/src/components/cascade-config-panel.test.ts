@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   traceEventMatchesSearch,
   filterHealthProviders,
-  fmtPct,
   candidateTone,
   catalogSourceSummary,
   sourceLabel,
@@ -26,6 +25,7 @@ import {
   rawConfigModeSummary,
   validateSourceConfigText,
 } from './cascade-config-panel'
+import { formatPct1 as fmtPct } from '../lib/format-number'
 import type {
   CascadeCandidate,
   CascadeClientCapacityEntry,

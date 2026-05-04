@@ -22,7 +22,7 @@
     color: var(--brass-1);
     padding: 1px 5px;
     border-radius: var(--r-1);
-    font-size: 0.9em;
+    font-size: 0.9em; /* intentional: relative em scales with parent context — not replaceable with px-based --fs-* tokens */
   }
 
   & pre {

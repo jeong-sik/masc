@@ -94,6 +94,8 @@
   /* Custom keyframe animations via animate-[...] */
   [class*="animate-["] { animation: none; }
 
-  /* Transition duration — reduce to instant for motion-sensitive users */
+  /* Transition duration — reduce to instant for motion-sensitive users.
+     0s is the only correct value here (WCAG 2.1 §2.3.3 / prefers-reduced-motion):
+     tokenizing this value would defeat its purpose. */
   * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }

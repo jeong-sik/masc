@@ -68,6 +68,7 @@
 .chip.k-error { color: var(--err); border-color: var(--err-border); }
 
 .pre {
+  /* font-size: intentional sub-pixel monospace tuning between --fs-10 (10px) and --fs-11 (11px) for code-block readability */
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
   color: var(--color-fg-primary); background: var(--color-bg-page);
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);

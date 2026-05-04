@@ -11,7 +11,15 @@
    FSM call site is [lib/cascade/cascade_fsm.ml:43-48]: Call_err -> Try_next
    iff should_cascade_to_next returns true; otherwise Exhausted.  A false
    return here terminates the cascade at the first hop, producing
-   fallback_applied=None in the observation. *)
+   fallback_applied=None in the observation.
+
+   Structured error codes (M04/M05):
+   [Oas_compat.Http_client.retryable_error] and [classify_accept_rejected]
+   replace the previous [accept_rejected_cascadable_markers] string list
+   and [accept_rejected_is_cascadable] string-scan (anti-patterns M04/M05).
+   String matching is quarantined in [classify_accept_rejected] and
+   [is_http_body_parse_error]; all cascade-decision code branches on the
+   enum variants instead of raw strings. *)
 
 module Http_client = Llm_provider.Http_client
 
@@ -220,6 +228,88 @@ let test_error_message_baseline () =
   Alcotest.(check string) "AcceptRejected -> reason"
     "x" (Oas_compat.Http_client.error_message acc)
 
+(* ── Structured error codes (M04 / M05) ───────────────────────────
+   Pin that [classify_accept_rejected] maps each string marker to the
+   correct [retryable_error] variant and that unknown reasons return
+   [None].  These tests are independent of cascade policy: they verify
+   the structured-code layer that replaced the marker list. *)
+
+let test_classify_accept_rejected_model_unsupported () =
+  let reason = "codex_cli does not support runtime_mcp_auth headers" in
+  (match Oas_compat.Http_client.classify_accept_rejected reason with
+   | Some Oas_compat.Http_client.Model_unsupported -> ()
+   | other ->
+       Alcotest.failf
+         "expected Model_unsupported, got %s"
+         (match other with
+          | None -> "None"
+          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
+          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
+          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
+          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+
+let test_classify_accept_rejected_request_rejected () =
+  let reason =
+    "kimi_cli rejected the request (exit 1). permanent auth/config/model error"
+  in
+  (match Oas_compat.Http_client.classify_accept_rejected reason with
+   | Some Oas_compat.Http_client.Request_rejected -> ()
+   | other ->
+       Alcotest.failf
+         "expected Request_rejected, got %s"
+         (match other with
+          | None -> "None"
+          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
+          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
+          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
+          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+
+let test_classify_accept_rejected_startup_crash () =
+  let reason =
+    "gemini_cli startup crash detected (unsettled top-level await / yoga_wasm)"
+  in
+  (match Oas_compat.Http_client.classify_accept_rejected reason with
+   | Some Oas_compat.Http_client.Startup_crash -> ()
+   | other ->
+       Alcotest.failf
+         "expected Startup_crash, got %s"
+         (match other with
+          | None -> "None"
+          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
+          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
+          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
+          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+
+let test_classify_accept_rejected_unknown_returns_none () =
+  let reason = "output_schema violation: value is not a string" in
+  (match Oas_compat.Http_client.classify_accept_rejected reason with
+   | None -> ()
+   | Some _ ->
+       Alcotest.fail
+         "expected None for unrecognised reason, not a retryable_error code")
+
+let test_is_http_body_parse_error_matches_ollama () =
+  let body = {|{"error": "can't find closing '}' in the object"}|} in
+  Alcotest.(check bool)
+    "Ollama 'can't find closing' body is a parse error"
+    true
+    (Oas_compat.Http_client.is_http_body_parse_error body)
+
+let test_is_http_body_parse_error_no_match () =
+  let body = {|{"error": "context length exceeded"}|} in
+  Alcotest.(check bool)
+    "Context-overflow body is not a parse error"
+    false
+    (Oas_compat.Http_client.is_http_body_parse_error body)
+
+let test_is_http_body_parse_error_case_insensitive () =
+  (* Marker matching must be case-insensitive per spec. *)
+  let body = "CAN'T FIND CLOSING '}'" in
+  Alcotest.(check bool)
+    "is_http_body_parse_error is case-insensitive"
+    true
+    (Oas_compat.Http_client.is_http_body_parse_error body)
+
 let () =
   Alcotest.run "oas_compat_cascade_fallback"
     [
@@ -266,5 +356,25 @@ let () =
         [
           Alcotest.test_case "preserves existing variants"
             `Quick test_error_message_baseline;
+        ] );
+      ( "Structured error codes — classify_accept_rejected (M05)",
+        [
+          Alcotest.test_case "does not support → Model_unsupported"
+            `Quick test_classify_accept_rejected_model_unsupported;
+          Alcotest.test_case "rejected the request → Request_rejected"
+            `Quick test_classify_accept_rejected_request_rejected;
+          Alcotest.test_case "startup crash → Startup_crash"
+            `Quick test_classify_accept_rejected_startup_crash;
+          Alcotest.test_case "unrecognised reason → None"
+            `Quick test_classify_accept_rejected_unknown_returns_none;
+        ] );
+      ( "Structured error codes — is_http_body_parse_error (M04)",
+        [
+          Alcotest.test_case "Ollama closing-brace body → true"
+            `Quick test_is_http_body_parse_error_matches_ollama;
+          Alcotest.test_case "context-overflow body → false"
+            `Quick test_is_http_body_parse_error_no_match;
+          Alcotest.test_case "case-insensitive match"
+            `Quick test_is_http_body_parse_error_case_insensitive;
         ] );
     ]

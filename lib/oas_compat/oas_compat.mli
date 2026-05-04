@@ -41,6 +41,52 @@ module Http_client : sig
     | Provider_failure_parse_error
     | Provider_failure_unknown
 
+  (** Structured error codes for conditions previously detected via
+      case-insensitive substring scanning of raw provider message strings
+      (anti-patterns M04/M05).
+
+      The string-matching logic is quarantined inside
+      [classify_accept_rejected] and [is_http_body_parse_error]; all
+      downstream code should branch on this enum. *)
+  type retryable_error =
+    | Parse_error
+        (** HTTP body signals a provider-side JSON parse failure (M04).
+            Ollama returning 400 on large bodies (~175 KB+) is the
+            canonical trigger; the cascade advances because the body-size
+            limit is local to this provider. *)
+    | Model_unsupported
+        (** Provider explicitly reports that the requested model or
+            capability is not supported (M05).  Covers codex_cli
+            [runtime_mcp_auth] / [tool_support] InvalidConfig wrappers.
+            Another provider in the cascade may support the capability. *)
+    | Request_rejected
+        (** Provider subprocess exited with a permanent rejection (M05).
+            Canonical case: kimi_cli exit 1.  The auth/config error is
+            Moonshot-specific; other providers are unaffected (#9932). *)
+    | Startup_crash
+        (** Provider CLI crashed before processing the request (M05).
+            Covers gemini_cli top-level-await / yoga_wasm and kimi_cli
+            process-title UnicodeDecodeError.  The CLI source marks these
+            "so the cascade can move on". *)
+
+  val classify_accept_rejected : string -> retryable_error option
+  (** Classify an [AcceptRejected] reason string into a structured
+      [retryable_error] code.
+
+      Returns [Some code] when the reason matches a known per-provider
+      failure marker ([Model_unsupported], [Request_rejected],
+      [Startup_crash]); [None] for unrecognised reasons
+      (e.g. output-schema violations), which are treated as
+      [Accept_rejected_terminal].
+
+      String matching is quarantined here; update only this function
+      when provider message formats change. *)
+
+  val is_http_body_parse_error : string -> bool
+  (** Return [true] when an HTTP 400/422 body signals a provider-side
+      JSON parse failure ([Parse_error] / M04).
+      Ollama fails with ["can't find closing '}'"] on large bodies. *)
+
   val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
   (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.
 
@@ -59,14 +105,14 @@ module Http_client : sig
       signals context overflow / provider parse error.
       [CliTransportRequired] cascades — the CLI provider cannot serve
       this request over HTTP, so the next provider must.
-      [AcceptRejected] cascades when the [reason] string carries a
-      per-provider failure marker:
-      - "does not support" — MASC's worker-layer wrapping of OAS
+      [AcceptRejected] cascades when [classify_accept_rejected] returns
+      a [retryable_error] code:
+      - [Model_unsupported] — MASC's worker-layer wrapping of OAS
         [InvalidConfig] errors for [runtime_mcp_auth] and [tool_support]
         (documented at [oas_worker_named.ml:661-678]).
-      - "rejected the request" — kimi_cli exit 1. The auth/config error
-        is Moonshot-specific; another provider can succeed.
-      - "startup crash" — gemini_cli top-level await / yoga_wasm or
+      - [Request_rejected] — kimi_cli exit 1. The auth/config error is
+        Moonshot-specific; another provider can succeed.
+      - [Startup_crash] — gemini_cli top-level await / yoga_wasm or
         kimi_cli process-title UnicodeDecodeError. The CLI source
         explicitly marks this "so the cascade can move on".
       All of these are per-provider, not cascade-wide; a fallback provider

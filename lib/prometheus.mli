@@ -194,10 +194,36 @@ val metric_keeper_path_rejection : string
 
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
+val metric_keeper_cleanup_tracking_failures : string
 val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
+val metric_keeper_meta_read_failures : string
+val metric_keeper_approval_queue_failures : string
+val metric_keeper_guards_failures : string
+val metric_keeper_profile_load_failures : string
+val metric_keeper_compact_audit_failures : string
+val metric_keeper_fs_failures : string
+val metric_keeper_crash_persistence_failures : string
+val metric_keeper_generation_lineage_failures : string
+val metric_keeper_keepalive_signal_failures : string
+val metric_keeper_meta_json_failures : string
+val metric_keeper_tools_oas_failures : string
+val metric_keeper_turn_up_update_failures : string
+val metric_keeper_exec_tools_failures : string
+val metric_keeper_circuit_breaker_trips : string
+val metric_keeper_prompt_failures : string
+val metric_keeper_run_context_failures : string
+val metric_keeper_shell_ops_failures : string
+val metric_keeper_tag_dispatch_failures : string
+val metric_keeper_trace_emit_failures : string
+val metric_keeper_transition_audit_failures : string
+val metric_keeper_execution_receipt_failures : string
+val metric_keeper_llm_bridge_failures : string
+val metric_keeper_shell_bash_failures : string
+val metric_keeper_rollover_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
+val metric_keeper_tool_policy_failures : string
 val metric_keeper_reconcile_failures : string
 val metric_keeper_decision_audit_flush_failures : string
 val metric_keeper_oas_cancel : string
@@ -712,13 +738,35 @@ val metric_gc_compactions : string
 (** Number of major-heap compactions since program start. *)
 
 val metric_gc_promoted_words : string
+(** Cumulative words promoted from minor to major heap since program start. *)
+
 val metric_keeper_stale_termination_total : string
 val metric_keeper_stale_termination_by_class : string
 val metric_keeper_oas_timeout_budget_watchdog_termination : string
 val metric_keeper_stale_termination_threshold_breached : string
 val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
-(** Cumulative words promoted from minor to major heap since program start. *)
+  (* Centralized metric constants for inline string replacement. *)
+val metric_keeper_tool_use_failure : string
+val metric_after_turn_response_model_empty : string
+val metric_after_turn_response_model_alias : string
+val metric_pricing_catalog_miss : string
+val metric_cost_emit_zero_source : string
+val metric_cost_ledger_status : string
+val metric_keeper_turn_gate_rejected_terminal : string
+val metric_keeper_receipt_unmapped_disposition : string
+val metric_keeper_bash_network_upgrade : string
+val metric_keeper_bash_local_execution : string
+val metric_keeper_docker_runtime_discarded : string
+val metric_keeper_proactive_skip : string
+val metric_keeper_stay_silent_loop_detected : string
+val metric_keeper_usage_trust : string
+val metric_keeper_usage_anomaly_reason : string
+val metric_keeper_config_env_parse_failures : string
+val metric_keeper_post_turn_wirein_failures : string
+(* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
+val metric_keeper_recurring_failures : string
+val metric_keeper_turn_cleanup_failures : string
 
 (** {1 Process monitoring} *)
 

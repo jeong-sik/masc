@@ -137,11 +137,11 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
        Log.Keeper.warn
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
-         (Keeper_state_machine.transition_error_to_string err));
-  Prometheus.inc_counter
-    Prometheus.metric_keeper_supervisor_cleanup_failures
-    ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
-  ();
+         (Keeper_state_machine.transition_error_to_string err);
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_supervisor_cleanup_failures
+         ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
+         ());
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)

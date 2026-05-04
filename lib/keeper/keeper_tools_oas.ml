@@ -207,6 +207,10 @@ let make_keeper_tool_handler
         | Some n -> n | None -> 0)
     in
     if prior_fails >= max_consecutive_failures then begin
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_tools_oas_failures
+        ~labels:[("tool", name); ("site", "blocked")]
+        ();
       Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
         name prior_fails;
       let msg = Printf.sprintf
@@ -259,6 +263,10 @@ let make_keeper_tool_handler
               ("ts_unix", `Float ts);
             ])
            with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_tools_oas_failures
+            ~labels:[("tool", name); ("site", "error_result")]
+            ();
           Log.Keeper.error
             "tool %s returned error result (%d/%d): %s"
             name count max_consecutive_failures detail;
@@ -430,6 +438,10 @@ let make_keeper_tool_handler
               name count max_consecutive_failures
               (Printexc.to_string exn)
         in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_tools_oas_failures
+          ~labels:[("tool", name); ("site", "exception")]
+          ();
         if is_edeadlk then Log.Keeper.warn "%s" msg
         else Log.Keeper.error "%s" msg;
         (match edeadlk_backtrace with

@@ -240,10 +240,18 @@ let record_handoff_artifacts
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_generation_lineage_failures
+             ~labels:[("keeper", child.name); ("site", "index_append")]
+             ();
            Log.Keeper.warn
              "keeper:%s failed to append generation index %s: %s"
              child.name index_path (Printexc.to_string exn))
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_generation_lineage_failures
+        ~labels:[("keeper", child.name); ("site", "manifest_save")]
+        ();
       Log.Keeper.warn
         "keeper:%s failed to save generation manifest %s: %s"
         child.name manifest_path err

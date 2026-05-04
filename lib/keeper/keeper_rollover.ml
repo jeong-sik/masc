@@ -105,6 +105,10 @@ let append_lineage_artifacts_best_effort
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_rollover_failures
+        ~labels:[("keeper", child.name); ("site", "lineage_append")]
+        ();
       Log.Keeper.warn
         "keeper:%s lineage append skipped after rollover trace=%s->%s: %s"
         child.name
@@ -255,6 +259,10 @@ let maybe_rollover_oas_handoff
                   ~agent_name:base_meta.agent_name
                   ~model ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_checkpoint_failures
+                ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
+                ();
               Log.Keeper.error
                 "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"
                 base_meta.name e;
@@ -262,6 +270,10 @@ let maybe_rollover_oas_handoff
           | Ok _checkpoint ->
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_rollover_failures
+                   ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
+                   ();
                  Log.Keeper.error
                    "keeper:%s OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
                    base_meta.name new_trace_id err;

@@ -403,6 +403,10 @@ let recover_context_overflow_retry
           compaction = recovery.compaction;
         }
   | None ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_checkpoint_failures
+        ~labels:[("keeper", meta.name); ("phase", "overflow_recovery_unavailable")]
+        ();
       Log.Keeper.warn
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
         meta.name (short_preview (Agent_sdk.Error.to_string error));

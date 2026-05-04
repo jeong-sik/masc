@@ -138,6 +138,10 @@ let execute_keeper_tool_call_with_outcome
       Keeper_failure_circuit_breaker.record_success ~keeper_name:meta.name;
       result
     | `Failure, Malformed_structured parse_error ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_exec_tools_failures
+        ~labels:[("keeper", meta.name); ("tool", name)]
+        ();
       Log.Keeper.error
         "keeper:%s tool:%s produced malformed structured payload: %s"
         meta.name name parse_error;

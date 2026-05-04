@@ -134,6 +134,10 @@ let prepare_agent_setup
              Log.Keeper.warn
                "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
                s;
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_config_env_parse_failures
+               ~labels:[("var", "MASC_KEEPER_TOOL_DECAY_TURNS")]
+               ();
              5)
         | None -> 5
       end)
@@ -1332,6 +1336,10 @@ let prepare_agent_setup
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_decision_audit_flush_failures
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s tool_disclosure jsonl append failed: %s"
                     meta.name

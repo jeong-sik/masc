@@ -280,6 +280,10 @@ let canonical_keeper_meta_key_names =
      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
      | _ -> fallback_canonical_keeper_meta_key_names)
   | Error msg ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_meta_json_failures
+      ~labels:[("site", "seed_parse")]
+      ();
     Log.Keeper.warn
       "canonical_keeper_meta_key_names seed failed: %s; falling back to static keys"
       msg;
@@ -297,6 +301,10 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
     in
     if unknown <> []
     then
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_meta_json_failures
+        ~labels:[("site", "unknown_keys")]
+        ();
       Log.Keeper.warn
         "keeper meta %s has unknown keys: %s"
         path

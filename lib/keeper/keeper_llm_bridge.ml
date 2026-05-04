@@ -64,6 +64,10 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     let _ : bool =
       Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall ()
     in
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_llm_bridge_failures
+      ~labels:[("site", "timeout")]
+      ();
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context rollback only; external tool side effects are not reverted)"
       wall timeout_s;
@@ -96,6 +100,10 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       | Failure msg -> "Failure(" ^ msg ^ ")"
       | _ -> Printexc.to_string inner_exn
     in
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_llm_bridge_failures
+      ~labels:[("site", "cancelled")]
+      ();
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s (re-raising; OAS context rollback only; external tool side effects are not reverted)"
       wall bucket inner_str;
@@ -108,6 +116,10 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     let bt = Printexc.get_backtrace () in
     Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
       ~labels:[("channel", "oas_bridge")]
+      ();
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_llm_bridge_failures
+      ~labels:[("site", "execution_error")]
       ();
     Log.Keeper.error "keeper_llm_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;
     Error (Agent_sdk.Error.Internal (Printexc.to_string exn))

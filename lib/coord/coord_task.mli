@@ -61,6 +61,13 @@ val cancel_task_r :
   config -> agent_name:string -> task_id:string ->
   reason:string -> string Types.masc_result
 
+(** Force-cancel a task regardless of assignee. System privilege.
+    Used by {!Verification_protocol.check_timeouts} to expire
+    [AwaitingVerification] tasks whose verifier deadline has passed. *)
+val force_cancel_task_r :
+  config -> agent_name:string -> task_id:string ->
+  reason:string -> unit -> string Types.masc_result
+
 val link_task_execution_artifacts_r :
   config -> task_id:string ->
   ?session_id:string -> ?operation_id:string -> ?autoresearch_loop_id:string ->

@@ -92,7 +92,11 @@ let decide
     if same_agent assignee || force
     then ok (cancelled_status ~agent_name ~now ~reason)
     else Error Invalid_transition
-  | Types.Cancel, (Types.AwaitingVerification _ | Types.Done _) ->
+  | Types.Cancel, Types.AwaitingVerification _ ->
+    if force
+    then ok (cancelled_status ~agent_name ~now ~reason)
+    else Error Invalid_transition
+  | Types.Cancel, Types.Done _ ->
     Error Invalid_transition
   (* ── Release ──────────────────────────────────── *)
   | Types.Release, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) ->

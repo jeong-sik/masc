@@ -619,6 +619,68 @@ let test_fsm_disabled_submit_fails () =
         (Astring.String.is_infix ~affix:"not enabled" msg))
 
 (* ================================================================ *)
+(* Verification timeout transition (check_timeouts)                  *)
+(* ================================================================ *)
+
+(* Move a task's deadline far into the past so the next check_timeouts
+   cycle sees [now > deadline_ts] without sleeping. *)
+let force_deadline_past config task_id =
+  let backlog = Coord.read_backlog config in
+  let past_iso =
+    Types.iso8601_of_unix_seconds (Time_compat.now () -. 3600.0)
+  in
+  let new_tasks =
+    List.map (fun (t : Types.task) ->
+      if t.id <> task_id then t
+      else match t.task_status with
+        | Types.AwaitingVerification fields ->
+          { t with task_status =
+              Types.AwaitingVerification { fields with deadline = Some past_iso } }
+        | _ -> t)
+      backlog.tasks
+  in
+  Coord.write_backlog config { backlog with tasks = new_tasks }
+
+let test_check_timeouts_transitions_awaiting_to_cancelled () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match Coord.transition_task_r config ~agent_name:"worker"
+             ~task_id ~action:Types.Submit_for_verification () with
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+     | Ok _ -> ());
+    Alcotest.(check string) "pre-check status" "awaiting_verification"
+      (status_string config task_id);
+    force_deadline_past config task_id;
+    Verification_protocol.check_timeouts ~config;
+    Alcotest.(check string) "post-check status" "cancelled"
+      (status_string config task_id);
+    match get_task config task_id with
+    | Some { task_status = Types.Cancelled { cancelled_by; reason; _ }; _ } ->
+      Alcotest.(check string) "cancelled_by system" "system" cancelled_by;
+      let reason_str = Option.value reason ~default:"" in
+      Alcotest.(check bool)
+        "reason mentions verification deadline" true
+        (Astring.String.is_infix ~affix:"verification deadline" reason_str)
+    | _ -> Alcotest.fail "task is not Cancelled after check_timeouts")
+
+let test_check_timeouts_idempotent_after_cancel () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match Coord.transition_task_r config ~agent_name:"worker"
+             ~task_id ~action:Types.Submit_for_verification () with
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+     | Ok _ -> ());
+    force_deadline_past config task_id;
+    Verification_protocol.check_timeouts ~config;
+    let status_after_first = status_string config task_id in
+    Verification_protocol.check_timeouts ~config;
+    let status_after_second = status_string config task_id in
+    Alcotest.(check string) "first check cancels" "cancelled" status_after_first;
+    Alcotest.(check string) "second check is no-op" "cancelled" status_after_second)
+
+(* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
 
@@ -665,5 +727,11 @@ let () =
         test_submit_verdict_pass;
       Alcotest.test_case "submit_verdict Fail preserves reason" `Quick
         test_submit_verdict_fail;
+    ]);
+    ("timeout_check", [
+      Alcotest.test_case "check_timeouts transitions AwaitingVerification to Cancelled"
+        `Quick test_check_timeouts_transitions_awaiting_to_cancelled;
+      Alcotest.test_case "check_timeouts is idempotent after cancellation"
+        `Quick test_check_timeouts_idempotent_after_cancel;
     ]);
   ]

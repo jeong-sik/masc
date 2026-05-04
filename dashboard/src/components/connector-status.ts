@@ -1319,7 +1319,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           <span class="text-lg">${channelIcon(ch.channel)}</span>
           <div>
             <div class="text-sm font-medium text-[var(--color-fg-primary)]">${ch.channel}</div>
-            <div class="text-3xs uppercase tracking-[0.18em] text-[var(--color-fg-disabled)]">
+            <div class="text-3xs uppercase tracking-[var(--track-label)] text-[var(--color-fg-disabled)]">
               ${ch.last_keeper ? `keeper ${ch.last_keeper}` : 'no keeper yet'}
             </div>
           </div>

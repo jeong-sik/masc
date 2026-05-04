@@ -14,7 +14,7 @@ import {
 function StatCell({ label, value }: { label: string; value: number }) {
   return html`
     <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-      <div class="text-2xs font-medium uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">${label}</div>
+      <div class="text-2xs font-medium uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">${label}</div>
       <div class="mt-1 text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${value}</div>
     </div>
   `
@@ -64,7 +64,7 @@ export function GitGraphPanel() {
     <section class="grid gap-4" data-testid="git-graph-panel">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="mb-1 flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">
+          <div class="mb-1 flex items-center gap-2 text-2xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">
             <${GitBranch} size=${14} aria-hidden="true" />
             Track 4
           </div>

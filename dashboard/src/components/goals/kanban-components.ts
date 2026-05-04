@@ -200,7 +200,7 @@ function TaskColumn({
     <section class="flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
       <div class="${DECK_HEAD} flex items-start justify-between gap-3">
         <div>
-          <h3 class="font-mono text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-primary)]">${title}</h3>
+          <h3 class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-primary)]">${title}</h3>
           <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">${description}</p>
         </div>
         <span class="rounded-[var(--r-0)] px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>

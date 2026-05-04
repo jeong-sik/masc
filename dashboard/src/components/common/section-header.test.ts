@@ -51,6 +51,6 @@ describe('SectionHeader', () => {
     render(h(SectionHeader, null, 'A'), container)
     const heading = container.querySelector('h4')
     expect(heading?.classList.contains('uppercase')).toBe(true)
-    expect(heading?.classList.contains('tracking-[0.06em]')).toBe(true)
+    expect(heading?.classList.contains('tracking-[var(--track-sub)]')).toBe(true)
   })
 })

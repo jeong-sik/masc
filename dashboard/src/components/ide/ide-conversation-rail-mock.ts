@@ -21,11 +21,11 @@ const KIND_LABEL: Record<ThreadKind, string> = {
 }
 
 const KIND_TOKEN: Record<ThreadKind, string> = {
-  flag: 'var(--color-status-err, var(--err))',
-  question: 'var(--color-status-info, var(--info))',
-  approve: 'var(--color-status-ok, var(--ok))',
+  flag: 'var(--color-status-err)',
+  question: 'var(--color-status-info)',
+  approve: 'var(--color-status-ok)',
   note: 'var(--color-fg-muted)',
-  suggest: 'var(--color-status-warn, var(--warn))',
+  suggest: 'var(--color-status-warn)',
 }
 
 export function IdeConversationRailMock() {

@@ -179,15 +179,15 @@ export function GovernanceMonitor() {
             <${StatTile}
               label="p95 대기"
               value=${fmtSec(data.approval_queue.p95_wait_sec)}
-              status=${data.approval_queue.p95_wait_sec > 300 ? 'warn' : undefined}
-              delta=${data.approval_queue.p95_wait_sec > 300 ? { direction: 'down' as const, text: '5분 초과' } : undefined}
+              status=${data.approval_queue.p95_wait_sec != null && data.approval_queue.p95_wait_sec > 300 ? 'warn' : undefined}
+              delta=${data.approval_queue.p95_wait_sec != null && data.approval_queue.p95_wait_sec > 300 ? { direction: 'down' as const, text: '5분 초과' } : undefined}
             />
             <div class="flex items-center gap-2">
               <${StatTile}
                 label="최장 대기"
                 value=${fmtSec(data.approval_queue.oldest_pending_sec)}
-                status=${data.approval_queue.oldest_pending_sec > 600 ? 'crit' : data.approval_queue.oldest_pending_sec > 300 ? 'warn' : undefined}
-                delta=${data.approval_queue.oldest_pending_sec > 300 ? { direction: 'down' as const, text: '장기 대기' } : undefined}
+                status=${data.approval_queue.oldest_pending_sec != null && data.approval_queue.oldest_pending_sec > 600 ? 'crit' : data.approval_queue.oldest_pending_sec != null && data.approval_queue.oldest_pending_sec > 300 ? 'warn' : undefined}
+                delta=${data.approval_queue.oldest_pending_sec != null && data.approval_queue.oldest_pending_sec > 300 ? { direction: 'down' as const, text: '장기 대기' } : undefined}
               />
               <${StatusChip}
                 label=${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}

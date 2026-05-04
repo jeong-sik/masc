@@ -109,6 +109,10 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_lifecycle_callback_failures
+         ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
+         ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
          keeper_name event.tool_name (Printexc.to_string exn));
@@ -1207,6 +1211,10 @@ let make_hooks
                 exceptions thrown from Sse.broadcast at the call boundary
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
+               ();
              Log.Keeper.warn
                "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
                meta.name turn (Printexc.to_string exn));
@@ -1303,6 +1311,10 @@ let make_hooks
                 were dropped without trace.  Loss of these rows leaves
                 downstream replay / debugging tools with gaps that look
                 identical to "no tool calls in this turn." *)
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+               ();
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));

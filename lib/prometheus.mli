@@ -258,6 +258,7 @@ val metric_keeper_write_meta_cycle_failures : string
 val metric_keeper_alert_persist_failures : string
 val metric_keeper_metrics_sse_failures : string
 val metric_keeper_dispatch_event_failures : string
+val metric_keeper_directive_failures : string
 val metric_keeper_session_cleanup_failures : string
 val metric_keeper_chat_store_failures : string
 val metric_keeper_observation_query_failures : string
@@ -579,6 +580,10 @@ val metric_keeper_dispatch_event_failures : string
     were previously silently dropped via [ignore].  Labels:
     [keeper, reason] where reason is [terminal_state] or
     [invalid_transition]. *)
+
+val metric_keeper_directive_failures : string
+(** gRPC directive routing failures — target agent not in registry
+    or directive malformed.  Labels: [keeper, site]. *)
 
 val metric_auth_credential_token_duplicate : string
 (** #9786 follow-up: boot-time audit counter for credentials

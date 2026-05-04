@@ -73,7 +73,7 @@ function CockpitPreview() {
       <iframe
         src=${COCKPIT_FRAME_SRC}
         class="h-full min-h-0 w-full border-0"
-        title="MASC Dream IDE Cockpit"
+        title="MASC Cockpit"
       />
     </section>
   `

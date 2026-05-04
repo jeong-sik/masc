@@ -442,6 +442,8 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; p50_latency_ms = None
   ; p95_latency_ms = None
   ; latency_samples = 0
+  ; avg_confidence = None
+  ; confidence_samples = 0
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info
@@ -519,6 +521,8 @@ let provider_entry_to_json ~(declared : bool)
     ("last_failure_at", opt_float info.last_failure_at);
     ("declared", `Bool declared);
     ("status", `String (provider_status info));
+    ("avg_confidence", opt_float info.avg_confidence);
+    ("confidence_samples", `Int info.confidence_samples);
   ] @ perf_fields)
 
 (** Back-compat alias: older call sites may still reference the previous
@@ -805,6 +809,7 @@ let client_capacity_history_json ?limit ?kind ?since_ts () =
 
 let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event)
   : Yojson.Safe.t =
+  let opt_float = function Some f -> `Float f | None -> `Null in
   let cascade_name =
     Keeper_cascade_profile.runtime_name_to_string ev.cascade_name
   in
@@ -823,6 +828,7 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event)
     ("backoff_ms", `Int ev.backoff_ms);
     ("kind", `String (Cascade_strategy_trace.kind_to_string ev.kind));
     ("trace_id", trace_id_json);
+    ("confidence_score", opt_float ev.confidence_score);
   ]
 
 let strategy_trace_json ?limit ?cascade () =

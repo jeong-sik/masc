@@ -194,6 +194,22 @@ let latency_ring_size =
         100
 
 
+let confidence_ring_size =
+  match Sys.getenv_opt "MASC_CASCADE_CONFIDENCE_RING_SIZE" with
+  | None -> 100
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 100
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some n -> n
+      | None ->
+        Log.Misc.warn
+          "Invalid int for MASC_CASCADE_CONFIDENCE_RING_SIZE=%S, using default 100"
+          raw;
+        100
+
+
 (* ── Types ────────────────────────────────────── *)
 
 (* [Rejected] is the third outcome kind introduced in 0.160.0.  It
@@ -249,6 +265,14 @@ type provider_state = {
   mutable latency_ring: float array option;
   mutable latency_count: int;     (* slots filled, capped at array length *)
   mutable latency_cursor: int;    (* next insertion index, wraps mod length *)
+  (* Confidence ring buffer for avg log probability per token from LLM
+     responses.  Mirrors the latency ring pattern: lazy allocation,
+     drop-oldest on overflow, bounded by [confidence_ring_size].
+     Values are negative log probs — lower (more negative) = higher
+     confidence in the response quality. *)
+  mutable confidence_ring: float array option;
+  mutable confidence_count: int;
+  mutable confidence_cursor: int;
 }
 
 type t = {
@@ -307,6 +331,9 @@ let get_or_create_state t key =
       latency_ring = None;
       latency_count = 0;
       latency_cursor = 0;
+      confidence_ring = None;
+      confidence_count = 0;
+      confidence_cursor = 0;
     } in
     Hashtbl.replace t.providers key s;
     s
@@ -332,6 +359,28 @@ let push_latency state lat_ms =
     state.latency_cursor <- (state.latency_cursor + 1) mod latency_ring_size;
     if state.latency_count < latency_ring_size then
       state.latency_count <- state.latency_count + 1
+  end
+
+(* Append [conf] (avg log prob per token) to the per-provider confidence ring.
+   Accepts negative values — most LLM log probs are negative.  Non-finite
+   values are silently dropped.  Same lazy-allocation pattern as
+   [push_latency]. *)
+let push_confidence state conf =
+  if confidence_ring_size <= 0 then ()
+  else if not (Float.is_finite conf) then ()
+  else begin
+    let ring =
+      match state.confidence_ring with
+      | Some r -> r
+      | None ->
+        let r = Array.make confidence_ring_size 0.0 in
+        state.confidence_ring <- Some r;
+        r
+    in
+    ring.(state.confidence_cursor) <- conf;
+    state.confidence_cursor <- (state.confidence_cursor + 1) mod confidence_ring_size;
+    if state.confidence_count < confidence_ring_size then
+      state.confidence_count <- state.confidence_count + 1
   end
 
 (* Build a stable fingerprint from caller-provided classification.
@@ -374,7 +423,7 @@ let prune_old_events now events =
   List.filter (fun e -> e.time >= cutoff) events
 
 let record t ~provider_key ~outcome ?error_kind ?error_reason
-    ?retry_after_s ?latency_ms ~now () =
+    ?retry_after_s ?latency_ms ?confidence ~now () =
   with_lock t (fun () ->
     let state = get_or_create_state t provider_key in
     let event = { time = now; outcome } in
@@ -394,6 +443,9 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          and a 200ms successful response are not the same signal. *)
       (match latency_ms with
        | Some ms -> push_latency state ms
+       | None -> ());
+      (match confidence with
+       | Some c -> push_confidence state c
        | None -> ())
     | Failure | Rejected ->
       (* Rejected responses indicate unusable output (gate reject, empty
@@ -468,8 +520,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
           ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
       end)
 
-let record_success t ~provider_key ?latency_ms () =
-  record t ~provider_key ~outcome:Success ?latency_ms
+let record_success t ~provider_key ?latency_ms ?confidence () =
+  record t ~provider_key ~outcome:Success ?latency_ms ?confidence
     ~now:(Unix.gettimeofday ()) ()
 
 let record_failure t ~provider_key ?error_kind ?error_reason () =
@@ -588,6 +640,8 @@ type provider_info = {
   p50_latency_ms : float option;
   p95_latency_ms : float option;
   latency_samples : int;
+  avg_confidence : float option;
+  confidence_samples : int;
 }
 
 (* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
@@ -616,6 +670,17 @@ let percentile_locked state pct =
       else
         let frac = rank -. float_of_int lo in
         Some (buf.(lo) *. (1.0 -. frac) +. buf.(hi) *. frac)
+
+(* Average of populated confidence ring values.  [None] when no samples. *)
+let avg_confidence_locked state =
+  match state.confidence_ring with
+  | None -> None
+  | Some ring when state.confidence_count = 0 -> ignore ring; None
+  | Some ring ->
+    let n = state.confidence_count in
+    let sum = ref 0.0 in
+    for i = 0 to n - 1 do sum := !sum +. ring.(i) done;
+    Some (!sum /. float_of_int n)
 
 let take_first_n n lst =
   let rec loop k acc = function
@@ -648,6 +713,7 @@ let build_info_locked ~now ~key state =
   in
   let p50_latency_ms = percentile_locked state 0.50 in
   let p95_latency_ms = percentile_locked state 0.95 in
+  let avg_confidence = avg_confidence_locked state in
   {
     provider_key = key;
     success_rate = rate;
@@ -661,6 +727,8 @@ let build_info_locked ~now ~key state =
     p50_latency_ms;
     p95_latency_ms;
     latency_samples = state.latency_count;
+    avg_confidence;
+    confidence_samples = state.confidence_count;
   }
 
 let provider_info t ~provider_key =

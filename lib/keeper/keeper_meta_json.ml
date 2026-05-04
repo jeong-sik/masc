@@ -299,15 +299,16 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
         if List.mem key canonical_keeper_meta_key_names then None else Some key)
       |> dedupe_keep_order
     in
-    if unknown <> []
-    then
-      Prometheus.inc_counter
-        Prometheus.metric_keeper_meta_json_failures
-        ~labels:[("site", "unknown_keys")]
-        ();
-      Log.Keeper.warn
-        "keeper meta %s has unknown keys: %s"
-        path
-        (String.concat ", " unknown)
+    (match unknown with
+     | [] -> ()
+     | _ :: _ ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_meta_json_failures
+         ~labels:[("site", "unknown_keys")]
+         ();
+       Log.Keeper.warn
+         "keeper meta %s has unknown keys: %s"
+         path
+         (String.concat ", " unknown))
   | _ -> ()
 ;;

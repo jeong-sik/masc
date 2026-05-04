@@ -1471,3 +1471,117 @@ let liveness_recovery_scan (ctx : _ context) =
       end
     ) entries
   end
+
+(* ──────────────────────────────────────────────────────────────────
+   #12838 Alive-but-stuck detector
+
+   Liveness Recovery Supervisor (#12801, [liveness_recovery_scan]
+   above) handles keepers in terminal phases (Dead, with carve-outs
+   for credential_archived and zombie_timeout_reached).  It does not
+   handle a separate failure mode observed in production on
+   2026-05-04: keepers that are alive in every metric the supervisor
+   checks but have a flat [proactive_rt.last_ts] for days because
+   their [current_task_id] references an orphaned [AwaitingVerification]
+   task.
+
+   This detector emits a Prometheus counter only.  No transition,
+   no restart, no board post.  Operator visibility first; action
+   is a follow-up (see issue #12838 "Proposed first PR").
+   ────────────────────────────────────────────────────────────────── *)
+
+(** Pure detection: is this keeper alive-but-stuck at [now]?
+
+    Returns [Some elapsed_sec] (the gap since the keeper's reference
+    timestamp) when the keeper is non-Dead, non-paused, has done at
+    least one autonomous turn, and has gone longer than
+    [max(stall_floor_sec, stall_multiplier * cooldown_sec)] without a
+    proactive turn.
+
+    Reference timestamp: [proactive_rt.last_ts] if that has ever
+    fired ([> 0.0]), otherwise [entry.started_at] — this catches the
+    "never_started" case (e.g. [glm-coding-plan] in the production
+    sample) without a separate code path.
+
+    Returns [None] when not stuck.  Pure: no I/O, no global state. *)
+let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
+    (entry : Keeper_registry.registry_entry) : float option =
+  let meta = entry.meta in
+  if meta.paused then None
+  else if entry.phase = Keeper_state_machine.Dead then None
+  else if meta.runtime.autonomous_turn_count <= 0 then
+    (* Brand-new keeper: not stuck, just hasn't started. *)
+    None
+  else
+    let cooldown_sec = float_of_int meta.proactive.cooldown_sec in
+    let stall_threshold =
+      Float.max stall_floor_sec
+        (cooldown_sec *. float_of_int stall_multiplier)
+    in
+    let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
+    let reference_ts =
+      if last_proactive_ts > 0.0 then last_proactive_ts
+      else entry.started_at
+    in
+    let elapsed = now -. reference_ts in
+    if elapsed > stall_threshold then Some elapsed else None
+
+(* Per-keeper dedup table for [alive_but_stuck_scan].  Bounds counter
+   emission to one increment per [alive_but_stuck_dedup_ttl_sec] per
+   keeper, even when the sweep fires every 30s.  Mirrors the
+   [liveness_recovery_table] pattern above. *)
+let alive_but_stuck_last_alert : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let alive_but_stuck_last_alert_mu = Eio.Mutex.create ()
+
+let alive_but_stuck_should_emit ~now ~dedup_ttl_sec name =
+  Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
+    match Hashtbl.find_opt alive_but_stuck_last_alert name with
+    | Some last_ts when now -. last_ts < dedup_ttl_sec -> false
+    | _ ->
+      Hashtbl.replace alive_but_stuck_last_alert name now;
+      true)
+
+(** Test-only: clear the dedup table so each test case starts fresh. *)
+let alive_but_stuck_reset_for_test () =
+  Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
+    Hashtbl.clear alive_but_stuck_last_alert)
+
+let alive_but_stuck_scan (ctx : _ context) =
+  if not Env_config.KeeperSupervisor.alive_but_stuck_enabled then ()
+  else begin
+    let now = Time_compat.now () in
+    let stall_multiplier =
+      Env_config.KeeperSupervisor.alive_but_stuck_stall_multiplier
+    in
+    let stall_floor_sec =
+      Env_config.KeeperSupervisor.alive_but_stuck_stall_floor_sec
+    in
+    let dedup_ttl_sec =
+      Env_config.KeeperSupervisor.alive_but_stuck_dedup_ttl_sec
+    in
+    let base_path = ctx.config.base_path in
+    let entries = Keeper_registry.all ~base_path () in
+    List.iter (fun (entry : Keeper_registry.registry_entry) ->
+      match
+        detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec entry
+      with
+      | None -> ()
+      | Some elapsed ->
+        if alive_but_stuck_should_emit ~now ~dedup_ttl_sec entry.name then begin
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_alive_but_stuck
+            ~labels:[("keeper", entry.name)]
+            ();
+          Log.Keeper.warn
+            "%s: alive-but-stuck detected (elapsed=%.0fs, threshold=%.0fs, \
+             autonomous_turns=%d, proactive_count_total=%d)"
+            entry.name elapsed
+            (Float.max stall_floor_sec
+               (float_of_int entry.meta.proactive.cooldown_sec
+                *. float_of_int stall_multiplier))
+            entry.meta.runtime.autonomous_turn_count
+            entry.meta.runtime.proactive_rt.count_total
+        end
+    ) entries
+  end

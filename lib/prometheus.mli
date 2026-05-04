@@ -79,6 +79,11 @@ val metric_keeper_usage_anomalies : string
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 val metric_keeper_contract_violations : string
 
+(** #12838: keepers detected as alive-but-stuck.  Detection-only
+    counter; bounded to one increment per dedup window per keeper.
+    Labels: keeper. *)
+val metric_keeper_alive_but_stuck : string
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.

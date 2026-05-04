@@ -90,3 +90,31 @@ val should_attempt_liveness_recovery :
   now:float -> Keeper_registry.registry_entry -> bool
 (** Pure predicate: true when a Dead keeper passes the eligibility gate for
     a liveness recovery attempt.  Exposed for tests. *)
+
+(** {1 Alive-but-stuck detector (#12838)} *)
+
+val detect_alive_but_stuck :
+  now:float ->
+  stall_multiplier:int ->
+  stall_floor_sec:float ->
+  Keeper_registry.registry_entry ->
+  float option
+(** Pure detection: returns [Some elapsed_sec] when a non-Dead, non-paused
+    keeper has gone longer than
+    [max(stall_floor_sec, stall_multiplier * proactive.cooldown_sec)]
+    without a proactive turn while autonomous turns kept advancing.
+    Reference timestamp is [proactive_rt.last_ts] if set, else
+    [entry.started_at] (covers the never-started case).  Returns [None]
+    otherwise.  Exposed for tests. *)
+
+val alive_but_stuck_scan : 'a context -> unit
+(** Scan all keepers in [Keeper_registry].  For each keeper detected as
+    alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
+    increment and a single warn log line, with per-keeper dedup so the
+    counter is at most incremented once per
+    [alive_but_stuck_dedup_ttl_sec] window.  Detection-only — no
+    transition or restart is triggered.  Gated behind
+    [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true). *)
+
+val alive_but_stuck_reset_for_test : unit -> unit
+(** Test-only: clear the alive-but-stuck dedup table. *)

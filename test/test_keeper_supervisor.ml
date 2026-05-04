@@ -1246,4 +1246,145 @@ let () =
              let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
              check bool "credential_archived → false" false result));
     ];
+    (* #12838 — alive-but-stuck detector. Pure function tests; dedup
+       state lives in [Sup.alive_but_stuck_*] and is not exercised here. *)
+    "alive_but_stuck", (
+      let make_test_entry ~name ~paused ~phase ~autonomous_turn_count
+          ~last_proactive_ts ~cooldown_sec ~started_at =
+        Reg.clear ();
+        let _reg = Reg.register ~base_path:bp name (make_meta name) in
+        let entry = match Reg.get ~base_path:bp name with
+          | Some e -> e
+          | None -> fail "register/get sync failure"
+        in
+        let meta = entry.meta in
+        let meta' = {
+          meta with
+          paused;
+          proactive = { meta.proactive with cooldown_sec };
+          runtime = {
+            meta.runtime with
+            autonomous_turn_count;
+            proactive_rt = {
+              meta.runtime.proactive_rt with
+              last_ts = last_proactive_ts;
+            };
+          };
+        } in
+        { entry with meta = meta'; phase; started_at }
+      in
+      let detect entry =
+        Sup.detect_alive_but_stuck
+          ~now:100_000.0
+          ~stall_multiplier:10
+          ~stall_floor_sec:1800.0
+          entry
+      in
+      [
+        test_case "paused keeper → None" `Quick (fun () ->
+          let entry = make_test_entry
+              ~name:"abs-paused"
+              ~paused:true
+              ~phase:KSM.Running
+              ~autonomous_turn_count:50
+              ~last_proactive_ts:0.0
+              ~cooldown_sec:60
+              ~started_at:0.0
+          in
+          check (option (float 0.1)) "paused → None" None (detect entry));
+        test_case "Dead phase → None (handled by liveness_recovery_scan)" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-dead"
+                ~paused:false
+                ~phase:KSM.Dead
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "Dead → None" None (detect entry));
+        test_case "brand-new keeper (autonomous_turn_count=0) → None" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-new"
+                ~paused:false
+                ~phase:KSM.Running
+                ~autonomous_turn_count:0
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "new → None" None (detect entry));
+        test_case "recent proactive turn → None" `Quick (fun () ->
+          let entry = make_test_entry
+              ~name:"abs-active"
+              ~paused:false
+              ~phase:KSM.Running
+              ~autonomous_turn_count:50
+              ~last_proactive_ts:99_500.0  (* 500s ago, within threshold *)
+              ~cooldown_sec:60
+              ~started_at:0.0
+          in
+          check (option (float 0.1)) "recent → None" None (detect entry));
+        test_case "stalled proactive_ts + autonomous advanced → Some" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-stalled"
+                ~paused:false
+                ~phase:KSM.Running
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:1_000.0  (* 99000s ago *)
+                ~cooldown_sec:60            (* threshold = max(1800, 600) = 1800 *)
+                ~started_at:0.0
+            in
+            match detect entry with
+            | None -> fail "expected stalled keeper to be detected"
+            | Some elapsed ->
+              check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
+        test_case "never_started + autonomous + old started_at → Some" `Quick
+          (fun () ->
+            (* Mirrors production case: glm-coding-plan with
+               proactive.last_outcome=never_started but autonomous_turn_count>0. *)
+            let entry = make_test_entry
+                ~name:"abs-never-started"
+                ~paused:false
+                ~phase:KSM.Running
+                ~autonomous_turn_count:14
+                ~last_proactive_ts:0.0       (* never started *)
+                ~cooldown_sec:60
+                ~started_at:1_000.0          (* started 99000s ago *)
+            in
+            match detect entry with
+            | None -> fail "expected never-started keeper to be detected"
+            | Some elapsed ->
+              check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
+        test_case "never_started + autonomous + recent started_at → None" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-just-launched"
+                ~paused:false
+                ~phase:KSM.Running
+                ~autonomous_turn_count:1
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:99_500.0  (* started 500s ago — under floor *)
+            in
+            check (option (float 0.1)) "just-launched → None"
+              None (detect entry));
+        test_case "high cooldown raises threshold above floor" `Quick (fun () ->
+          (* cooldown 600 * multiplier 10 = 6000s > floor 1800s, so a
+             5500s-old proactive ts is NOT stuck under this keeper's policy. *)
+          let entry = make_test_entry
+              ~name:"abs-high-cooldown"
+              ~paused:false
+              ~phase:KSM.Running
+              ~autonomous_turn_count:50
+              ~last_proactive_ts:94_500.0  (* 5500s ago *)
+              ~cooldown_sec:600            (* threshold = max(1800,6000) = 6000 *)
+              ~started_at:0.0
+          in
+          check (option (float 0.1)) "below per-keeper threshold → None"
+            None (detect entry));
+      ]);
   ]

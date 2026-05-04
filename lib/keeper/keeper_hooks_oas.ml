@@ -954,6 +954,8 @@ let make_hooks
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
+    ?(passive_loop_nudge : unit -> string option =
+        fun () -> None)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -993,36 +995,50 @@ let make_hooks
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with
 
-    (* Work discovery injection (#8773 fix). The callback owns the policy
-       (interval, sources, query) and returns Some text only when there
-       is actionable work to surface. Hook stays domain-agnostic: it just
-       wraps the callback's payload in a Nudge so the next LLM turn sees
-       it as ambient observation. Returns Continue when callback yields
-       None — silent no-op, no token cost. *)
+    (* Work discovery injection (#8773 fix) and passive loop action injection
+       (#12799 P1/5). The callbacks own their policy and return Some text only
+       when there is actionable content to surface. The passive loop nudge
+       takes priority (prepended) when active, since it requires immediate
+       action. Hook stays domain-agnostic: it wraps payloads in a Nudge so
+       the next LLM turn sees them as ambient observation. Returns Continue
+       when both callbacks yield None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
-        (match discover_work_nudge () with
+        let loop_alert = passive_loop_nudge () in
+        let work_text = discover_work_nudge () in
+        let combined =
+          match loop_alert, work_text with
+          | None, None -> None
+          | Some a, None -> Some a
+          | None, Some w -> Some w
+          | Some a, Some w -> Some (a ^ "\n\n" ^ w)
+        in
+        (match combined with
          | None -> Agent_sdk.Hooks.Continue
          | Some text when String.trim text = "" ->
            Agent_sdk.Hooks.Continue
          | Some text when not (String.is_valid_utf_8 text) ->
-           (* Defensive: nudge path producers (e.g. keeper_agent_run's
-              discover_work_nudge) source strings from external input
-              (task titles, operator guidance, board posts). A byte-
-              level truncation upstream can leave an orphan UTF-8
-              continuation byte, and codex CLI rejects the resulting
-              argv with "invalid UTF-8 was detected in one or more
-              arguments" at parse time (non-cascadable). This gate
-              prevents polluted nudges from ever reaching transport
-              argv, regardless of which producer introduced the
-              drift. See #9036 for the first observed producer fix. *)
+           (* Defensive: nudge path producers source strings from external
+              input (task titles, operator guidance, board posts). A byte-
+              level truncation upstream can leave an orphan UTF-8 continuation
+              byte, and codex CLI rejects the resulting argv with "invalid
+              UTF-8 was detected in one or more arguments" at parse time
+              (non-cascadable). This gate prevents polluted nudges from ever
+              reaching transport argv, regardless of which producer introduced
+              the drift. See #9036 for the first observed producer fix. *)
            Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
              (!meta_ref).name (String.length text);
            Agent_sdk.Hooks.Continue
          | Some text ->
-           Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
-             (!meta_ref).name (String.length text);
+           let source =
+             match loop_alert, work_text with
+             | Some _, _ -> "passive_loop_nudge"
+             | None, Some _ -> "work_discovery nudge"
+             | None, None -> "nudge"
+           in
+           Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
+             (!meta_ref).name source (String.length text);
            Agent_sdk.Hooks.Nudge text)
       | _ -> Agent_sdk.Hooks.Continue);
 

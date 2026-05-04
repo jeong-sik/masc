@@ -33,6 +33,15 @@ val current_streak : keeper_name:string -> int
 (** Return the current passive-only streak for [keeper_name].
     Returns 0 if the keeper has no recorded state. *)
 
+val nudge_message : keeper_name:string -> string option
+(** [nudge_message ~keeper_name] returns [Some message] when a passive loop
+    has been detected for [keeper_name] (streak has reached the threshold and
+    the detection latch is active), or [None] when no passive loop is active.
+
+    The returned string is a directive intended for injection into the next
+    turn's before_turn nudge, prompting the keeper to take an execution or
+    completion action instead of continuing passive read-only behavior. *)
+
 val reset : keeper_name:string -> unit
 (** Reset all streak state for [keeper_name].  Used when a keeper is
     unregistered or restarted. *)

@@ -110,6 +110,68 @@ let test_independent_keepers () =
   check int "kb streak = 0 (execution)" 0
     (PLD.current_streak ~keeper_name:"kb")
 
+(* ── nudge_message tests ──────────────────────────────────────────── *)
+
+let test_nudge_message_none_before_threshold () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  (* Below threshold — no nudge yet *)
+  PLD.record_turn ~keeper_name:"k-nudge-below" ~progress_class:"passive_status";
+  PLD.record_turn ~keeper_name:"k-nudge-below" ~progress_class:"passive_status";
+  let msg = PLD.nudge_message ~keeper_name:"k-nudge-below" in
+  check bool "nudge is None before threshold" true (Option.is_none msg)
+
+let test_nudge_message_some_at_threshold () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  (* Reach the default threshold (5) — nudge should fire *)
+  for _ = 1 to 5 do
+    PLD.record_turn ~keeper_name:"k-nudge-at" ~progress_class:"passive_status"
+  done;
+  let msg = PLD.nudge_message ~keeper_name:"k-nudge-at" in
+  check bool "nudge is Some at threshold" true (Option.is_some msg)
+
+let test_nudge_message_some_above_threshold () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  (* Above threshold — nudge should persist *)
+  for _ = 1 to 8 do
+    PLD.record_turn ~keeper_name:"k-nudge-above" ~progress_class:"passive_status"
+  done;
+  let msg = PLD.nudge_message ~keeper_name:"k-nudge-above" in
+  check bool "nudge persists above threshold" true (Option.is_some msg)
+
+let test_nudge_message_none_after_reset () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  (* Reach threshold, then reset via an execution turn *)
+  for _ = 1 to 5 do
+    PLD.record_turn ~keeper_name:"k-nudge-reset" ~progress_class:"passive_status"
+  done;
+  let before_reset = PLD.nudge_message ~keeper_name:"k-nudge-reset" in
+  check bool "nudge active before reset" true (Option.is_some before_reset);
+  PLD.record_turn ~keeper_name:"k-nudge-reset" ~progress_class:"execution";
+  let after_reset = PLD.nudge_message ~keeper_name:"k-nudge-reset" in
+  check bool "nudge cleared after execution turn" true (Option.is_none after_reset)
+
+let test_nudge_message_none_for_unknown_keeper () =
+  setup ();
+  let msg = PLD.nudge_message ~keeper_name:"unknown-keeper-xyz" in
+  check bool "nudge is None for unknown keeper" true (Option.is_none msg)
+
+let test_nudge_message_contains_streak_count () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  for _ = 1 to 5 do
+    PLD.record_turn ~keeper_name:"k-nudge-streak" ~progress_class:"passive_status"
+  done;
+  let msg = PLD.nudge_message ~keeper_name:"k-nudge-streak" in
+  match msg with
+  | None -> fail "expected Some nudge at threshold"
+  | Some text ->
+    check bool "nudge mentions streak count" true
+      (String.length text > 0)
+
 let () =
   run "keeper_passive_loop_detector" [
     "streak", [
@@ -135,5 +197,19 @@ let () =
     "independence", [
       test_case "keepers are tracked independently" `Quick
         test_independent_keepers;
+    ];
+    "nudge_message", [
+      test_case "None before threshold" `Quick
+        test_nudge_message_none_before_threshold;
+      test_case "Some at threshold" `Quick
+        test_nudge_message_some_at_threshold;
+      test_case "Some persists above threshold" `Quick
+        test_nudge_message_some_above_threshold;
+      test_case "None after execution reset" `Quick
+        test_nudge_message_none_after_reset;
+      test_case "None for unknown keeper" `Quick
+        test_nudge_message_none_for_unknown_keeper;
+      test_case "nudge text is non-empty" `Quick
+        test_nudge_message_contains_streak_count;
     ];
   ]

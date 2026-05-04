@@ -996,6 +996,8 @@ let prepare_agent_setup
           }
           :: acc.tool_calls)
       ~discover_work_nudge
+      ~passive_loop_nudge:(fun () ->
+        Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
       ()
   in
   let before_turn_hook : Agent_sdk.Hooks.hooks =

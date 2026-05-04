@@ -7,8 +7,7 @@ import {
   BFCL_V4_CATEGORIES,
   BFCL_MODEL_BREAKDOWN,
   HARNESS_MODELS,
-  categoryLevelClass,
-  categoryLevelLabel,
+  scoreColor,
 } from './data'
 
 function V4CategoryTable() {
@@ -46,10 +45,11 @@ function ModelBreakdownTable() {
           <tr>
             <th class="pm-th min-w-[120px]">모델</th>
             <th class="pm-th pm-th--center min-w-[60px]">Overall</th>
-            <th class="pm-th pm-th--center">Simple</th>
-            <th class="pm-th pm-th--center">Parallel</th>
+            <th class="pm-th pm-th--center">Single</th>
             <th class="pm-th pm-th--center">Multi-turn</th>
             <th class="pm-th pm-th--center">Agentic</th>
+            <th class="pm-th pm-th--center">Halluc.</th>
+            <th class="pm-th pm-th--center">Format</th>
           </tr>
         </thead>
         <tbody>
@@ -57,12 +57,8 @@ function ModelBreakdownTable() {
             <tr key=${m.model} class="pm-row-alt">
               <td class="pm-td font-semibold">${m.model}</td>
               <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
-              ${([m.simple, m.parallel, m.multiTurn, m.agentic] as const).map((level, j) => html`
-                <td key=${j} class="pm-td pm-td--center">
-                  <span class="pm-cell-badge ${categoryLevelClass(level)}">
-                    ${categoryLevelLabel(level)}
-                  </span>
-                </td>
+              ${([m.singleTurn, m.multiTurn, m.agentic, m.hallucination, m.format] as const).map((score, j) => html`
+                <td key=${j} class="pm-td pm-td--center pm-td--mono ${scoreColor(score)}">${score}</td>
               `)}
             </tr>
           `)}
@@ -179,7 +175,7 @@ export function BfclRankings() {
       <div>
         <h4 class="t-label font-semibold mb-2">BFCL V4 카테고리 구성</h4>
         <p class="t-micro t-dim mb-2">
-          Multi-turn(30%) + Agentic(40%) = 70%가 실제 에이전트 시나리오 평가. AST 기반 코드 수준 평가로 텍스트 매칭 한계 극복.
+          Agentic + Multi-turn이 실제 에이전트 시나리오 평가. Hallucination은 오류 탐지 능력, Format은 FC-Prompt 격차 측정. Overall = unweighted average.
         </p>
         <${V4CategoryTable} />
       </div>
@@ -187,7 +183,7 @@ export function BfclRankings() {
       <div>
         <h4 class="t-label font-semibold mb-2">모델별 카테고리 성능 분포</h4>
         <p class="t-micro t-dim mb-2">
-          Claude Opus 4.5, Sonnet 4.5는 전 카테고리 '높음'. GPT-5.2는 Agentic에서만 '높음'.
+          Claude Opus 4.5는 전 카테고리 70+%. Mistral Large는 Single-turn 84.65%이나 Agentic 28%, Hallucination 14.12%로 에이전트 역량 취약.
           Mistral Large(38.37%)는 전반적으로 낮은 스키마 준수율.
         </p>
         <${ModelBreakdownTable} />

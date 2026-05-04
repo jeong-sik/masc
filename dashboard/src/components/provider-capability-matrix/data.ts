@@ -266,31 +266,30 @@ export const BFCL_V4_CATEGORIES: BfclV4Category[] = [
   { id: 'format',        label: 'Format Sensitivity',         description: 'FC vs Prompt 모드 간 격차 측정 (Prompt 전용)', weight: 'Prompt 전용' },
 ]
 
-type CategoryLevel = 'high' | 'mid' | 'low'
-
 export interface BfclModelCategoryBreakdown {
   model: string
   overall: string
-  simple: CategoryLevel
-  parallel: CategoryLevel
-  multiTurn: CategoryLevel
-  agentic: CategoryLevel
+  singleTurn: string
+  multiTurn: string
+  agentic: string
+  hallucination: string
+  format: string
 }
 
-// Category-level breakdown estimated from V4 overall + V3 historical category patterns.
-// BFCL V4 does not publish per-category scores per model publicly.
+// Per-category scores from BFCL V4 leaderboard (gorilla.cs.berkeley.edu, 2026-04-12).
+// Overall = unweighted average of all sub-categories.
 export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
-  { model: 'Claude Opus 4.5',  overall: '77.47%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'Claude Sonnet 4.5',overall: '73.24%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'GLM-4.6',          overall: '72.38%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'mid'  },
-  { model: 'Claude Haiku 4.5', overall: '68.70%', simple: 'high', parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Kimi K2',          overall: '59.06%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'DeepSeek V3.2',    overall: '56.73%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Gemini 2.5 Flash', overall: '56.24%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'GPT-5.2',          overall: '55.87%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
-  { model: 'GPT-4.1',          overall: '53.96%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
-  { model: 'Qwen3-235B',       overall: '52.15%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
-  { model: 'Mistral Large',    overall: '38.37%', simple: 'mid',  parallel: 'low',  multiTurn: 'low',  agentic: 'low'  },
+  { model: 'Claude Opus 4.5',   overall: '77.47%', singleTurn: '88.58', multiTurn: '73.76', agentic: '84.50', hallucination: '68.38', format: '79.79' },
+  { model: 'Claude Sonnet 4.5', overall: '73.24%', singleTurn: '88.65', multiTurn: '64.95', agentic: '81.00', hallucination: '61.37', format: '81.13' },
+  { model: 'GLM-4.6',           overall: '72.38%', singleTurn: '87.56', multiTurn: '55.70', agentic: '77.50', hallucination: '68.00', format: '80.90' },
+  { model: 'Claude Haiku 4.5',  overall: '68.70%', singleTurn: '86.50', multiTurn: '54.41', agentic: '83.50', hallucination: '53.62', format: '78.68' },
+  { model: 'Kimi K2',           overall: '59.06%', singleTurn: '77.89', multiTurn: '42.27', agentic: '66.50', hallucination: '53.68', format: '67.78' },
+  { model: 'DeepSeek V3.2',     overall: '56.73%', singleTurn: '73.56', multiTurn: '38.33', agentic: '66.50', hallucination: '45.57', format: '64.36' },
+  { model: 'Gemini 2.5 Flash',  overall: '56.24%', singleTurn: '76.16', multiTurn: '42.11', agentic: '58.00', hallucination: '42.12', format: '70.69' },
+  { model: 'GPT-5.2',           overall: '55.87%', singleTurn: '70.26', multiTurn: '42.19', agentic: '69.00', hallucination: '38.51', format: '71.63' },
+  { model: 'GPT-4.1',           overall: '53.96%', singleTurn: '70.72', multiTurn: '37.81', agentic: '60.50', hallucination: '42.26', format: '70.66' },
+  { model: 'Qwen3-235B',        overall: '52.15%', singleTurn: '69.81', multiTurn: '35.67', agentic: '55.00', hallucination: '44.12', format: '68.48' },
+  { model: 'Mistral Large',     overall: '38.37%', singleTurn: '84.65', multiTurn: '24.95', agentic: '28.00', hallucination: '14.12', format: '81.87' },
 ]
 
 export function categoryLevelClass(level: CategoryLevel): string {
@@ -307,6 +306,13 @@ export function categoryLevelLabel(level: CategoryLevel): string {
     case 'mid':  return '중간'
     case 'low':  return '낮음'
   }
+}
+
+export function scoreColor(score: string): string {
+  const v = parseFloat(score)
+  if (v >= 75) return 'text-[var(--color-status-ok)]'
+  if (v >= 50) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--bad-light)]'
 }
 
 // ── Function Calling Harness Case Study ──────────────────────────

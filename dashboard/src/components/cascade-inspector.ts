@@ -204,7 +204,7 @@ export function CascadeInspector() {
       <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5" aria-label="Cascade 검사기">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Cascade 검사기</div>
+            <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">Cascade 검사기</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">
               전략 추적 · 프로바이더 건강도
             </h3>

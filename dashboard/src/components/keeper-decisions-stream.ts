@@ -52,7 +52,7 @@ export function summarizeDecisionEvents(events: readonly KeeperDecision[]): Deci
 function MetricCell({ label, value }: { label: string; value: string | number }) {
   return html`
     <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
-      <div class="font-mono text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">${label}</div>
+      <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
       <div class="mt-1 font-mono text-lg font-semibold leading-none text-[var(--color-fg-primary)]">${value}</div>
     </div>
   `
@@ -81,7 +81,7 @@ export function KeeperDecisionsTable({
       </div>
 
       <div class="flex items-center justify-between rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
-        <span class="font-mono text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">
+        <span class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           keeper decisions · ${events.length} events · limit ${limit}
         </span>
       </div>
@@ -89,7 +89,7 @@ export function KeeperDecisionsTable({
       <div class="overflow-x-auto rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
         <table class="w-full min-w-[760px]" aria-label="Keeper decision events">
           <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">
+            <tr class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
               <th scope="col" class="px-2 py-1.5 text-left">event</th>

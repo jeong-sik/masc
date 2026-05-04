@@ -687,7 +687,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="border-t border-[var(--color-border-divider)] pt-5">
-      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
+      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[var(--track-sub)]">직접 통신</h3>
 
       ${isOffline ? html`
         <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">

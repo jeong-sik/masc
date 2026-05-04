@@ -49,7 +49,7 @@ import {
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
 const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
-const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
+const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
 const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
@@ -426,7 +426,7 @@ function GoalVerificationEvidencePanel({
               <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
-                  <span class="${DECK_CHIP} uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">${vote.decision}</span>
+                  <span class="${DECK_CHIP} uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${vote.decision}</span>
                   <span class="${DECK_META}"><${TimeAgo} timestamp=${vote.submitted_at} /></span>
                 </div>
                 ${vote.note ? html`
@@ -544,15 +544,15 @@ function TreeSummary({
       </div>
       <div class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.active_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-ok/80">정상</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-ok/80">정상</div>
       </div>
       <div class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-warn tabular-nums">${summary.at_risk_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-warn/80">위험</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-warn/80">위험</div>
       </div>
       <div class="rounded-[var(--r-0)] border border-bad/25 bg-bad/10 p-3 text-center">
         <div class="font-mono text-xl font-semibold text-bad tabular-nums">${summary.blocked_goals}</div>
-        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-bad/80">차단</div>
+        <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-bad/80">차단</div>
       </div>
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.pending_approvals}</div>
@@ -561,13 +561,13 @@ function TreeSummary({
       ${goalVerificationCount > 0 ? html`
         <div class="rounded-[var(--r-0)] border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] p-3 text-center">
           <div class="font-mono text-xl font-semibold text-[var(--color-warn-fg)] tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-warn-fg)]">Goal 검증 대기</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-warn-fg)]">Goal 검증 대기</div>
         </div>
       ` : null}
       ${awaitingVerificationCount > 0 ? html`
         <div class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] p-3 text-center">
           <div class="font-mono text-xl font-semibold text-[var(--color-accent-fg)] tabular-nums">${awaitingVerificationCount}</div>
-          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-accent-fg)]/80">Task 검증 대기</div>
+          <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]/80">Task 검증 대기</div>
         </div>
       ` : null}
       <div class="${CARD_BOX}">
@@ -580,7 +580,7 @@ function TreeSummary({
 
 function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
   return html`
-    <span class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${healthClass(health)}">
+    <span class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${healthClass(health)}">
       ${healthLabel(health)}
     </span>
   `
@@ -593,7 +593,7 @@ function GoalBadges({ badges }: { badges: string[] }) {
       ${badges.map(badge => html`
         <span
           key=${badge}
-          class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[0.08em] ${badgeClass(badge)}"
+          class="inline-flex items-center rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${badgeClass(badge)}"
         >
           ${badgeLabel(badge)}
         </span>
@@ -975,7 +975,7 @@ function GoalDetailPanel({
     <section class=${`${GOAL_PANEL} flex flex-col gap-4`} aria-label="목표 상세">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
-          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 상세</div>
+          <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 상세</div>
           <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <${HealthBadge} health=${selectedNode.health} />
@@ -1256,7 +1256,7 @@ export function GoalTree() {
       <section class=${GOAL_PANEL} aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 관리자</div>
+            <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 관리자</div>
             <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
               goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
@@ -1293,7 +1293,7 @@ export function GoalTree() {
 
         ${data && data.tree.length > 0 ? html`
           <div class="mb-4 flex flex-wrap items-center gap-2">
-            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 단계</span>
+            <span class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 단계</span>
             <${FilterChips}
               chips=${([
                 'all',

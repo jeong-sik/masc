@@ -14,7 +14,7 @@ import {
 } from '../lib/keeper-runtime-display'
 
 function SectionLabel({ children }: { children: unknown }) {
-  return html`<div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">${children}</div>`
+  return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
 }
 
 function KeeperModelChip({ keeper }: { keeper: Keeper }) {
@@ -351,7 +351,7 @@ export function KeeperDetailSection({
       aria-label=${title}
     >
       <div class="border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
-        <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--color-fg-muted)]">${eyebrow}</div>
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
         <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h3 class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>

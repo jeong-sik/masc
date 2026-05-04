@@ -8,8 +8,8 @@ type HeaderSize = 'xs' | 'sm' | 'md'
 
 const SIZE_CLASSES: Record<HeaderSize, string> = {
   xs: 'text-3xs font-semibold tracking-wider',
-  sm: 'text-2xs font-medium tracking-[0.06em]',
-  md: 'text-sm font-medium tracking-[0.06em]',
+  sm: 'text-2xs font-medium tracking-[var(--track-sub)]',
+  md: 'text-sm font-medium tracking-[var(--track-sub)]',
 }
 
 interface SectionHeaderProps {
@@ -29,7 +29,7 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return html`
     <div class="flex items-center justify-between gap-2 ${cx ?? ''}">
-      <h4 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[0.06em] text-[var(--color-fg-muted)]">${children}</h4>
+      <h4 class="m-0 ${SIZE_CLASSES[size]} uppercase tracking-[var(--track-sub)] text-[var(--color-fg-muted)]">${children}</h4>
       ${right ?? null}
     </div>
   `

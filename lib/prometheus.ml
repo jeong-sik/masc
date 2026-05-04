@@ -764,6 +764,8 @@ let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
 let metric_llm_provider_capability_drops =
   "masc_llm_provider_capability_drops_total"
+let metric_fallback_triggered =
+  "masc_fallback_triggered_total"
 
 (* Domain-specific counters not yet constant-ised. *)
 let metric_anti_rationalization_fallback =
@@ -1186,6 +1188,10 @@ let init () =
     Counter;
   add metric_llm_provider_capability_drops
     "Total OAS capability drops from LLM providers, labeled by model and field"
+    Counter;
+  add metric_fallback_triggered
+    "Total fallback events across the LLM cascade pipeline, labeled by kind \
+     (cross_cascade|cascade_empty|capability_drop|cli_unsupported|...) and detail"
     Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here

@@ -330,6 +330,17 @@ val metric_tool_call_duration : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
 val metric_llm_provider_capability_drops : string
+val metric_fallback_triggered : string
+(** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
+    fallback event across the cascade pipeline. Labels: [kind] enumerates
+    the fallback class (cross_cascade, cascade_empty, capability_drop,
+    cli_unsupported, …); [detail] carries the specific reason within
+    the kind (e.g. for cross_cascade: source provider; for cascade_empty:
+    rejection_reason_label). Detail counters
+    ([masc_cross_cascade_fallback_total],
+    [masc_llm_provider_capability_drops_total]) remain for per-class
+    drill-down; this counter exists so the "Zero Silent Failure"
+    dashboard panel has a single numerator across all classes. *)
 val metric_board_truncated_posts : string
 val metric_anti_rationalization_fallback : string
 val metric_anti_rationalization_excuse_pattern : string

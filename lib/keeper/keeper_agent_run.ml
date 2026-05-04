@@ -491,7 +491,7 @@ let run_turn
                    Prometheus.inc_counter
                      Prometheus.metric_keeper_thinking_persist_failures
                      ~labels:[("keeper", meta.name)]
-                     ())
+                     ());
               | Agent_sdk.Types.RedactedThinking _ ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
@@ -994,7 +994,7 @@ let run_turn
               Prometheus.inc_counter
                 Prometheus.metric_keeper_memory_write_failures
                 ~labels:[("keeper", meta.name)]
-                ())
+                ());
            (* Episodic memory: create an episode from [STATE] after
               Agent.run returns, then persist and emit activity through the
               post-run memory adapter. Collaboration learning (Hebbian

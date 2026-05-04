@@ -975,6 +975,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    errors (transient).  Logged so dashboard readers can
                    distinguish exhaustion from transient failure without
                    re-parsing Turn_finalizing reason fields. *)
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_oas_execution_errors
+                  ~labels:[("keeper", meta.name); ("phase", "terminal_non_exhaustion")]
+                  ();
                 Log.Keeper.warn
                   "%s: turn terminal (non-exhaustion error) — err=%s \
                    attempt=%d"
@@ -1264,6 +1268,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          | None -> "none")
                         attempt (EC.max_transient_retries ()) delay
                         (short_preview (Agent_sdk.Error.to_string err));
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_oas_execution_errors
+                        ~labels:[("keeper", meta.name); ("phase", "recoverable_cascade_transient")]
+                        ();
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation
                         ~attempt:(attempt + 1)
@@ -1596,6 +1604,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~committed_tools
                       ~error_detail:e_str
                   in
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_turn_error_after_tools
+                    ~labels:[("keeper", meta.name); ("reason", "ambiguous_partial")]
+                    ();
                   Log.Keeper.warn
                     "%s: ambiguous partial commit (tools=[%s], reason=%s); \
                      paused keeper and opened continue gate id=%s"
@@ -1796,6 +1808,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ();
           end;
           if count >= threshold && not cascade_auto_paused then begin
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_oas_execution_errors
+              ~labels:[("keeper", meta.name); ("phase", "persistent_escalation")]
+              ();
             Log.Keeper.error
               "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;

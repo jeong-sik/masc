@@ -89,15 +89,14 @@ let current_streak ~keeper_name =
     | None -> 0)
 
 let nudge_message_text ~streak =
-  Printf.sprintf
-    "ACTION REQUIRED — PASSIVE LOOP DETECTED: You have completed %d \
-     consecutive turns using only read-only or status tools without any \
-     execution or completion action. This violates the keeper turn \
-     contract. You MUST call an execution or completion tool this turn \
-     (e.g. keeper_task_done, keeper_task_claim, keeper_shell, \
-     keeper_board_post with a concrete update, or another write tool). \
-     Do not call read-only tools again without first taking an action."
-    streak
+  "ACTION REQUIRED — PASSIVE LOOP DETECTED: You have completed "
+  ^ string_of_int streak
+  ^ " consecutive turns using only read-only or status tools without any"
+  ^ " execution or completion action. This violates the keeper turn"
+  ^ " contract. You MUST call an execution or completion tool this turn"
+  ^ " (e.g. keeper_task_done, keeper_task_claim, keeper_shell,"
+  ^ " keeper_board_post with a concrete update, or another write tool)."
+  ^ " Do not call read-only tools again without first taking an action."
 
 let nudge_message ~keeper_name =
   with_lock (fun () ->

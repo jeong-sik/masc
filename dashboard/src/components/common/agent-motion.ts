@@ -19,7 +19,7 @@ export function normalizeAgentKey(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase()
 }
 
-export function toEpoch(value: string | number): number {
+function toEpoch(value: string | number): number {
   const parsed =
     typeof value === 'number'
       ? value
@@ -44,7 +44,7 @@ function keeperSignalTimestamp(keeper: Keeper): string | null {
     ?? timestampFromAgeSeconds(keeper.last_compaction_ago_s)
 }
 
-export function boardPreview(post: BoardPost): string {
+function boardPreview(post: BoardPost): string {
   const title = post.title.trim()
   if (title) return title
   return trimText(post.content)

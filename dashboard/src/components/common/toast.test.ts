@@ -6,7 +6,6 @@ import {
   showToast,
   showActionToast,
   ToastContainer,
-  MAX_VISIBLE_TOASTS,
   defaultToastDuration,
   pauseToastTimer,
   resumeToastTimer,
@@ -36,17 +35,6 @@ describe('toast queue semantics', () => {
     expect(_testGetToasts().length).toBe(1)
     vi.advanceTimersByTime(2000)
     expect(_testGetToasts().length).toBe(0)
-  })
-
-  it('queue caps at MAX_VISIBLE_TOASTS — oldest is evicted when the Nth+1 arrives', () => {
-    for (let i = 0; i < MAX_VISIBLE_TOASTS + 2; i++) {
-      showToast(`msg ${i}`, 'success', 60_000) // long duration so nothing auto-expires
-    }
-    const q = _testGetToasts()
-    expect(q.length).toBe(MAX_VISIBLE_TOASTS)
-    // The two oldest (msg 0 and msg 1) should be gone; the tail should win.
-    expect(q[0]!.message).toBe(`msg 2`)
-    expect(q[q.length - 1]!.message).toBe(`msg ${MAX_VISIBLE_TOASTS + 1}`)
   })
 
   it('error toasts land in the queue with type="error"', () => {

@@ -681,7 +681,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       meta.name (Printexc.to_string exn);
                     Prometheus.inc_counter
                       Prometheus.metric_keeper_event_bus_drain
-                      ~labels:[("keeper", meta.name); ("site", "turn_drain")]
+                      ~labels:[("site", "background_poll"); ("outcome", "exception")]
                       ();
                   (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
                      of events per tool cycle (ToolCalled / ToolResult /

@@ -22,7 +22,7 @@ export type GoalPhaseFilter =
   | 'dropped'
 
 const horizonFilter = signal<HorizonFilter>('all')
-export const phaseFilter = signal<GoalPhaseFilter>('all')
+const phaseFilter = signal<GoalPhaseFilter>('all')
 
 // -- Task-level search (case-insensitive, title + description + assignee) --
 
@@ -110,7 +110,7 @@ function isDoneTask(t: Task): boolean {
   return t.status === 'done'
 }
 
-export const goalProgressMap = computed<Map<string, GoalProgress>>(() => {
+const goalProgressMap = computed<Map<string, GoalProgress>>(() => {
   const map = new Map<string, GoalProgress>()
   for (const g of goals.value) {
     map.set(g.id, { done: 0, total: 0, ratio: 0 })

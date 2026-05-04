@@ -82,7 +82,7 @@ export function topologyNodeColor(kind: 'agent' | 'keeper' | 'task', status: str
  *   - agent → keeper when `agent.keeper_name` matches a known keeper.
  *   - task → agent when `task.assignee` matches a known agent name.
  */
-export function buildTopologyGraph(
+function buildTopologyGraph(
   agentList: readonly Agent[],
   taskList: readonly Task[],
   keeperList: readonly Keeper[],

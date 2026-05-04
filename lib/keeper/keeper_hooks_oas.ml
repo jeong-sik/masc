@@ -1007,18 +1007,19 @@ let make_hooks
       | Agent_sdk.Hooks.BeforeTurn _ ->
         let loop_alert = passive_loop_nudge () in
         let work_text = discover_work_nudge () in
-        let combined =
+        let combined_with_source =
           match loop_alert, work_text with
           | None, None -> None
-          | Some a, None -> Some a
-          | None, Some w -> Some w
-          | Some a, Some w -> Some (a ^ "\n\n" ^ w)
+          | Some a, None -> Some (a, "passive_loop_nudge")
+          | None, Some w -> Some (w, "work_discovery")
+          | Some a, Some w ->
+            Some (a ^ "\n\n" ^ w, "passive_loop_nudge + work_discovery")
         in
-        (match combined with
+        (match combined_with_source with
          | None -> Agent_sdk.Hooks.Continue
-         | Some text when String.trim text = "" ->
+         | Some (text, _) when String.trim text = "" ->
            Agent_sdk.Hooks.Continue
-         | Some text when not (String.is_valid_utf_8 text) ->
+         | Some (text, _) when not (String.is_valid_utf_8 text) ->
            (* Defensive: nudge path producers source strings from external
               input (task titles, operator guidance, board posts). A byte-
               level truncation upstream can leave an orphan UTF-8 continuation
@@ -1030,13 +1031,7 @@ let make_hooks
            Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
              (!meta_ref).name (String.length text);
            Agent_sdk.Hooks.Continue
-         | Some text ->
-           let source =
-             match loop_alert, work_text with
-             | Some _, Some _ -> "passive_loop_nudge + work_discovery"
-             | Some _, None -> "passive_loop_nudge"
-             | None, _ -> "work_discovery"
-           in
+         | Some (text, source) ->
            Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
              (!meta_ref).name source (String.length text);
            Agent_sdk.Hooks.Nudge text)

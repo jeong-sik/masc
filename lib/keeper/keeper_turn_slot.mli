@@ -31,6 +31,17 @@ val reactive_turn_semaphore_value_for_test : unit -> int
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit
 
+(** Test-only: drive the queue-head wait loop directly with an injected
+    [~started_at]. Exposed so a regression test can assert that a stale
+    [started_at] (e.g. one captured before a fairness cooldown) immediately
+    returns [Error `Semaphore_wait_timeout] — proving the parameter is the
+    timing knob whose freshness must be controlled at every call site. *)
+val wait_for_autonomous_queue_head_for_test :
+  keeper_name:string ->
+  ticket:int ->
+  started_at:float ->
+  (unit, [> `Semaphore_wait_timeout of float ]) result
+
 (** Pure computation: seconds keeper should yield before re-entering queue
     at time [now].  0.0 = no yield needed. *)
 val fairness_delay_sec_at : now:float -> keeper_name:string -> float

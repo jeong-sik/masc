@@ -479,7 +479,18 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           maybe_yield_for_fairness ~keeper_name;
           let ticket = enqueue_autonomous_waiter ~keeper_name in
           slot_state.autonomous_ticket := Some ticket;
-          match wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0 with
+          (* Reset the queue-head timeout clock to the moment we joined the
+             queue, NOT [t0] (slot-entry). Otherwise [maybe_yield_for_fairness]
+             above silently consumes the [semaphore_wait_timeout_sec] budget
+             before we even appear in the FIFO, producing the symptom
+             "skipping turn (semaphore wait > 60s, peers holding slot,
+             autonomous_available=N)" with N>0 because the slot is genuinely
+             free but we ran out of budget while sleeping in fairness yield. *)
+          let queue_entered_at = Time_compat.now () in
+          match
+            wait_for_autonomous_queue_head ~keeper_name ~ticket
+              ~started_at:queue_entered_at
+          with
           | Error _ as e -> e
           | Ok () ->
             match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
@@ -518,4 +529,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
   with_keeper_turn_slot ~keeper_name ~channel f
+;;
+
+let wait_for_autonomous_queue_head_for_test ~keeper_name ~ticket ~started_at =
+  wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at
 ;;

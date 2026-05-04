@@ -91,6 +91,7 @@
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
+        test_keeper_alerting_path
         test_keeper_allowed_paths
         test_keeper_repo_readiness
         test_keeper_tool_surface_guard
@@ -288,6 +289,7 @@
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor
+          test_keeper_alerting_path
           test_keeper_allowed_paths
           test_keeper_repo_readiness
           test_keeper_tool_surface_guard

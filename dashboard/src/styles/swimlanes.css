@@ -69,7 +69,7 @@
 }
 .sl-toggle input:checked::after {
   content: ""; position: absolute; inset: 1px;
-  background: var(--brass-1); border-radius: 1px;
+  background: var(--brass-1); border-radius: 1px; /* intentional: micro-radius on ~7px inset check mark */
 }
 
 .wf-scale-ctrl {
@@ -244,7 +244,7 @@
 .sl-spark-bar {
   flex: 1; min-width: 1px;
   background: var(--color-fg-muted);
-  border-radius: 1px 1px 0 0;
+  border-radius: 1px 1px 0 0; /* intentional: tiny top-rounded spark bar — --r-0 (2px) would visibly distort at this scale */
 }
 .sl-spark-bar.is-err { background: var(--err); }
 .sl-row.is-active .sl-spark-bar { background: var(--brass-2); }
@@ -305,7 +305,7 @@
   display: block; width: 100%; height: 100%;
   min-width: 3px;
   background: var(--color-fg-muted);
-  border-radius: 1px;
+  border-radius: 1px; /* intentional: small bar marker — --r-0 (2px) is too aggressive at 3px min-width */
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast);
 }
 
@@ -317,7 +317,7 @@
 .sl-glyph.k-claim .sl-glyph-mark {
   background: var(--ok);
   transform: rotate(45deg) scale(.75);
-  border-radius: 1px;
+  border-radius: 1px; /* intentional: rotated 5×5 diamond marker — --r-0 (2px) at this scale produces a circle, not a diamond */
   min-width: 5px;
   width: 5px; height: 5px;
   margin: auto;

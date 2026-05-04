@@ -95,7 +95,7 @@
   display: block;
   width: 2px; min-height: 1px;
   background: var(--color-fg-muted);
-  border-radius: 1px;
+  border-radius: 1px; /* intentional: 2px-wide spark bar — --r-0 (2px) equals full width and turns bar into a circle */
 }
 .spark.is-brass > i { background: var(--brass-2); }
 .spark.is-ok > i { background: var(--ok); }
@@ -187,7 +187,7 @@
 .band {
   height: 2px; width: 100%;
   background: var(--color-border-strong);
-  border-radius: 1px 1px 0 0;
+  border-radius: 1px 1px 0 0; /* intentional: micro top-radius on 2px strip — --r-0 (2px) equals strip height and over-rounds the top corners */
 }
 .band.is-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .5); }
 .band.is-ok      { background: var(--ok); }

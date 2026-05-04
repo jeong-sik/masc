@@ -1115,7 +1115,7 @@ let handle_keeper_shell
                    control syntax."
               ])
       | Ok parsed_cmd ->
-        let allowed_orgs = Keeper_tool_policy.git_clone_allowed_orgs () in
+        let allowed_orgs_opt = Keeper_tool_policy.git_clone_allowed_orgs () in
         let canonical_cmd_str =
           Keeper_gh_shared.gh_simple_command_argv parsed_cmd
           |> String.concat " "
@@ -1260,22 +1260,50 @@ let handle_keeper_shell
              ; "hint", `String hint ]
          | R0_Read | R1_Reversible ->
            begin
-             match
-               Worker_dev_tools.validate_gh_command
-                 ~allowed_orgs canonical_cmd_str
-             with
-             | Error reason ->
+             match allowed_orgs_opt with
+             | None ->
+               (* Fail-closed: policy config not loaded; cannot validate org
+                  restrictions.  Reject rather than silently skipping the check.
+                  This guards against the fail-open footgun where None → []
+                  was previously treated as "any org allowed". *)
+               Log.Keeper.warn
+                 "keeper_shell op=gh: tool_policy.toml not loaded (policy_not_loaded), \
+                  rejecting gh command (keeper=%s cmd=%s)"
+                 meta.name canonical_cmd_str;
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_shell_ops_failures
+                 ~labels:[("keeper", meta.name)]
+                 ();
                Yojson.Safe.to_string
                  (`Assoc
                      [ "ok", `Bool false
                      ; "op", `String op
-                     ; "error", `String "gh_command_blocked"
-                     ; "reason", `String reason
+                     ; "error", `String "policy_not_loaded"
+                     ; "reason", `String
+                         "tool_policy.toml not loaded; gh org restrictions \
+                          cannot be validated"
                      ; "hint", `String
-                         "Run `gh --help` shapes: pr/issue/repo/release/\
-                         label/run/workflow/api/project/ruleset/search/\
-                          status/cache/gist. auth/secret/ssh-key are blocked."
+                         "The server tool-policy config has not been loaded. \
+                          Restart the server and ensure config/tool_policy.toml \
+                          is present and valid."
                      ])
+             | Some allowed_orgs ->
+               match
+                 Worker_dev_tools.validate_gh_command
+                   ~allowed_orgs canonical_cmd_str
+               with
+               | Error reason ->
+                 Yojson.Safe.to_string
+                   (`Assoc
+                       [ "ok", `Bool false
+                       ; "op", `String op
+                       ; "error", `String "gh_command_blocked"
+                       ; "reason", `String reason
+                       ; "hint", `String
+                           "Run `gh --help` shapes: pr/issue/repo/release/\
+                           label/run/workflow/api/project/ruleset/search/\
+                            status/cache/gist. auth/secret/ssh-key are blocked."
+                       ])
              | Ok () ->
                (match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
                 | Error e -> error_json e

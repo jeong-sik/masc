@@ -380,8 +380,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
-            ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
-            ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
+            ~allowed_orgs:(Option.value (Keeper_tool_policy.git_clone_allowed_orgs ()) ~default:[])
+            ~denied_repos:(Option.value (Keeper_tool_policy.git_clone_denied_repos ()) ~default:[])
             ~active_goals
             ()
       in

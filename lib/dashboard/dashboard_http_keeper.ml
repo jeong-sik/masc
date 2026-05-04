@@ -1423,8 +1423,8 @@ let keeper_config_json (config : Coord.config) (name : string)
           ~long_goal:m.long_goal ~will:m.will
           ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
           ~persona_extended ~keeper_name:m.name
-          ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
-          ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
+          ~allowed_orgs:(Option.value (Keeper_tool_policy.git_clone_allowed_orgs ()) ~default:[])
+          ~denied_repos:(Option.value (Keeper_tool_policy.git_clone_denied_repos ()) ~default:[])
           ~active_goals
           ()
       in

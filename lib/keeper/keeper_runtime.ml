@@ -806,7 +806,9 @@ let start_supervisor_sweep ctx =
       Prometheus.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
-    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
+    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec;
+    (* RFC-0026 Phase 1: fork liveness scanner alongside supervisor sweep *)
+    Keeper_supervisor.fork_liveness_scanner ctx ~interval_sec:sweep_sec
   end
 
 (** #10125: supervisor sweep age helper.  Returns the wall-clock

@@ -418,6 +418,7 @@ val metric_keeper_stale_watchdog_tick_failures : string
     Labels: [site, outcome]. [outcome] is [drained] (events were
     pulled) or [empty] (subscriber returned no pending events). *)
 val metric_keeper_event_bus_drain : string
+val metric_keeper_terminal_detected_total : string
 val metric_keeper_dead_total : string
 (** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:

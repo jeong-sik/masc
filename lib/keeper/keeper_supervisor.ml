@@ -1307,3 +1307,60 @@ let sweep_and_recover (ctx : _ context) =
            | _ -> ());
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx
+
+(* --- Liveness Scanner (RFC-0026 Phase 1) --- *)
+
+let scan_terminal_keepers (ctx : _ context) =
+  let now = Time_compat.now () in
+  let base_path = ctx.config.base_path in
+  let entries = Keeper_registry.all ~base_path () in
+  List.iter (fun (entry : Keeper_registry.registry_entry) ->
+    match entry.phase with
+    | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
+        let duration_s =
+          match entry.dead_since_ts with
+          | Some ts -> now -. ts
+          | None -> 0.0
+        in
+        let reason_str =
+          Option.map Keeper_registry.failure_reason_to_string
+            entry.last_failure_reason
+          |> Option.value ~default:"unknown"
+        in
+        let phase_str =
+          Keeper_state_machine.phase_to_string entry.phase
+        in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_terminal_detected_total
+          ~labels:[
+            ("keeper", entry.name);
+            ("phase", phase_str);
+            ("reason", reason_str);
+          ]
+          ();
+        Log.Keeper.warn
+          "liveness_scanner: terminal keeper detected \
+           name=%s phase=%s dead_since=%.0f duration_s=%.0f \
+           failure_reason=%s restart_count=%d"
+          entry.name phase_str
+          (Option.value ~default:0.0 entry.dead_since_ts)
+          duration_s reason_str entry.restart_count
+    | _ -> ()
+  ) entries
+
+let fork_liveness_scanner (ctx : _ context) ~interval_sec =
+  let module KSM = Keeper_state_machine in
+  Log.Keeper.info
+    "liveness_scanner: starting periodic scan interval=%.0fs"
+    interval_sec;
+  Eio.Fiber.fork_daemon ~sw:ctx.sw (fun () ->
+    let rec loop () =
+      Eio_unix.sleep interval_sec;
+      (try scan_terminal_keepers ctx
+       with exn ->
+         Log.Keeper.warn
+           "liveness_scanner: scan error: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ())

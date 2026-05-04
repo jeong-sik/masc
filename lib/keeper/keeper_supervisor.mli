@@ -73,3 +73,13 @@ val apply_self_preservation :
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Returns the filtered list of entries that should proceed with restart. *)
+
+(** {1 Liveness Scanner (RFC-0026)} *)
+
+val fork_liveness_scanner : 'a context -> interval_sec:float -> unit
+(** Fork a daemon fiber that periodically scans [Keeper_registry] for
+    terminal-state (Dead/Zombie) keepers. Emits structured log entries and
+    increments [metric_keeper_terminal_detected_total] Prometheus counter.
+    Does NOT perform recovery (Phase 2).
+
+    @since 2.113.0 *)

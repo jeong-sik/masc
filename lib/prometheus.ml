@@ -801,6 +801,8 @@ let metric_keeper_supervisor_cleanup_failures =
   "masc_keeper_supervisor_cleanup_failures_total"
 let metric_keeper_stale_watchdog_tick_failures =
   "masc_keeper_stale_watchdog_tick_failures_total"
+let metric_keeper_terminal_detected_total =
+  "masc_keeper_terminal_detected_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
 (* Self-healing circuit breaker: incremented each time [sweep_and_recover]
    auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
@@ -1186,6 +1188,12 @@ let init () =
     "Total keeper turns that tolerated unexpected tool names because at least \
      one valid keeper tool call was present. Labeled by keeper_name and \
      logged=true|false so WARN suppression remains observable."
+    Counter;
+  add metric_keeper_terminal_detected_total
+    "Terminal-state keeper detections by the liveness scanner. Incremented \
+     each scan tick per Dead/Zombie keeper. Labeled by keeper, phase, reason. \
+     A sustained rate >0 with no corresponding auto_resumed_total means the \
+     recovery pipeline is not engaged."
     Counter;
   add metric_keeper_dead_total
     "Total keeper transitions to Dead phase after the supervisor exhausts \

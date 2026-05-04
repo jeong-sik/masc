@@ -734,8 +734,6 @@ val metric_keeper_post_turn_wirein_failures : string
 val metric_keeper_recurring_failures : string
 val metric_keeper_turn_cleanup_failures : string
 
-(** Cumulative words promoted from minor to major heap since program start. *)
-
 (** {1 Process monitoring} *)
 
 val approximate_open_fd_count : unit -> int

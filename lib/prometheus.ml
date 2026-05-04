@@ -1320,7 +1320,7 @@ let init () =
     "Total keeper failure circuit breaker trips, labeled by keeper and failure_type"
     Counter;
   add metric_keeper_prompt_failures
-    "Total keeper prompt render failures, labeled by keeper"
+    "Total keeper prompt render failures, labeled by prompt name"
     Counter;
   add metric_keeper_run_context_failures
     "Total keeper run context failures (checkpoint save), labeled by keeper"
@@ -1341,7 +1341,9 @@ let init () =
     "Total keeper execution receipt failures (unmapped/emit failed/stale broadcast), labeled by keeper and site"
     Counter;
   add metric_keeper_llm_bridge_failures
-    "Total keeper LLM bridge failures (timeout/cancelled/error), labeled by keeper and site"
+    "Total keeper LLM bridge failures (timeout/cancelled/error), labeled by site. \
+     The bridge is a generic timeout helper that does not receive keeper context; \
+     keeper attribution is recovered from the surrounding Log.Keeper line."
     Counter;
   add metric_keeper_shell_bash_failures
     "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by keeper and site"
@@ -1350,7 +1352,7 @@ let init () =
     "Total keeper rollover failures (lineage append, checkpoint save, invalid trace ID), labeled by keeper and site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
-    "Total post-turn lifecycle dispatch rejections, labeled by event"
+    "Total post-turn lifecycle dispatch rejections, labeled by keeper and event"
     Counter;
   add metric_keeper_paused_state_persist_errors
     "Total keeper paused-state persistence failures, labeled by phase \

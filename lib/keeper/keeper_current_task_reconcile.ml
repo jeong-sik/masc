@@ -11,6 +11,10 @@ let resolved_agent_names ~(config : Coord.config) ~(agent_name : string) =
     with
     | Sys_error _ | Yojson.Json_error _ -> agent_name
     | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_reconcile_failures
+        ~labels:[("keeper", agent_name); ("phase", "resolve_agent")]
+        ();
       Log.Keeper.warn
         "resolve_agent_name failed while reconciling current task for %s: %s"
         agent_name (Printexc.to_string exn);
@@ -22,6 +26,10 @@ let task_id_of_owned_active_task ~(keeper_name : string) (task : Types.task) =
   match Keeper_id.Task_id.of_string task.id with
   | Ok task_id -> Some task_id
   | Error msg ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_reconcile_failures
+      ~labels:[("keeper", keeper_name); ("phase", "task_id_parse")]
+      ();
     Log.Keeper.warn
       "keeper:%s owned task %s could not be parsed: %s"
       keeper_name task.id msg;
@@ -52,6 +60,10 @@ let owned_active_task_ids_for_meta ~(config : Coord.config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_reconcile_failures
+      ~labels:[("keeper", meta.name); ("phase", "owned_tasks_query")]
+      ();
     Log.Keeper.warn
       "keeper:%s owned task reconciliation failed: %s"
       meta.name (Printexc.to_string exn);

@@ -736,6 +736,10 @@ let start_supervisor_sweep ctx =
         let on_beat _beat =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "keeper_runtime")]
+               ();
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
           (* TOML hot-reload: re-sync declarative fields for running keepers.
@@ -759,6 +763,10 @@ let start_supervisor_sweep ctx =
                          entry.name e)
               | _ -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_toml_reconcile_sweep_failures
+               ~labels:[("origin", "keeper_runtime")]
+               ();
              Log.Keeper.error "TOML reconcile sweep failed: %s"
                (Printexc.to_string exn));
           (* #10125: advance the supervisor liveness gauge after a

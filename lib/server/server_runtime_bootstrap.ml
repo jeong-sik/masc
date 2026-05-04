@@ -29,28 +29,6 @@ let force_jsonl_fallback_env () =
   close_out oc;
   Unix.putenv "OAS_GEMINI_ADMIN_POLICY" policy_path
 
-let () =
-  Prometheus.register_counter
-    ~name:"masc_egress_audit_missing_total"
-    ~help:
-      "Boot-time egress policy audit (PR-Eg2b/Leak 11): keeper has no \
-       egress.json at the expected docker-path or local-path location, \
-       so the keeper would fail-closed on every URL command. Labels: \
-       keeper. A non-zero rate at boot indicates an operator should \
-       seed the policy file before the keeper attempts network egress."
-    ()
-
-let () =
-  Prometheus.register_counter
-    ~name:"masc_egress_audit_stale_orphan_total"
-    ~help:
-      "Boot-time egress policy audit (PR-Eg2b/Leak 11): keeper has an \
-       egress.json at a host-direct legacy location but none at the \
-       expected docker-path location. Code reads only the expected \
-       path, so the orphan file is silently inert and the keeper \
-       fail-closes. Labels: keeper. Operator should cp the orphan into \
-       the docker-path location and remove the host-direct file."
-    ()
 
 let () =
   Prometheus.register_counter
@@ -613,12 +591,12 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
       oks;
     List.iter (fun r ->
       Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
-      Prometheus.inc_counter "masc_egress_audit_missing_total"
+      Prometheus.inc_counter Prometheus.metric_egress_audit_missing
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       missings;
     List.iter (fun r ->
       Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
-      Prometheus.inc_counter "masc_egress_audit_stale_orphan_total"
+      Prometheus.inc_counter Prometheus.metric_egress_audit_stale_orphan
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       orphans;
     Log.Misc.info

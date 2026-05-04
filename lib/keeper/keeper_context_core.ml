@@ -711,6 +711,10 @@ let migrate_session_history_logs
       (match Fs_compat.save_file_atomic main_path (render_jsonl_lines kept_lines) with
        | Ok () -> ()
        | Error detail ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_checkpoint_failures
+             ~labels:[("operation", "migrate_main_history")]
+             ();
            Log.Keeper.error "migrate_session_history_logs: save main history failed for %s: %s"
              main_path detail);
       (match
@@ -719,6 +723,10 @@ let migrate_session_history_logs
        with
        | Ok () -> ()
        | Error detail ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_checkpoint_failures
+             ~labels:[("operation", "migrate_internal_history")]
+             ();
            Log.Keeper.error "migrate_session_history_logs: save internal history failed for %s: %s"
              internal_path detail);
       {
@@ -1275,6 +1283,10 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   let legacy_checkpoint =
     try load_latest_checkpoint session
     with ex ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_checkpoint_failures
+        ~labels:[("operation", "load_legacy")]
+        ();
       Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
         (Printexc.to_string ex);
       None
@@ -1335,6 +1347,10 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          in
          (session, Some ctx)
        with ex ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_checkpoint_failures
+           ~labels:[("operation", "restore_legacy")]
+           ();
          Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
            trace_id (Printexc.to_string ex);
          (session, None))

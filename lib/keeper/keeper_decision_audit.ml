@@ -203,7 +203,12 @@ let flush_if_needed ~base_path ~keeper_name =
           Fs_compat.append_file dir flush_lines;
           ring.unflushed <- 0
         with Eio.Cancel.Cancelled _ as e -> raise e
-           | e -> Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
+           | e ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_decision_audit_flush_failures
+               ~labels:[("keeper", keeper_name)]
+               ();
+             Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
         ring.last_flush_ts <- now
       end
 

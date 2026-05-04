@@ -196,6 +196,45 @@ val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
+val metric_keeper_task_load_failures : string
+val metric_keeper_tool_selection_failures : string
+val metric_keeper_reconcile_failures : string
+val metric_keeper_decision_audit_flush_failures : string
+val metric_keeper_oas_cancel : string
+val metric_keeper_claim_auto_provision : string
+val metric_egress_audit_missing : string
+val metric_egress_audit_stale_orphan : string
+val metric_keeper_toml_invalid : string
+val metric_keeper_persona_drift_missing : string
+val metric_keeper_room_init_failures : string
+val metric_keeper_presence_sync_failures : string
+val metric_keeper_self_preservation_universal : string
+val metric_keeper_stale_storm_paused : string
+val metric_keeper_oas_timeout_budget_loop_paused : string
+val metric_keeper_cycle_exceptions : string
+val metric_keeper_snapshot_write_failures : string
+val metric_keeper_sse_broadcast_failures : string
+val metric_keeper_room_heartbeat_failures : string
+val metric_keeper_turn_metrics_snapshot_failures : string
+val metric_keeper_oas_execution_errors : string
+val metric_keeper_episode_create_failures : string
+val metric_keeper_supervisor_sweep_failures : string
+val metric_keeper_toml_reconcile_sweep_failures : string
+val metric_keeper_tool_usage_flush_failures : string
+val metric_keeper_turn_livelock_blocks : string
+val metric_keeper_turn_timeout_committed : string
+val metric_keeper_turn_error_after_tools : string
+val metric_keeper_cascade_sync_failures : string
+val metric_keeper_thinking_persist_failures : string
+val metric_keeper_checkpoint_failures : string
+val metric_keeper_memory_write_failures : string
+val metric_keeper_write_meta_cycle_failures : string
+val metric_keeper_alert_persist_failures : string
+val metric_keeper_metrics_sse_failures : string
+val metric_keeper_dispatch_event_failures : string
+val metric_keeper_session_cleanup_failures : string
+val metric_keeper_chat_store_failures : string
+val metric_keeper_observation_query_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string
@@ -640,6 +679,12 @@ val metric_gc_compactions : string
 (** Number of major-heap compactions since program start. *)
 
 val metric_gc_promoted_words : string
+val metric_keeper_stale_termination_total : string
+val metric_keeper_stale_termination_by_class : string
+val metric_keeper_oas_timeout_budget_watchdog_termination : string
+val metric_keeper_stale_termination_threshold_breached : string
+val metric_keeper_stale_termination_batch : string
+val metric_keeper_stale_broadcast_emit_failures : string
 (** Cumulative words promoted from minor to major heap since program start. *)
 
 (** {1 Process monitoring} *)

@@ -131,6 +131,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
          (Keeper_state_machine.transition_error_to_string err));
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_supervisor_cleanup_failures
+    ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
+  ();
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -187,6 +191,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "fiber_terminated")]
+                    ();
                   Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              if resolve_done (`Crashed reason) then
@@ -198,12 +206,20 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 Keeper_state_machine.Stop_requested with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "stop_requested")]
+                    ();
                   Log.Keeper.warn "supervisor: Stop_requested dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              (match Keeper_registry.dispatch_event ~base_path meta.name
                 Keeper_state_machine.Drain_complete with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "drain_complete")]
+                    ();
                   Log.Keeper.warn "supervisor: Drain_complete dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              if resolve_done `Stopped then
@@ -234,6 +250,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "fiber_terminated")]
+                    ();
                   Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              let ts = Time_compat.now () in
@@ -330,6 +350,10 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   with
   | Ok _ -> ()
   | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_persona_drift_missing
+        ~labels:[("keeper", meta.name)]
+        ();
       Log.Keeper.error
         "[#10993][persona_drift] keeper=%s resolved=%s persona file missing at %s \
          — runtime falls through to logging-only RFC P3-a path; \
@@ -357,6 +381,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
        if not (Coord_utils.is_initialized ctx.config) then
          let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in ()
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_room_init_failures
+         ~labels:[("keeper", meta.name)]
+         ();
        Log.Keeper.error "supervisor room init failed: %s"
          (Printexc.to_string exn));
     let live_meta =
@@ -374,6 +402,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
              meta.name msg);
         synced
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_presence_sync_failures
+          ~labels:[("keeper", meta.name)]
+          ();
         Log.Keeper.error "supervisor presence sync failed: %s"
           (Printexc.to_string exn);
         meta
@@ -501,7 +533,11 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
         | Agent_sdk.Hooks.Reject reason ->
             Log.Keeper.warn
               "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
-              meta.name reason)
+              meta.name reason;
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_supervisor_cleanup_failures
+              ~labels:[("keeper", meta.name); ("site", "reconcile_gate_rejected")]
+              ())
       ()
   in
   Log.Keeper.warn
@@ -555,6 +591,10 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          | Ok (Some _meta) -> () (* paused, skip *)
          | Ok None -> ()
          | Error err ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_observation_query_failures
+               ~labels:[("operation", "reconcile_read_meta")]
+               ();
              Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err)
     names;
   Log.Keeper.debug "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
@@ -612,7 +652,11 @@ let cleanup_dead_tombstone (ctx : _ context)
           ~event:(Keeper_lifecycle_events.Custom_event
                     { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
           entry.name "meta write failed, unregistered anyway" ();
-        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
+        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name;
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_supervisor_cleanup_failures
+          ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_write")]
+          ()
       end
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
@@ -621,7 +665,11 @@ let cleanup_dead_tombstone (ctx : _ context)
         ~event:(Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
         entry.name "meta missing" ();
-      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_supervisor_cleanup_failures
+        ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_missing")]
+        ()
   | Error err ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
@@ -631,7 +679,11 @@ let cleanup_dead_tombstone (ctx : _ context)
         entry.name
         (Printf.sprintf "meta read error: %s" err) ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
-        entry.name err
+        entry.name err;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_supervisor_cleanup_failures
+        ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_error")]
+        ()
 
 (** Cohort key from structured failure_reason ADT.
     #10584: delegates to [Keeper_registry.failure_reason_cohort_key] so a
@@ -757,7 +809,11 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
               breaker working as designed = WARN.  Both lines carry
               [streak=N] so dashboards can show how close the next
               probe valve is. *)
-           if ratio >= 0.99 then
+           if ratio >= 0.99 then begin
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_self_preservation_universal
+               ~labels:[("cohort", dominant_key)]
+               ();
              Log.Keeper.error
                "self-preservation: UNIVERSAL suppression %d/%d \
                 (ratio=%.2f, cohort=%s, streak=%d) — auto-recovery is \
@@ -769,6 +825,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
                suppressed_count n_total ratio dominant_key
                sp_escape_state.consecutive_suppressions
                probe_after_n_suppressions
+           end
            else
              Log.Keeper.warn
                "self-preservation: suppressing %d/%d restarts \
@@ -872,11 +929,19 @@ let handle_crash_auto_pause (ctx : _ context)
    | Ok None ->
        Log.Keeper.warn
          "%s: %s pause: meta missing, cannot persist paused=true"
-         entry.name reason_tag
+         entry.name reason_tag;
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", entry.name); ("phase", "pause_meta_missing")]
+         ()
    | Error err ->
        Log.Keeper.warn
          "%s: %s pause read_meta failed: %s"
-         entry.name reason_tag err);
+         entry.name reason_tag err;
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", entry.name); ("phase", "pause_read_meta")]
+         ());
   Prometheus.inc_counter
     metric_name
     ~labels:[ ("keeper", entry.name) ]
@@ -891,7 +956,7 @@ let handle_stale_storm_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~count =
   handle_crash_auto_pause ctx entry
     ~reason_tag:"stale_storm"
-    ~metric_name:"masc_keeper_stale_storm_paused_total"
+    ~metric_name:Prometheus.metric_keeper_stale_storm_paused
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
     ~blocker_class:(Some Turn_timeout)
     ~log_message:
@@ -907,7 +972,7 @@ let handle_oas_timeout_budget_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~count =
   handle_crash_auto_pause ctx entry
     ~reason_tag:"oas_timeout_budget_loop"
-    ~metric_name:"masc_keeper_oas_timeout_budget_loop_paused_total"
+    ~metric_name:Prometheus.metric_keeper_oas_timeout_budget_loop_paused
     ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
     ~blocker_class:(Some Oas_timeout_budget)
     ~log_message:
@@ -981,6 +1046,10 @@ let sweep_and_recover (ctx : _ context) =
     Log.Keeper.warn
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name msg;
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_supervisor_cleanup_failures
+      ~labels:[("keeper", entry.name); ("site", "force_watchdog_crash")]
+      ();
     if Keeper_registry.try_resolve_done entry (`Crashed msg) then begin
       ignore
         (Keeper_registry.dispatch_event_and_log
@@ -1159,7 +1228,11 @@ let sweep_and_recover (ctx : _ context) =
                   Log.Keeper.info "%s: stale paused meta pruned" name
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"
-                    name (Printexc.to_string exn))
+                    name (Printexc.to_string exn);
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_supervisor_cleanup_failures
+                    ~labels:[("keeper", name); ("site", "paused_meta_prune")]
+                    ())
            | _ -> ());
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause

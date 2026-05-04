@@ -487,7 +487,11 @@ let run_turn
                    Log.Keeper.error
                      "keeper:%s thinking persist failed: %s"
                      meta.name
-                     (Printexc.to_string exn))
+                     (Printexc.to_string exn));
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_thinking_persist_failures
+                     ~labels:[("keeper", meta.name)]
+                     ()
               | Agent_sdk.Types.RedactedThinking _ ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
@@ -510,7 +514,11 @@ let run_turn
                    Log.Keeper.error
                      "keeper:%s redacted thinking persist failed: %s"
                      meta.name
-                     (Printexc.to_string exn))
+                     (Printexc.to_string exn));
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_thinking_persist_failures
+                     ~labels:[("keeper", meta.name)]
+                     ()
               | _ -> ())
             result.response.content
         | None -> ());
@@ -866,6 +874,10 @@ let run_turn
                   Log.Keeper.error
                     "keeper:%s cascade=%s OAS checkpoint save failed: %s"
                     meta.name meta.cascade_name e;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_checkpoint_failures
+                    ~labels:[("keeper", meta.name); ("site", "save")]
+                    ();
                   Error
                     (checkpoint_persistence_error
                        ~keeper_name:meta.name
@@ -874,6 +886,10 @@ let run_turn
                Log.Keeper.error
                  "keeper:%s cascade=%s missing OAS checkpoint after run"
                  meta.name meta.cascade_name;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_checkpoint_failures
+                   ~labels:[("keeper", meta.name); ("site", "missing")]
+                   ();
                Error
                  (checkpoint_persistence_error
                     ~keeper_name:meta.name
@@ -975,6 +991,10 @@ let run_turn
                 "keeper:%s memory_write failed: %s"
                 meta.name
                 (Printexc.to_string exn));
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_memory_write_failures
+                ~labels:[("keeper", meta.name)]
+                ();
            (* Episodic memory: create an episode from [STATE] after
               Agent.run returns, then persist and emit activity through the
               post-run memory adapter. Collaboration learning (Hebbian

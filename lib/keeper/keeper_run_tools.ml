@@ -452,6 +452,10 @@ let prepare_agent_setup
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_task_load_failures
+            ~labels:[("keeper", meta.name); ("phase", "task_contract_load")]
+            ();
           Log.Keeper.warn
             "keeper:%s failed to load current task contract for %s: %s"
             meta.name
@@ -569,6 +573,10 @@ let prepare_agent_setup
                   ()
               with
               | Error detail ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_tool_selection_failures
+                    ~labels:[("keeper", meta.name); ("phase", "cascade_resolve")]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s TopK_llm: strict cascade resolution failed for '%s' (%s), falling back to core+prefilter+discovered"
                     meta.name
@@ -578,6 +586,10 @@ let prepare_agent_setup
               | Ok providers ->
                   (match Cascade_config.filter_healthy_strict ~sw ~net providers with
                    | Error rejection ->
+                       Prometheus.inc_counter
+                         Prometheus.metric_keeper_tool_selection_failures
+                         ~labels:[("keeper", meta.name); ("phase", "cascade_health")]
+                         ();
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: strict health filter rejected cascade '%s' (%s), falling back to core+prefilter+discovered"
                          meta.name
@@ -585,6 +597,10 @@ let prepare_agent_setup
                          (Cascade_config.health_filter_rejection_to_string rejection);
                        []
                    | Ok [] ->
+                       Prometheus.inc_counter
+                         Prometheus.metric_keeper_tool_selection_failures
+                         ~labels:[("keeper", meta.name); ("phase", "cascade_no_provider")]
+                         ();
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: no healthy provider for cascade '%s', falling back to core+prefilter+discovered"
                          meta.name
@@ -629,12 +645,20 @@ let prepare_agent_setup
                         with
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
+                            Prometheus.inc_counter
+                              Prometheus.metric_keeper_tool_selection_failures
+                              ~labels:[("keeper", meta.name); ("phase", "topk_llm")]
+                              ();
                             Log.Keeper.warn
                               "keeper:%s TopK_llm failed (%s), falling back to core+prefilter+discovered"
                               meta.name
                               (Printexc.to_string exn);
                             [])))
          | _ ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_tool_selection_failures
+             ~labels:[("keeper", meta.name); ("phase", "topk_llm_no_eio")]
+             ();
            Log.Keeper.warn
              "keeper:%s TopK_llm: Eio context unavailable, falling back to core+prefilter+discovered"
              meta.name;

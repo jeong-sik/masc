@@ -172,6 +172,10 @@ let sync_keeper_presence
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       incr consecutive_failures;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_room_heartbeat_failures
+        ~labels:[("keeper", meta_current.name)]
+        ();
       Log.Keeper.error
         "room heartbeat failed (%d/%d): %s"
         !consecutive_failures
@@ -265,6 +269,10 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_sse_broadcast_failures
+             ~labels:[("keeper", meta.name)]
+             ();
            Log.Keeper.error "in-turn heartbeat SSE broadcast failed: %s"
              (Printexc.to_string exn))
   | _ -> ()
@@ -694,6 +702,10 @@ let run_keepalive_unified_turn
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_cycle_exceptions
+        ~labels:[("keeper", meta_after_triage.name)]
+        ();
       Log.Keeper.error "%s: keeper cycle exception: %s"
         meta_after_triage.name (Printexc.to_string exn);
       meta_after_triage)
@@ -906,6 +918,10 @@ let maybe_write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_snapshot_write_failures
+         ~labels:[("keeper", meta_current.name)]
+         ();
        Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));
     last_snapshot_ts := now_ts)
 ;;

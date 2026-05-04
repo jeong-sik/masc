@@ -507,6 +507,84 @@ let metric_keeper_proactive_outcome =
    Labelled by [keeper] and [cascade]. *)
 let metric_keeper_ollama_saturation_skip =
   "masc_keeper_ollama_saturation_skip_total"
+(* Tool-setup and task-load failures during keeper tool surface assembly.
+   task_load: Coord.get_tasks_raw exception while loading current task contract.
+   tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
+let metric_keeper_task_load_failures =
+  "masc_keeper_task_load_failures_total"
+let metric_keeper_tool_selection_failures =
+  "masc_keeper_tool_selection_failures_total"
+let metric_keeper_reconcile_failures =
+  "masc_keeper_reconcile_failures_total"
+let metric_keeper_decision_audit_flush_failures =
+  "masc_keeper_decision_audit_flush_failures_total"
+let metric_keeper_oas_cancel =
+  "masc_keeper_oas_cancel_total"
+let metric_keeper_claim_auto_provision =
+  "masc_keeper_claim_auto_provision_total"
+let metric_egress_audit_missing =
+  "masc_egress_audit_missing_total"
+let metric_egress_audit_stale_orphan =
+  "masc_egress_audit_stale_orphan_total"
+let metric_keeper_toml_invalid =
+  "masc_keeper_toml_invalid_total"
+let metric_keeper_persona_drift_missing =
+  "masc_keeper_persona_drift_missing_total"
+let metric_keeper_room_init_failures =
+  "masc_keeper_room_init_failures_total"
+let metric_keeper_presence_sync_failures =
+  "masc_keeper_presence_sync_failures_total"
+let metric_keeper_self_preservation_universal =
+  "masc_keeper_self_preservation_universal_total"
+let metric_keeper_stale_storm_paused =
+  "masc_keeper_stale_storm_paused_total"
+let metric_keeper_oas_timeout_budget_loop_paused =
+  "masc_keeper_oas_timeout_budget_loop_paused_total"
+let metric_keeper_cycle_exceptions =
+  "masc_keeper_cycle_exceptions_total"
+let metric_keeper_snapshot_write_failures =
+  "masc_keeper_snapshot_write_failures_total"
+let metric_keeper_sse_broadcast_failures =
+  "masc_keeper_sse_broadcast_failures_total"
+let metric_keeper_room_heartbeat_failures =
+  "masc_keeper_room_heartbeat_failures_total"
+let metric_keeper_turn_metrics_snapshot_failures =
+  "masc_keeper_turn_metrics_snapshot_failures_total"
+let metric_keeper_oas_execution_errors =
+  "masc_keeper_oas_execution_errors_total"
+let metric_keeper_episode_create_failures =
+  "masc_keeper_episode_create_failures_total"
+let metric_keeper_supervisor_sweep_failures =
+  "masc_keeper_supervisor_sweep_failures_total"
+let metric_keeper_toml_reconcile_sweep_failures =
+  "masc_keeper_toml_reconcile_sweep_failures_total"
+let metric_keeper_tool_usage_flush_failures =
+  "masc_keeper_tool_usage_flush_failures_total"
+let metric_keeper_turn_livelock_blocks =
+  "masc_keeper_turn_livelock_blocks_total"
+let metric_keeper_turn_timeout_committed =
+  "masc_keeper_turn_timeout_committed_total"
+let metric_keeper_turn_error_after_tools =
+  "masc_keeper_turn_error_after_tools_total"
+let metric_keeper_cascade_sync_failures =
+  "masc_keeper_cascade_sync_failures_total"
+let metric_keeper_thinking_persist_failures =
+  "masc_keeper_thinking_persist_failures_total"
+let metric_keeper_checkpoint_failures =
+  "masc_keeper_checkpoint_failures_total"
+let metric_keeper_memory_write_failures =
+  "masc_keeper_memory_write_failures_total"
+let metric_keeper_write_meta_cycle_failures =
+  "masc_keeper_write_meta_cycle_failures_total"
+let metric_keeper_alert_persist_failures =
+  "masc_keeper_alert_persist_failures_total"
+let metric_keeper_metrics_sse_failures =
+  "masc_keeper_metrics_sse_failures_total"let metric_keeper_session_cleanup_failures =
+  "masc_keeper_session_cleanup_failures_total"
+let metric_keeper_chat_store_failures =
+  "masc_keeper_chat_store_failures_total"
+let metric_keeper_observation_query_failures =
+  "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -863,6 +941,24 @@ let metric_coord_join_normalize_outcome =
   "masc_coord_join_normalize_outcome_total"
 
 
+
+(* Centralized from keeper_stale_watchdog.ml.  Originally each metric was
+   an inline string literal passed to inc_counter / register_counter.
+   Constants make grep/audit trivial and prevent typo-induced metric
+   proliferation (a single-character typo creates a new invisible metric). *)
+let metric_keeper_stale_termination_total =
+  "masc_keeper_stale_termination_total"
+let metric_keeper_stale_termination_by_class =
+  "masc_keeper_stale_termination_by_class_total"
+let metric_keeper_oas_timeout_budget_watchdog_termination =
+  "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+let metric_keeper_stale_termination_threshold_breached =
+  "masc_keeper_stale_termination_threshold_breached_total"
+let metric_keeper_stale_termination_batch =
+  "masc_keeper_stale_termination_batch_total"
+let metric_keeper_stale_broadcast_emit_failures =
+  "masc_keeper_stale_broadcast_emit_failures"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -1174,6 +1270,159 @@ let init () =
      ollama-only and the /api/ps probe reported zero available slots. \
      Labeled by keeper and cascade."
     Counter;
+  add metric_keeper_task_load_failures
+    "Total Coord.get_tasks_raw exceptions while loading current task contract. \
+     Labeled by keeper and phase=task_contract_load."
+    Counter;
+  add metric_keeper_tool_selection_failures
+    "Total tool selection exceptions during per-turn tool set assembly. \
+     Labeled by keeper and phase=topk_llm|tool_discovery."
+    Counter;
+  add metric_keeper_reconcile_failures
+    "Total current-task reconciliation failures. \
+     Labeled by keeper and phase=resolve_agent|task_id_parse|owned_tasks_query."
+    Counter;
+  add metric_keeper_decision_audit_flush_failures
+    "Total decision audit ring-buffer flush failures causing audit data loss. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_oas_cancel
+    "Total OAS execution cancellations in keeper_llm_bridge. \
+     Labeled by bucket (timeout classification)."
+    Counter;
+  add metric_keeper_claim_auto_provision
+    "Total task-claim auto-provision outcomes during keeper bootstrap. \
+     Labeled by outcome and agent_name."
+    Counter;
+  add metric_egress_audit_missing
+    "Total egress audit entries where the keeper has no audit record. \
+     Labeled by keeper."
+    Counter;
+  add metric_egress_audit_stale_orphan
+    "Total egress audit entries that are stale or orphaned. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_toml_invalid
+    "Total keeper TOML config parse failures falling back to persona. \
+     Labeled by keeper and reason."
+    Counter;
+  add metric_keeper_persona_drift_missing
+    "Total keeper persona file missing at expected path (config drift). \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_room_init_failures
+    "Total supervisor room initialization failures during keeper bootstrap. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_presence_sync_failures
+    "Total supervisor presence sync failures after room init. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_self_preservation_universal
+    "Total self-preservation UNIVERSAL suppression events where all \
+     keepers in a cohort are suppressed and auto-recovery is OFF. \
+     Labeled by cohort (dominant failure key)."
+    Counter;
+  add metric_keeper_stale_storm_paused
+    "Total keepers auto-paused due to stale termination storms. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_oas_timeout_budget_loop_paused
+    "Total keepers auto-paused due to repeated OAS timeout budget \
+     exhaustion. Labeled by keeper."
+    Counter;
+  add metric_keeper_cycle_exceptions
+    "Total unhandled exceptions caught by the keeper main cycle loop. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_snapshot_write_failures
+    "Total heartbeat snapshot persistence failures causing metric \
+     data loss. Labeled by keeper."
+    Counter;
+  add metric_keeper_sse_broadcast_failures
+    "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."
+    Counter;
+  add metric_keeper_room_heartbeat_failures
+    "Total room heartbeat failures (consecutive, leads to crash). \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_metrics_snapshot_failures
+    "Total metrics snapshot write failures after keeper turns. \
+     Labeled by keeper and channel."
+    Counter;
+  add metric_keeper_oas_execution_errors
+    "Total OAS execution errors (non-cancellation) in keeper_llm_bridge. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_episode_create_failures
+    "Total episode creation failures in keeper_agent_memory_episode. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_supervisor_sweep_failures
+    "Total supervisor sweep failures in keeper_runtime periodic beat. \
+     Labeled by origin."
+    Counter;
+  add metric_keeper_toml_reconcile_sweep_failures
+    "Total TOML reconcile sweep failures in keeper_runtime periodic beat. \
+     Labeled by origin."
+    Counter;
+  add metric_keeper_tool_usage_flush_failures
+    "Total tool usage JSONL flush failures in keeper_registry. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_livelock_blocks
+    "Total turn dispatches blocked by livelock guard in keeper_unified_turn."
+    Counter;
+  add metric_keeper_turn_timeout_committed
+    "Total wall-clock turn timeouts after committed mutating tools. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_error_after_tools
+    "Total provider errors after committed mutating tool calls. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_cascade_sync_failures
+    "Total cascade state synchronization failures (pause/resume/auto-pause). \
+     Labeled by keeper and site."
+    Counter;
+  add metric_keeper_thinking_persist_failures
+    "Total thinking content persistence failures in keeper_agent_run. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_checkpoint_failures
+    "Total OAS checkpoint save or missing-checkpoint failures. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_memory_write_failures
+    "Total memory write failures (notes/kinds) in keeper_agent_run. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_write_meta_cycle_failures
+    "Total write_meta failures after turn/cycle in keeper_unified_turn. \
+     Labeled by keeper and site."
+    Counter;
+  add metric_keeper_alert_persist_failures
+    "Total alert JSONL write failures (alert/failed-channels/deadletter). \
+     Labeled by kind."
+    Counter;
+  add metric_keeper_metrics_sse_failures
+    "Total SSE broadcast failures during metrics compaction/handoff. \
+     Labeled by kind."
+    Counter;
+  add metric_keeper_dispatch_event_failures
+    "Total keeper state machine dispatch_event failures in supervisor. \
+     Labeled by event type."
+    Counter;
+  add metric_keeper_session_cleanup_failures
+    "Total session directory cleanup failures during keeper teardown."
+    Counter;
+  add metric_keeper_chat_store_failures
+    "Total chat store append/load failures. Labeled by operation."
+    Counter;
+  add metric_keeper_observation_query_failures
+    "Total world observation query failures (backlog counts, active agents, \
+     board events). Labeled by operation."
+    Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
@@ -1404,6 +1653,47 @@ let init () =
     "Maximum SSE event queue depth across live sessions" Gauge;
   add metric_sse_external_subscribers
     "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
+
+  add metric_keeper_turn_livelock_blocks
+    "Total livelock-block events where keeper found a turn already in-progress      during unified_turn start. Labels: keeper." Counter;
+  add metric_keeper_turn_timeout_committed
+    "Total wall-clock timeout events after tools were committed but before      response completed. Labels: keeper." Counter;
+  add metric_keeper_turn_error_after_tools
+    "Total errors after tool calls were committed in unified_turn.      Labels: keeper." Counter;
+  add metric_keeper_cascade_sync_failures
+    "Total failures to sync cascade state during turn pause/rejection.      Labels: keeper, site." Counter;
+  add metric_keeper_thinking_persist_failures
+    "Total failures persisting thinking content to disk. Labels: keeper." Counter;
+  add metric_keeper_checkpoint_failures
+    "Total checkpoint save/restore failures. Labels: keeper, operation." Counter;
+  add metric_keeper_memory_write_failures
+    "Total failures writing keeper memory to disk. Labels: keeper." Counter;
+  add metric_keeper_write_meta_cycle_failures
+    "Total CAS-race or write failures in write_meta during turn cycle.      Labels: keeper." Counter;
+  add metric_keeper_alert_persist_failures
+    "Total failures persisting alert notifications. Labels: keeper." Counter;
+  add metric_keeper_metrics_sse_failures
+    "Total failures pushing metrics via SSE to dashboard. Labels: keeper." Counter;
+  add metric_keeper_dispatch_event_failures
+    "Total failures dispatching state events to keeper event bus.      Labels: keeper, event." Counter;
+  add metric_keeper_session_cleanup_failures
+    "Total failures cleaning up keeper session directories on shutdown." Counter;
+  add metric_keeper_chat_store_failures
+    "Total failures in keeper chat store append/load operations.      Labels: operation." Counter;
+  add metric_keeper_observation_query_failures
+    "Total failures in world observation queries (backlog, agents, board).      Labels: operation." Counter;
+  add metric_keeper_stale_termination_total
+    "Total stale watchdog terminations (all classes). Labels: keeper." Counter;
+  add metric_keeper_stale_termination_by_class
+    "Total stale watchdog terminations broken down by kill class      (idle_turn | in_turn_hung | noop_failure_loop). Labels: keeper, class." Counter;
+  add metric_keeper_oas_timeout_budget_watchdog_termination
+    "Total watchdog terminations preserving unresolved oas_timeout_budget      failure reason. Labels: keeper." Counter;
+  add metric_keeper_stale_termination_threshold_breached
+    "Total stale termination threshold breaches triggering auto-pause.      Labels: keeper." Counter;
+  add metric_keeper_stale_termination_batch
+    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window)." Counter;
+  add metric_keeper_stale_broadcast_emit_failures
+    "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

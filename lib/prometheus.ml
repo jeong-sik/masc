@@ -402,13 +402,6 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
-(* Two-tier slot lifecycle (RFC #12885): autonomous slot released at inner
-   cancel and reacquired before the degraded-retry cascade attempt.
-   Labels: [keeper].  Incremented each time the slot is successfully
-   yielded and reacquired during a cascade rotation retry. *)
-let metric_keeper_slot_yield_total =
-  "masc_keeper_slot_yield_total"
-
 let metric_timeout_policy_overshoot =
   "masc_timeout_policy_overshoot_total"
 
@@ -1239,11 +1232,6 @@ let init () =
   add metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
-  add metric_keeper_slot_yield_total
-    "Total autonomous slot yield-and-reacquire cycles during cascade rotation \
-     retries (RFC: release autonomous turn slot at inner cancel). \
-     Labels: keeper."
-    Counter;
   (* P-DASH-13: provider block duration histogram.
      Records the duration (in seconds) for which a provider is placed in
      cooldown each time a cooldown is applied or extended.  Labels: provider. *)

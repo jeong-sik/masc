@@ -78,10 +78,10 @@ fork_liveness_scanner ctx ~interval_sec:30.0
 ```
 masc_keeper_terminal_detected_total{keeper,phase,reason}
   — counter, incremented each scan tick for each terminal keeper
-
-masc_keeper_terminal_dead_duration_seconds{keeper}
-  — gauge, now - dead_since_ts for each Dead keeper
 ```
+
+Note: `masc_keeper_terminal_dead_duration_seconds` gauge deferred to Phase 2
+where it will be populated by the recoverer alongside recovery duration tracking.
 
 #### Structured log
 

@@ -470,6 +470,8 @@ let metric_keeper_tool_call_duration =
   "masc_keeper_tool_call_duration_seconds"
 let metric_keeper_write_meta_failures =
   "masc_keeper_write_meta_failures_total"
+let metric_keeper_meta_read_failures =
+  "masc_keeper_meta_read_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1226,6 +1228,9 @@ let init () =
      first observation. *)
   add metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
+    Counter;
+  add metric_keeper_meta_read_failures
+    "Total keeper meta-file read/parse failures, labeled by keeper and site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

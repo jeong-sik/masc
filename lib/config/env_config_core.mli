@@ -37,6 +37,21 @@ val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool
 
+val get_int_nonneg : default:int -> string -> int
+(** Like {!get_int} but floors negative parses at [default].  Use
+    for env vars whose call sites treat negatives as nonsensical
+    (retry caps, byte budgets, max counts).  NaN-equivalent for
+    [int] does not exist, so the only extra rejection vs {!get_int}
+    is [v < 0]. *)
+
+val get_float_nonneg : default:float -> string -> float
+(** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and
+    negative parses at [default].  Use for env vars whose call
+    sites treat negatives or non-finite values as nonsensical
+    (timeouts, scores, ratios).  [+∞] is rejected because
+    [float_of_string "inf"] succeeds and [+∞ > 0.0] would
+    otherwise pass an effectively unbounded value through. *)
+
 (** {1 String / path helpers} *)
 
 val trim_opt : string option -> string option

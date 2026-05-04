@@ -1096,6 +1096,7 @@
 (include stanzas/test_keeper_long_turn_9943.inc)
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 (include stanzas/test_keeper_meta_canonical_seed.inc)
+(include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 (include stanzas/test_keeper_meta_heartbeat_retain_9733.inc)
 (include stanzas/test_keeper_meta_merge.inc)
 (include stanzas/test_keeper_mutex_coverage.inc)

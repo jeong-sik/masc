@@ -1,7 +1,8 @@
 import { signal } from '@preact/signals'
 export const activeIdeFile = signal<string>('package.json')
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditorMock, type IdeEditorView } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
@@ -73,13 +74,17 @@ function CockpitPreview() {
       <iframe
         src=${COCKPIT_FRAME_SRC}
         class="h-full min-h-0 w-full border-0"
-        title="MASC Dream IDE Cockpit"
+        title="MASC Cockpit"
       />
     </section>
   `
 }
 
 export function IdeShell() {
+  const coordinator = useMemo(() => createIdeDataCoordinator(), [])
+
+  useEffect(() => () => coordinator.dispose(), [coordinator])
+
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const activeLayers = layersFromRoute(route.value.params.layers)
 
@@ -144,7 +149,7 @@ export function IdeShell() {
         }}
       >
         <div class="ide-plane-tree">
-          <${IdeExplorer} />
+          <${IdeExplorer} fileTreeStore=${coordinator.fileTreeStore} />
         </div>
         <div
           class="ide-plane-editor"
@@ -154,7 +159,13 @@ export function IdeShell() {
             minHeight: 0,
           }}
         >
-          <${IdeEditorMock} activeView=${activeView} activeLayers=${activeLayers} />
+          <${IdeEditorMock}
+            activeView=${activeView}
+            activeLayers=${activeLayers}
+            documentStore=${coordinator.documentStore}
+            ownershipStore=${coordinator.ownershipStore}
+            diffRows=${coordinator.diffRows}
+          />
           <${CockpitPreview} />
         </div>
         <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>

@@ -7,7 +7,6 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 
-const FALLBACK_ROOM_ID = 'run-fallback'
 const KIND_TO_VERB: Readonly<Record<string, RunActivityVerb>> = {
   'task.created': 'noted',
   'task.claimed': 'flagged',
@@ -52,6 +51,8 @@ interface ApiActivityResponse {
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 
+const DEFAULT_ROOM_ID = 'run-default'
+
 function verbFromKind(kind: string): RunActivityVerb {
   return KIND_TO_VERB[kind] ?? DEFAULT_VERB
 }
@@ -88,23 +89,23 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
 async function fetchActivityEvents(): Promise<{ events: ReadonlyArray<RunActivityEvent>; roomId: string }> {
   try {
     const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
     const data: ApiActivityResponse = await res.json()
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
     }
-    const roomId = rawEvents[0].room_id || FALLBACK_ROOM_ID
+    const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
     return { events: mapped, roomId }
   } catch {
-    return { events: EMPTY_ACTIVITY, roomId: FALLBACK_ROOM_ID }
+    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
   }
 }
 
 export function IdeActivityMock() {
   const store = useMemo(() => {
-    const store = createRunActivityStore(FALLBACK_ROOM_ID)
+    const store = createRunActivityStore(DEFAULT_ROOM_ID)
     store.seed(EMPTY_ACTIVITY)
     return store
   }, [])

@@ -73,7 +73,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'cockpit',
     label: 'MASC Cockpit',
     icon: 'workspace',
-    description: 'High-Fidelity MASC Cockpit (Dream IDE)',
+    description: 'High-Fidelity MASC Cockpit',
     defaultTab: 'cockpit',
     tabs: ['cockpit'],
   },

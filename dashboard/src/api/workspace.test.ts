@@ -1,0 +1,96 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  fetchWorkspaceTree,
+  fetchWorkspaceFile,
+  fetchGitBlame,
+  fetchGitDiff,
+} from './workspace'
+
+afterEach(() => {
+  mockFetch.mockClear()
+  vi.unstubAllGlobals()
+})
+
+const mockFetch = vi.fn()
+
+function stubFetch(response: unknown, ok = true): void {
+  mockFetch.mockResolvedValue({
+    ok,
+    status: ok ? 200 : 500,
+    statusText: ok ? 'OK' : 'Internal Server Error',
+    json: () => Promise.resolve(response),
+    text: () => Promise.resolve(JSON.stringify(response)),
+    clone() { return this },
+  } as Response)
+  vi.stubGlobal('fetch', mockFetch)
+}
+
+describe('workspace API', () => {
+  it('fetchWorkspaceTree returns file nodes', async () => {
+    const nodes = [{ path: 'lib/main.ml', label: 'main.ml', depth: 1, parent: 'lib', hasChildren: false, diff: null, keeperId: null, hueIndex: null }]
+    stubFetch(nodes)
+
+    const result = await fetchWorkspaceTree(2)
+    expect(result).toHaveLength(1)
+    expect(result[0].path).toBe('lib/main.ml')
+
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/workspace/tree?depth=2')
+  })
+
+  it('fetchWorkspaceTree appends keeper param when provided', async () => {
+    stubFetch([])
+
+    await fetchWorkspaceTree(1, { keeper: 'sangsu' })
+    expect(mockFetch.mock.calls[0][0]).toContain('keeper=sangsu')
+  })
+
+  it('fetchWorkspaceFile returns file content', async () => {
+    stubFetch({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
+
+    const result = await fetchWorkspaceFile('lib/main.ml')
+    expect(result?.ok).toBe(true)
+    expect(result?.content).toBe('let x = 1\n')
+
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/workspace/file?path=')
+    expect(mockFetch.mock.calls[0][0]).toContain('lib%2Fmain.ml')
+  })
+
+  it('fetchGitBlame returns blame blocks', async () => {
+    const blocks = [{ file_path: 'a.ml', line_start: 1, line_end: 5, keeper_id: 'claude', timestamp_ms: 1000, kind: 'edit' }]
+    stubFetch(blocks)
+
+    const result = await fetchGitBlame('a.ml')
+    expect(result).toHaveLength(1)
+    expect(result[0].keeper_id).toBe('claude')
+  })
+
+  it('fetchGitDiff extracts unified rows from response', async () => {
+    const unified = [{ kind: 'add', oldLine: null, newLine: 1, text: 'new line' }]
+    stubFetch({ unified })
+
+    const result = await fetchGitDiff('a.ml')
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('add')
+  })
+
+  it('fetchGitDiff defaults to empty array when unified missing', async () => {
+    stubFetch({})
+
+    const result = await fetchGitDiff('a.ml')
+    expect(result).toHaveLength(0)
+  })
+
+  it('fetchGitDiff uses HEAD as default baseRef', async () => {
+    stubFetch({ unified: [] })
+
+    await fetchGitDiff('a.ml')
+    expect(mockFetch.mock.calls[0][0]).toContain('base_ref=HEAD')
+  })
+
+  it('fetchGitDiff accepts custom baseRef', async () => {
+    stubFetch({ unified: [] })
+
+    await fetchGitDiff('a.ml', { baseRef: 'v0.19.0' })
+    expect(mockFetch.mock.calls[0][0]).toContain('base_ref=v0.19.0')
+  })
+})

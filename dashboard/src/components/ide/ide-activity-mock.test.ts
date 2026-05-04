@@ -4,15 +4,12 @@ import { render } from 'preact'
 import { IdeActivityMock } from './ide-activity-mock'
 
 describe('IdeActivityMock', () => {
-  it('renders the activity pane with fallback mock data', () => {
+  it('renders the activity pane with empty state when no API data', () => {
     const container = document.createElement('div')
     render(h(IdeActivityMock, {}), container)
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('ACTIVITY')
-    expect(container.textContent).toContain('13 events · 3 keepers')
-    expect(container.textContent).toContain('nick0cave')
-    expect(container.textContent).toContain('flagged')
-    expect(container.textContent).toContain('router.ts:34')
+    expect(container.textContent).toContain('0 events · 0 keepers')
   })
 })

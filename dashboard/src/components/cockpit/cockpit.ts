@@ -14,7 +14,7 @@ export function Cockpit() {
           <iframe
             src=${COCKPIT_FRAME_SRC}
             class="h-[calc(100vh_-_300px)] min-h-0 w-full flex-1 border-0"
-            title="MASC Dream IDE Cockpit"
+            title="MASC Cockpit"
           />
         `
         : null}

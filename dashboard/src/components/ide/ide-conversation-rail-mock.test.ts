@@ -3,24 +3,23 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
-import { IDE_MOCK_RELATED_LINE, IDE_MOCK_THREADS } from './ide-mock-data'
 
 describe('IdeConversationRailMock', () => {
-  it('renders the RFC 0021 anchored thread rail mock', () => {
+  it('renders the conversation rail with board posts', () => {
     const container = document.createElement('div')
     render(h(IdeConversationRailMock, {}), container)
 
     const region = container.querySelector('[role="region"]')
-    expect(region?.getAttribute('aria-label')).toBe('CONVERSATION (RFC 0021 anchored thread rail mock)')
+    expect(region?.getAttribute('aria-label')).toBe('CONVERSATION')
     expect(container.textContent).toContain('CONVERSATION')
-    expect(container.textContent).toContain(String(IDE_MOCK_THREADS.length))
-    expect(container.textContent).toContain(`router.ts:${IDE_MOCK_RELATED_LINE}`)
-    expect(container.textContent).toContain('2 related')
+    expect(container.textContent).toContain('5')
     expect(container.textContent).toContain('FLAG')
     expect(container.textContent).toContain('nick0cave')
+    expect(container.textContent).toContain('operator')
+    expect(container.textContent).toContain('masc-improver')
   })
 
-  it('focuses a thread card when clicked', async () => {
+  it('focuses a post card when clicked', async () => {
     const container = document.createElement('div')
     await act(async () => {
       render(h(IdeConversationRailMock, {}), container)
@@ -32,5 +31,14 @@ describe('IdeConversationRailMock', () => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
     expect(button?.getAttribute('aria-current')).toBe('true')
+  })
+
+  it('shows kind labels from board post content', () => {
+    const container = document.createElement('div')
+    render(h(IdeConversationRailMock, {}), container)
+
+    expect(container.textContent).toContain('APPROVE')
+    expect(container.textContent).toContain('SUGGEST')
+    expect(container.textContent).toContain('QUESTION')
   })
 })

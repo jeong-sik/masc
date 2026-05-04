@@ -90,11 +90,15 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
+function distSegStyle(pct: number): string {
+  return pct > 0 ? `width:${pct.toFixed(1)}%` : ''
+}
+
 function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
   if (!dist) return html`<div class="text-2xs text-[var(--color-fg-muted)] italic">도구 분포 데이터가 없습니다.</div>`
-  // Mutually exclusive segments: public ⊂ visible, hidden = total - visible
   const visibleExclusive = Math.max(0, dist.visible - dist.public)
   const pct = (n: number) => dist.total > 0 ? ((n / dist.total) * 100).toFixed(1) : '0'
+  const segPct = (n: number) => dist.total > 0 ? (n / dist.total) * 100 : 0
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
@@ -112,6 +116,13 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
+      ${dist.total > 0 ? html`
+        <div class="bar-seg mt-1" style="height:var(--sp-1)">
+          ${dist.public > 0 ? html`<span class="seg-ok" style=${distSegStyle(segPct(dist.public))}></span>` : null}
+          ${visibleExclusive > 0 ? html`<span class="seg-idle" style=${distSegStyle(segPct(visibleExclusive))}></span>` : null}
+          ${dist.hidden > 0 ? html`<span class="seg-warn" style=${distSegStyle(segPct(dist.hidden))}></span>` : null}
+        </div>
+      ` : null}
       <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
     </div>
   `

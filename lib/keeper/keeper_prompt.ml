@@ -62,7 +62,7 @@ let render_world_prompt ~allowed_orgs ~denied_repos : string =
   | Error msg ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_prompt_failures
-        ~labels:[]
+        ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
       Log.Keeper.warn
         "render_world_prompt: template render failed, falling back to raw \

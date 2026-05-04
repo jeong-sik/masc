@@ -835,7 +835,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
        if final_events <> [] then begin
          Prometheus.inc_counter
            Prometheus.metric_keeper_observation_query_failures
-           ~labels:[("keeper", meta.name); ("site", "cursor_stale")]
+           ~labels:[("operation", "cursor_stale")]
            ();
          Log.Keeper.warn
            "board cursor not updated for %s despite %d events processed"
@@ -1236,7 +1236,7 @@ let keeper_cycle_decision
                    should_run (derived below) stays consistent with verdict. *)
                 Prometheus.inc_counter
                   Prometheus.metric_keeper_observation_query_failures
-                  ~labels:[("keeper", meta.name); ("site", "empty_run_reasons")]
+                  ~labels:[("operation", "empty_run_reasons")]
                   ();
                 Log.Keeper.warn
                   "unreachable: should_run=true but run_reasons is empty";

@@ -683,7 +683,7 @@ let run_keepalive_unified_turn
                    meta_after_observe.name;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_meta_read_failures
-                   ~labels:[("keeper", meta_after_observe.name); ("phase", "none_after_failure")]
+                   ~labels:[("keeper", meta_after_observe.name); ("site", "none_after_failure")]
                    ();
                  meta_after_observe
                | Error e ->
@@ -691,7 +691,7 @@ let run_keepalive_unified_turn
                    meta_after_observe.name e;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_meta_read_failures
-                   ~labels:[("keeper", meta_after_observe.name); ("phase", "error_after_failure")]
+                   ~labels:[("keeper", meta_after_observe.name); ("site", "error_after_failure")]
                    ();
                  meta_after_observe)
             | Ok updated ->

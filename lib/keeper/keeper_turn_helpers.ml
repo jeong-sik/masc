@@ -123,7 +123,7 @@ let record_execution_receipt_gap
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_write_meta_failures
-        ~labels:[("keeper", meta.name); ("site", "receipt_coverage_gap")]
+        ~labels:[("keeper", meta.name); ("phase", "receipt_coverage_gap")]
         ();
       Log.Keeper.warn
         "keeper:%s pre-dispatch execution_receipt coverage gap append failed: %s"
@@ -267,7 +267,7 @@ let record_pre_dispatch_terminal_observation
       let error = Printexc.to_string exn in
       Prometheus.inc_counter
         Prometheus.metric_keeper_write_meta_failures
-        ~labels:[("keeper", meta.name); ("site", "receipt_append")]
+        ~labels:[("keeper", meta.name); ("phase", "receipt_append")]
         ();
       Log.Keeper.warn
         "keeper:%s pre-dispatch execution_receipt append failed: %s"

@@ -60,10 +60,6 @@ let handle_keeper_down ctx args : tool_result =
                if Keeper_meta_store.is_version_conflict_error err then
                  Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
                else
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_write_meta_failures
-                   ~labels:[("keeper", name); ("site", "keeper_down")]
-                   ();
                  Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
           Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name

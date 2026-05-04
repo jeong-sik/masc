@@ -81,10 +81,24 @@ let test_float_nonneg_positive_passes () =
 
 let test_float_nonneg_nan_falls_back () =
   (* NaN sneaks past [< 0.0] silently — the explicit
-     [Float.is_nan] guard is the property under test. *)
+     non-finite guard is the property under test. *)
   with_env "MASC_TEST_NONNEG_FLOAT_NAN" "nan" @@ fun () ->
   check_float "NaN → default 12.0" 12.0
     (C.get_float_nonneg ~default:12.0 "MASC_TEST_NONNEG_FLOAT_NAN")
+
+let test_float_nonneg_pos_inf_falls_back () =
+  (* [+∞ > 0.0] is [true] so a [< 0.0]-only check would let it
+     through.  [Float.is_finite] guard catches it. *)
+  with_env "MASC_TEST_NONNEG_FLOAT_PINF" "inf" @@ fun () ->
+  check_float "+inf → default 13.0" 13.0
+    (C.get_float_nonneg ~default:13.0 "MASC_TEST_NONNEG_FLOAT_PINF")
+
+let test_float_nonneg_neg_inf_falls_back () =
+  (* [-∞ < 0.0] alone would suffice, but pinning the non-finite
+     contract uniformly across {NaN, +∞, -∞} is the property. *)
+  with_env "MASC_TEST_NONNEG_FLOAT_NINF" "-inf" @@ fun () ->
+  check_float "-inf → default 14.0" 14.0
+    (C.get_float_nonneg ~default:14.0 "MASC_TEST_NONNEG_FLOAT_NINF")
 
 let test_float_nonneg_unset_uses_default () =
   check_float "unset → default" 5.5
@@ -125,6 +139,10 @@ let () =
             test_float_nonneg_positive_passes;
           Alcotest.test_case "NaN → default" `Quick
             test_float_nonneg_nan_falls_back;
+          Alcotest.test_case "+inf → default" `Quick
+            test_float_nonneg_pos_inf_falls_back;
+          Alcotest.test_case "-inf → default" `Quick
+            test_float_nonneg_neg_inf_falls_back;
           Alcotest.test_case "unset → default" `Quick
             test_float_nonneg_unset_uses_default;
           Alcotest.test_case "garbage → default" `Quick

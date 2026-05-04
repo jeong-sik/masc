@@ -8,10 +8,22 @@ val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
 
-    Two detection modes:
-    - Idle stall: [last_turn_ts] older than 300s while [Running].
-    - Failure loop: [consecutive_noop_count >= 3] — catches keepers in
-      LLM timeout loops where [last_turn_ts] stays fresh.
+    Three detection modes — see {!Keeper_registry.stale_kill_class}:
+    - [Idle_turn]: [last_turn_ts] older than the idle threshold while
+      the keeper phase is [Running] but no [current_turn_observation]
+      is recorded.
+    - [In_turn_hung]: a turn started ([current_turn_observation = Some])
+      and ran past [timeout_threshold] seconds — covers the
+      "Orphaned Streaming" pattern described in the executor FSM
+      analysis (TLA+ I2: [in_turn_age > grace_period → in_turn_stale]).
+    - [Noop_failure_loop]: turns kept firing but produced no tool
+      calls; the keepalive's [consecutive_noop_count] reached the
+      watchdog threshold — catches keepers in LLM timeout loops where
+      [last_turn_ts] stays fresh because each failed turn updates it.
+
+    Detection class is exposed on the
+    [masc_keeper_stale_termination_by_class] Prometheus counter for
+    per-class root-cause attribution.
 
     On detection, sets [fiber_stop] and emits a stale broadcast. The
     supervisor's [sweep_and_recover] picks up the stopped fiber and

@@ -209,6 +209,12 @@ val metric_keeper_persona_drift_missing : string
 val metric_keeper_room_init_failures : string
 val metric_keeper_presence_sync_failures : string
 val metric_keeper_self_preservation_universal : string
+val metric_keeper_stale_storm_paused : string
+val metric_keeper_oas_timeout_budget_loop_paused : string
+val metric_keeper_cycle_exceptions : string
+val metric_keeper_snapshot_write_failures : string
+val metric_keeper_sse_broadcast_failures : string
+val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

@@ -536,6 +536,18 @@ let metric_keeper_presence_sync_failures =
   "masc_keeper_presence_sync_failures_total"
 let metric_keeper_self_preservation_universal =
   "masc_keeper_self_preservation_universal_total"
+let metric_keeper_stale_storm_paused =
+  "masc_keeper_stale_storm_paused_total"
+let metric_keeper_oas_timeout_budget_loop_paused =
+  "masc_keeper_oas_timeout_budget_loop_paused_total"
+let metric_keeper_cycle_exceptions =
+  "masc_keeper_cycle_exceptions_total"
+let metric_keeper_snapshot_write_failures =
+  "masc_keeper_snapshot_write_failures_total"
+let metric_keeper_sse_broadcast_failures =
+  "masc_keeper_sse_broadcast_failures_total"
+let metric_keeper_room_heartbeat_failures =
+  "masc_keeper_room_heartbeat_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1255,6 +1267,29 @@ let init () =
     "Total self-preservation UNIVERSAL suppression events where all \
      keepers in a cohort are suppressed and auto-recovery is OFF. \
      Labeled by cohort (dominant failure key)."
+    Counter;
+  add metric_keeper_stale_storm_paused
+    "Total keepers auto-paused due to stale termination storms. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_oas_timeout_budget_loop_paused
+    "Total keepers auto-paused due to repeated OAS timeout budget \
+     exhaustion. Labeled by keeper."
+    Counter;
+  add metric_keeper_cycle_exceptions
+    "Total unhandled exceptions caught by the keeper main cycle loop. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_snapshot_write_failures
+    "Total heartbeat snapshot persistence failures causing metric \
+     data loss. Labeled by keeper."
+    Counter;
+  add metric_keeper_sse_broadcast_failures
+    "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."
+    Counter;
+  add metric_keeper_room_heartbeat_failures
+    "Total room heartbeat failures (consecutive, leads to crash). \
+     Labeled by keeper."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

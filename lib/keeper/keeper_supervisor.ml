@@ -908,7 +908,7 @@ let handle_stale_storm_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~count =
   handle_crash_auto_pause ctx entry
     ~reason_tag:"stale_storm"
-    ~metric_name:"masc_keeper_stale_storm_paused_total"
+    ~metric_name:Prometheus.metric_keeper_stale_storm_paused
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
     ~blocker_class:(Some Turn_timeout)
     ~log_message:
@@ -924,7 +924,7 @@ let handle_oas_timeout_budget_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~count =
   handle_crash_auto_pause ctx entry
     ~reason_tag:"oas_timeout_budget_loop"
-    ~metric_name:"masc_keeper_oas_timeout_budget_loop_paused_total"
+    ~metric_name:Prometheus.metric_keeper_oas_timeout_budget_loop_paused
     ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
     ~blocker_class:(Some Oas_timeout_budget)
     ~log_message:

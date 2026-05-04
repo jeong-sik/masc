@@ -613,6 +613,10 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Prometheus.metric_keeper_room_init_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_presence_sync_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_self_preservation_universal |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_cycle_exceptions |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_snapshot_write_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_sse_broadcast_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_room_heartbeat_failures |> int_of_float)
       in
       let tool_suffix =
         if tool_failures > 0

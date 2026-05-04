@@ -24,17 +24,17 @@ let cases =
     E.Fs, 30.0;
     E.Preflight, 10.0;
     E.Repo_readiness, 10.0;
-    E.Sandbox, 2.0;
+    E.Sandbox, 10.0;
     E.Pr_review, 15.0;
     E.Pr_review_post, 30.0;
     E.Dispatch, 120.0;
     E.Memory_audit, 3.0;
     E.Alerting, 20.0;
     E.Gh_shared, 10.0;
-    E.Status_detail, 10.0;
+    E.Status_detail, 5.0;
     E.Turn_sandbox, 2.0;
     E.Turn_up, 15.0;
-    E.Git_meta, 5.0;
+    E.Git_meta, 10.0;
     E.Shell_probe, 2.0;
   ]
 

@@ -80,6 +80,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
+    ?yield_and_reacquire_slot
     () : (keeper_meta, Agent_sdk.Error.sdk_error) result =
   (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 28 anchor for
      B2 (Task Acquisition).  Authoritative spec mirror is
@@ -1240,14 +1241,50 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                              | Some requested -> string_of_int requested
                              | None -> "none")
                             (short_preview (Agent_sdk.Error.to_string err));
-                          Eio.Fiber.yield ();
-                          retry_loop ~run_meta ~execution:next_execution
-                            ~run_generation
-                            ~attempt:1
-                            ~is_retry:true
-                            ~overflow_retry_used
-                            ~attempted_cascades:
-                              (next_execution_cascade_name :: attempted_cascades))
+                          (* RFC: release the autonomous turn slot before the
+                             degraded retry so peer keepers can acquire it during
+                             the inter-attempt window (two-tier slot lifecycle).
+                             Without this, the slot is held for the full outer
+                             wall-clock budget even when the inner LLM op
+                             cancelled much earlier. *)
+                          let can_retry =
+                            match yield_and_reacquire_slot with
+                            | None -> true
+                            | Some yield_fn ->
+                                (match yield_fn () with
+                                 | Ok _new_wait_ms -> true
+                                 | Error (`Semaphore_wait_timeout timeout_sec) ->
+                                     Log.Keeper.warn
+                                       "%s: slot_yield: autonomous slot \
+                                        reacquisition timed out after %.0fs; \
+                                        aborting degraded retry to %s"
+                                       meta.name timeout_sec
+                                       next_execution_cascade_name;
+                                     Prometheus.inc_counter
+                                       Prometheus.metric_keeper_semaphore_wait_timeout
+                                       ~labels:[
+                                         ("keeper", meta.name);
+                                         ("channel", "autonomous_slot_yield");
+                                       ]
+                                       ();
+                                     false
+                                 | Error _ ->
+                                     (* Unknown acquisition error; abort retry conservatively. *)
+                                     false)
+                          in
+                          if not can_retry then begin
+                            mark_terminal_error err;
+                            Error err
+                          end else begin
+                            Eio.Fiber.yield ();
+                            retry_loop ~run_meta ~execution:next_execution
+                              ~run_generation
+                              ~attempt:1
+                              ~is_retry:true
+                              ~overflow_retry_used
+                              ~attempted_cascades:
+                                (next_execution_cascade_name :: attempted_cascades)
+                          end)
                   | Degraded_retry_budget_exhausted degraded_retry ->
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"

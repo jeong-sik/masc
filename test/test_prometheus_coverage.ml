@@ -276,6 +276,16 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_auth_credential_token_rotated;
   check_registered Prometheus.metric_telemetry_coverage_gap
 
+let test_slot_yield_metric_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has slot yield HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_keeper_slot_yield_total ^ " "));
+  check bool "has slot yield TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_keeper_slot_yield_total
+        ^ " counter"))
+
 let test_distributed_lock_metric_registered () =
   let text = Prometheus.to_prometheus_text () in
   check bool "has distributed lock HELP" true
@@ -459,6 +469,8 @@ let () =
         test_review_blocker_metrics_registered;
       test_case "distributed lock metric registered" `Quick
         test_distributed_lock_metric_registered;
+      test_case "slot yield metric registered" `Quick
+        test_slot_yield_metric_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

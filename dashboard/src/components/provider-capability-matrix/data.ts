@@ -582,19 +582,20 @@ export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'kimi', binary: 'kimi-for-coding', loc: 693, promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: '단일 모델 기본 (kimi-for-coding)' },
 ]
 
-// ── GLM Coding Plan Mapping ───────────────────────────────────
-// Claude Code internal env vars → GLM model mapping. Source: supplement research.
+// ── GLM Model Mapping ─────────────────────────────────────────
+// OAS GLM provider model list. Source: sec01 provider table.
+// GLM-5-Code and GLM-4.5-Air are NOT confirmed in reference docs — marked as unverified.
 
 export const GLM_CODING_PLAN_MAP: Array<{ envVar: string; glmModel: string; note: string }> = [
-  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'GLM-4.7', note: '최고 성능 코딩' },
-  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'GLM-4.7', note: '표준 코딩' },
-  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'GLM-4.5-Air', note: '빠른/경량 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'glm-4.7', note: 'BFCL V4 강자 (200K)' },
+  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'glm-5-turbo', note: '표준 코딩 (200K)' },
+  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'glm-5.1', note: '빠른 응답 (200K)' },
 ]
 
 export const GLM_WIRING_GAPS: Array<{ area: string; oasCurrent: string; official: string; gap: string }> = [
-  { area: 'Coding 전용 모델', oasCurrent: 'glm-5.1, glm-5, glm-5-turbo (auto 목록)', official: 'GLM-5-Code (별도 모델군)', gap: 'Coding 전용 모델 미식별' },
-  { area: '모델 에일리어스', oasCurrent: 'auto, flash, turbo, vision, air, ocr', official: 'GLM-4.7, GLM-4.5-Air, GLM-5-Code', gap: 'Coding-specific alias 부재' },
-  { area: 'Context ceiling', oasCurrent: '200K (General과 동일)', official: '128K (GLM-5-Code)', gap: 'Context 과다 선언' },
+  { area: 'Tool Choice', oasCurrent: 'supports_tool_choice=false', official: 'auto만 지원 (none/any/강제 불가)', gap: 'Coerce-to-auto fake fallback' },
+  { area: 'Structured Output', oasCurrent: 'supports_structured_output=false', official: 'JSON Schema 지정 가능 (JSON Mode)', gap: 'JSON Mode ≠ Constrained Decoding' },
+  { area: 'Context', oasCurrent: '200K (sec01 기준)', official: '200K (sec01 기준)', gap: '검증된 gap 없음' },
 ]
 
 // ── Cascade Traces ────────────────────────────────────────────

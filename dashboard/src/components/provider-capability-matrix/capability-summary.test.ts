@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { CapabilitySummaryStrip } from './capability-summary'
-import { WIRING_GAPS, ANTI_PATTERNS, FEATURES } from './data'
+import { ANTI_PATTERNS, FEATURES } from './data'
 
 describe('CapabilitySummaryStrip', () => {
   function mount(props: { liveProviders?: any[] }) {
@@ -22,7 +22,7 @@ describe('CapabilitySummaryStrip', () => {
   it('spotlights high-impact wiring gaps when present', () => {
     const el = mount({ liveProviders: [] })
     const cells = el.querySelectorAll('[role="listitem"]')
-    const spotlight = cells[0]
+    const spotlight = cells[0]!
     expect(spotlight.getAttribute('aria-label')).toContain('(spotlight)')
     expect(spotlight.textContent).toContain('◆')
     expect(spotlight.textContent).toContain('배선')

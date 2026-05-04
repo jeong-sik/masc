@@ -126,8 +126,8 @@ describe('fmtPct', () => {
     expect(fmtPct(1.0)).toBe('100.0%')
   })
 
-  it('returns -- for NaN', () => {
-    expect(fmtPct(NaN)).toBe('--')
+  it('returns - for NaN', () => {
+    expect(fmtPct(NaN)).toBe('-')
   })
 })
 

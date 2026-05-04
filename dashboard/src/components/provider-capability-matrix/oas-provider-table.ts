@@ -45,7 +45,7 @@ export function OasProviderTable() {
             </tr>
           </thead>
           <tbody>
-            ${OAS_PROVIDER_CAPS.map((prov, i) => {
+            ${OAS_PROVIDER_CAPS.map((prov) => {
               const isCli = prov.usage === 'strip'
               return html`
                 <tr key=${prov.id} class="pm-row-alt ${isCli ? 'pm-row--cli' : ''}">

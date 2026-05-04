@@ -61,30 +61,27 @@ function installStorageShim(name: 'localStorage' | 'sessionStorage'): void {
 installStorageShim('localStorage')
 installStorageShim('sessionStorage')
 
-// Mock all lucide-preact icons to a lightweight span to avoid happy-dom timeout issues
-// This drastically reduces mounting time during parallel test runs.
+// Mock all lucide-preact icons to a lightweight span to avoid happy-dom timeout issues.
+// Uses a Proxy to avoid ESM frozen descriptor collisions across parallel test workers.
 vi.mock('lucide-preact', async (importOriginal) => {
   const actual = await importOriginal<typeof import('lucide-preact')>()
-  const mocked: Record<string, unknown> = Object.create(
-    Object.getPrototypeOf(actual),
-    Object.getOwnPropertyDescriptors(actual),
-  )
+  const iconCache = new Map<string, unknown>()
 
-  for (const key of Object.getOwnPropertyNames(actual)) {
-    if (key === '__esModule' || key === 'createLucideIcon' || key === 'default')
-      continue
-    if (typeof actual[key as keyof typeof actual] !== 'function') continue
+  const mockIcon = (key: string) =>
+    ({ size, className, ...props }: any) =>
+      html`<span data-icon=${key} width=${size} height=${size} class=${className} ...${props}></span>`
 
-    Object.defineProperty(mocked, key, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: ({ size, className, ...props }: any) =>
-        html`<span data-icon=${key} width=${size} height=${size} class=${className} ...${props}></span>`,
-    })
-  }
-
-  return mocked
+  return new Proxy(actual, {
+    get(target, prop: string) {
+      if (prop === '__esModule' || prop === 'createLucideIcon' || prop === 'default') {
+        return target[prop as keyof typeof target]
+      }
+      const val = target[prop as keyof typeof target]
+      if (typeof val !== 'function') return val
+      if (!iconCache.has(prop)) iconCache.set(prop, mockIcon(prop))
+      return iconCache.get(prop)
+    },
+  })
 })
 
 // Mock Shiki to avoid heavy loading during happy-dom tests

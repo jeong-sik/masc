@@ -316,6 +316,8 @@ export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
   { model: 'Mistral Large',     overall: '38.37%', singleTurn: '84.65', multiTurn: '24.95', agentic: '28.00', hallucination: '14.12', format: '81.87' },
 ]
 
+export type CategoryLevel = 'high' | 'mid' | 'low'
+
 export function categoryLevelClass(level: CategoryLevel): string {
   switch (level) {
     case 'high': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'

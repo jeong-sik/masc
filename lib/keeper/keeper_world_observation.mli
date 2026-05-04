@@ -113,6 +113,7 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
+  | Entropic_oscillation
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =

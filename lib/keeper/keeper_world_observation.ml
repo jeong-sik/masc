@@ -66,6 +66,7 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
+  | Entropic_oscillation
 
 type skip_reason =
   | Keeper_paused
@@ -90,7 +91,8 @@ let turn_reason_to_string = function
   | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
-  | Min_interval_elapsed -> "min_interval_elapsed"
+  | Min_interval_elapsed
+  | Entropic_oscillation -> "min_interval_elapsed"
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
@@ -1139,8 +1141,14 @@ let keeper_cycle_decision
            on top defeats its purpose. Without this bypass, keepers ignore
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
+        let entropic_oscillation_interval = 600 in
+        let should_oscillate =
+          since_last_scheduled_autonomous >= entropic_oscillation_interval
+          && (Random.int 100 < 5)
+        in
         let should_run =
           is_bootstrap
+          || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
               && (backlog_fresh
@@ -1179,6 +1187,7 @@ let keeper_cycle_decision
             let run_reasons =
               [
                 Some Scheduled_autonomous_turn;
+                (if should_oscillate then Some Entropic_oscillation else None);
                 (if is_bootstrap
                  then Some Never_started else None);
                 (if min_interval_elapsed

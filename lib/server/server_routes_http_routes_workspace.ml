@@ -6,37 +6,50 @@ module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.room_config.base_path
 
-(* Resolve the workspace base directory for tree/file reads.
+(* Pure classification of the [?keeper=<name>] query param into a
+   workspace base directory plus a source tag.
 
-   Without [?keeper=<name>] the project root from [base_path_of_state]
-   is used (single shared workspace). With a keeper name the keeper's
-   private workspace root (sandbox playground) is resolved via
-   [Keeper_sandbox.host_root_abs_of_meta] and validated for existence.
+   Without a keeper name (or with an empty / whitespace-only one) the
+   project root is used. With a name, [lookup_playground] returns the
+   keeper's private workspace root if the keeper meta is known, and
+   [exists_dir] validates that the playground directory is actually
+   on disk. Failures fall back to the project root so the IDE always
+   renders something and never depends on disk state to draw a tree.
 
-   Unknown keeper / missing meta / non-existent playground silently
-   fall back to the project root so the IDE always renders something
-   and never depends on disk state to render a tree. The boolean
-   return signals whether the requested keeper's playground was
-   actually found, so callers can surface "playground 없음" hints
-   without leaking the resolved absolute path back to the client. *)
-let resolve_workspace_base ~state ~uri =
-  let project_base = base_path_of_state state in
-  match Uri.get_query_param uri "keeper" with
+   This split keeps the side-effecting wiring (state -> config,
+   Keeper_types.read_meta, Sys.file_exists / Sys.is_directory) at the
+   route boundary while the dispatch logic stays unit-testable. *)
+let classify_keeper_query
+    ~project_base
+    ~lookup_playground
+    ~exists_dir
+    keeper_param =
+  match keeper_param with
   | None | Some "" -> (project_base, `Project)
   | Some keeper_name ->
     let trimmed = String.trim keeper_name in
     if trimmed = "" then (project_base, `Project)
     else
-      let config = state.Mcp_server.room_config in
-      match Keeper_types.read_meta config trimmed with
-      | Ok (Some m) ->
-        let playground =
-          Keeper_sandbox.host_root_abs_of_meta ~config m
-        in
-        if Sys.file_exists playground && Sys.is_directory playground
-        then (playground, `Playground trimmed)
-        else (project_base, `PlaygroundMissing trimmed)
-      | _ -> (project_base, `KeeperUnknown trimmed)
+      match lookup_playground trimmed with
+      | Some playground when exists_dir playground ->
+        (playground, `Playground trimmed)
+      | Some _ -> (project_base, `PlaygroundMissing trimmed)
+      | None -> (project_base, `KeeperUnknown trimmed)
+
+let resolve_workspace_base ~state ~uri =
+  let project_base = base_path_of_state state in
+  let config = state.Mcp_server.room_config in
+  let lookup_playground name =
+    match Keeper_types.read_meta config name with
+    | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
+    | _ -> None
+  in
+  let exists_dir p = Sys.file_exists p && Sys.is_directory p in
+  classify_keeper_query
+    ~project_base
+    ~lookup_playground
+    ~exists_dir
+    (Uri.get_query_param uri "keeper")
 
 let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]

@@ -29,11 +29,11 @@ async function fetchTree(depth = 3, keeper = ''): Promise<FileTreeNode[]> {
     const params = new URLSearchParams({ depth: String(depth) })
     if (keeper) params.set('keeper', keeper)
     const res = await fetch(`/api/v1/workspace/tree?${params.toString()}`)
-    if (!res.ok) return FALLBACK_SEED
+    if (!res.ok) return [...FALLBACK_SEED]
     const data = await res.json()
-    if (!Array.isArray(data) || data.length === 0) return FALLBACK_SEED
+    if (!Array.isArray(data) || data.length === 0) return [...FALLBACK_SEED]
     return data as FileTreeNode[]
-  } catch { return FALLBACK_SEED }
+  } catch { return [...FALLBACK_SEED] }
 }
 
 export function IdeExplorer() {

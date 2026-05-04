@@ -1,12 +1,7 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
-import {
-  IDE_MOCK_FILE_PATH,
-  IDE_MOCK_RELATED_LINE,
-  IDE_MOCK_THREADS,
-} from './ide-mock-data'
-import type { AnchoredThread, ThreadKind } from './anchored-thread-rail-store'
+import type { ThreadKind } from './anchored-thread-rail-store'
 
 interface BoardPost {
   readonly id: string
@@ -17,10 +12,6 @@ interface BoardPost {
   readonly comment_count: number
   readonly created_at_iso: string
   readonly hearth?: string | null
-}
-
-interface BoardListResponse {
-  readonly posts?: ReadonlyArray<BoardPost>
 }
 
 const KIND_LABEL: Record<ThreadKind, string> = {

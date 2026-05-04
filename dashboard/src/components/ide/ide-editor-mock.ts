@@ -12,16 +12,11 @@ import {
   createKeeperLineOwnershipStore,
   type LineOwnership,
 } from './keeper-line-ownership-store'
-import {
-  IDE_LAYER_ORDER,
-  IDE_MOCK_FILE_PATH,
-  IDE_MOCK_OWNERSHIP_EVENTS,
-  IDE_MOCK_SOURCE,
-  ideMockAnnotationsForLayer,
-  ideMockAnnotationsForLine,
-  type IdeLayerKind,
-} from './ide-mock-data'
+import type { KeeperEditKind } from '../../../design-system/headless-core/keeper-line-ownership'
 import { languageFromPath } from './language-detection'
+
+const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'explode'] as const
+type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 // PR-5 precursor: the editor remains a read-only fixture, but source document,
 // blame-by-keeper ownership, view state, and layer affordances now flow through
@@ -101,55 +96,6 @@ const LAYER_LABEL: Record<IdeLayerKind, string> = {
   explode: 'EXPLODE',
 }
 
-const UNIFIED_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = [
-  { kind: 'context', oldLine: 16, newLine: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-  { kind: 'delete', oldLine: 17, newLine: null, text: '  if (req.tools === undefined) {' },
-  { kind: 'delete', oldLine: 18, newLine: null, text: '    return req' },
-  { kind: 'delete', oldLine: 19, newLine: null, text: '  }' },
-  { kind: 'add', oldLine: null, newLine: 17, text: '  // strip empty tools array' },
-  { kind: 'add', oldLine: null, newLine: 18, text: '  if (req.tools && req.tools.length === 0) {' },
-  { kind: 'add', oldLine: null, newLine: 19, text: '    const { tools, tool_choice, ...rest } = req' },
-  { kind: 'add', oldLine: null, newLine: 20, text: '    return rest as CascadeReq' },
-  { kind: 'add', oldLine: null, newLine: 21, text: '  }' },
-  { kind: 'context', oldLine: 20, newLine: 22, text: '  return req' },
-  { kind: 'context', oldLine: 21, newLine: 23, text: '}' },
-]
-
-const SPLIT_DIFF_ROWS: ReadonlyArray<SplitDiffRow> = [
-  {
-    before: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-    after: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-  },
-  {
-    before: { kind: 'delete', line: 17, text: '  if (req.tools === undefined) {' },
-    after: { kind: 'add', line: 17, text: '  // strip empty tools array' },
-  },
-  {
-    before: { kind: 'delete', line: 18, text: '    return req' },
-    after: { kind: 'add', line: 18, text: '  if (req.tools && req.tools.length === 0) {' },
-  },
-  {
-    before: { kind: 'delete', line: 19, text: '  }' },
-    after: { kind: 'add', line: 19, text: '    const { tools, tool_choice, ...rest } = req' },
-  },
-  {
-    before: null,
-    after: { kind: 'add', line: 20, text: '    return rest as CascadeReq' },
-  },
-  {
-    before: null,
-    after: { kind: 'add', line: 21, text: '  }' },
-  },
-  {
-    before: { kind: 'context', line: 20, text: '  return req' },
-    after: { kind: 'context', line: 22, text: '  return req' },
-  },
-  {
-    before: { kind: 'context', line: 21, text: '}' },
-    after: { kind: 'context', line: 23, text: '}' },
-  },
-]
-
 export function IdeEditorMock({
   activeView = 'source',
   activeLayers = EMPTY_ACTIVE_LAYERS,
@@ -177,7 +123,7 @@ export function IdeEditorMock({
     () => createCodeDocumentStore({
       file_path: activeIdeFile.value,
       language: languageFromPath(activeIdeFile.value),
-      content: sourceCode.length > 0 ? sourceCode : IDE_MOCK_SOURCE,
+      content: sourceCode,
     }),
     [sourceCode, activeIdeFile.value],
   )
@@ -190,10 +136,6 @@ export function IdeEditorMock({
     let cancelled = false
     fetchBlame(activeIdeFile.value).then(blocks => {
       if (cancelled) return
-      if (blocks.length === 0) {
-        for (const event of IDE_MOCK_OWNERSHIP_EVENTS) ownershipStore.ingest(event)
-        return
-      }
       ownershipStore.reset(activeIdeFile.value)
       for (const block of blocks) {
         ownershipStore.ingest({
@@ -202,7 +144,7 @@ export function IdeEditorMock({
           line_end: block.line_end,
           keeper_id: block.keeper_id,
           timestamp_ms: block.timestamp_ms,
-          kind: block.kind,
+          kind: block.kind as KeeperEditKind,
         })
       }
     })
@@ -213,7 +155,7 @@ export function IdeEditorMock({
   useEffect(() => {
     let cancelled = false
     fetchDiff(activeIdeFile.value).then(rows => {
-      if (!cancelled) setDiffRows(rows.length > 0 ? rows : UNIFIED_DIFF_ROWS)
+      if (!cancelled) setDiffRows(rows)
     })
     return () => { cancelled = true }
   }, [activeIdeFile.value])
@@ -589,7 +531,7 @@ function LayerOverlaySummary(
 }
 
 function rowLayerChips(
-  line: CodeDocumentLine,
+  _line: CodeDocumentLine,
   owner: LineOwnership | undefined,
   activeLayerKinds: ReadonlyArray<IdeLayerKind>,
 ): ReadonlyArray<string> {
@@ -599,9 +541,7 @@ function rowLayerChips(
     else if (kind === 'parallel' && owner) pushUnique(chips, owner.last_edit_kind)
     else if (kind === 'explode' && owner) pushUnique(chips, 'ghost')
     else {
-      for (const annotation of ideMockAnnotationsForLine(line.num)) {
-        if (annotation.layers.includes(kind)) pushUnique(chips, annotation.chip)
-      }
+      // annotation layers (tools, approve, notes) require a backend API — not yet available
     }
   }
   return chips
@@ -626,9 +566,9 @@ function layerLabel(kind: IdeLayerKind): string {
 function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
   if (kind === 'time') return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
   if (kind === 'parallel') return `${keepers.length} keepers`
-  if (kind === 'tools') return `${ideMockAnnotationsForLayer(kind).length} anchored`
-  if (kind === 'approve') return `${ideMockAnnotationsForLayer(kind).length} approval`
-  if (kind === 'notes') return `${ideMockAnnotationsForLayer(kind).length} note`
+  if (kind === 'tools') return '0 anchored'
+  if (kind === 'approve') return '0 approval'
+  if (kind === 'notes') return '0 note'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
 }
@@ -660,9 +600,11 @@ function buildSplitDiff(rows: ReadonlyArray<UnifiedDiffRow>): SplitDiffRow[] {
   function flushPending(): void {
     const max = Math.max(deletes.length, adds.length)
     for (let i = 0; i < max; i++) {
+      const del = deletes[i]
+      const add = adds[i]
       result.push({
-        before: deletes[i] ? { kind: 'delete', line: deletes[i].oldLine, text: deletes[i].text } : null,
-        after: adds[i] ? { kind: 'add', line: adds[i].newLine, text: adds[i].text } : null,
+        before: del ? { kind: 'delete', line: del.oldLine, text: del.text } : null,
+        after: add ? { kind: 'add', line: add.newLine, text: add.text } : null,
       })
     }
     deletes.length = 0

@@ -852,7 +852,7 @@ let recover_latest_checkpoint_for_overflow_retry
                 "overflow retry checkpoint save failed: %s" e;
               Prometheus.inc_counter
                 Prometheus.metric_keeper_checkpoint_failures
-                ~labels:[("keeper", "unknown"); ("phase", "overflow_save")]
+                ~labels:[("keeper", retry_meta.agent_name); ("operation", "overflow_save")]
                 ();
               None)
         with

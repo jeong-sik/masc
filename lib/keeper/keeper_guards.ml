@@ -280,7 +280,7 @@ let emit_gate_event
     | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_guards_failures
-        ~labels:[("keeper", "unknown"); ("site", "event_emit")]
+        ~labels:[("keeper", agent_name); ("site", "event_emit")]
         ();
       Log.Keeper.warn
         "keeper_guards: event emit failed stage=%s tool=%s err=%s"

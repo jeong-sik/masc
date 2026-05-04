@@ -5,7 +5,7 @@ import { html } from 'htm/preact'
 import { useComputed } from '@preact/signals'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
 import { Card } from './common/card'
-import { StatCell } from './common/stat-cell'
+import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/empty-state'
 import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 
@@ -118,37 +118,38 @@ export function OasHealthChip() {
   return html`
     <${Card} title="OAS 런타임">
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-        <${StatCell}
+        <${StatTile}
           label="총 이벤트"
-          value=${summary.value.totalEvents}
-          detail=${describeTotalEventsDetail(summary.value)}
+          value=${String(summary.value.totalEvents)}
+          delta=${{ direction: 'flat', text: describeTotalEventsDetail(summary.value) }}
         />
-        <${StatCell}
+        <${StatTile}
           label="LLM 호출"
-          value=${summary.value.totalLlmCalls}
-          detail=${sampleWindow ? `${llmDetail} · ${sampleWindow}` : llmDetail}
+          value=${String(summary.value.totalLlmCalls)}
+          delta=${{ direction: 'up', text: sampleWindow ? `${llmDetail} · ${sampleWindow}` : llmDetail }}
         />
-        <${StatCell}
+        <${StatTile}
           label="에러"
-          value=${summary.value.totalErrors}
-          detail=${sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail}
-          tone=${summary.value.totalErrors > 0 ? 'text-[var(--color-status-err)]' : undefined}
+          value=${String(summary.value.totalErrors)}
+          status=${summary.value.totalErrors > 0 ? 'crit' : undefined}
+          delta=${{ direction: summary.value.totalErrors > 0 ? 'down' as const : 'flat' as const, text: sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail }}
         />
-        <${StatCell}
+        <${StatTile}
           label="에이전트 이벤트"
-          value=${summary.value.agentEventsCount}
-          detail="자율성 트레이스"
+          value=${String(summary.value.agentEventsCount)}
+          delta=${{ direction: 'flat', text: '자율성 트레이스' }}
         />
-        <${StatCell}
+        <${StatTile}
           label="Keeper 스냅샷"
-          value=${summary.value.keeperSnapshotsCount}
-          detail="활성 keeper"
+          value=${String(summary.value.keeperSnapshotsCount)}
+          status=${summary.value.keeperSnapshotsCount > 0 ? 'ok' : undefined}
+          delta=${{ direction: summary.value.keeperSnapshotsCount > 0 ? 'up' as const : 'flat' as const, text: '활성 keeper' }}
         />
-        <${StatCell}
+        <${StatTile}
           label="최근 tick"
           value=${formatLastTick(summary.value.lastKeeperTick)}
-          detail=${isStale.value ? '신호 끊김' : '수신 중'}
-          tone=${isStale.value ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-status-ok)]'}
+          status=${isStale.value ? 'warn' : 'ok'}
+          delta=${{ direction: isStale.value ? 'down' as const : 'up' as const, text: isStale.value ? '신호 끊김' : '수신 중' }}
         />
       </div>
       ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`

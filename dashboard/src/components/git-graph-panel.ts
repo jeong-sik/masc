@@ -5,20 +5,12 @@ import { EmptyState, ErrorRecoverable, LoadingState } from './common/feedback-st
 import { ActionButton } from './common/button'
 import { TimeAgo } from './common/time-ago'
 import { GitGraphView } from './git-graph-view'
+import { StatTile } from './common/stat-tile'
 import {
   cancelGitGraphRefresh,
   gitGraphResource,
   refreshGitGraph,
 } from './git-graph-store'
-
-function StatCell({ label, value }: { label: string; value: number }) {
-  return html`
-    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-      <div class="text-2xs font-medium uppercase tracking-[0.16em] text-[var(--color-fg-muted)]">${label}</div>
-      <div class="mt-1 text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${value}</div>
-    </div>
-  `
-}
 
 export function GitGraphPanel() {
   const state = gitGraphResource.state.value
@@ -103,12 +95,22 @@ export function GitGraphPanel() {
       ` : null}
 
       <div class="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        <${StatCell} label="Repos" value=${graph.stats.repo_count} />
-        <${StatCell} label="Worktrees" value=${graph.stats.agent_count} />
-        <${StatCell} label="Branches" value=${graph.stats.branch_count} />
-        <${StatCell} label="Commits" value=${graph.stats.commit_count} />
-        <${StatCell} label="Dirty" value=${graph.stats.dirty_count} />
-        <${StatCell} label="Conflicts" value=${graph.stats.conflict_count} />
+        <${StatTile} label="Repos" value=${String(graph.stats.repo_count)} />
+        <${StatTile} label="Worktrees" value=${String(graph.stats.agent_count)} />
+        <${StatTile} label="Branches" value=${String(graph.stats.branch_count)} />
+        <${StatTile} label="Commits" value=${String(graph.stats.commit_count)} />
+        <${StatTile}
+          label="Dirty"
+          value=${String(graph.stats.dirty_count)}
+          status=${graph.stats.dirty_count > 0 ? 'warn' : undefined}
+          delta=${graph.stats.dirty_count > 0 ? { direction: 'flat' as const, text: '미커밋' } : undefined}
+        />
+        <${StatTile}
+          label="Conflicts"
+          value=${String(graph.stats.conflict_count)}
+          status=${graph.stats.conflict_count > 0 ? 'crit' : undefined}
+          delta=${graph.stats.conflict_count > 0 ? { direction: 'down' as const, text: '해결 필요' } : undefined}
+        />
       </div>
 
       ${graph.warnings.length > 0 ? html`

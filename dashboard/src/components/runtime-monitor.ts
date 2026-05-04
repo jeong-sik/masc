@@ -14,7 +14,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
-import { StatCell } from './common/stat-cell'
+import { StatTile } from './common/stat-tile'
 import { StatusChip } from './common/status-chip'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
@@ -386,15 +386,15 @@ export function RuntimeMonitor() {
 
       <${Card} title="프로바이더 런타임">
         <div class="grid grid-cols-2 gap-3 mb-4">
-          <${StatCell}
+          <${StatTile}
             label="프로바이더"
-            value=${providers?.summary?.providers ?? providers?.providers.length ?? 0}
-            detail=${providers?.updated_at ?? 'updated_at 없음'}
+            value=${String(providers?.summary?.providers ?? providers?.providers.length ?? 0)}
+            delta=${{ direction: 'flat', text: providers?.updated_at ?? 'updated_at 없음' }}
           />
-          <${StatCell}
+          <${StatTile}
             label="로컬 모델"
-            value=${providers?.summary?.local_models ?? 0}
-            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
+            value=${String(providers?.summary?.local_models ?? 0)}
+            delta=${{ direction: 'flat', text: `Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}` }}
           />
         </div>
         <div class="flex flex-col gap-3">
@@ -434,20 +434,20 @@ export function RuntimeMonitor() {
 
       <${Card} title="모델 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">
-          <${StatCell}
+          <${StatTile}
             label="텔레메트리 윈도우"
             value=${`${metrics?.window_minutes ?? windowMinutes.value}m`}
-            detail=${`항목 ${fmtNumber(metrics?.total_entries ?? 0)}`}
+            delta=${{ direction: 'flat', text: `항목 ${fmtNumber(metrics?.total_entries ?? 0)}` }}
           />
-          <${StatCell}
+          <${StatTile}
             label="추적 중인 모델"
-            value=${metrics?.models.length ?? 0}
-            detail=${`오류 ${fmtNumber(metrics?.total_error_entries ?? 0)}`}
+            value=${String(metrics?.models.length ?? 0)}
+            delta=${{ direction: 'flat', text: `오류 ${fmtNumber(metrics?.total_error_entries ?? 0)}` }}
           />
-          <${StatCell}
+          <${StatTile}
             label="총 비용"
             value=${fmtCost(sumNullable((metrics?.models ?? []).map(m => m.total_cost_usd)))}
-            detail=${`${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls`}
+            delta=${{ direction: 'flat', text: `${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
           />
         </div>
         <div class="flex items-center justify-end mb-2">

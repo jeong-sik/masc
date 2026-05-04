@@ -7,7 +7,7 @@ import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { TextInput } from './common/input'
-import { StatCell } from './common/stat-cell'
+import { StatTile } from './common/stat-tile'
 import { StatusChip } from './common/status-chip'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
@@ -166,22 +166,28 @@ export function GovernanceMonitor() {
       <${Card} title="승인 대기열">
         ${data ? html`
           <div class="grid grid-cols-4 gap-3">
-            <${StatCell}
+            <${StatTile}
               label="대기열 깊이"
-              value=${data.approval_queue.depth}
+              value=${String(data.approval_queue.depth)}
+              status=${data.approval_queue.depth > 0 ? 'warn' : 'ok'}
+              delta=${{ direction: data.approval_queue.depth > 0 ? 'flat' as const : 'up' as const, text: data.approval_queue.depth > 0 ? '승인 대기' : '비어있음' }}
             />
-            <${StatCell}
+            <${StatTile}
               label="p50 Wait"
               value=${fmtSec(data.approval_queue.p50_wait_sec)}
             />
-            <${StatCell}
+            <${StatTile}
               label="p95 대기"
               value=${fmtSec(data.approval_queue.p95_wait_sec)}
+              status=${data.approval_queue.p95_wait_sec > 300 ? 'warn' : undefined}
+              delta=${data.approval_queue.p95_wait_sec > 300 ? { direction: 'down' as const, text: '5분 초과' } : undefined}
             />
             <div class="flex items-center gap-2">
-              <${StatCell}
+              <${StatTile}
                 label="최장 대기"
                 value=${fmtSec(data.approval_queue.oldest_pending_sec)}
+                status=${data.approval_queue.oldest_pending_sec > 600 ? 'crit' : data.approval_queue.oldest_pending_sec > 300 ? 'warn' : undefined}
+                delta=${data.approval_queue.oldest_pending_sec > 300 ? { direction: 'down' as const, text: '장기 대기' } : undefined}
               />
               <${StatusChip}
                 label=${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}

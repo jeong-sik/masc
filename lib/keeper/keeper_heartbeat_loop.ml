@@ -34,6 +34,10 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta) 
         Log.Keeper.error
           "keepalive identity repair failed for %s: invalid trace_id %s (%s)"
           meta.name new_trace_id_raw err;
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_heartbeat_failures
+          ~labels:[("keeper", meta.name); ("phase", "identity_repair")]
+          ();
         None
     | Ok new_trace_id ->
         let base_dir = session_base_dir ctx.config in
@@ -95,9 +99,9 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
   if stale_turn_failures > 0 then begin
     Keeper_registry.reset_turn_failures
       ~base_path:ctx.config.base_path meta.name;
-    ignore (Keeper_registry.dispatch_event_and_log
+    Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path meta.name
-      Keeper_state_machine.Heartbeat_ok);
+      Keeper_state_machine.Heartbeat_ok;
     Keeper_keepalive_signal.dispatch_keepalive_event ~ctx ~keeper_name:meta.name
       Keeper_state_machine.Turn_succeeded;
     Log.Keeper.info
@@ -145,19 +149,19 @@ let sync_keeper_presence
         (* RFC-0002: dispatch heartbeat failure *)
         Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
           ~labels:[("keeper", meta_current.name)] ();
-        ignore (Keeper_registry.dispatch_event_and_log
+        Keeper_registry.dispatch_event_unit
           ~base_path:ctx.config.base_path meta_current.name
           (Keeper_state_machine.Heartbeat_failed {
             consecutive = !consecutive_failures;
             max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ();
-          })))
+          }))
       else (
         consecutive_failures := 0;
         last_successful_heartbeat_ts := Time_compat.now ();
         (* RFC-0002: dispatch heartbeat success *)
-        ignore (Keeper_registry.dispatch_event_and_log
+        Keeper_registry.dispatch_event_unit
           ~base_path:ctx.config.base_path meta_current.name
-          Keeper_state_machine.Heartbeat_ok);
+          Keeper_state_machine.Heartbeat_ok;
         Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_successes
           ~labels:[("keeper", meta_current.name)] ();
         maybe_recover_from_failing ~ctx ~meta:meta_current);
@@ -172,18 +176,22 @@ let sync_keeper_presence
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       incr consecutive_failures;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_room_heartbeat_failures
+        ~labels:[("keeper", meta_current.name)]
+        ();
       Log.Keeper.error
         "room heartbeat failed (%d/%d): %s"
         !consecutive_failures
         (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
         (Printexc.to_string exn);
       (* RFC-0002: dispatch heartbeat failure *)
-      ignore (Keeper_registry.dispatch_event_and_log
+      Keeper_registry.dispatch_event_unit
         ~base_path:ctx.config.base_path meta_current.name
         (Keeper_state_machine.Heartbeat_failed {
           consecutive = !consecutive_failures;
           max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ();
-        }));
+        });
       meta_current)
 ;;
 
@@ -208,6 +216,10 @@ let collect_keepalive_board_events
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_heartbeat_failures
+          ~labels:[("keeper", meta_current.name); ("phase", "board_count_query")]
+          ();
         []
     in
     pending_board_events, meta_current)
@@ -231,7 +243,11 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.warn "in-turn liveness pulse failed: %s"
-                 (Printexc.to_string exn));
+                 (Printexc.to_string exn);
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_heartbeat_failures
+                 ~labels:[("keeper", "liveness_pulse"); ("phase", "pulse_tick")]
+                 ());
           loop ())
       in
       loop ());
@@ -247,7 +263,11 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Log.Keeper.warn "in-turn heartbeat failed for %s: %s"
-             meta.name (Printexc.to_string exn));
+             meta.name (Printexc.to_string exn);
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_heartbeat_failures
+             ~labels:[("keeper", meta.name); ("phase", "in_turn_heartbeat")]
+             ());
       let now_ts = Time_compat.now () in
       (try
          let json =
@@ -265,6 +285,10 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_sse_broadcast_failures
+             ~labels:[("keeper", meta.name)]
+             ();
            Log.Keeper.error "in-turn heartbeat SSE broadcast failed: %s"
              (Printexc.to_string exn))
   | _ -> ()
@@ -369,14 +393,38 @@ let run_keepalive_unified_turn
               | Keeper_event_queue.Normal -> "normal"
               | Keeper_event_queue.Low -> "low"
             in
+            let class_str =
+              match Keeper_event_queue.classify stim with
+              | Board_signal -> "board_signal"
+              | Bootstrap -> "bootstrap"
+              | Unsupported _ -> "unsupported"
+            in
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_stimulus_consumed
+              ~labels:[("keeper", meta_after_triage.name); ("class", class_str)] ();
             Log.Keeper.info
-              "turn entry: consumed stimulus stimulus_id=%s urgency=%s payload_len=%d (keeper=%s)"
-              stim.post_id urgency_str
+              "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s payload_len=%d (keeper=%s)"
+              stim.post_id urgency_str class_str
               (String.length stim.payload)
               meta_after_triage.name;
-            Keeper_world_observation.pending_board_event_of_stimulus
-              ~continuity_summary:meta_after_triage.continuity_summary
-              ~meta:meta_after_triage stim
+            (match Keeper_event_queue.classify stim with
+             | Board_signal ->
+                 Keeper_world_observation.pending_board_event_of_stimulus
+                   ~continuity_summary:meta_after_triage.continuity_summary
+                   ~meta:meta_after_triage stim
+             | Bootstrap ->
+                 Log.Keeper.info
+                   "turn entry: bootstrap stimulus consumed (keeper=%s)"
+                   meta_after_triage.name;
+                 None
+             | Unsupported prefix ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_unsupported_stimulus
+                   ~labels:[("keeper", meta_after_triage.name)] ();
+                 Log.Keeper.warn
+                   "turn entry: unsupported stimulus consumed prefix=%S post_id=%s (keeper=%s) — wake→no_signal gap #12684"
+                   prefix stim.post_id meta_after_triage.name;
+                 None)
       in
       let pending_board_events =
         match queued_board_event with
@@ -572,6 +620,10 @@ let run_keepalive_unified_turn
                 Log.Keeper.error
                   "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
                   meta_after_observe.name e_str;
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_heartbeat_failures
+                  ~labels:[("keeper", meta_after_observe.name); ("phase", "fatal_environment")]
+                  ();
                 Keeper_registry.set_failure_reason
                   ~base_path:ctx.config.base_path meta_after_observe.name
                   (Some (Keeper_registry.Exception
@@ -629,10 +681,18 @@ let run_keepalive_unified_turn
                | Ok None ->
                  Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"
                    meta_after_observe.name;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_meta_read_failures
+                   ~labels:[("keeper", meta_after_observe.name); ("site", "none_after_failure")]
+                   ();
                  meta_after_observe
                | Error e ->
                  Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"
                    meta_after_observe.name e;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_meta_read_failures
+                   ~labels:[("keeper", meta_after_observe.name); ("site", "error_after_failure")]
+                   ();
                  meta_after_observe)
             | Ok updated ->
               (* PR-M: success clears the strike counter so a single
@@ -648,8 +708,12 @@ let run_keepalive_unified_turn
         | Error (`Semaphore_wait_timeout wait_sec) ->
           (* Peers held the turn semaphore longer than the wait cap — not a
              keeper failure. Skip this cycle and let the next heartbeat retry
-             once a slot opens up. Meta is left untouched so failure counters
-             do not tick. *)
+             once a slot opens up. Failure counters intentionally NOT ticked
+             (this is starvation, not crash); but [last_blocker_class] IS
+             updated so the dashboard surfaces the stuck reason — without it
+             the keeper appears as [outcome=never_started, blocker_class=null]
+             and operators see "alive but invisible" (2026-05-05 fleet stuck
+             diagnosis evidence). *)
           record_semaphore_wait_observation
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
@@ -657,11 +721,26 @@ let run_keepalive_unified_turn
             ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
+          let blocker_text =
+            Printf.sprintf
+              "skipped: semaphore wait > %.0fs, peers holding slot \
+               (cascade=%s, autonomous_available=%d turn_available=%d)"
+              wait_sec meta_after_triage.cascade_name auto_avail turn_avail
+          in
           Log.Keeper.warn
-            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot, cascade=%s, autonomous_available=%d turn_available=%d)"
-            meta_after_triage.name wait_sec meta_after_triage.cascade_name
-            auto_avail turn_avail;
-          meta_after_triage)
+            "%s: skipping turn (%s)"
+            meta_after_triage.name blocker_text;
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_semaphore_wait_timeout
+            ~labels:[("keeper", meta_after_triage.name); ("channel", (Keeper_world_observation.channel_to_string turn_decision.channel))]
+            ();
+          Keeper_types.map_runtime
+            (fun rt ->
+              { rt with
+                last_blocker = blocker_text;
+                last_blocker_class = Some Keeper_types.Autonomous_slot_wait_timeout;
+              })
+            meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
       else
@@ -670,6 +749,10 @@ let run_keepalive_unified_turn
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_cycle_exceptions
+        ~labels:[("keeper", meta_after_triage.name)]
+        ();
       Log.Keeper.error "%s: keeper cycle exception: %s"
         meta_after_triage.name (Printexc.to_string exn);
       meta_after_triage)
@@ -736,11 +819,19 @@ let dispatch_recurring_keepalive
            with
            | exn ->
              Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_recurring_failures
+               ~labels:[("task", task.id); ("phase", "task_execution")]
+               ();
              Error (Printexc.to_string exn)))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_recurring_failures
+      ~labels:[("task", "dispatch"); ("phase", "dispatch_error")]
+      ();
     0
 ;;
 
@@ -882,6 +973,10 @@ let maybe_write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_snapshot_write_failures
+         ~labels:[("keeper", meta_current.name)]
+         ();
        Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));
     last_snapshot_ts := now_ts)
 ;;
@@ -1123,13 +1218,9 @@ let run_heartbeat_loop
               ~proactive_warmup_elapsed
               ~shared_context
           in
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"pre"
-            (fun () -> Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
           turn_running := false;
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"post"
-            (fun () -> Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
           r
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),

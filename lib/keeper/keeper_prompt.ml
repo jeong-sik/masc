@@ -60,6 +60,10 @@ let render_world_prompt ~allowed_orgs ~denied_repos : string =
   with
   | Ok rendered -> rendered
   | Error msg ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_prompt_failures
+        ~labels:[("prompt", Keeper_prompt_names.world)]
+        ();
       Log.Keeper.warn
         "render_world_prompt: template render failed, falling back to raw \
          template (keepers may see unrendered placeholders): %s"

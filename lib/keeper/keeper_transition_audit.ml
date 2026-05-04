@@ -299,6 +299,10 @@ let get_default_store () =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_transition_audit_failures
+             ~labels:[("site", "default_store")]
+             ();
            Log.Keeper.warn "transition_audit default store failed: %s"
              (Printexc.to_string exn);
            None)

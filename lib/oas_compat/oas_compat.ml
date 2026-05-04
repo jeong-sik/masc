@@ -27,6 +27,47 @@ module Http_client = struct
     | Provider_failure_parse_error
     | Provider_failure_unknown
 
+  (** Structured error codes for conditions that previously required
+      case-insensitive substring scanning of raw provider message strings.
+
+      Each variant corresponds to a concrete per-provider failure mode
+      that was originally identified via string markers (M04/M05).
+      Keeping the conversion quarantined in [classify_accept_rejected] and
+      [is_http_body_parse_error] means:
+        1. String fragility is isolated — message-format changes only
+           break one small function each.
+        2. Downstream cascade logic branches on variant, not string.
+        3. Adding a new signal requires only a new variant + one clause,
+           not a new magic-needle in a shared list. *)
+  type retryable_error =
+    | Parse_error
+        (** HTTP body signals a provider-side JSON parse failure.
+            Originally detected via [contains_ci "can't find closing"]
+            (M04). Ollama returning 400 on large request bodies
+            (~175 KB+) is the canonical trigger.  The cascade should
+            advance because the body size limit is local to this
+            provider. *)
+    | Model_unsupported
+        (** Provider explicitly reports that the requested model or
+            capability is not supported.
+            Originally detected via [contains_ci "does not support"]
+            (M05).  Covers codex_cli [runtime_mcp_auth] /
+            [tool_support] InvalidConfig wrappers built in
+            [oas_worker_exec_transport.ml].  Another provider in the
+            cascade may support the capability. *)
+    | Request_rejected
+        (** Provider subprocess exited with a permanent rejection.
+            Originally detected via [contains_ci "rejected the request"]
+            (M05).  Canonical case: kimi_cli exit 1 — the auth/config
+            error is Moonshot-specific; other providers are unaffected.
+            See masc-mcp #9932. *)
+    | Startup_crash
+        (** Provider CLI crashed before processing the request.
+            Originally detected via [contains_ci "startup crash"] (M05).
+            Covers gemini_cli top-level-await / yoga_wasm and kimi_cli
+            process-title UnicodeDecodeError.  The CLI source marks
+            these "so the cascade can move on". *)
+
   let classify_provider_failure_kind =
     let module H = Llm_provider.Http_client in
     function
@@ -38,11 +79,21 @@ module Http_client = struct
     | H.Provider_parse_error _ -> Provider_failure_parse_error
     | H.Unknown_provider_failure _ -> Provider_failure_unknown
 
-  (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
-  let contains_ci ?(max_scan = 512) ~haystack ~needle () =
+  (* String-matching quarantine zone.
+     All case-insensitive substring checks live here and nowhere else.
+     When OAS or a provider changes a message format, only this section
+     needs updating.  Downstream cascade code uses [retryable_error]
+     variants, not raw strings. *)
+
+  let max_scan_bytes = 512
+
+  (* Case-insensitive substring check — O(n*m) but the haystack scan is
+     capped at [max_scan_bytes] so the worst-case cost is fixed. *)
+  let contains_ci_scan_limited ~haystack ~needle =
     let h =
       String.lowercase_ascii
-        (if String.length haystack > max_scan then String.sub haystack 0 max_scan
+        (if String.length haystack > max_scan_bytes then
+           String.sub haystack 0 max_scan_bytes
          else haystack)
     in
     let n = String.lowercase_ascii needle in
@@ -57,42 +108,32 @@ module Http_client = struct
       in
       scan 0
 
-  (* Ollama failing on large request bodies (~175KB+) returns 400 with
-     "can't find closing '}'". See cascade_health_filter history. *)
-  let is_provider_parse_error body =
-    contains_ci ~haystack:body ~needle:"can't find closing" ()
+  (** Classify an [AcceptRejected] reason string into a structured
+      [retryable_error] code.
 
-  (* AcceptRejected is raised by OAS for multiple distinct conditions, all
-     of which are per-provider rather than cascade-wide. A different provider
-     in the cascade may handle the request even when the current one rejects:
-     (a) Per-provider permanent failures from subprocess CLI transports.
-         - kimi_cli exit 1: [transport_kimi_cli.ml] labels this
-           "permanent auth/config/model error". The auth/config is specific
-           to Moonshot; claude/gpt/ollama providers are unaffected.
-         - gemini_cli startup crash and kimi_cli process-title
-           UnicodeDecodeError: the CLI source explicitly marks the
-           AcceptRejected with "rejecting without retry so the cascade can
-           move on".
-     (b) Provider capability mismatches wrapped by MASC's worker layer at
-         [oas_worker_named.ml:672-678] (InvalidConfig runtime_mcp_auth /
-         tool_support). The detail string is built in
-         [oas_worker_exec_transport.ml] and starts with "<provider> does not
-         support ...". Another provider with matching capability can succeed.
-     The markers below cover (a) and (b). CompletionContractViolation and
-     UnrecognizedStopReason use free-form [reason] and are not whitelisted
-     here — their cascade intent is tracked at their own call sites in
-     [oas_worker_named.ml:673-678]. See masc-mcp #9932 (kimi fallback),
-     #9850 (codex_cli runtime_mcp_auth). *)
-  let accept_rejected_cascadable_markers = [
-    "does not support";
-    "rejected the request";  (* kimi_cli exit 1 — #9932 *)
-    "startup crash";          (* gemini_cli top-level await / yoga_wasm *)
-  ]
+      Returns [Some code] when the reason matches a known per-provider
+      failure marker; [None] for reasons with no recognised marker
+      (e.g. [output_schema] violations), which remain terminal
+      ([Accept_rejected_terminal]). *)
+  let classify_accept_rejected reason : retryable_error option =
+    (* Model/capability unsupported — MASC worker-layer wrapping of OAS
+       InvalidConfig errors (#9850). *)
+    if contains_ci_scan_limited ~haystack:reason ~needle:"does not support" then
+      Some Model_unsupported
+    (* kimi_cli permanent auth/config/model rejection (#9932). *)
+    else if contains_ci_scan_limited ~haystack:reason ~needle:"rejected the request" then
+      Some Request_rejected
+    (* gemini_cli / kimi_cli CLI startup failures. *)
+    else if contains_ci_scan_limited ~haystack:reason ~needle:"startup crash" then
+      Some Startup_crash
+    else
+      None
 
-  let accept_rejected_is_cascadable reason =
-    List.exists
-      (fun needle -> contains_ci ~haystack:reason ~needle ())
-      accept_rejected_cascadable_markers
+  (** Return [true] when an HTTP 400/422 body signals a provider-side
+      JSON parse failure (M04).
+      Ollama fails with "can't find closing '}'" on large bodies (~175 KB+). *)
+  let is_http_body_parse_error body =
+    contains_ci_scan_limited ~haystack:body ~needle:"can't find closing"
 
   let classify (err : Llm_provider.Http_client.http_error) :
       cascade_failure_class =
@@ -105,18 +146,22 @@ module Http_client = struct
              && Llm_provider.Retry.is_context_overflow_message body ->
           Context_overflow
       | Llm_provider.Http_client.HttpError { code; body }
-        when List.mem code [ 400; 422 ] && is_provider_parse_error body ->
+        when List.mem code [ 400; 422 ] && is_http_body_parse_error body ->
           Provider_parse_error
       | Llm_provider.Http_client.HttpError { code; _ } ->
           if List.mem code Llm_provider.Constants.Http.cascadable_codes then
             Transient_http code
           else
             Terminal_http code
-      | Llm_provider.Http_client.AcceptRejected { reason } ->
-          if accept_rejected_is_cascadable reason then
-            Accept_rejected_capability_mismatch
-          else
-            Accept_rejected_terminal
+      | Llm_provider.Http_client.AcceptRejected { reason } -> (
+          (* All [retryable_error] codes are per-provider — a different cascade
+             hop may succeed.  The type name encodes this intent: any variant
+             returned by [classify_accept_rejected] should advance the cascade.
+             If a future code should NOT cascade, it belongs in a different
+             type (or the call-site match should be extended at that point). *)
+          match classify_accept_rejected reason with
+          | Some _ -> Accept_rejected_capability_mismatch
+          | None -> Accept_rejected_terminal)
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->

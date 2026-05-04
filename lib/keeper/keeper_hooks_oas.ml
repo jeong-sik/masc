@@ -109,6 +109,10 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_lifecycle_callback_failures
+         ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
+         ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
          keeper_name event.tool_name (Printexc.to_string exn));
@@ -183,7 +187,7 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = "masc_keeper_tool_use_failure_total"
+let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -201,10 +205,10 @@ let record_tool_use_failure ~keeper_name ~tool_name =
    and emits a labelled counter so the operator can see WHICH
    transport leaked and WHICH resolution path recovered it. *)
 let empty_response_model_metric =
-  "masc_after_turn_response_model_empty_total"
+  Prometheus.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
-  "masc_after_turn_response_model_alias_total"
+  Prometheus.metric_after_turn_response_model_alias
 
 let unknown_model_sentinel = "unknown_provider"
 
@@ -354,7 +358,7 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
     : float =
   let pricing_catalog_miss () =
     Prometheus.inc_counter
-      "masc_pricing_catalog_miss_total"
+      Prometheus.metric_pricing_catalog_miss
       ~labels:[("model", model)] ();
     Log.Keeper.warn
       "pricing_catalog_miss model=%s input_tokens=%d output_tokens=%d \
@@ -580,7 +584,7 @@ let wall_tokens_per_second
                                 [estimate_usage_cost_usd] returned 0.
     - [zero_token_call]       — trusted+priced but tokens=0
                                 (tool-only call or empty completion). *)
-let cost_emit_source_metric = "masc_cost_emit_zero_source_total"
+let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
 
 let () =
   Prometheus.register_counter
@@ -807,7 +811,7 @@ let emit_cost_event
       ()
   in
   Prometheus.inc_counter
-    "masc_cost_ledger_status_total"
+    Prometheus.metric_cost_ledger_status
     ~labels:
       [
         ("provider", assembled.provider);
@@ -821,6 +825,10 @@ let emit_cost_event
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_metric_emit_dropped
+          ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
+          ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
           path (Printexc.to_string exn))
 
@@ -954,6 +962,8 @@ let make_hooks
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
+    ?(passive_loop_nudge : unit -> string option =
+        fun () -> None)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -993,36 +1003,45 @@ let make_hooks
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with
 
-    (* Work discovery injection (#8773 fix). The callback owns the policy
-       (interval, sources, query) and returns Some text only when there
-       is actionable work to surface. Hook stays domain-agnostic: it just
-       wraps the callback's payload in a Nudge so the next LLM turn sees
-       it as ambient observation. Returns Continue when callback yields
-       None — silent no-op, no token cost. *)
+    (* Work discovery injection (#8773 fix) and passive loop action injection
+       (#12799 P1/5). The callbacks own their policy and return Some text only
+       when there is actionable content to surface. The passive loop nudge
+       takes priority (prepended) when active, since it requires immediate
+       action. Hook stays domain-agnostic: it wraps payloads in a Nudge so
+       the next LLM turn sees them as ambient observation. Returns Continue
+       when both callbacks yield None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
-        (match discover_work_nudge () with
+        let loop_alert = passive_loop_nudge () in
+        let work_text = discover_work_nudge () in
+        let combined_with_source =
+          match loop_alert, work_text with
+          | None, None -> None
+          | Some a, None -> Some (a, "passive_loop_nudge")
+          | None, Some w -> Some (w, "work_discovery")
+          | Some a, Some w ->
+            Some (a ^ "\n\n" ^ w, "passive_loop_nudge + work_discovery")
+        in
+        (match combined_with_source with
          | None -> Agent_sdk.Hooks.Continue
-         | Some text when String.trim text = "" ->
+         | Some (text, _) when String.trim text = "" ->
            Agent_sdk.Hooks.Continue
-         | Some text when not (String.is_valid_utf_8 text) ->
-           (* Defensive: nudge path producers (e.g. keeper_agent_run's
-              discover_work_nudge) source strings from external input
-              (task titles, operator guidance, board posts). A byte-
-              level truncation upstream can leave an orphan UTF-8
-              continuation byte, and codex CLI rejects the resulting
-              argv with "invalid UTF-8 was detected in one or more
-              arguments" at parse time (non-cascadable). This gate
-              prevents polluted nudges from ever reaching transport
-              argv, regardless of which producer introduced the
-              drift. See #9036 for the first observed producer fix. *)
+         | Some (text, _) when not (String.is_valid_utf_8 text) ->
+           (* Defensive: nudge path producers source strings from external
+              input (task titles, operator guidance, board posts). A byte-
+              level truncation upstream can leave an orphan UTF-8 continuation
+              byte, and codex CLI rejects the resulting argv with "invalid
+              UTF-8 was detected in one or more arguments" at parse time
+              (non-cascadable). This gate prevents polluted nudges from ever
+              reaching transport argv, regardless of which producer introduced
+              the drift. See #9036 for the first observed producer fix. *)
            Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
              (!meta_ref).name (String.length text);
            Agent_sdk.Hooks.Continue
-         | Some text ->
-           Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
-             (!meta_ref).name (String.length text);
+         | Some (text, source) ->
+           Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
+             (!meta_ref).name source (String.length text);
            Agent_sdk.Hooks.Nudge text)
       | _ -> Agent_sdk.Hooks.Continue);
 
@@ -1080,11 +1099,11 @@ let make_hooks
            let cr = u.cache_read_input_tokens in
            if cc > 0 then
              Prometheus.inc_counter
-               "masc_provider_prefix_cache_creation_tokens_total"
+               Prometheus.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
            if cr > 0 then
              Prometheus.inc_counter
-               "masc_provider_prefix_cache_read_tokens_total"
+               Prometheus.metric_provider_prefix_cache_read_tokens
                ~delta:(Float.of_int cr) ()
          | Some _ | None -> ());
         (* Inference latency histogram for /metrics endpoint.
@@ -1093,7 +1112,7 @@ let make_hooks
            the hook isn't running". Without this split a histogram sum/count
            of 0 is ambiguous between the two. *)
         Prometheus.inc_counter
-          "masc_after_turn_hook_total"
+          Prometheus.metric_after_turn_hook
           ~labels:[("model", model)] ();
         (match response.telemetry with
          | Some t when t.request_latency_ms > 0 ->
@@ -1103,11 +1122,11 @@ let make_hooks
              (Float.of_int t.request_latency_ms /. 1000.0)
          | Some _ ->
            Prometheus.inc_counter
-             "masc_after_turn_telemetry_zero_latency_total"
+             Prometheus.metric_after_turn_telemetry_zero_latency
              ~labels:[("model", model)] ()
          | None ->
            Prometheus.inc_counter
-             "masc_after_turn_telemetry_missing_total"
+             Prometheus.metric_after_turn_telemetry_missing
              ~labels:[("model", model)] ());
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v
@@ -1192,6 +1211,10 @@ let make_hooks
                 exceptions thrown from Sse.broadcast at the call boundary
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
+               ();
              Log.Keeper.warn
                "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
                meta.name turn (Printexc.to_string exn));
@@ -1288,6 +1311,10 @@ let make_hooks
                 were dropped without trace.  Loss of these rows leaves
                 downstream replay / debugging tools with gaps that look
                 identical to "no tool calls in this turn." *)
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+               ();
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
@@ -1365,6 +1392,10 @@ let make_hooks
              ~provider:summary.provider
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_lifecycle_callback_failures
+                ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
+                ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
         if is_keeper_board_write_tool_name tool_name then
@@ -1401,6 +1432,10 @@ let make_hooks
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_callback_failures
+          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
+          ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
         Agent_sdk.Hooks.Continue
@@ -1408,6 +1443,10 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_callback_failures
+          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
+          ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
         Agent_sdk.Hooks.Continue

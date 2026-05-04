@@ -33,6 +33,7 @@ import './styles/governance.css'
 import './styles/governance-agent.css'
 import './styles/ops.css'
 import './styles/tools.css'
+import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
 
 import { render } from 'preact'

@@ -13,9 +13,9 @@
 
   & p { margin: 6px 0; }
 
-  & h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: var(--sp-4) 0 var(--sp-2); color: var(--color-fg-primary); }
-  & h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: var(--sp-3) 0 6px; color: var(--color-fg-primary); }
-  & h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: var(--sp-2) 0 4px; color: var(--color-fg-secondary); }
+  & h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: 8px 0 4px; color: var(--color-fg-secondary); }
 
   & code {
     background: var(--color-bg-elevated);
@@ -34,7 +34,7 @@
     font-size: var(--fs-sm);
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     line-height: 1.6;
-    margin: var(--sp-2) 0;
+    margin: 8px 0;
   }
 
   & pre code {
@@ -47,9 +47,9 @@
 
   & blockquote {
     border-left: 3px solid var(--brass-border);
-    padding-left: var(--sp-3);
+    padding-left: 12px;
     color: var(--color-fg-muted);
-    margin: var(--sp-2) 0;
+    margin: 8px 0;
   }
 
   & ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
@@ -57,13 +57,13 @@
   & li { margin: 2px 0; }
   & li > ul, & li > ol { margin: 2px 0; }
 
-  & hr { border: none; border-top: 1px solid var(--color-border-default); margin: var(--sp-3) 0; }
+  & hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
 
   & a { color: var(--brass-1); &:hover { text-decoration: underline; } }
   & strong { font-weight: var(--fw-semi); }
   & del { color: var(--color-fg-muted); }
 
-  & table { margin: var(--sp-2) 0; }
+  & table { margin: 8px 0; }
 
   & img { max-width: 100%; height: auto; border-radius: var(--r-2); margin: 4px 0; }
 }
@@ -71,8 +71,8 @@
 /* ── Mermaid rendered output ──────────────────────────────── */
 .mermaid-rendered {
   border-radius: var(--r-2);
-  padding: var(--sp-4);
-  margin: var(--sp-2) 0;
+  padding: 16px;
+  margin: 8px 0;
   background: var(--color-bg-panel-alt);
   border: 1px solid var(--color-border-default);
   overflow-x: auto;
@@ -83,7 +83,7 @@
   background: var(--purple-12);
   border: 1px solid var(--purple-12);
   padding: 10px 14px;
-  margin: var(--sp-2) 0;
+  margin: 8px 0;
   & summary { cursor: pointer; color: var(--color-purple); font-size: var(--fs-sm); }
 }
 

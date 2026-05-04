@@ -79,6 +79,11 @@ val metric_keeper_usage_anomalies : string
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 val metric_keeper_contract_violations : string
 
+(** #12838: keepers detected as alive-but-stuck.  Detection-only
+    counter; bounded to one increment per dedup window per keeper.
+    Labels: keeper. *)
+val metric_keeper_alive_but_stuck : string
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.
@@ -194,8 +199,74 @@ val metric_keeper_path_rejection : string
 
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
+val metric_keeper_cleanup_tracking_failures : string
 val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
+val metric_keeper_meta_read_failures : string
+val metric_keeper_approval_queue_failures : string
+val metric_keeper_guards_failures : string
+val metric_keeper_profile_load_failures : string
+val metric_keeper_compact_audit_failures : string
+val metric_keeper_fs_failures : string
+val metric_keeper_crash_persistence_failures : string
+val metric_keeper_generation_lineage_failures : string
+val metric_keeper_keepalive_signal_failures : string
+val metric_keeper_meta_json_failures : string
+val metric_keeper_tools_oas_failures : string
+val metric_keeper_turn_up_update_failures : string
+val metric_keeper_exec_tools_failures : string
+val metric_keeper_circuit_breaker_trips : string
+val metric_keeper_prompt_failures : string
+val metric_keeper_run_context_failures : string
+val metric_keeper_shell_ops_failures : string
+val metric_keeper_tag_dispatch_failures : string
+val metric_keeper_trace_emit_failures : string
+val metric_keeper_transition_audit_failures : string
+val metric_keeper_execution_receipt_failures : string
+val metric_keeper_llm_bridge_failures : string
+val metric_keeper_shell_bash_failures : string
+val metric_keeper_rollover_failures : string
+val metric_keeper_task_load_failures : string
+val metric_keeper_tool_selection_failures : string
+val metric_keeper_tool_policy_failures : string
+val metric_keeper_reconcile_failures : string
+val metric_keeper_decision_audit_flush_failures : string
+val metric_keeper_oas_cancel : string
+val metric_keeper_claim_auto_provision : string
+val metric_egress_audit_missing : string
+val metric_egress_audit_stale_orphan : string
+val metric_keeper_toml_invalid : string
+val metric_keeper_persona_drift_missing : string
+val metric_keeper_room_init_failures : string
+val metric_keeper_presence_sync_failures : string
+val metric_keeper_self_preservation_universal : string
+val metric_keeper_stale_storm_paused : string
+val metric_keeper_oas_timeout_budget_loop_paused : string
+val metric_keeper_cycle_exceptions : string
+val metric_keeper_snapshot_write_failures : string
+val metric_keeper_sse_broadcast_failures : string
+val metric_keeper_room_heartbeat_failures : string
+val metric_keeper_turn_metrics_snapshot_failures : string
+val metric_keeper_oas_execution_errors : string
+val metric_keeper_episode_create_failures : string
+val metric_keeper_supervisor_sweep_failures : string
+val metric_keeper_toml_reconcile_sweep_failures : string
+val metric_keeper_tool_usage_flush_failures : string
+val metric_keeper_turn_livelock_blocks : string
+val metric_keeper_turn_timeout_committed : string
+val metric_keeper_turn_error_after_tools : string
+val metric_keeper_cascade_sync_failures : string
+val metric_keeper_thinking_persist_failures : string
+val metric_keeper_checkpoint_failures : string
+val metric_keeper_memory_write_failures : string
+val metric_keeper_write_meta_cycle_failures : string
+val metric_keeper_alert_persist_failures : string
+val metric_keeper_metrics_sse_failures : string
+val metric_keeper_dispatch_event_failures : string
+val metric_keeper_directive_failures : string
+val metric_keeper_session_cleanup_failures : string
+val metric_keeper_chat_store_failures : string
+val metric_keeper_observation_query_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string
@@ -212,6 +283,23 @@ val metric_keeper_no_tool_provider : string
 val metric_keeper_proactive_outcome : string
 (** #10474: counter classifying each scheduled autonomous cycle outcome.
     Labels: keeper, outcome=[tool_called|noop|error]. *)
+val metric_keeper_passive_loop_detected_total : string
+(** #12799 Total passive-loop detections: keeper completed N consecutive turns
+    using only passive read-only tools, violating the proactive contract.
+    Incremented once per loop episode (streak resets on any execution-progress
+    turn). Labels: [keeper]. *)
+
+val metric_keeper_consecutive_idle : string
+(** Task-138 Current consecutive-idle streak (passive-only turns) per
+    keeper.  Resets to 0 on the next execution/completion turn.  Pairs
+    with [metric_keeper_passive_loop_detected_total]: the counter fires
+    only at the threshold crossing, this gauge lets dashboards see the
+    streak rising before the latch.  Labels: [keeper]. *)
+
+val metric_keeper_last_productive_ts : string
+(** Task-138 Unix timestamp of the most recent productive turn
+    (execution/completion class) per keeper.  Reads as 0 until the
+    keeper has produced anything in this process.  Labels: [keeper]. *)
 val metric_keeper_ollama_saturation_skip : string
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
     because the keeper's resolved cascade is ollama-only and the
@@ -286,6 +374,17 @@ val metric_tool_call_duration : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
 val metric_llm_provider_capability_drops : string
+val metric_fallback_triggered : string
+(** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
+    fallback event across the cascade pipeline. Labels: [kind] enumerates
+    the fallback class (cross_cascade, cascade_empty, capability_drop,
+    cli_unsupported, …); [detail] carries the specific reason within
+    the kind (e.g. for cross_cascade: source provider; for cascade_empty:
+    rejection_reason_label). Detail counters
+    ([masc_cross_cascade_fallback_total],
+    [masc_llm_provider_capability_drops_total]) remain for per-class
+    drill-down; this counter exists so the "Zero Silent Failure"
+    dashboard panel has a single numerator across all classes. *)
 val metric_board_truncated_posts : string
 val metric_anti_rationalization_fallback : string
 val metric_anti_rationalization_excuse_pattern : string
@@ -294,6 +393,9 @@ val metric_anti_rationalization_excuse_pattern : string
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
+val metric_cascade_server_error_skip_total : string
+(** #12797 Total cascade label-ranking skips triggered by recent server-error
+    (5xx) score decay for a provider.  Labels: [provider_key]. *)
 val metric_keeper_invariant_violations : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
@@ -416,6 +518,17 @@ val metric_keeper_event_queue_override : string
     MissedWakeup (KeeperHeartbeat.tla bug action).
     Labels: [keeper]. *)
 
+val metric_keeper_stimulus_consumed : string
+(** Total stimuli consumed at turn entry, classified by [stimulus_class].
+    Labels: [keeper], [class] (board_signal|bootstrap|unsupported).
+    Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
+    drill-down with payload prefix. *)
+
+val metric_keeper_unsupported_stimulus : string
+(** Unsupported stimuli consumed at turn entry — the dequeued payload
+    did not match any known stimulus class. Each increment represents a
+    wake -> no_signal gap per #12684. Labels: [keeper]. *)
+
 val metric_keeper_near_exhaustion_total : string
 (** Total times a keeper restart attempt landed at
     [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
@@ -428,6 +541,20 @@ val metric_keeper_restart_attempts : string
 val metric_keeper_restart_outcomes : string
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
+
+val metric_keeper_liveness_recovery_attempts : string
+(** #12801 Total Liveness Recovery Supervisor scan attempts to auto-recover
+    Dead keepers. Increments each time a Dead keeper passes eligibility
+    checks and a recovery is launched. Labels: [keeper]. *)
+
+val metric_keeper_liveness_recovery_outcomes : string
+(** #12801 Total Liveness Recovery Supervisor outcomes. Labels:
+    [keeper, outcome]. Outcome is one of:
+    - [started]: keeper re-registered and fiber launched successfully
+    - [not_running]: keeper re-registered but not in Running state after launch
+    - [meta_missing]: no keeper meta file found — recovery skipped
+    - [meta_read_failed]: meta read I/O error — recovery skipped
+    - [meta_write_failed]: meta write to clear [paused] failed *)
 
 val metric_keeper_oas_timeout_budget_strike : string
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes.
@@ -470,6 +597,10 @@ val metric_keeper_dispatch_event_failures : string
     were previously silently dropped via [ignore].  Labels:
     [keeper, reason] where reason is [terminal_state] or
     [invalid_transition]. *)
+
+val metric_keeper_directive_failures : string
+(** gRPC directive routing failures — target agent not in registry
+    or directive malformed.  Labels: [keeper, site]. *)
 
 val metric_auth_credential_token_duplicate : string
 (** #9786 follow-up: boot-time audit counter for credentials
@@ -630,6 +761,34 @@ val metric_gc_compactions : string
 
 val metric_gc_promoted_words : string
 (** Cumulative words promoted from minor to major heap since program start. *)
+
+val metric_keeper_stale_termination_total : string
+val metric_keeper_stale_termination_by_class : string
+val metric_keeper_oas_timeout_budget_watchdog_termination : string
+val metric_keeper_stale_termination_threshold_breached : string
+val metric_keeper_stale_termination_batch : string
+val metric_keeper_stale_broadcast_emit_failures : string
+  (* Centralized metric constants for inline string replacement. *)
+val metric_keeper_tool_use_failure : string
+val metric_after_turn_response_model_empty : string
+val metric_after_turn_response_model_alias : string
+val metric_pricing_catalog_miss : string
+val metric_cost_emit_zero_source : string
+val metric_cost_ledger_status : string
+val metric_keeper_turn_gate_rejected_terminal : string
+val metric_keeper_receipt_unmapped_disposition : string
+val metric_keeper_bash_network_upgrade : string
+val metric_keeper_bash_local_execution : string
+val metric_keeper_docker_runtime_discarded : string
+val metric_keeper_proactive_skip : string
+val metric_keeper_stay_silent_loop_detected : string
+val metric_keeper_usage_trust : string
+val metric_keeper_usage_anomaly_reason : string
+val metric_keeper_config_env_parse_failures : string
+val metric_keeper_post_turn_wirein_failures : string
+(* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
+val metric_keeper_recurring_failures : string
+val metric_keeper_turn_cleanup_failures : string
 
 (** {1 Process monitoring} *)
 

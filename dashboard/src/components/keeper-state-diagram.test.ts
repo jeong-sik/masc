@@ -54,7 +54,7 @@ describe("transitionType", () => {
 describe("signalTone", () => {
   const warnClasses = "border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]"
   const errClasses = "border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]"
-  const okClasses = "border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]"
+  const okClasses = "border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]"
 
   it.each([
     ["bad", errClasses],
@@ -87,8 +87,8 @@ describe("signalTone", () => {
 })
 
 describe("badgeTone", () => {
-  const okClasses = "border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]"
-  const errClasses = "border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]"
+  const okClasses = "border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]"
+  const errClasses = "border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--color-status-err)]"
 
   it("returns ok tone for true", () => {
     expect(badgeTone(true)).toBe(okClasses)

@@ -183,6 +183,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     if not (String.equal old_value new_value) then
       let len = String.length new_value in
       if len > Keeper_config.prompt_render_max_bytes then
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_turn_up_update_failures
+          ~labels:[("keeper", old.name); ("site", "prompt_cap")]
+          ();
         Log.Keeper.warn
           "update_keeper personality.%s for %s exceeds prompt cap \
            (%d bytes > %d). Stored as-is; truncated only at prompt rendering."
@@ -294,21 +298,34 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~allowed_paths
   with
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_turn_up_update_failures
+        ~labels:[("keeper", p.name); ("site", "sandbox_validation")]
+        ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
         p.name err;
       (false, err)
   | Ok () ->
       (match
          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-           ~timeout_sec:15.0 ~sandbox_profile
+           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
        with
        | Error err ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_turn_up_update_failures
+             ~labels:[("keeper", p.name); ("site", "sandbox_preflight")]
+             ();
            Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
              p.name err;
            (false, err)
        | Ok () ->
       (match write_meta ctx.config updated with
-       | Error e -> (false, e)
+       | Error e ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_write_meta_failures
+             ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+             ();
+           (false, e)
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;

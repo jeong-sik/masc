@@ -172,14 +172,10 @@
   --fw-semi: 600;
   --fw-bold: 700;
 
-  --track-tight:    -0.01em;
-  --track-normal:    0;
-  --track-sub:       0.06em;
-  --track-wide:      0.04em;
-  --track-section:   0.16em;
-  --track-caps:      0.08em;
-  --track-label:     0.18em;
-  --track-brand:     0.22em;
+  --track-tight:  -0.01em;
+  --track-normal:  0;
+  --track-wide:    0.04em;
+  --track-caps:    0.08em;
 
   /* Type ROLE tokens — prefer these over raw --fs-*.
      Each role bundles size / weight / line-height / tracking. */
@@ -246,7 +242,6 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --_density-scope: 1;
 
   /* Radius — micro for controls, macro for cards/panels */
-  --r-00: 1px;
   --r-0: 2px;
   --r-1: 3px;
   --r-2: 5px;

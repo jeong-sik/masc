@@ -103,10 +103,9 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
             Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
-         FALSE] postcondition. Counter-mode by default. *)
-      Keeper_fsm_guard_runtime.wrap_unit
-        ~action:"HeartbeatTick" ~stage:"post"
-        (fun () -> post_heartbeat_tick ~wakeup);
+         FALSE] postcondition. The [@@fsm_guard] PPX routes the
+         assertion through [wrap_unit ~stage:"guard"] automatically. *)
+      post_heartbeat_tick ~wakeup;
       Woken)
     else if remaining <= 0.0
     then Timeout
@@ -300,13 +299,18 @@ let wakeup_relevant_keeper_for_board_signal
   in
   let selected, dropped = select_board_wakeup_candidates candidates in
   selected |> List.iter (fun (meta, reason) -> wake_meta meta reason);
-  if dropped > 0 then
+  if dropped > 0 then begin
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_keepalive_signal_failures
+      ~labels:[("keeper", "aggregate"); ("site", "board_capped")]
+      ();
     Log.Keeper.warn
       "board signal wakeup capped: dropped=%d post=%s generic_limit=%d total_limit=%d"
       dropped
       signal.post_id
       board_reactive_generic_wakeup_limit
       board_reactive_wakeup_max
+  end
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.
@@ -366,8 +370,8 @@ let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_and_log
-      ~base_path:ctx.config.base_path keeper_name event)
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path keeper_name event
 
 let dispatch_keepalive_event_with_audit
       ~(ctx : _ context)
@@ -378,10 +382,21 @@ let dispatch_keepalive_event_with_audit
       event
   =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_with_audit_and_log
-      ~base_path:ctx.config.base_path
-      ~snapshot
-      ~events_fired
-      ~selected_event
-      keeper_name
-      event)
+    (match Keeper_registry.dispatch_event_with_audit_and_log
+       ~base_path:ctx.config.base_path
+       ~snapshot
+       ~events_fired
+       ~selected_event
+       keeper_name
+       event
+     with
+     | Ok _ -> ()
+     | Error err ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_keepalive_signal_failures
+           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
+           ();
+         Log.Keeper.warn
+           "%s: keepalive late-event dispatch rejected: %s"
+           keeper_name
+           (Keeper_state_machine.transition_error_to_string err))

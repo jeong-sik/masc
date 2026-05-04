@@ -70,6 +70,10 @@ let effective_provider_attempt_timeout_s
   | None ->
       provider_default_attempt_timeout_s constraints
 
+let apply_stream_idle_timeout_default = function
+  | Some _ as v -> v
+  | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -205,6 +209,14 @@ let run_named
                   Provider_tool_support.provider_debug_label provider_cfg);
                ]
                ();
+             (* §7.3.2 Zero Silent Failure: feed the unified fallback
+                counter so the dashboard panel sees a single numerator
+                across all fallback classes (cross_cascade,
+                cascade_empty, capability_drop, …). *)
+             Llm_metric_bridge.emit_fallback_triggered
+               ~kind:"cross_cascade"
+               ~detail:
+                 (Printf.sprintf "%s->%s" cascade_name source_cascade);
              Log.Misc.info
                "cascade %s: cross-cascade fallback to %s from %s \
                 (original had no tool-capable providers)"
@@ -290,7 +302,13 @@ let run_named
                  stream_idle_timeout_s =
                    (match per_provider_timeout_s with
                     | Some _ as timeout_s -> timeout_s
-                    | None -> stream_idle_timeout_s);
+                    | None ->
+                        Some
+                          (Option.value
+                             ~default:
+                               Env_config_keeper.KeeperKeepalive
+                               .stream_idle_timeout_sec
+                             stream_idle_timeout_s));
                  temperature;
                  max_idle_turns;
                  guardrails;
@@ -1020,6 +1038,7 @@ let run_model_by_label
     ?net
     ()
   : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
@@ -1152,6 +1171,7 @@ let run_model_with_masc_tools
     ?net
     ()
   : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature

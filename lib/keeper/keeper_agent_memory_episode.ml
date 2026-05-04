@@ -61,6 +61,9 @@ let record_success
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+      ~labels:[("keeper", keeper_name)]
+      ();
     Log.Keeper.error "keeper:%s episode_create failed: %s"
       keeper_name (Printexc.to_string exn)
 
@@ -147,5 +150,8 @@ let record_failure
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+      ~labels:[("keeper", keeper_name)]
+      ();
     Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"
       keeper_name (Printexc.to_string exn)

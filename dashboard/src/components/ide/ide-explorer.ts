@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
+import { activeIdeFile } from './ide-shell'
 
 // Phase 2 PR-4: real EXPLORER backed by file-tree-store. Replaces the
 // PR-2 ide-explorer-mock placeholder. The fixture below is the same
@@ -87,6 +88,7 @@ export function IdeExplorer() {
       >
         ${visible.map(node => TreeRow(node, store.isExpanded(node.path), () => {
           if (node.hasChildren) store.toggle(node.path)
+          else activeIdeFile.value = node.path
         }))}
       </ul>
     </div>

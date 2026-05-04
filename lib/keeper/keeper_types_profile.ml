@@ -557,6 +557,10 @@ let personas_root_opt () =
   with
   | Sys_error _ -> None
   | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_profile_load_failures
+        ~labels:[("site", "personas_root")]
+        ();
       Log.Keeper.warn "personas_root_opt unexpected: %s" (Printexc.to_string exn);
       None
 
@@ -568,6 +572,10 @@ let persona_profile_path_opt name =
     with
     | Sys_error _ -> []
     | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_profile_load_failures
+          ~labels:[("site", "personas_dirs_resolve")]
+          ();
         Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
         []
   in
@@ -1152,6 +1160,10 @@ let log_toml_skip_once ~file ~error =
   if Hashtbl.mem logged_toml_skip key then false
   else begin
     Hashtbl.add logged_toml_skip key ();
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_profile_load_failures
+      ~labels:[("site", "toml_skip")]
+      ();
     Log.Keeper.warn "toml_loader: skipping %s: %s" file error;
     true
   end
@@ -1630,7 +1642,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     (match keeper_toml_path_opt name with
      | Some _ ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Prometheus.inc_counter "masc_keeper_toml_invalid_total"
+       Prometheus.inc_counter Prometheus.metric_keeper_toml_invalid
          ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
          ()
      | None -> ());
@@ -1672,6 +1684,10 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
       | Ok (_name, defaults) ->
           { source_kind = Some "toml"; defaults }
       | Error e ->
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_profile_load_failures
+            ~labels:[("site", "toml_fallback")]
+            ();
           Log.Keeper.warn
             "toml config for %s failed (%s), falling back to persona"
             name e;
@@ -1697,6 +1713,10 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
     with
     | Sys_error _ -> []
     | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_profile_load_failures
+          ~labels:[("site", "load_persona_extended")]
+          ();
         Log.Keeper.warn "load_persona_extended personas_dirs unexpected: %s"
           (Printexc.to_string exn);
         []
@@ -1709,6 +1729,10 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
       if Fs_compat.file_exists path then
         match Safe_ops.read_file_safe path with
         | Error msg ->
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_profile_load_failures
+            ~labels:[("site", "agent_md_read")]
+            ();
           Log.Keeper.warn "[load_agent_md] failed to read %s: %s" path msg;
           None
         | Ok content ->
@@ -1785,6 +1809,10 @@ let list_persona_summaries () : persona_summary list =
     with
     | Sys_error _ -> []
     | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_profile_load_failures
+          ~labels:[("site", "list_persona_summaries")]
+          ();
         Log.Keeper.warn "list_persona_summaries personas_dirs unexpected: %s"
           (Printexc.to_string exn);
         []

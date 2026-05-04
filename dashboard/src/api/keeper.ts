@@ -527,6 +527,55 @@ export async function fetchKeeperTransitions(
   return parseKeeperTransitionsResponse(await resp.json())
 }
 
+// --- Keeper lifecycle timeline (#12798) ---
+
+export interface KeeperLifecycleEvent {
+  ts: number
+  event: string
+  phase: string | null
+  detail: string
+}
+
+export interface KeeperLifecycleTimelineResponse {
+  keeper: string
+  count: number
+  events: KeeperLifecycleEvent[]
+}
+
+function parseKeeperLifecycleEvent(raw: unknown): KeeperLifecycleEvent {
+  if (!isRecord(raw)) throw new Error('lifecycle event is not a record')
+  return {
+    ts: typeof raw.ts === 'number' ? raw.ts : 0,
+    event: typeof raw.event === 'string' ? raw.event : '',
+    phase: typeof raw.phase === 'string' ? raw.phase : null,
+    detail: typeof raw.detail === 'string' ? raw.detail : '',
+  }
+}
+
+export function parseKeeperLifecycleResponse(raw: unknown): KeeperLifecycleTimelineResponse {
+  if (!isRecord(raw)) throw new Error('lifecycle response is not a record')
+  const events = Array.isArray(raw.events) ? raw.events.map(parseKeeperLifecycleEvent) : []
+  return {
+    keeper: typeof raw.keeper === 'string' ? raw.keeper : '',
+    count: typeof raw.count === 'number' ? raw.count : events.length,
+    events,
+  }
+}
+
+export async function fetchKeeperLifecycle(
+  name: string,
+  limit = 50,
+  opts?: { signal?: AbortSignal },
+): Promise<KeeperLifecycleTimelineResponse> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/lifecycle?limit=${limit}`,
+    { headers: jsonHeaders(), signal: opts?.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`lifecycle fetch failed: ${resp.status}`)
+  return parseKeeperLifecycleResponse(await resp.json())
+}
+
 export async function fetchKeeperStateDiagram(
   name: string,
   opts?: { signal?: AbortSignal },

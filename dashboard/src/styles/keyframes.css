@@ -25,11 +25,21 @@
   50% { box-shadow: 0 0 8px 2px rgb(var(--info-glow) / .3); }
 }
 
+@keyframes avatar-particle {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-12px) scale(0); opacity: 0; }
+}
+
 /* ── Agent state animations ────────────────────────────── */
 
 @keyframes workingPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .15); }
   50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .25); }
+}
+
+@keyframes warnBlink {
+  0%, 100% { border-color: rgb(var(--warn-glow) / .28); }
+  50% { border-color: rgb(var(--warn-glow) / .5); }
 }
 
 @keyframes blocker-pulse {
@@ -39,9 +49,23 @@
 
 /* ── Component keyframes (consolidated) ──────────────────── */
 
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.75; }
+}
+
+@keyframes orchestraFlow {
+  to { stroke-dashoffset: -40; }
+}
+
+@keyframes orchestraPulse {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50% { transform: scale(1.06); opacity: 1; }
 }
 
 @keyframes livePulse {
@@ -54,9 +78,24 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes keeper-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 @keyframes pipeline-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
   50% { box-shadow: 0 0 4px 1px rgb(var(--info-glow) / .25); }
+}
+
+@keyframes pipeline-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 @keyframes keeperPulse {
@@ -135,24 +174,3 @@
   background-size: 200% 100%;
   animation: anim-shimmer 1.5s linear infinite;
 }
-
-/* ── Motion utility classes ─────────────────────────────────
-   Named after reference SPEC v0.4 §14 motion presets.
-   Use via .anim-fade-in, .anim-slide-up, etc. */
-
-@keyframes anim-fade-in   { from { opacity: 0; } to { opacity: 1; } }
-@keyframes anim-fade-out  { from { opacity: 1; } to { opacity: 0; } }
-@keyframes anim-slide-up  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes anim-slide-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes anim-slide-left { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes anim-pop       { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
-
-.anim-fade-in    { animation: anim-fade-in    var(--motion-enter) both; }
-.anim-fade-out   { animation: anim-fade-out   var(--motion-exit)  both; }
-.anim-slide-up   { animation: anim-slide-up   var(--motion-enter) both; }
-.anim-slide-down { animation: anim-slide-down var(--motion-enter) both; }
-.anim-slide-left { animation: anim-slide-left var(--motion-enter) both; }
-.anim-slide-right{ animation: anim-slide-right var(--motion-enter) both; }
-.anim-pop        { animation: anim-pop        var(--motion-pop)   both; }
-.anim-spin       { animation: spin            var(--t-slow)       linear infinite; }

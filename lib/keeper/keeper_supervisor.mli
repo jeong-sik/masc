@@ -24,16 +24,11 @@ val supervise_keepalive :
 
 val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
-(** Fork a stale-turn watchdog fiber for the given keeper.
-
-    Two detection modes:
-    - Idle stall: [last_turn_ts] older than 300s while [Running].
-    - Failure loop: [consecutive_noop_count >= 3] — catches keepers in
-      LLM timeout loops where [last_turn_ts] stays fresh.
-
-    On detection, sets [fiber_stop] and emits a stale broadcast. The
-    supervisor's [sweep_and_recover] picks up the stopped fiber and
-    restarts with exponential backoff. *)
+(** Fork a stale-turn watchdog fiber for the given keeper.  This is a
+    re-export of {!Keeper_stale_watchdog.fork_stale_watchdog}; see
+    that module's docstring for the authoritative description of the
+    three detection modes ([Idle_turn] / [In_turn_hung] /
+    [Noop_failure_loop]) and per-class Prometheus counter. *)
 
 (** {1 Sweep and Recovery} *)
 
@@ -73,3 +68,53 @@ val apply_self_preservation :
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Returns the filtered list of entries that should proceed with restart. *)
+
+(** {1 Liveness Recovery} *)
+
+val liveness_recovery_scan : 'a context -> unit
+(** Scan all Dead keepers in [Keeper_registry].  For each Dead keeper whose
+    root cause is not structural ([credential_archived] or
+    [zombie_timeout_reached]) and that has been dead for at least
+    [MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC], attempt to re-register and
+    relaunch the keepalive fiber.  Uses exponential backoff per keeper and a
+    per-keeper attempt budget.  Gated behind
+    [MASC_KEEPER_LIVENESS_RECOVERY_ENABLED] (default: true).
+
+    Emits [metric_keeper_liveness_recovery_attempts] and
+    [metric_keeper_liveness_recovery_outcomes] Prometheus counters. *)
+
+val liveness_recovery_backoff : int -> float
+(** Compute the exponential backoff delay for liveness recovery attempt [n]. *)
+
+val should_attempt_liveness_recovery :
+  now:float -> Keeper_registry.registry_entry -> bool
+(** Pure predicate: true when a Dead keeper passes the eligibility gate for
+    a liveness recovery attempt.  Exposed for tests. *)
+
+(** {1 Alive-but-stuck detector (#12838)} *)
+
+val detect_alive_but_stuck :
+  now:float ->
+  stall_multiplier:int ->
+  stall_floor_sec:float ->
+  Keeper_registry.registry_entry ->
+  float option
+(** Pure detection: returns [Some elapsed_sec] when a non-Dead, non-paused
+    keeper has gone longer than
+    [max(stall_floor_sec, stall_multiplier * proactive.cooldown_sec)]
+    without a proactive turn while autonomous turns kept advancing.
+    Reference timestamp is [proactive_rt.last_ts] if set, else
+    [entry.started_at] (covers the never-started case).  Returns [None]
+    otherwise.  Exposed for tests. *)
+
+val alive_but_stuck_scan : 'a context -> unit
+(** Scan all keepers in [Keeper_registry].  For each keeper detected as
+    alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
+    increment and a single warn log line, with per-keeper dedup so the
+    counter is at most incremented once per
+    [alive_but_stuck_dedup_ttl_sec] window.  Detection-only — no
+    transition or restart is triggered.  Gated behind
+    [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true). *)
+
+val alive_but_stuck_reset_for_test : unit -> unit
+(** Test-only: clear the alive-but-stuck dedup table. *)

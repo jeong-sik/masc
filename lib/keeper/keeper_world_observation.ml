@@ -66,6 +66,7 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
+  | Entropic_oscillation
 
 type skip_reason =
   | Keeper_paused
@@ -90,7 +91,8 @@ let turn_reason_to_string = function
   | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
-  | Min_interval_elapsed -> "min_interval_elapsed"
+  | Min_interval_elapsed
+  | Entropic_oscillation -> "min_interval_elapsed"
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
@@ -304,6 +306,10 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_observation_query_failures
+        ~labels:[("operation", "read_backlog_counts")]
+        ();
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
       (0, 0, 0, 0, false)
 
@@ -313,6 +319,10 @@ let count_active_agents ~(config : Coord.config) : int =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_observation_query_failures
+        ~labels:[("operation", "count_active_agents")]
+        ();
       Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
       0
 
@@ -822,14 +832,23 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
          meta.name ts post_id (fst base_cursor)
          (Option.value ~default:"" (snd base_cursor))
      | None ->
-       if final_events <> [] then
+       if final_events <> [] then begin
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_observation_query_failures
+           ~labels:[("operation", "cursor_stale")]
+           ();
          Log.Keeper.warn
            "board cursor not updated for %s despite %d events processed"
-           meta.name (List.length final_events));
+           meta.name (List.length final_events)
+       end);
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_observation_query_failures
+      ~labels:[("operation", "board_events")]
+      ();
     Log.Keeper.warn "board event collection failed: %s"
       (Printexc.to_string exn);
     ([], 0, 0)
@@ -1139,8 +1158,14 @@ let keeper_cycle_decision
            on top defeats its purpose. Without this bypass, keepers ignore
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
+        let entropic_oscillation_interval = 600 in
+        let should_oscillate =
+          since_last_scheduled_autonomous >= entropic_oscillation_interval
+          && (Random.int 100 < 5)
+        in
         let should_run =
           is_bootstrap
+          || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
               && (backlog_fresh
@@ -1179,6 +1204,7 @@ let keeper_cycle_decision
             let run_reasons =
               [
                 Some Scheduled_autonomous_turn;
+                (if should_oscillate then Some Entropic_oscillation else None);
                 (if is_bootstrap
                  then Some Never_started else None);
                 (if min_interval_elapsed
@@ -1208,6 +1234,10 @@ let keeper_cycle_decision
                    tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_observation_query_failures
+                  ~labels:[("operation", "empty_run_reasons")]
+                  ();
                 Log.Keeper.warn
                   "unreachable: should_run=true but run_reasons is empty";
                 Skip { reasons = (No_signal, []) }

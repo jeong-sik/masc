@@ -357,7 +357,30 @@ let check_timeouts ~(config : Coord.config) =
                ("verification_id", `String verification_id);
                ("assignee", `String assignee);
                ("timestamp", `Float now);
-             ])
+             ]);
+             (* Transition the task out of AwaitingVerification so the next
+                check_timeouts cycle does not re-emit the same Timeout post.
+                Without this, deadline > now stays true forever and every
+                cycle re-creates the same board entry. *)
+             let cancel_reason =
+               Printf.sprintf
+                 "verification deadline exceeded (assignee=%s, vrf=%s, deadline=%s)"
+                 assignee verification_id dl
+             in
+             (match
+                Coord.force_cancel_task_r
+                  config
+                  ~agent_name:"system"
+                  ~task_id:task.id
+                  ~reason:cancel_reason
+                  ()
+              with
+              | Ok _ -> ()
+              | Error e ->
+                Log.Task.error
+                  "verification timeout transition failed (task=%s vrf=%s): %s"
+                  task.id verification_id
+                  (Types.show_masc_error e))
            | Some _ -> ()
            | None -> ())
         | Todo | Claimed _ | InProgress _ | AwaitingVerification { deadline = None; _ } | Done _ | Cancelled _ -> ()

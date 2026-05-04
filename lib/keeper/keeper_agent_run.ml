@@ -90,6 +90,10 @@ let run_turn
     try Masc_runtime_events.emit_turn_end () with
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_dispatch_event_failures
+        ~labels:[("keeper", meta.name); ("site", "emit_turn_end")]
+        ();
       Log.Keeper.warn
         "%s: emit_turn_end in finally raised: %s"
         meta.name (Printexc.to_string e)
@@ -160,6 +164,10 @@ let run_turn
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
       let backtrace = Printexc.get_backtrace () in
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_dispatch_event_failures
+        ~labels:[("keeper", meta.name); ("site", "tool_cleanup")]
+        ();
       Log.Keeper.warn
         "%s: keeper tool bundle cleanup raised: %s%s"
         meta.name
@@ -487,7 +495,11 @@ let run_turn
                    Log.Keeper.error
                      "keeper:%s thinking persist failed: %s"
                      meta.name
-                     (Printexc.to_string exn))
+                     (Printexc.to_string exn);
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_thinking_persist_failures
+                     ~labels:[("keeper", meta.name)]
+                     ());
               | Agent_sdk.Types.RedactedThinking _ ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
@@ -510,7 +522,11 @@ let run_turn
                    Log.Keeper.error
                      "keeper:%s redacted thinking persist failed: %s"
                      meta.name
-                     (Printexc.to_string exn))
+                     (Printexc.to_string exn);
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_thinking_persist_failures
+                     ~labels:[("keeper", meta.name)]
+                     ())
               | _ -> ())
             result.response.content
         | None -> ());
@@ -574,6 +590,10 @@ let run_turn
              (String.concat ", " unexpected_tool_names)
          in
          acc.receipt_tool_contract_result <- "violated";
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_contract_violations
+           ~labels:[("keeper_name", meta.name); ("kind", "tool_surface_violation"); ("signal", "unexpected_tool_names")]
+           ();
          Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
          Error (Agent_sdk.Error.Internal reason)
        else (
@@ -866,6 +886,10 @@ let run_turn
                   Log.Keeper.error
                     "keeper:%s cascade=%s OAS checkpoint save failed: %s"
                     meta.name meta.cascade_name e;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_checkpoint_failures
+                    ~labels:[("keeper", meta.name); ("site", "save")]
+                    ();
                   Error
                     (checkpoint_persistence_error
                        ~keeper_name:meta.name
@@ -874,6 +898,10 @@ let run_turn
                Log.Keeper.error
                  "keeper:%s cascade=%s missing OAS checkpoint after run"
                  meta.name meta.cascade_name;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_checkpoint_failures
+                   ~labels:[("keeper", meta.name); ("site", "missing")]
+                   ();
                Error
                  (checkpoint_persistence_error
                     ~keeper_name:meta.name
@@ -904,6 +932,10 @@ let run_turn
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("site", "activity_emit")]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s activity emit failed (%s): %s"
                     meta.name
@@ -932,6 +964,10 @@ let run_turn
                    else []);
               (match outcome with
                | Cdal_eval_v1.Load_failure (err, _) ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_dispatch_event_failures
+                   ~labels:[("keeper", meta.name); ("site", "cdal_load")]
+                   ();
                  Log.Keeper.warn
                    "keeper:%s contract_verdict load failure: %s"
                    meta.name
@@ -974,7 +1010,11 @@ let run_turn
               Log.Keeper.error
                 "keeper:%s memory_write failed: %s"
                 meta.name
-                (Printexc.to_string exn));
+                (Printexc.to_string exn);
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_memory_write_failures
+                ~labels:[("keeper", meta.name)]
+                ());
            (* Episodic memory: create an episode from [STATE] after
               Agent.run returns, then persist and emit activity through the
               post-run memory adapter. Collaboration learning (Hebbian
@@ -1000,6 +1040,10 @@ let run_turn
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_dispatch_event_failures
+                  ~labels:[("keeper", meta.name); ("site", "compaction")]
+                  ();
                 Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
                   meta.cascade_name (Printexc.to_string exn));
            (* Post-turn quality metrics — goal alignment + memory recall.
@@ -1030,6 +1074,10 @@ let run_turn
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_dispatch_event_failures
+                        ~labels:[("keeper", meta.name); ("site", "memory_recall")]
+                        ();
                       Log.Keeper.warn
                         "keeper:%s memory recall history load failed: %s"
                         meta.name
@@ -1079,6 +1127,10 @@ let run_turn
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_dispatch_event_failures
+                ~labels:[("keeper", meta.name); ("site", "post_turn_eval")]
+                ();
               Log.Keeper.warn
                 "keeper:%s post_turn_eval jsonl append failed: %s"
                 meta.name
@@ -1252,6 +1304,10 @@ let run_turn
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         let err_msg = Printexc.to_string exn in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_dispatch_event_failures
+          ~labels:[("keeper", meta.name); ("site", "receipt_append")]
+          ();
         Log.Keeper.warn
           "keeper:%s execution_receipt append failed: %s"
           meta.name err_msg;
@@ -1274,6 +1330,10 @@ let run_turn
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | gap_exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_dispatch_event_failures
+             ~labels:[("keeper", meta.name); ("site", "coverage_gap_append")]
+             ();
            Log.Keeper.warn
              "keeper:%s execution_receipt coverage gap append failed: %s"
              meta.name

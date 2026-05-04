@@ -134,6 +134,10 @@ let prepare_agent_setup
              Log.Keeper.warn
                "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
                s;
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_config_env_parse_failures
+               ~labels:[("var", "MASC_KEEPER_TOOL_DECAY_TURNS")]
+               ();
              5)
         | None -> 5
       end)
@@ -452,6 +456,10 @@ let prepare_agent_setup
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_task_load_failures
+            ~labels:[("keeper", meta.name); ("phase", "task_contract_load")]
+            ();
           Log.Keeper.warn
             "keeper:%s failed to load current task contract for %s: %s"
             meta.name
@@ -569,6 +577,10 @@ let prepare_agent_setup
                   ()
               with
               | Error detail ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_tool_selection_failures
+                    ~labels:[("keeper", meta.name); ("phase", "cascade_resolve")]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s TopK_llm: strict cascade resolution failed for '%s' (%s), falling back to core+prefilter+discovered"
                     meta.name
@@ -578,6 +590,10 @@ let prepare_agent_setup
               | Ok providers ->
                   (match Cascade_config.filter_healthy_strict ~sw ~net providers with
                    | Error rejection ->
+                       Prometheus.inc_counter
+                         Prometheus.metric_keeper_tool_selection_failures
+                         ~labels:[("keeper", meta.name); ("phase", "cascade_health")]
+                         ();
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: strict health filter rejected cascade '%s' (%s), falling back to core+prefilter+discovered"
                          meta.name
@@ -585,6 +601,10 @@ let prepare_agent_setup
                          (Cascade_config.health_filter_rejection_to_string rejection);
                        []
                    | Ok [] ->
+                       Prometheus.inc_counter
+                         Prometheus.metric_keeper_tool_selection_failures
+                         ~labels:[("keeper", meta.name); ("phase", "cascade_no_provider")]
+                         ();
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: no healthy provider for cascade '%s', falling back to core+prefilter+discovered"
                          meta.name
@@ -629,12 +649,20 @@ let prepare_agent_setup
                         with
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
+                            Prometheus.inc_counter
+                              Prometheus.metric_keeper_tool_selection_failures
+                              ~labels:[("keeper", meta.name); ("phase", "topk_llm")]
+                              ();
                             Log.Keeper.warn
                               "keeper:%s TopK_llm failed (%s), falling back to core+prefilter+discovered"
                               meta.name
                               (Printexc.to_string exn);
                             [])))
          | _ ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_tool_selection_failures
+             ~labels:[("keeper", meta.name); ("phase", "topk_llm_no_eio")]
+             ();
            Log.Keeper.warn
              "keeper:%s TopK_llm: Eio context unavailable, falling back to core+prefilter+discovered"
              meta.name;
@@ -972,6 +1000,8 @@ let prepare_agent_setup
           }
           :: acc.tool_calls)
       ~discover_work_nudge
+      ~passive_loop_nudge:(fun () ->
+        Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
       ()
   in
   let before_turn_hook : Agent_sdk.Hooks.hooks =
@@ -1306,6 +1336,10 @@ let prepare_agent_setup
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_decision_audit_flush_failures
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s tool_disclosure jsonl append failed: %s"
                     meta.name

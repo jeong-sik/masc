@@ -559,6 +559,10 @@ let ensure_keeper_meta config name =
       match write_meta config updated with
       | Ok () -> Ok updated
       | Error e ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_write_meta_failures
+          ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
+          ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok meta
     end
@@ -732,7 +736,35 @@ let start_supervisor_sweep ctx =
         let on_beat _beat =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "keeper_runtime")]
+               ();
              Log.Keeper.error "supervisor sweep failed: %s"
+               (Printexc.to_string exn));
+          (* #12801 Liveness Recovery Supervisor: attempt to auto-recover Dead
+             keepers whose root cause has cleared.  Runs after sweep_and_recover
+             so any newly-crashed keepers are processed by sweep first. *)
+          (try Keeper_supervisor.liveness_recovery_scan ctx
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "liveness_recovery")]
+               ();
+             Log.Keeper.error "liveness recovery scan failed: %s"
+               (Printexc.to_string exn));
+          (* #12838 Alive-but-stuck detector: emit a Prometheus counter
+             (and a warn log) for keepers that are alive in every other
+             health metric but have a frozen [proactive_rt.last_ts] while
+             autonomous turns keep advancing.  Detection-only — no
+             transition or restart is triggered. *)
+          (try Keeper_supervisor.alive_but_stuck_scan ctx
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "alive_but_stuck")]
+               ();
+             Log.Keeper.error "alive-but-stuck scan failed: %s"
                (Printexc.to_string exn));
           (* TOML hot-reload: re-sync declarative fields for running keepers.
              Runs after sweep_and_recover so TOML edits take effect within
@@ -755,6 +787,10 @@ let start_supervisor_sweep ctx =
                          entry.name e)
               | _ -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_toml_reconcile_sweep_failures
+               ~labels:[("origin", "keeper_runtime")]
+               ();
              Log.Keeper.error "TOML reconcile sweep failed: %s"
                (Printexc.to_string exn));
           (* #10125: advance the supervisor liveness gauge after a

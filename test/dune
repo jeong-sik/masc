@@ -91,6 +91,7 @@
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
+        test_keeper_alerting_path
         test_keeper_allowed_paths
         test_keeper_repo_readiness
         test_keeper_tool_surface_guard
@@ -218,6 +219,7 @@
         test_per_keeper_token_fallback
         test_auth_strict_mode
         test_keeper_turn_fsm_emit
+        test_keeper_event_queue
         test_gh_api_classification
         test_actionable_path_action
         test_stale_kill_class
@@ -287,6 +289,7 @@
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor
+          test_keeper_alerting_path
           test_keeper_allowed_paths
           test_keeper_repo_readiness
           test_keeper_tool_surface_guard
@@ -417,6 +420,7 @@
           test_per_keeper_token_fallback
           test_auth_strict_mode
           test_keeper_turn_fsm_emit
+          test_keeper_event_queue
           test_gh_api_classification
           test_actionable_path_action
           test_stale_kill_class
@@ -1094,10 +1098,12 @@
 (include stanzas/test_keeper_long_turn_9943.inc)
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 (include stanzas/test_keeper_meta_canonical_seed.inc)
+(include stanzas/test_keeper_meta_unknown_keys_warn.inc)
 (include stanzas/test_keeper_meta_heartbeat_retain_9733.inc)
 (include stanzas/test_keeper_meta_merge.inc)
 (include stanzas/test_keeper_mutex_coverage.inc)
 (include stanzas/test_keeper_path_roots_leak_10349.inc)
+(include stanzas/test_keeper_passive_loop_detector.inc)
 (include stanzas/test_keeper_pause_silent_failure_source.inc)
 (include stanzas/test_keeper_paused_cas_retain_9733.inc)
 (include stanzas/test_keeper_personality_round_trip.inc)
@@ -1161,7 +1167,6 @@
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
 (include stanzas/test_tool_name.inc)
 (include stanzas/test_tool_task_completion_example.inc)
-(include stanzas/test_track2_sync_boundary.inc)
 (include stanzas/test_transport_bridge_seal.inc)
 (include stanzas/test_work_as_heartbeat.inc)
 (include stanzas/test_worker_safety_gates.inc)

@@ -9,6 +9,8 @@ import {
   riskLabel,
   categoryLabel,
   categoryColor,
+  SOURCE_LABEL,
+  sourceColor,
 } from './data'
 import type { AntiPatternCategory } from './data'
 
@@ -29,59 +31,59 @@ export function AntiPatternList() {
         <div class="flex gap-1">
           <button
             type="button"
-            class="px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-              categoryFilter.value === 'all'
-                ? 'border-[var(--color-border-strong)] bg-[var(--white-8)] text-[var(--color-fg-primary)]'
-                : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)]'
-            }"
+            class="pm-filter ${categoryFilter.value === 'all' ? 'is-active' : ''}"
             onClick=${() => { categoryFilter.value = 'all' }}
           >전체 (${ANTI_PATTERNS.length})</button>
           ${categories.map(cat => html`
             <button
               key=${cat}
               type="button"
-              class="px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                categoryFilter.value === cat
-                  ? 'border-[var(--color-border-strong)] bg-[var(--white-8)] text-[var(--color-fg-primary)]'
-                  : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)]'
-              }"
+              class="pm-filter ${categoryFilter.value === cat ? 'is-active' : ''}"
               onClick=${() => { categoryFilter.value = cat }}
             >${categoryLabel(cat)} (${ANTI_PATTERNS.filter(ap => ap.category === cat).length})</button>
           `)}
         </div>
-        <div class="flex gap-2 text-[10px] font-mono text-[var(--color-fg-muted)]">
-          <span>C:<strong class="text-[var(--color-status-err)]">${riskCounts.C}</strong></span>
-          <span>H:<strong class="text-[var(--color-status-err)]">${riskCounts.H}</strong></span>
-          <span>M:<strong class="text-[var(--color-status-warn)]">${riskCounts.M}</strong></span>
-          <span>L:<strong class="text-[var(--color-fg-muted)]">${riskCounts.L}</strong></span>
+        <div class="flex gap-2 t-caption">
+          <span>C:<strong class="t-err">${riskCounts.C}</strong></span>
+          <span>H:<strong class="t-err">${riskCounts.H}</strong></span>
+          <span>M:<strong class="t-warn">${riskCounts.M}</strong></span>
+          <span>L:<strong>${riskCounts.L}</strong></span>
         </div>
       </div>
 
-      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-        <table class="w-full text-xs border-collapse">
-          <thead>
-            <tr class="bg-[var(--white-4)]">
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] w-[50px]">ID</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] w-[100px]">분류</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">설명</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] w-[160px]">위치</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] w-[60px]">리스크</th>
+      <div class="pm-scroll">
+        <table class="pm-table">
+          <thead class="pm-thead">
+            <tr>
+              <th class="pm-th w-[50px]">ID</th>
+              <th class="pm-th w-[100px]">분류</th>
+              <th class="pm-th">설명</th>
+              <th class="pm-th w-[160px]">위치</th>
+              <th class="pm-th w-[60px]">리스크</th>
+              <th class="pm-th w-[60px]">출처</th>
+              <th class="pm-th">개선 방향</th>
             </tr>
           </thead>
           <tbody>
-            ${filtered.map((ap, i) => html`
-              <tr key=${ap.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-                <td class="border-b border-[var(--color-border-default)] px-3 py-1.5 font-mono text-[var(--color-fg-muted)]">${ap.id}</td>
-                <td class="border-b border-[var(--color-border-default)] px-3 py-1.5">
-                  <span class="inline-block rounded border px-1.5 py-0.5 text-[10px] font-mono ${categoryColor(ap.category)}">
+            ${filtered.map((ap) => html`
+              <tr key=${ap.id} class="pm-row-alt">
+                <td class="pm-td pm-td--mono">${ap.id}</td>
+                <td class="pm-td">
+                  <span class="chip sm ${categoryColor(ap.category)}">
                     ${categoryLabel(ap.category)}
                   </span>
                 </td>
-                <td class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-[var(--color-fg-secondary)]">${ap.description}</td>
-                <td class="border-b border-[var(--color-border-default)] px-3 py-1.5 font-mono text-[10px] text-[var(--color-fg-muted)]">${ap.location}</td>
-                <td class="border-b border-[var(--color-border-default)] px-3 py-1.5">
+                <td class="pm-td t-meta">${ap.description}</td>
+                <td class="pm-td t-caption">${ap.location}</td>
+                <td class="pm-td">
                   <${StatusChip} tone=${riskTone(ap.risk)}>${riskLabel(ap.risk)}<//>
                 </td>
+                <td class="pm-td">
+                  <span class="chip sm ${sourceColor(ap.source)}">
+                    ${SOURCE_LABEL[ap.source]}
+                  </span>
+                </td>
+                <td class="pm-td t-micro t-meta">${ap.improvement}</td>
               </tr>
             `)}
           </tbody>

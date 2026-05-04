@@ -4,6 +4,12 @@
 > Current authoritative keeper FSM set is `KeeperStateMachine`, `KeeperCompositeLifecycle`, `KeeperTurnCycle`, `KeeperDecisionPipeline`, `KeeperCascadeLifecycle`, `KeeperCompactionLifecycle`, and `boundary/KeeperContinueGate`.
 > `KeeperReconcileLiveness.tla` and `boundary/KeeperRecoveryOrchestration.tla` are retained here as forensic models for the old two-store reconcile bug.
 
+> **Update 2026-05-05** — §5 disposition recheck:
+> - **P1 (TurnSucceeded divergence)** — applied: `KeeperStateMachine.tla` line 128-141 leaves `manual_reconcile_required` UNCHANGED in `TurnSucceeded`, matching the OCaml `Turn_succeeded` branch.
+> - **P3 (`ManualReconcileClearable` invariant)** — *no longer applicable in its original form*: the `manual_reconcile_required` variable was removed from `KeeperStateMachine.tla` `VARIABLES` block during a later condition-model refactor (TLC parse fails on the audit's literal proposal — "Unknown operator: manual_reconcile_required"). Re-encoding the "no one-way trap" property requires identifying the new representation; deferred until a spec owner confirms the intended condition model.
+> - **P4 (`KeeperRecoveryOrchestration.tla`)** — landed under `specs/boundary/KeeperRecoveryOrchestration.tla` (with `.cfg` and a `-buggy.cfg`), so the multi-event recovery sequence is now under TLC.
+> - **P2 / P5** unchanged from the original disposition.
+
 Date: 2026-04-13
 Auditor: Claude Opus 4.6 (1M context)
 PR: #6834 (fix), this document: audit branch `audit/tla-state-gap`

@@ -207,6 +207,51 @@ let normalize_github_clone_url url =
   | Some org_repo -> "https://github.com/" ^ org_repo ^ ".git"
   | None -> url
 
+let local_clone_origin_path url =
+  let trimmed = String.trim url in
+  let file_prefix = "file://" in
+  let path =
+    if String.starts_with ~prefix:file_prefix trimmed then
+      Some
+        (String.sub trimmed (String.length file_prefix)
+           (String.length trimmed - String.length file_prefix))
+    else if trimmed <> "" && not (Filename.is_relative trimmed) then
+      Some trimmed
+    else
+      None
+  in
+  match path with
+  | Some p when p <> "" -> Some p
+  | _ -> None
+
+let realpath_opt path =
+  try Some (Unix.realpath path) with
+  | Unix.Unix_error _ | Sys_error _ -> None
+
+let path_is_under ~root path =
+  match realpath_opt root, realpath_opt path with
+  | Some root_real, Some path_real ->
+      let root_prefix =
+        if String.ends_with ~suffix:"/" root_real then root_real
+        else root_real ^ "/"
+      in
+      String.equal root_real path_real
+      || String.starts_with ~prefix:root_prefix path_real
+  | _ -> false
+
+let validate_local_clone_origin ~base_path url =
+  match local_clone_origin_path url with
+  | None -> None
+  | Some path ->
+      Some
+        (if path_is_under ~root:base_path path then
+           Ok ()
+         else
+           Error
+             (Printf.sprintf
+                "Local clone origin is outside base_path: origin=%s base_path=%s"
+                path base_path))
+
 let validate_clone_origin_url ~base_path url =
   match load_git_clone_policy_result ~base_path with
   | Error msg ->
@@ -214,7 +259,9 @@ let validate_clone_origin_url ~base_path url =
   | Ok (allowed_orgs, denied_repos) ->
       let allowed_lc = List.map String.lowercase_ascii allowed_orgs in
       let denied_lc = List.map String.lowercase_ascii denied_repos in
-      match extract_github_org_repo url with
+      match validate_local_clone_origin ~base_path url with
+      | Some result -> result
+      | None -> match extract_github_org_repo url with
       | None ->
           Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
       | Some org_repo ->
@@ -446,7 +493,7 @@ let ensure_sandbox_clone_ready candidate =
       Error
         (System (System_error.IoError
            (Printf.sprintf
-              "sandbox_clone_invalid: %s has a .git marker but is not a usable \               git clone: %s"
+              "sandbox_clone_invalid: %s has a .git marker but is not a usable git clone: %s"
               candidate detail)))
 
 let keeper_toml_path ~config ~agent_name =
@@ -1276,13 +1323,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 let msg = Printf.sprintf "Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
                   worktree_path branch_name branch_status prune_status in
                 if branch_exit <> 0 || prune_exit <> 0 then
-<<<<<<< HEAD
-                  Error (IoError (msg ^ "\n   Post-processing had failures"))
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-                  Error (IoError (msg ^ "\n   ⚠️ Post-processing had failures"))
-=======
                   Error (System (System_error.IoError (msg ^ "\n   ⚠️ Post-processing had failures")))
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
                 else
                   Ok msg
               end

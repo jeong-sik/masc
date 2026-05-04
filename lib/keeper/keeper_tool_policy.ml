@@ -325,6 +325,10 @@ let preset_allowlist preset =
   let name = preset_name_of_tool_preset preset in
   match !policy_config with
   | None ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_tool_policy_failures
+      ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
+      ();
     Log.Keeper.error
       "tool policy config not loaded; preset '%s' returns empty. \
        Call init_policy_config at startup." name;

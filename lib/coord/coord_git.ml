@@ -278,16 +278,8 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
           in
           match warnings with
           | [] -> Ok msg
-<<<<<<< HEAD
-          | ws -> Ok (msg ^ "\n    Warnings: " ^ String.concat "; " ws))
-        else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-          | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
-        else Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
-=======
           | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
         else Error (System (System_error.IoError "Failed to remove worktree. It may have uncommitted changes."))
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
 
 (** List all worktrees in the repository *)
 let list ~base_path =

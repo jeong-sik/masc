@@ -149,6 +149,84 @@ let rate_limit_score_for_provider health ~provider_key =
     else if rate_limit_skip_after > 0 && count >= rate_limit_skip_after then 0.0
     else Float.pow rate_limit_decay_base (float_of_int count)
 
+(* ── Server-error recency factor (#12797) ────────────────────────────
+
+   Complements the rate-limit recency factor: every recent [Failure]
+   event (which covers HTTP 5xx server errors) in a narrow window
+   decays the provider's weight, making the ranker prefer providers
+   that have been responding cleanly.
+
+   Window: 120 s (wider than the 429 window — 5xx errors tend to clear
+   more slowly than transient rate limits).
+   Decay: 0.6 per failure (less aggressive than 429 to avoid
+   over-penalising brief provider blips).
+   Skip threshold: 4 recent failures → weight 0.0 (skip entirely).
+
+   Set [MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S=0] to disable. *)
+let server_error_recency_window_s =
+  match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S" with
+  | None -> 120.0
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 120.0
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some n -> n
+      | None ->
+        Log.Misc.warn
+          "Invalid float for MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S=%S, \
+           using default 120.0" raw;
+        120.0
+
+let server_error_decay_base =
+  match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_DECAY_BASE" with
+  | None -> 0.6
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 0.6
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some n when n > 0.0 && n < 1.0 -> n
+      | _ ->
+        Log.Misc.warn
+          "Invalid decay base for MASC_CASCADE_SERVER_ERROR_DECAY_BASE=%S \
+           (must be in (0.0, 1.0)), using default 0.6" raw;
+        0.6
+
+let server_error_skip_after =
+  match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_SKIP_AFTER" with
+  | None -> 4
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 4
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some n when n >= 0 -> n
+      | _ ->
+        Log.Misc.warn
+          "Invalid int for MASC_CASCADE_SERVER_ERROR_SKIP_AFTER=%S, using default 4"
+          raw;
+        4
+
+let server_error_score_for_provider health ~provider_key =
+  if server_error_recency_window_s <= 0.0 then 1.0
+  else
+    let count =
+      Cascade_health_tracker.recent_outcome_count
+        health
+        ~provider_key
+        ~outcome:Cascade_health_tracker.Outcome_failure
+        ~window_s:server_error_recency_window_s
+    in
+    if count <= 0 then 1.0
+    else if server_error_skip_after > 0 && count >= server_error_skip_after then begin
+      Prometheus.inc_counter
+        Prometheus.metric_cascade_server_error_skip_total
+        ~labels:[("provider_key", provider_key)] ();
+      0.0
+    end else
+      Float.pow server_error_decay_base (float_of_int count)
+
 type cycle_policy = {
   max_cycles : int;
   backoff_base_ms : int;
@@ -269,7 +347,7 @@ let filter_cooldown adapter ctx cands =
 let weighted_shuffle adapter ctx cands =
   (* Compute health-adjusted weight per candidate.
 
-     Base weight is [config_weight × success_rate] (cooldown → 0).  Two
+     Base weight is [config_weight × success_rate] (cooldown → 0).  Three
      [0.0–1.0] adaptive factors are multiplied in before the random
      pick:
 
@@ -279,11 +357,14 @@ let weighted_shuffle adapter ctx cands =
          [decay_base ^ count] for [Soft_rate_limited] events in the
          {!rate_limit_recency_window_s} window.  Providers with no
          recent 429 hit get 1.0.
+       - [se]  — server-error recency score (#12797), decays for recent
+         [Failure] events (5xx) in {!server_error_recency_window_s}.
 
      Cooled-down providers stay at 0.  Latency never zeroes a provider,
-     but a sustained rate-limit burst may return [rl = 0.0] and remove
-     the provider for this ordering pass; otherwise the [max 1] guard
-     prevents tiny fractional weights from rounding to zero. *)
+     but a sustained rate-limit burst or server-error storm may return
+     [rl = 0.0] / [se = 0.0] and remove the provider for this ordering
+     pass; otherwise the [max 1] guard prevents tiny fractional weights
+     from rounding to zero. *)
   let weighted = List.map
       (fun c ->
          let provider_key = adapter.health_key c in
@@ -296,8 +377,9 @@ let weighted_shuffle adapter ctx cands =
            else
              let lat = latency_score_for_provider ctx.health ~provider_key in
              let rl  = rate_limit_score_for_provider ctx.health ~provider_key in
-             if lat <= 0.0 || rl <= 0.0 then 0
-             else max 1 (int_of_float (float_of_int ew *. lat *. rl))
+             let se  = server_error_score_for_provider ctx.health ~provider_key in
+             if lat <= 0.0 || rl <= 0.0 || se <= 0.0 then 0
+             else max 1 (int_of_float (float_of_int ew *. lat *. rl *. se))
          in
          (c, final))
       cands

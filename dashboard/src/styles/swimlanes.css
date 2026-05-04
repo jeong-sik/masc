@@ -69,7 +69,7 @@
 }
 .sl-toggle input:checked::after {
   content: ""; position: absolute; inset: 1px;
-  background: var(--brass-1); border-radius: var(--r-00);
+  background: var(--brass-1); border-radius: 1px;
 }
 
 .wf-scale-ctrl {
@@ -305,7 +305,7 @@
   display: block; width: 100%; height: 100%;
   min-width: 3px;
   background: var(--color-fg-muted);
-  border-radius: var(--r-00);
+  border-radius: 1px;
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast);
 }
 
@@ -317,7 +317,7 @@
 .sl-glyph.k-claim .sl-glyph-mark {
   background: var(--ok);
   transform: rotate(45deg) scale(.75);
-  border-radius: var(--r-00);
+  border-radius: 1px;
   min-width: 5px;
   width: 5px; height: 5px;
   margin: auto;

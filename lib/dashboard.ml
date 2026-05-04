@@ -453,7 +453,32 @@ let keepers_section now : section =
       e.name phase_str e.transition_seq since last_info
   in
   let content = List.map format_entry sorted in
-  { title = "Keepers"; content; empty_msg = "(no keepers registered)" }
+  let guard_violations =
+    Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
+  in
+  let write_meta_failures =
+    Prometheus.metric_total Prometheus.metric_keeper_write_meta_failures |> int_of_float
+  in
+  let tool_failures =
+    (Prometheus.metric_total Prometheus.metric_keeper_tool_selection_failures |> int_of_float)
+    + (Prometheus.metric_total Prometheus.metric_keeper_task_load_failures |> int_of_float)
+  in
+  let title =
+    match guard_violations, write_meta_failures, tool_failures with
+    | 0, 0, 0 -> "Keepers"
+    | gv, 0, 0 -> Printf.sprintf "Keepers (guard violations: %d)" gv
+    | 0, wm, 0 -> Printf.sprintf "Keepers (meta write errors: %d)" wm
+    | 0, 0, tf -> Printf.sprintf "Keepers (tool errors: %d)" tf
+    | gv, wm, 0 ->
+        Printf.sprintf "Keepers (guard violations: %d, meta write errors: %d)" gv wm
+    | gv, 0, tf ->
+        Printf.sprintf "Keepers (guard violations: %d, tool errors: %d)" gv tf
+    | 0, wm, tf ->
+        Printf.sprintf "Keepers (meta write errors: %d, tool errors: %d)" wm tf
+    | gv, wm, tf ->
+        Printf.sprintf "Keepers (guard violations: %d, meta write errors: %d, tool errors: %d)" gv wm tf
+  in
+  { title; content; empty_msg = "(no keepers registered)" }
 
 (** Attention section: items requiring operator action *)
 let attention_section now (snapshots : room_snapshot list) : section =
@@ -573,6 +598,78 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         working_count idle_count stuck_count offline_count
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
-      Printf.sprintf "KEEPERS: %d running / %d dead / %d other"
-        k_running k_dead k_other;
+      let guard_violations =
+        Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
+      in
+      let write_meta_failures =
+        Prometheus.metric_total Prometheus.metric_keeper_write_meta_failures |> int_of_float
+      in
+      let tool_failures =
+        (Prometheus.metric_total Prometheus.metric_keeper_tool_selection_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_task_load_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_reconcile_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_decision_audit_flush_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_persona_drift_missing |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_room_init_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_presence_sync_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_self_preservation_universal |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_cycle_exceptions |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_snapshot_write_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_sse_broadcast_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_room_heartbeat_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_metrics_snapshot_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_oas_execution_errors |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_episode_create_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_supervisor_sweep_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_toml_reconcile_sweep_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_tool_usage_flush_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_livelock_blocks |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_timeout_committed |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_error_after_tools |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_cleanup_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_cleanup_tracking_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_cascade_sync_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_thinking_persist_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_checkpoint_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_memory_write_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_write_meta_cycle_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_alert_persist_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_metrics_sse_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_dispatch_event_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_session_cleanup_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_chat_store_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_observation_query_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_termination_threshold_breached |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_termination_batch |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_broadcast_emit_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_tool_use_failure |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_config_env_parse_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_gate_rejected_terminal |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_receipt_unmapped_disposition |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_post_turn_wirein_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_meta_read_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_approval_queue_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_guards_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_profile_load_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_compact_audit_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_fs_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_crash_persistence_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_generation_lineage_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_keepalive_signal_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_meta_json_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_tools_oas_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_up_update_failures |> int_of_float)
++ (Prometheus.metric_total Prometheus.metric_keeper_execution_receipt_failures |> int_of_float)
++ (Prometheus.metric_total Prometheus.metric_keeper_llm_bridge_failures |> int_of_float)
++ (Prometheus.metric_total Prometheus.metric_keeper_shell_bash_failures |> int_of_float)
+      + (Prometheus.metric_total Prometheus.metric_keeper_rollover_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_recurring_failures |> int_of_float)
+      in
+      let tool_suffix =
+        if tool_failures > 0
+        then Printf.sprintf " | TOOL-ERR: %d" tool_failures
+        else ""
+      in
+      Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d | META-WRITE-ERR: %d%s"
+        k_running k_dead k_other guard_violations write_meta_failures tool_suffix;
     ]

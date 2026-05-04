@@ -403,6 +403,10 @@ let recover_context_overflow_retry
           compaction = recovery.compaction;
         }
   | None ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_checkpoint_failures
+        ~labels:[("keeper", meta.name); ("phase", "overflow_recovery_unavailable")]
+        ();
       Log.Keeper.warn
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
         meta.name (short_preview (Agent_sdk.Error.to_string error));
@@ -492,10 +496,18 @@ let pause_keeper_for_overflow
    with
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "overflow_pause_cas_race")]
+         ();
        Log.Keeper.warn
          "%s: overflow pause write_meta lost CAS race after retries: %s"
          meta.name err
    | Error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "overflow_pause")]
+         ();
        Log.Keeper.error
          "%s: overflow pause write_meta failed: %s"
          meta.name err);
@@ -546,6 +558,12 @@ let sync_keeper_paused_state
       config synced_meta
   with
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_write_meta_failures
+        ~labels:[("keeper", meta.name);
+                 ("phase",
+                  if paused then "pause_sync" else "resume_sync")]
+        ();
       Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
         ~config
         ~keeper_name:meta.name
@@ -617,7 +635,11 @@ let enqueue_partial_commit_continue_gate
          | Error err ->
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
-               meta.name err)
+               meta.name err);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
+               ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
          | Ok paused_meta ->
@@ -630,7 +652,11 @@ let enqueue_partial_commit_continue_gate
          | Error err ->
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
-               meta.name err reason))
+               meta.name err reason);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
+               ())
     ()
 
 (* Dedupe "mixed cascade context budget" log: the values are constant

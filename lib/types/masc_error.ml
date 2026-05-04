@@ -26,13 +26,39 @@ let rate_limit_config_to_yojson c =
 let rate_limit_config_of_yojson json =
   let open Yojson.Safe.Util in
   try
-    let per_minute = json |> member "per_minute" |> to_int in
-    let burst_allowed = json |> member "burst_allowed" |> to_int in
-    let priority_agents = json |> member "priority_agents" |> to_list |> filter_string in
-    let worker_multiplier = json |> member "worker_multiplier" |> to_float in
-    let admin_multiplier = json |> member "admin_multiplier" |> to_float in
-    let broadcast_per_minute = json |> member "broadcast_per_minute" |> to_int in
-    let task_ops_per_minute = json |> member "task_ops_per_minute" |> to_int in
+    let field name = json |> member name in
+    let int_field name default =
+      match field name with
+      | `Null -> default
+      | value -> to_int value
+    in
+    let float_field name default =
+      match field name with
+      | `Null -> default
+      | value -> to_float value
+    in
+    let string_list_field name default =
+      match field name with
+      | `Null -> default
+      | value -> value |> to_list |> filter_string
+    in
+    let per_minute = int_field "per_minute" default_rate_limit.per_minute in
+    let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in
+    let priority_agents =
+      string_list_field "priority_agents" default_rate_limit.priority_agents
+    in
+    let worker_multiplier =
+      float_field "worker_multiplier" default_rate_limit.worker_multiplier
+    in
+    let admin_multiplier =
+      float_field "admin_multiplier" default_rate_limit.admin_multiplier
+    in
+    let broadcast_per_minute =
+      int_field "broadcast_per_minute" default_rate_limit.broadcast_per_minute
+    in
+    let task_ops_per_minute =
+      int_field "task_ops_per_minute" default_rate_limit.task_ops_per_minute
+    in
     Ok { per_minute; burst_allowed; priority_agents; worker_multiplier;
          admin_multiplier; broadcast_per_minute; task_ops_per_minute }
   with e -> Error (Printexc.to_string e)
@@ -80,9 +106,18 @@ module Task_error = struct
     | InvalidId of string
 
   let to_string = function
-    | NotFound id -> Printf.sprintf "[TaskError] Task not found: %s" id
-    | AlreadyClaimed { task_id; by } -> Printf.sprintf "[TaskError] Task %s is currently owned by %s." task_id by
-    | NotClaimed id -> Printf.sprintf "[TaskError] Task %s is still todo." id
+    | NotFound id ->
+        Printf.sprintf
+          "[TaskError] Task not found: %s. Call masc_status to refresh your task list."
+          id
+    | AlreadyClaimed { task_id; by } ->
+        Printf.sprintf
+          "[TaskError] Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
+          task_id by
+    | NotClaimed id ->
+        Printf.sprintf
+          "[TaskError] Task %s is still todo. Claim/start it first, then mark it done."
+          id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
 end
@@ -96,7 +131,8 @@ module Agent_error = struct
 
   let to_string = function
     | NotFound name -> Printf.sprintf "[AgentError] Agent not found: %s" name
-    | NotJoined name -> Printf.sprintf "[AgentError] Agent not joined: %s" name
+    | NotJoined name ->
+        Printf.sprintf "[AgentError] Agent not joined: %s. Use masc_join first." name
     | AlreadyJoined name -> Printf.sprintf "[AgentError] Agent already joined: %s" name
     | InvalidName reason -> Printf.sprintf "[AgentError] Invalid agent name: %s" reason
 end
@@ -111,7 +147,8 @@ module Auth_error = struct
   let to_string = function
     | Unauthorized reason -> Printf.sprintf "[AuthError] Unauthorized: %s" reason
     | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
-    | TokenExpired agent -> Printf.sprintf "[AuthError] Token expired for %s" agent
+    | TokenExpired agent ->
+        Printf.sprintf "[AuthError] Token expired for %s. Use masc_auth_refresh." agent
     | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
 end
 
@@ -122,9 +159,15 @@ module Portal_error = struct
     | Closed of string
 
   let to_string = function
-    | NotOpen agent -> Printf.sprintf "[PortalError] No portal open for %s" agent
+    | NotOpen agent ->
+        Printf.sprintf
+          "[PortalError] No portal open for %s. Use masc_portal_open first."
+          agent
     | AlreadyOpen { agent; target } -> Printf.sprintf "[PortalError] Portal already open: %s <-> %s" agent target
-    | Closed agent -> Printf.sprintf "[PortalError] Portal is closed for %s" agent
+    | Closed agent ->
+        Printf.sprintf
+          "[PortalError] Portal is closed for %s. Use masc_portal_open to reopen."
+          agent
 end
 
 module System_error = struct
@@ -138,7 +181,7 @@ module System_error = struct
     | ValidationError of string
 
   let to_string = function
-    | NotInitialized -> "[SystemError] MASC not initialized."
+    | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."
     | AlreadyInitialized -> "[SystemError] MASC already initialized."
     | InvalidJson msg -> Printf.sprintf "[SystemError] Invalid JSON: %s" msg
     | IoError msg -> Printf.sprintf "[SystemError] IO error: %s" msg
@@ -156,102 +199,20 @@ type t =
   | RateLimitExceeded of rate_limit_error
   | CacheError of cache_error
 
-<<<<<<< HEAD
-let rec to_string = function
-  | NotInitialized -> "MASC not initialized. Use masc_init first."
-  | AlreadyInitialized -> "MASC already initialized."
-  | AgentNotFound name -> Printf.sprintf "Agent not found: %s" name
-  | AgentNotJoined name -> Printf.sprintf "Agent not joined: %s. Use masc_join first." name
-  | AgentAlreadyJoined name -> Printf.sprintf "%s is already in the room" name
-  | TaskNotFound id -> Printf.sprintf "Task not found: %s. Call masc_status to refresh your task list." id
-  | TaskAlreadyClaimed { task_id; by } ->
-      Printf.sprintf
-        "Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
-        task_id by
-  | TaskNotClaimed id ->
-      Printf.sprintf
-        "Task %s is still todo. Claim/start it first, then mark it done."
-        id
-  | TaskInvalidState msg -> Printf.sprintf "Invalid task state: %s" msg
-  | PortalNotOpen agent -> Printf.sprintf "No portal open for %s. Use masc_portal_open first." agent
-  | PortalAlreadyOpen { agent; target } -> Printf.sprintf "Portal already open: %s <-> %s" agent target
-  | PortalClosed agent -> Printf.sprintf "Portal is closed for %s. Use masc_portal_open to reopen." agent
-  | InvalidJson msg -> Printf.sprintf "Invalid JSON: %s" msg
-  | IoError msg -> Printf.sprintf "IO error: %s" msg
-  | InvalidAgentName reason -> Printf.sprintf "Invalid agent name: %s" reason
-  | InvalidTaskId reason -> Printf.sprintf "Invalid task ID: %s" reason
-  | InvalidFilePath reason -> Printf.sprintf "Invalid file path: %s" reason
-  | Unauthorized reason -> Printf.sprintf "Unauthorized: %s" reason
-  | Forbidden { agent; action } -> Printf.sprintf "Forbidden: %s cannot %s" agent action
-  | TokenExpired agent -> Printf.sprintf "Token expired for %s. Use masc_auth_refresh." agent
-  | InvalidToken reason -> Printf.sprintf "Invalid token: %s" reason
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-let rec to_string = function
-  | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
-  | AlreadyInitialized -> "MASC already initialized."
-  | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
-  | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
-  | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
-  | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s. Call masc_status to refresh your task list." id
-  | TaskAlreadyClaimed { task_id; by } ->
-      Printf.sprintf
-        "❌ Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
-        task_id by
-  | TaskNotClaimed id ->
-      Printf.sprintf
-        "❌ Task %s is still todo. Claim/start it first, then mark it done."
-        id
-  | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
-  | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
-  | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
-  | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent
-  | InvalidJson msg -> Printf.sprintf "❌ Invalid JSON: %s" msg
-  | IoError msg -> Printf.sprintf "❌ IO error: %s" msg
-  | InvalidAgentName reason -> Printf.sprintf "❌ Invalid agent name: %s" reason
-  | InvalidTaskId reason -> Printf.sprintf "❌ Invalid task ID: %s" reason
-  | InvalidFilePath reason -> Printf.sprintf "❌ Invalid file path: %s" reason
-  | Unauthorized reason -> Printf.sprintf "🔐 Unauthorized: %s" reason
-  | Forbidden { agent; action } -> Printf.sprintf "🚫 Forbidden: %s cannot %s" agent action
-  | TokenExpired agent -> Printf.sprintf "⏰ Token expired for %s. Use masc_auth_refresh." agent
-  | InvalidToken reason -> Printf.sprintf "🔑 Invalid token: %s" reason
-=======
 let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
   | Portal e -> Portal_error.to_string e
   | System e -> System_error.to_string e
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
   | RateLimitExceeded e ->
-<<<<<<< HEAD
-      Printf.sprintf "Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-      Printf.sprintf "⏳ Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-=======
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
         (show_rate_limit_category e.category) e.current e.limit e.wait_seconds
   | CacheError e -> (match e with
-<<<<<<< HEAD
-      | CacheReadFailed path -> Printf.sprintf "Cache read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "Cache write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "Cache expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "Cache corrupted [path=%s]" path)
-  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
-  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
-||||||| parent of ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
-      | CacheReadFailed path -> Printf.sprintf "❌ Cache: Read failed [path=%s]" path
-      | CacheWriteFailed path -> Printf.sprintf "❌ Cache: Write failed [path=%s]" path
-      | CacheExpired { key; age_hours } -> Printf.sprintf "❌ Cache: Expired [key=%s, age=%.1fh]" key age_hours
-      | CacheCorrupted path -> Printf.sprintf "❌ Cache: Corrupted [path=%s]" path)
-  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
-  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
-=======
       | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
       | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path
       | CacheExpired { key; age_hours } -> Printf.sprintf "[CacheError] Expired [key=%s, age=%.1fh]" key age_hours
       | CacheCorrupted path -> Printf.sprintf "[CacheError] Corrupted [path=%s]" path)
->>>>>>> ce3ebfb29e (refactor: domain-specific error hierarchy for MASC-MCP)
 
 let show = to_string
 
@@ -259,7 +220,10 @@ let to_yojson err =
   `String (to_string err)
 
 let code = function
+  | Auth (Auth_error.Forbidden _) -> 403
   | Auth _ -> 401
+  | Task (Task_error.NotFound _) -> 404
+  | Agent (Agent_error.NotFound _) -> 404
   | Task _ | Agent _ | Portal _ | System _ -> 400
   | RateLimitExceeded _ -> 429
   | _ -> 500

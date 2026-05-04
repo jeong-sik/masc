@@ -119,9 +119,9 @@ let test_classified_predicates () =
 
 (* Cycle 12 (PR #11450): [@@fsm_guard "expr"] runtime assertion injection.
    The guard is parsed as an OCaml boolean expression at PPX time and
-   injected as [assert (...)] into the function body. For curried
-   bindings the assert lands in the innermost lambda so it fires per
-   application, not per partial application. *)
+   injected through [Keeper_fsm_guard_runtime.wrap_unit] into the function
+   body. For curried bindings the wrapped assert lands in the innermost
+   lambda so it fires per application, not per partial application. *)
 
 let f_with_guard x = x + 1
 [@@fsm_guard "x >= 0"]
@@ -160,6 +160,52 @@ let test_fsm_guard_curried_fail () =
   in
   assert raised
 
+(* Verify that [wrap_unit] was actually called by the PPX-generated code,
+   not just a bare assert.  The stub tracks invocations. *)
+let test_wrap_unit_routing () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = f_with_guard 5 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "f_with_guard");
+  assert (stage = "guard")
+
+let test_wrap_unit_routing_curried () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = g_curried 2 3 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "g_curried");
+  assert (stage = "guard")
+
+(* Labeled-only arguments: the PPX should inject the wrapped assert into
+   the function body regardless of whether parameters are labelled. *)
+let h_labeled ~x ~y = x * y
+[@@fsm_guard "x >= 0 && y >= 0"]
+
+let test_fsm_guard_labeled_pass () =
+  assert (h_labeled ~x:3 ~y:4 = 12)
+
+let test_fsm_guard_labeled_fail () =
+  let raised =
+    try
+      ignore (h_labeled ~x:(-1) ~y:2);
+      false
+    with Assert_failure _ -> true
+  in
+  assert raised
+
+let test_wrap_unit_routing_labeled () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = h_labeled ~x:1 ~y:2 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "h_labeled");
+  assert (stage = "guard")
+
 let () =
   test_color_to_tla_symbol ();
   test_color_all_states ();
@@ -176,4 +222,9 @@ let () =
   test_fsm_guard_fail ();
   test_fsm_guard_curried_pass ();
   test_fsm_guard_curried_fail ();
-  print_endline "ppx_tla cycle 2 + 3 + 12 tests: PASS"
+  test_wrap_unit_routing ();
+  test_wrap_unit_routing_curried ();
+  test_fsm_guard_labeled_pass ();
+  test_fsm_guard_labeled_fail ();
+  test_wrap_unit_routing_labeled ();
+  print_endline "ppx_tla cycle 2 + 3 + 15 tests: PASS"

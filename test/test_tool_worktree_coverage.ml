@@ -106,6 +106,11 @@ let write_keeper_toml ~base_path ~name ~sandbox_profile =
        "[keeper]\npersona_name = %S\nsandbox_profile = %S\n"
        name sandbox_profile)
 
+let write_git_clone_policy_toml ~base_path =
+  write_file
+    (Filename.concat base_path ".masc/config/tool_policy.toml")
+    "[git_clone]\nallowed_orgs = []\ndenied_repos = []\n"
+
 let run_ok ~cwd cmd =
   let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd in
   let code = Sys.command wrapped in
@@ -118,6 +123,7 @@ let init_process_eio env =
   Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock
 
 let setup_nested_repo_with_remote ~base_path ~repo_rel =
+  write_git_clone_policy_toml ~base_path;
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   let repo = Filename.concat base_path repo_rel in
   ensure_dir (Filename.dirname repo);

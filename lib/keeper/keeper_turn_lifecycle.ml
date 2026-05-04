@@ -49,10 +49,25 @@ let handle_keeper_down ctx args : tool_result =
          ((match write_meta ctx.config retained with
            | Ok () -> ()
            | Error err ->
-               Log.Keeper.error "keeper_down write_meta failed: %s" err);
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:[("keeper", name);
+                          ("phase",
+                           if Keeper_meta_store.is_version_conflict_error err
+                           then "keeper_down_cas_race"
+                           else "keeper_down")]
+                 ();
+               if Keeper_meta_store.is_version_conflict_error err then
+                 Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
+               else
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_write_meta_failures
+                   ~labels:[("keeper", name); ("site", "keeper_down")]
+                   ();
+                 Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
-          ignore (Keeper_registry.dispatch_event_and_log ~base_path:ctx.config.base_path name
-            Keeper_state_machine.Operator_pause)));
+          Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name
+            Keeper_state_machine.Operator_pause));
       if remove_session then (
         let rec rm_rf path =
           if Fs_compat.file_exists path then begin
@@ -68,6 +83,9 @@ let handle_keeper_down ctx args : tool_result =
         if validate_name (Keeper_id.Trace_id.to_string m.runtime.trace_id) then (
           let dir = Filename.concat (session_base_dir ctx.config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_session_cleanup_failures
+              ();
             Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));
       let json = `Assoc [

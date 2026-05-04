@@ -228,6 +228,10 @@ let rec record_failure ~keeper_name ~(error_msg : string) : string option =
       s.consecutive_count <- 0;
       let tripped = s.total_tripped in
       let recent = s.recent_failures in
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_circuit_breaker_trips
+        ~labels:[("keeper", keeper_name); ("failure_type", error_class_to_string cls)]
+        ();
       Log.Keeper.warn
         "circuit_breaker tripped for %s: %d consecutive %s failures \
          (total trips: %d) recent=%s"

@@ -63,6 +63,35 @@ module KeeperSupervisor : sig
   val paused_cleanup_ttl_sec : float
   val auto_resume_initial_sec : float
   val auto_resume_max_sec : float
+  val liveness_recovery_enabled : bool
+  (** #12801 Whether the liveness recovery scan is enabled. *)
+  val liveness_recovery_min_dead_sec : float
+  (** Minimum seconds a keeper must have been Dead before recovery attempt. *)
+  val liveness_recovery_backoff_base_sec : float
+  (** Base backoff delay between liveness recovery attempts (seconds). *)
+  val liveness_recovery_backoff_max_sec : float
+  (** Maximum backoff delay cap for liveness recovery (seconds). *)
+  val liveness_recovery_max_attempts : int
+  (** Maximum total liveness recovery attempts per keeper. *)
+
+  val alive_but_stuck_enabled : bool
+  (** #12838 Detection-only scan for alive-but-stuck keepers
+      (proactive_rt.last_ts frozen while autonomous turns advance).
+      Default: true (counter only, no transitions). *)
+
+  val alive_but_stuck_stall_multiplier : int
+  (** Multiplier on the keeper's [proactive.cooldown_sec] before
+      stalling is flagged. Default: 10. *)
+
+  val alive_but_stuck_stall_floor_sec : float
+  (** Hard floor (seconds) for stall detection — guards against
+      keepers with very small cooldowns being flagged after a few
+      minutes of legitimate quiet. Default: 1800 (30 min). *)
+
+  val alive_but_stuck_dedup_ttl_sec : float
+  (** Per-keeper dedup window: counter increments at most once per
+      window per keeper even when the sweep fires every 30s.
+      Default: 3600 (1 hr). *)
 end
 
 (** {1 Stale-turn watchdog} *)

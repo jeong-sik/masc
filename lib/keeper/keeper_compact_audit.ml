@@ -181,6 +181,10 @@ let prune_best_effort base_path ~retention_days =
   with
   | _n -> ()
   | exception e ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_compact_audit_failures
+      ~labels:[("keeper", "global"); ("site", "retention_prune")]
+      ();
     Log.Keeper.warn
       "keeper_compact_audit: retention prune failed: %s"
       (Printexc.to_string e)
@@ -350,6 +354,10 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
     (match persist_start ~base_path ~retention_days r with
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_compact_audit_failures
+         ~labels:[("keeper", agent_name); ("site", "persist_start")]
+         ();
        Log.Keeper.warn "keeper_compact_audit: persist_start failed: %s" m)
   | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
@@ -376,6 +384,10 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
     (match persist_complete ~base_path ~retention_days r with
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_compact_audit_failures
+         ~labels:[("keeper", agent_name); ("site", "persist_complete")]
+         ();
        Log.Keeper.warn "keeper_compact_audit: persist_complete failed: %s" m)
   | _payload -> Log.Misc.debug "keeper_compact_audit: ignoring non-compaction event"
 
@@ -411,6 +423,10 @@ let spawn_subscriber
            try handle_event ~base_path ~retention_days:effective_retention event
            with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_compact_audit_failures
+                 ~labels:[("keeper", "batch"); ("site", "handle_event")]
+                 ();
                Log.Keeper.warn "keeper_compact_audit: handle_event failed: %s"
                  (Printexc.to_string exn))
         batch;

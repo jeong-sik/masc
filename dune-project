@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc_mcp)
-(version 0.19.3)
+(version 0.19.5)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)

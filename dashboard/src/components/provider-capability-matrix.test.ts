@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { html } from 'htm/preact'
-import { runtimeProviderToMatrixId } from './provider-capability-matrix/data'
+import { runtimeProviderToMatrixId, ANTI_PATTERNS } from './provider-capability-matrix/data'
 import { FeatureMatrix, liveStatusDot } from './provider-capability-matrix/feature-matrix'
 import { WiringGaps } from './provider-capability-matrix/wiring-gaps'
 import { AntiPatternList } from './provider-capability-matrix/anti-patterns'
@@ -53,8 +53,10 @@ describe('ProviderCapabilityMatrix', () => {
     const el = container()
     render(html`<${WiringGaps} />`, el)
 
-    expect(el.textContent).toContain('과소선언: 6건')
-    expect(el.textContent).toContain('정확한 선언: 6건')
+    expect(el.textContent).toContain('HIGH')
+    expect(el.textContent).toContain('MEDIUM')
+    expect(el.textContent).toContain('LOW')
+    expect(el.textContent).toContain('정확')
     expect(el.textContent).toContain('W01')
     expect(el.textContent).not.toContain('W07')
   })
@@ -74,5 +76,21 @@ describe('ProviderCapabilityMatrix', () => {
 
     expect(el.textContent).toContain('M01')
     expect(el.textContent).not.toContain('S01')
+  })
+
+  it('all anti-patterns have source attribution with file locations', () => {
+    for (const ap of ANTI_PATTERNS) {
+      expect(ap.source).toBeDefined()
+      expect(ap.location).toMatch(/\.\w+(:[\d,-]+)?$/)
+    }
+    const oasCount = ANTI_PATTERNS.filter(ap => ap.source === 'oas').length
+    expect(oasCount).toBe(32)
+  })
+
+  it('all anti-patterns have improvement directions', () => {
+    for (const ap of ANTI_PATTERNS) {
+      expect(ap.improvement).toBeDefined()
+      expect(ap.improvement.length).toBeGreaterThan(0)
+    }
   })
 })

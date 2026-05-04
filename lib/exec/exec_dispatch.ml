@@ -54,7 +54,7 @@ let dispatch_simple (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
-  match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec:120.0 with
+  match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) with
   | exception exn ->
       { status = Unix.WEXITED 1;
         stdout = "";
@@ -79,7 +79,7 @@ let rec dispatch_pipeline stages =
             let env = resolve_env s.env in
             (match
                Process_eio.run_argv_with_stdin_and_status_split
-                 ~timeout_sec:120.0 ~env
+                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with
             | exception exn ->
@@ -94,7 +94,7 @@ let rec dispatch_pipeline stages =
             let env = resolve_env s.env in
             (match
                Process_eio.run_argv_with_stdin_and_status_split
-                 ~timeout_sec:120.0 ~env
+                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with
             | exception exn ->

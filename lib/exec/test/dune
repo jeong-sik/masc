@@ -6,4 +6,4 @@
         test_history_insight test_exec_cache test_exec_budget
         test_exec_adaptive_timeout test_risk_classifier test_egress_policy)
  (libraries masc_exec masc_exec_bash_parser masc_process
-            masc_core alcotest eio eio_main yojson unix base re))
+            masc_core alcotest eio eio_main yojson unix re))

@@ -52,6 +52,26 @@ let sort_by_urgency (queue : t) : t =
     (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
     queue
 
+type stimulus_class =
+  | Board_signal
+  | Bootstrap
+  | Unsupported of string
+
+let classify (s : stimulus) : stimulus_class =
+  if String.equal s.payload "Keeper bootstrap signal" then Bootstrap
+  else
+    (* Board signals carry JSON with "source":"board_signal". Lightweight
+       prefix check avoids a full Yojson parse in the data layer. *)
+    let len = String.length s.payload in
+    if len > 2
+       && String.equal
+            (String.sub s.payload 0 (min 30 len))
+            "{\"source\":\"board_signal\""
+    then Board_signal
+    else
+      Unsupported
+        (String.sub s.payload 0 (min 40 (String.length s.payload)))
+
 let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"
     (List.length queue)

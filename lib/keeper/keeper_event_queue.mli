@@ -58,3 +58,13 @@ val sort_by_urgency : t -> t
 
 val summary : t -> string
 (** Short human-readable description for log lines. *)
+
+type stimulus_class =
+  | Board_signal   (** JSON payload with {"source":"board_signal", ...} *)
+  | Bootstrap      (** Plain string "Keeper bootstrap signal" *)
+  | Unsupported of string  (** Unrecognized: payload prefix (max 40 chars) for audit *)
+
+val classify : stimulus -> stimulus_class
+(** [classify s] discriminates the stimulus by inspecting its payload.
+    No Yojson dependency — uses lightweight prefix matching so the Event
+    Layer data module stays self-contained. *)

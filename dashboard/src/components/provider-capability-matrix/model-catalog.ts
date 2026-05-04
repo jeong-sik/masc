@@ -10,6 +10,8 @@ import {
   CLI_TRANSPORTS,
   GLM_CODING_PLAN_MAP,
   GLM_WIRING_GAPS,
+  CLAUDE_CODE_EXTENSIONS,
+  CLAUDE_CODE_STATS,
   modelTierStyle,
   type ProviderModelGroup,
 } from './data'
@@ -109,6 +111,75 @@ function CliTransportTable() {
   `
 }
 
+function ClaudeCodeArchSection() {
+  const extCostColor = (cost: string) => {
+    switch (cost) {
+      case 'zero': return 't-ok'
+      case 'low': return 't-ok'
+      case 'medium': return 't-warn'
+      case 'high': return 't-err'
+      default: return ''
+    }
+  }
+
+  return html`
+    <div class="pm-card">
+      <div class="pm-card-head">
+        <div class="flex items-center gap-2">
+          <span class="t-label font-semibold">Claude Code Architecture</span>
+          <span class="t-micro t-dim">${CLAUDE_CODE_STATS.tools} tools · ${CLAUDE_CODE_STATS.approvalRate} approval</span>
+        </div>
+        <span class="chip sm is-ghost">external_research.md §1.3.3</span>
+      </div>
+      <div class="px-3 py-2 bg-[var(--shell-rail-bg)]">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div class="text-center">
+            <div class="t-display font-bold t-ok">${CLAUDE_CODE_STATS.tools}</div>
+            <div class="t-micro t-dim">도구 (${CLAUDE_CODE_STATS.unconditionalTools} 무조건 + ${CLAUDE_CODE_STATS.conditionalTools} 조건부)</div>
+          </div>
+          <div class="text-center">
+            <div class="t-display font-bold">${CLAUDE_CODE_STATS.approvalRate}</div>
+            <div class="t-micro t-dim">승인율 (deny-first 보안)</div>
+          </div>
+          <div class="text-center">
+            <div class="t-display font-bold">${CLAUDE_CODE_STATS.compactionThreshold}</div>
+            <div class="t-micro t-dim">Context compaction 임계값</div>
+          </div>
+          <div class="text-center">
+            <div class="t-display font-bold">${CLAUDE_CODE_STATS.thinkingModes.length}</div>
+            <div class="t-micro t-dim">Thinking 모드</div>
+          </div>
+        </div>
+        <p class="t-caption t-meta mb-2">
+          ${CLAUDE_CODE_STATS.thinkingModes.join(' / ')}
+        </p>
+        <div class="pm-scroll">
+          <table class="pm-table">
+            <thead class="pm-thead">
+              <tr>
+                <th class="pm-th">확장 메커니즘</th>
+                <th class="pm-th pm-th--center">도입</th>
+                <th class="pm-th pm-th--center">비용</th>
+                <th class="pm-th">설명</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${CLAUDE_CODE_EXTENSIONS.map((ext, i) => html`
+                <tr key=${ext.name} class="pm-row-alt">
+                  <td class="pm-td pm-td--mono font-semibold">${ext.name}</td>
+                  <td class="pm-td pm-td--center pm-td--mono t-dim">${ext.since}</td>
+                  <td class="pm-td pm-td--center pm-td--mono font-bold ${extCostColor(ext.cost)}">${ext.cost}</td>
+                  <td class="pm-td t-meta">${ext.description}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function GlmCodingPlanSection() {
   return html`
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -193,6 +264,12 @@ export function ModelCatalog() {
         <h4 class="t-label font-semibold mb-2">GLM Coding Plan 특수 매핑</h4>
         <p class="t-micro t-dim mb-2">Claude Code 호환 엔드포인트를 통한 GLM 모델 매핑 + OAS wiring 간격</p>
         <${GlmCodingPlanSection} />
+      </div>
+
+      <div>
+        <h4 class="t-label font-semibold mb-2">Claude Code Architecture Reference</h4>
+        <p class="t-micro t-dim mb-2">에이전트 CLI 아키텍처 참조 — 54 도구, 5개 확장 메커니즘, deny-first 보안 모델</p>
+        <${ClaudeCodeArchSection} />
       </div>
     </div>
   `

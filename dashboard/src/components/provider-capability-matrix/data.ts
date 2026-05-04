@@ -634,6 +634,35 @@ export const GLM_WIRING_GAPS: Array<{ area: string; oasCurrent: string; official
   { area: 'Context', oasCurrent: '200K (sec01 기준)', official: '200K (sec01 기준)', gap: '검증된 gap 없음' },
 ]
 
+// ── Claude Code Architecture ────────────────────────────────────
+// Source: external_research.md §1.3.3, §2.3.2 (verified 2026-04-30)
+
+export interface ExtensionMechanism {
+  name: string
+  since: string
+  cost: string
+  description: string
+}
+
+export const CLAUDE_CODE_EXTENSIONS: ExtensionMechanism[] = [
+  { name: 'MCP Servers', since: '2024.11', cost: 'high', description: '외부 서버 연동, 도구/리소스/프롬프트 제공' },
+  { name: 'Subagents', since: '2025.07', cost: 'medium', description: '독립 에이전트 스폰, 병렬 작업' },
+  { name: 'Hooks', since: '2025.09', cost: 'zero', description: 'PreToolUse/PostToolUse/Stop/Notification 이벤트' },
+  { name: 'Plugins/Skills', since: '2025.10', cost: 'low', description: 'SKILL.md + YAML frontmatter, 슬래시 명령' },
+  { name: 'Agent Teams', since: '2026.02', cost: 'medium', description: '멀티 에이전트 협업, TaskList 공유' },
+]
+
+export const CLAUDE_CODE_STATS = {
+  tools: 54,
+  unconditionalTools: 19,
+  conditionalTools: 35,
+  approvalRate: '93%',
+  compactionThreshold: '~75%',
+  contextWindow: '200K',
+  structuredOutput: 'Constrained Decoding (2025.11)',
+  thinkingModes: ['Extended (budget_tokens)', 'Interleaved (Claude 4+)', 'Adaptive (Sonnet 4.6/Opus 4.6)'],
+}
+
 // ── Cascade Traces ────────────────────────────────────────────
 // OAS cascade routing trace scenarios. Source: sec03 cascade flow analysis.
 

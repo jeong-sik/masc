@@ -116,9 +116,9 @@ function formatFte(value: number): string {
 
 function heatClass(pct: string): string {
   const n = Number.parseFloat(pct.replace('%', ''))
-  if (n >= 100) return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] font-semibold'
-  if (n >= 80)  return 'bg-[var(--ok-5)] text-[var(--color-fg-default)]'
-  if (n >= 50)  return 'bg-[var(--warn-5)] text-[var(--color-fg-default)]'
+  if (n >= 100) return 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] font-semibold'
+  if (n >= 80)  return 'bg-[var(--ok-6)] text-[var(--color-fg-default)]'
+  if (n >= 50)  return 'bg-[var(--warn-8)] text-[var(--color-fg-default)]'
   if (n > 0)    return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
   return 'text-[var(--color-fg-muted)]'
 }

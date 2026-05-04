@@ -37,6 +37,45 @@ let keeper_turn_throttle_limit =
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
+(* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore
+   for 60+ seconds the wait timeout WARN says "peers holding slot" but
+   never names *which* peer.  Operators are then blind to which keeper
+   is the actual blocker.
+
+   Track holders in a single Hashtbl keyed by (label, keeper_name) so
+   [acquire_bounded] can dump the live list on timeout.  Mutex-guarded
+   because Eio fibers may release/acquire concurrently.
+
+   Holder rows are tuples [(label, keeper_name) → acquire_ts].
+   [label] disambiguates the three pools (turn / autonomous / reactive)
+   without requiring three separate tables.  Cardinality is bounded by
+   the deployment's keeper count (typically <50). *)
+let holder_table : (string * string, float) Hashtbl.t = Hashtbl.create 32
+let holder_mutex = Eio.Mutex.create ()
+
+let with_holder_lock f =
+  Eio.Mutex.use_rw ~protect:true holder_mutex f
+
+let record_holder ~label ~keeper_name ~acquired_at =
+  with_holder_lock (fun () ->
+    Hashtbl.replace holder_table (label, keeper_name) acquired_at)
+
+let drop_holder ~label ~keeper_name =
+  with_holder_lock (fun () ->
+    Hashtbl.remove holder_table (label, keeper_name))
+
+(** [snapshot_holders ~label ~now] returns [(keeper_name, held_for_sec)]
+    pairs for the given [label] sorted by descending hold time.  Used
+    by [acquire_bounded] to attribute timeouts to the longest-held
+    peer.  Pure read, no mutation. *)
+let snapshot_holders ~label ~now =
+  with_holder_lock (fun () ->
+    Hashtbl.fold
+      (fun (l, name) ts acc ->
+        if String.equal l label then (name, now -. ts) :: acc else acc)
+      holder_table [])
+  |> List.sort (fun (_, a) (_, b) -> compare b a)
+
 (* Autonomous turn concurrency cap. Prevents thundering-herd when all
    keepers fire scheduled turns simultaneously on a shared LLM server.
    Reactive turns (explicit mentions, board events) use a separate gate
@@ -224,16 +263,22 @@ let release_keeper_turn_slot ~keeper_name state =
   (* Release exactly what we acquired. The turn, autonomous, and reactive
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
-  if !(state.acquired_turn) then Eio.Semaphore.release turn_semaphore;
+  if !(state.acquired_turn) then begin
+    drop_holder ~label:"turn" ~keeper_name;
+    Eio.Semaphore.release turn_semaphore
+  end;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
        [maybe_yield_for_fairness] can measure the correct interval
        when this keeper's heartbeat loops back immediately. *)
     record_autonomous_completion ~keeper_name;
+    drop_holder ~label:"autonomous" ~keeper_name;
     Eio.Semaphore.release autonomous_turn_semaphore
   end;
-  if !(state.acquired_reactive) then
+  if !(state.acquired_reactive) then begin
+    drop_holder ~label:"reactive" ~keeper_name;
     Eio.Semaphore.release reactive_turn_semaphore
+  end
 
 let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
@@ -435,16 +480,31 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       (try
         Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
           Eio.Semaphore.acquire sem);
+        record_holder ~label ~keeper_name
+          ~acquired_at:(Time_compat.now ());
         Ok ()
       with Eio.Time.Timeout ->
         (* Routine, not WARN: the keeper-specific heartbeat loop already
            emits the operator-facing skip warning with owner/cascade
-           context, while the metric below preserves attribution. *)
+           context, while the metric below preserves attribution.
+           2026-05-05: also dump the actual holders so operators are
+           not blind to *which* peer is starving the queue. *)
+        let holders =
+          snapshot_holders ~label ~now:(Time_compat.now ())
+        in
+        let holder_summary =
+          match holders with
+          | [] -> "(none — race or empty)"
+          | _ ->
+            holders
+            |> List.map (fun (n, age) -> Printf.sprintf "%s/%.0fs" n age)
+            |> String.concat ", "
+        in
         Log.Keeper.routine
-          "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
-           skipping turn"
+          "semaphore_wait: %s semaphore wait exceeded %.0fs \
+           (channel=%s, holders=[%s]), skipping turn"
           label semaphore_wait_timeout_sec
-          channel_label;
+          channel_label holder_summary;
         (* #9771: per-keeper × per-acquire-channel counter so
            operators can attribute slot starvation to autonomous
            vs turn semaphore pressure. *)
@@ -464,6 +524,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
         label;
       Eio.Semaphore.acquire sem;
+      record_holder ~label ~keeper_name ~acquired_at:(Time_compat.now ());
       Ok ()
   in
   Fun.protect

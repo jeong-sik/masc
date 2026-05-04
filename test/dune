@@ -90,6 +90,7 @@
         test_keeper_contract_classifier_pure
         test_keeper_compact_policy_pure
         test_heartbeat_smart
+        test_env_config_nonneg
         test_keeper_allowed_paths
         test_keeper_repo_readiness
         test_keeper_tool_surface_guard
@@ -293,6 +294,7 @@
           test_keeper_contract_classifier_pure
           test_keeper_compact_policy_pure
           test_heartbeat_smart
+          test_env_config_nonneg
           test_keeper_allowed_paths
           test_keeper_repo_readiness
           test_keeper_tool_surface_guard

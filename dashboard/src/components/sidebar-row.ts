@@ -59,7 +59,7 @@ export function SidebarRow(props: SidebarRowProps): VNode {
   const containerStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: 'var(--sp-1-5)',
     padding: `4px var(--spacing-element)`,
     borderRadius: 'var(--r-1)',
     background: props.selected ? 'var(--color-bg-elevated)' : 'transparent',

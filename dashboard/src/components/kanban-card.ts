@@ -69,7 +69,7 @@ export function KanbanCard(props: KanbanCardProps): VNode {
   const containerStyle = {
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: '4px',
+    gap: 'var(--sp-1)',
     padding: `var(--spacing-element) var(--spacing-group)`,
     borderRadius: 'var(--r-1)',
     background: 'var(--bg-panel)',
@@ -103,7 +103,7 @@ export function KanbanCard(props: KanbanCardProps): VNode {
   const footStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: 'var(--sp-1-5)',
     fontSize: 'var(--font-size-3xs)',
     color: 'var(--color-fg-muted)',
     marginTop: '2px',

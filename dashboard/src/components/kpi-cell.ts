@@ -106,7 +106,7 @@ export function KpiCell(props: KpiCellProps): VNode {
           style=${{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: 'var(--sp-1-5)',
             fontSize: 'var(--fs-9)',
             fontFamily: 'var(--font-mono)',
             color: captionColor,

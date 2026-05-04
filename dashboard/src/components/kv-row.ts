@@ -54,15 +54,15 @@ export function KvRow(props: KvRowProps): VNode {
   const rowStyle = {
     display: 'grid',
     gridTemplateColumns: wide ? '120px 1fr' : '80px 1fr',
-    gap: '12px',
-    padding: '4px 0',
+    gap: 'var(--sp-3)',
+    padding: 'var(--sp-1) 0',
     alignItems: 'baseline' as const,
     fontSize: 'var(--fs-11)',
   }
 
   const keyStyle = {
     color: 'var(--color-fg-muted)',
-    fontSize: '10px',
+    fontSize: 'var(--fs-10)',
     textTransform: 'uppercase' as const,
     letterSpacing: '0.06em',
   }

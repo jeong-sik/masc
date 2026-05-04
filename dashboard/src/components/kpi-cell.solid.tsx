@@ -120,7 +120,7 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
           style={{
             display: 'inline-flex',
             'align-items': 'center',
-            gap: '6px',
+            gap: 'var(--sp-1-5)',
             'font-size': 'var(--font-size-3xs)',
             color: 'var(--color-fg-muted)',
             'letter-spacing': '0.06em',

@@ -95,7 +95,7 @@ export function TickerItem(props: TickerItemProps): VNode {
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: 'var(--sp-1-5)',
         padding: `2px var(--spacing-element)`,
         fontFamily: MONO_STACK,
         fontSize: 'var(--font-size-2xs)',

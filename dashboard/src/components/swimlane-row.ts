@@ -120,7 +120,7 @@ export function SwimlaneRow(props: SwimlaneRowProps): VNode {
   const headStyle = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: 'var(--sp-1-5)',
     width: `${HEAD_WIDTH_PX}px`,
     flex: 'none',
     fontFamily: MONO_STACK,

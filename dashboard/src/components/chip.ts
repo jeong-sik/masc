@@ -170,7 +170,7 @@ export function Chip(props: ChipProps): VNode {
   const containerStyle = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px',
+    gap: 'var(--sp-1)',
     height: ss.height,
     padding: ss.padding,
     fontFamily: MONO_STACK,

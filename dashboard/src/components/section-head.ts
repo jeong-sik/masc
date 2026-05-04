@@ -61,9 +61,9 @@ export function SectionHead(props: SectionHeadProps): VNode {
   const containerStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: 'var(--sp-2)',
     minHeight: '28px',
-    padding: '0 12px',
+    padding: '0 var(--sp-3)',
     // Longhand instead of `borderBottom` shorthand — happy-dom mis-
     // parses `border-bottom: 1px solid var(--token)` and splits the
     // var() across all three sub-properties (width/style/color), so
@@ -95,7 +95,7 @@ export function SectionHead(props: SectionHeadProps): VNode {
   const tailStyle = {
     marginLeft: props.count != null ? '8px' : 'auto',
     display: 'inline-flex',
-    gap: '4px',
+    gap: 'var(--sp-1)',
     alignItems: 'center',
   }
 

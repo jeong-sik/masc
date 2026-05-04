@@ -135,7 +135,7 @@ export function KeeperBadge({
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: 'var(--sp-1-5)',
         verticalAlign: 'middle',
       }}
       title=${title}
@@ -145,7 +145,7 @@ export function KeeperBadge({
         style=${{
           color: `var(--color-keeper-${slot})`,
           fontFamily: SANS_STACK,
-          fontSize: '11px',
+          fontSize: 'var(--fs-11)',
           fontWeight: 500,
         }}
       >${display}</span>
@@ -185,7 +185,7 @@ export function KeeperStack({
             border: `2px solid ${surface}`,
             borderRadius: 'var(--r-1)',
             fontFamily: MONO_STACK,
-            fontSize: '10px',
+            fontSize: 'var(--fs-10)',
             fontWeight: 600,
           }}
         >+${overflow}</span>

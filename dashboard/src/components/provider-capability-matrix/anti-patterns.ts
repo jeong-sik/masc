@@ -9,6 +9,8 @@ import {
   riskLabel,
   categoryLabel,
   categoryColor,
+  SOURCE_LABEL,
+  sourceColor,
 } from './data'
 import type { AntiPatternCategory } from './data'
 
@@ -58,6 +60,7 @@ export function AntiPatternList() {
               <th class="pm-th">설명</th>
               <th class="pm-th w-[160px]">위치</th>
               <th class="pm-th w-[60px]">리스크</th>
+              <th class="pm-th w-[60px]">출처</th>
             </tr>
           </thead>
           <tbody>
@@ -73,6 +76,11 @@ export function AntiPatternList() {
                 <td class="pm-td t-caption">${ap.location}</td>
                 <td class="pm-td">
                   <${StatusChip} tone=${riskTone(ap.risk)}>${riskLabel(ap.risk)}<//>
+                </td>
+                <td class="pm-td">
+                  <span class="chip sm ${sourceColor(ap.source)}">
+                    ${SOURCE_LABEL[ap.source]}
+                  </span>
                 </td>
               </tr>
             `)}

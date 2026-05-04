@@ -128,11 +128,9 @@ export function BfclRankings() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="t-micro mono t-dim px-1">
-        <span>BFCL = 스키마 준수율 측정</span>
+        <span>BFCL V4 = 스키마 준수율 측정 (UC Berkeley, 2026-04-12 기준, 109개 모델)</span>
         <span class="text-[var(--color-border-default)] mx-2">|</span>
-        <span>MCPMark = 작업 완료율 측정</span>
-        <span class="text-[var(--color-border-default)] mx-2">|</span>
-        <span>GPT-5: BFCL 7위(59.22%) vs MCPMark 1위(52.6%)</span>
+        <span>Claude Opus 4.5: V4 1위 (77.47%)</span>
       </div>
 
       <div class="pm-scroll">
@@ -193,8 +191,8 @@ export function BfclRankings() {
       <div>
         <h4 class="t-label font-semibold mb-2">모델별 카테고리 성능 분포</h4>
         <p class="t-micro t-dim mb-2">
-          상위 3개 모델(GLM-4.5, Claude Opus 4.1, Sonnet 4)은 모든 카테고리에서 '높음'.
-          GPT-5는 Agentic에서만 '높음', Simple/Parallel은 '중간'.
+          Claude Opus 4.5, Sonnet 4.5는 전 카테고리 '높음'. GPT-5.2는 Agentic에서만 '높음'.
+          Mistral Large(38.37%)는 전반적으로 낮은 스키마 준수율.
         </p>
         <${ModelBreakdownTable} />
       </div>
@@ -208,8 +206,9 @@ export function BfclRankings() {
       </div>
 
       <div class="t-micro t-dim px-1">
-        출처: BFCL V3/V4 (UC Berkeley), MCPMark pass@1 (Sam Chon), SWE-Bench Pro (K2.6).
+        출처: BFCL V4 Leaderboard (gorilla.cs.berkeley.edu, 2026-04-12 갱신, 109개 모델).
         Harness: Sam Chon, Wrtn Technologies. CoT Compliance 9.91%→100% 후속 연구.
+        카테고리별 breakdown은 V4 공개 데이터 미제공으로 overall score 기반 추정.
       </div>
     </div>
   `

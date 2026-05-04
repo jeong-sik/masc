@@ -590,6 +590,10 @@ let run_turn
              (String.concat ", " unexpected_tool_names)
          in
          acc.receipt_tool_contract_result <- "violated";
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_contract_violations
+           ~labels:[("keeper_name", meta.name); ("kind", "tool_surface_violation"); ("signal", "unexpected_tool_names")]
+           ();
          Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
          Error (Agent_sdk.Error.Internal reason)
        else (

@@ -9,7 +9,7 @@ import {
   PROVIDER_LABELS,
   PROVIDER_CATEGORY,
   FEATURE_CATEGORIES,
-  supportCellClass,
+  supportHeatBucket,
   computeMatrixSummary,
   runtimeProviderToMatrixId,
 } from './data'
@@ -194,7 +194,7 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
                       const v = feat.providers[pid] ?? '—'
                       return html`
                         <td key=${pid} class="pm-td pm-td--center">
-                          <span class="pm-cell-badge ${supportCellClass(v)}">
+                          <span class="pm-cell-badge ${supportHeatBucket(v)}">
                             ${v}
                           </span>
                         </td>

@@ -978,12 +978,12 @@ export const SUCCESS_METRICS: SuccessMetric[] = [
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-export function supportCellClass(v: FeatureSupport): string {
+export function supportHeatBucket(v: FeatureSupport): string {
   switch (v) {
-    case '●': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    case '◐': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-    case '○': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
-    case '—': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+    case '●': return 'z4'
+    case '◐': return 'z2'
+    case '○': return 'z1'
+    case '—': return 'z0'
   }
 }
 

@@ -20,6 +20,7 @@ import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
+import { formatTimeHms } from '../lib/format-time'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -153,13 +154,6 @@ export function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   if (total === 0) return '--'
   const pct = (success / total) * 100
   return `${pct.toFixed(1)}%`
-}
-
-
-function fmtTime(tsUnix: number): string {
-  if (tsUnix <= 0) return '--'
-  const d = new Date(tsUnix * 1000)
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 
@@ -593,7 +587,7 @@ export function RuntimeMonitor() {
                               return html`
                                 <div class="mb-1">
                                   <div class="grid grid-cols-7 gap-1 text-2xs text-[var(--color-fg-primary)]">
-                                    <div>${fmtTime(re.ts_unix)}</div>
+                                    <div>${re.ts_unix > 0 ? formatTimeHms(re.ts_unix) : '--'}</div>
                                     <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
                                     <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
                                     <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${formatNumber(re.latency_ms, 0)}ms`}</div>

@@ -238,6 +238,16 @@ let metric_keeper_usage_anomalies =
 let metric_keeper_contract_violations =
   "masc_keeper_contract_violations_total"
 
+(** #12838: keepers detected as alive-but-stuck — non-Dead, non-paused,
+    keepalive_running, but [proactive_rt.last_ts] has been frozen while
+    autonomous turns kept advancing.  Detection-only signal: no transition
+    or restart is triggered.  Per-keeper dedup window
+    ([alive_but_stuck_dedup_ttl_sec]) bounds emission rate so a single
+    stuck keeper does not flood the counter on every 30s sweep.
+    Labels: keeper. *)
+let metric_keeper_alive_but_stuck =
+  "masc_keeper_alive_but_stuck_total"
+
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent

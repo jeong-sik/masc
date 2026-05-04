@@ -220,6 +220,35 @@ module KeeperSupervisor = struct
       permanently.  Default: 5. *)
   let liveness_recovery_max_attempts =
     max 1 (get_int ~default:5 "MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS")
+
+  (** Detection-only signal for alive-but-stuck keepers (#12838) —
+      keepers that are not Dead/Zombie and not paused, but whose
+      [proactive_rt.last_ts] has been frozen while autonomous turns
+      keep advancing.  Defaults to enabled because emission is a
+      Prometheus counter only (no board posts, no transitions). *)
+  let alive_but_stuck_enabled =
+    get_bool ~default:true "MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED"
+
+  (** Multiplier on the keeper's own [proactive.cooldown_sec] before a
+      stalled keeper is flagged.  Default: 10 (10 cooldowns elapsed
+      without a proactive turn). *)
+  let alive_but_stuck_stall_multiplier =
+    max 1 (get_int ~default:10 "MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER")
+
+  (** Hard floor (seconds) so keepers with very small cooldowns are not
+      flagged after a few minutes of legitimate quiet.  The detector
+      uses [max(stall_floor, multiplier * cooldown)].  Default:
+      1800 (30 min). *)
+  let alive_but_stuck_stall_floor_sec =
+    Float.max 60.0 (get_float ~default:1800.0
+                      "MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC")
+
+  (** Per-keeper dedup window (seconds): once a keeper is flagged the
+      counter is incremented at most once per window, even if the
+      sweep fires every 30s.  Default: 3600 (1 hr). *)
+  let alive_but_stuck_dedup_ttl_sec =
+    Float.max 60.0 (get_float ~default:3600.0
+                      "MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC")
 end
 
 (** {1 Keeper Poll Intervals}

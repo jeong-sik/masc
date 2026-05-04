@@ -18,6 +18,7 @@ import { StatusDot } from '../common/status-dot'
 import { StatTile } from '../common/stat-tile'
 import { HeartbeatStrip } from '../common/heartbeat-strip'
 import { statusLabel } from '../../lib/status-label'
+import { formatPct } from '../../lib/format-number'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
 import {
   recordHeartbeat,
@@ -135,7 +136,7 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
   return html`
     <div class="flex flex-col gap-2">
       <div class="grid grid-cols-6 gap-2">
-        <${StatTile} label="네이티브" value=${summary.native} status="brass" delta=${{ direction: 'up', text: `${((summary.native / summary.total) * 100).toFixed(0)}%` }} />
+        <${StatTile} label="네이티브" value=${summary.native} status="brass" delta=${{ direction: 'up', text: formatPct(summary.native / summary.total) }} />
         <${StatTile} label="부분 지원" value=${summary.partial} status="warn" delta=${{ direction: 'flat', text: '◐' }} />
         <${StatTile} label="미지원" value=${summary.unsupported} status="crit" delta=${{ direction: 'down', text: '○' }} />
         <${StatTile} label="Cloud API" value=${cloudCount} status="ok" />

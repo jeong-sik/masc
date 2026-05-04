@@ -3,6 +3,7 @@ import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
+import { formatCost } from '../../lib/format-number'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 type ChatTranscriptVariant = 'default' | 'messenger'
@@ -71,8 +72,7 @@ function detailSummary(details: KeeperConversationDetails | null | undefined): s
 function formatCurrency(value?: number | null): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   if (value === 0) return '$0.00'
-  if (value < 0.01) return `$${value.toFixed(4)}`
-  return `$${value.toFixed(2)}`
+  return formatCost(value) ?? null
 }
 
 function stateRows(stateBlock?: string | null): Array<{ label: string; value: string }> {

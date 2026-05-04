@@ -7,6 +7,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor, normalizeToolName } from './tool-call-shared'
+import { formatCost } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
@@ -230,7 +231,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <//>
         ${totalCost > 0 ? html`
           <${StatusChip} tone="info" uppercase=${false} class="gap-1 py-1">
-            <span class="font-mono font-medium text-[var(--color-accent-fg)]">$${totalCost.toFixed(3)}</span>
+            <span class="font-mono font-medium text-[var(--color-accent-fg)]">${formatCost(totalCost)}</span>
           <//>
         ` : null}
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1 text-[var(--color-fg-disabled)]">

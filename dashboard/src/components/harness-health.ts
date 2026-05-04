@@ -247,7 +247,7 @@ export function HarnessHealth() {
   const data = s.status === 'loaded' ? s.data : undefined
   const cal = data?.calibration
   const rejectRate = cal && cal.total_verdicts > 0
-    ? ((cal.reject_count / cal.total_verdicts) * 100).toFixed(1)
+    ? formatPct1(cal.reject_count / cal.total_verdicts)
     : '0'
   const agreementPct = cal ? formatPct1(cal.agreement_rate) : '-'
   const fallbackCount = cal?.fallback_count ?? 0

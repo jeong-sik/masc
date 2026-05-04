@@ -8,6 +8,7 @@ import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { TextInput } from '../common/input'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
+import { formatCost } from '../../lib/format-number'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 import { activeFilter, activityListSearchQuery, type ActivityFilter } from './task-detail-state'
@@ -112,7 +113,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
             </div>
           ` : null}
           ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
-          ${event.cost_usd != null ? html`<div class="text-3xs text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
+          ${event.cost_usd != null ? html`<div class="text-3xs text-text-dim mt-1">cost: ${formatCost(event.cost_usd)}</div>` : null}
         </div>
       ` : null}
     </details>

@@ -56,7 +56,7 @@ let prune ~(session_dir : string) ~(keep : int) : int =
            path (Printexc.to_string exn);
          Prometheus.inc_counter
            Prometheus.metric_keeper_checkpoint_failures
-           ~labels:[("site", "cleanup")]
+           ~labels:[("keeper", "aggregate"); ("operation", "cleanup")]
            ()))
       to_remove;
     List.length to_remove
@@ -134,7 +134,7 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
          path (Printexc.to_string exn);
        Prometheus.inc_counter
          Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("site", "malformed_load")]
+         ~labels:[("keeper", "aggregate"); ("operation", "malformed_load")]
          ();
        None)
 

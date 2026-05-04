@@ -70,6 +70,10 @@ let effective_provider_attempt_timeout_s
   | None ->
       provider_default_attempt_timeout_s constraints
 
+let apply_stream_idle_timeout_default = function
+  | Some _ as v -> v
+  | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -1026,6 +1030,7 @@ let run_model_by_label
     ?net
     ()
   : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
@@ -1158,6 +1163,7 @@ let run_model_with_masc_tools
     ?net
     ()
   : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature

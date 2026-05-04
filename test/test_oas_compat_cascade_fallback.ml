@@ -254,7 +254,7 @@ let test_classify_accept_rejected_model_unsupported () =
 
 let test_classify_accept_rejected_request_rejected () =
   let reason =
-    "kimi_cli rejected the request (exit 1). permanent auth/config/model error"
+    "kimi_cli rejected the request (exit 1). Permanent auth/config/model error"
   in
   (match Oas_compat.Http_client.classify_accept_rejected reason with
    | Some Oas_compat.Http_client.Request_rejected -> ()

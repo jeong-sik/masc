@@ -87,15 +87,15 @@ module Http_client = struct
      needs updating.  Downstream cascade code uses [retryable_error]
      variants, not raw strings. *)
 
-  let _max_scan_bytes = 512
+  let max_scan_bytes = 512
 
   (* Case-insensitive substring check — O(n*m) but bounded by
-     [_max_scan_bytes] so the worst-case cost is fixed. *)
-  let contains_ci_bounded ~haystack ~needle =
+     [max_scan_bytes] so the worst-case cost is fixed. *)
+  let contains_ci_limited ~haystack ~needle =
     let h =
       String.lowercase_ascii
-        (if String.length haystack > _max_scan_bytes then
-           String.sub haystack 0 _max_scan_bytes
+        (if String.length haystack > max_scan_bytes then
+           String.sub haystack 0 max_scan_bytes
          else haystack)
     in
     let n = String.lowercase_ascii needle in
@@ -120,13 +120,13 @@ module Http_client = struct
   let classify_accept_rejected reason : retryable_error option =
     (* Model/capability unsupported — MASC worker-layer wrapping of OAS
        InvalidConfig errors (#9850). *)
-    if contains_ci_bounded ~haystack:reason ~needle:"does not support" then
+    if contains_ci_limited ~haystack:reason ~needle:"does not support" then
       Some Model_unsupported
     (* kimi_cli permanent auth/config/model rejection (#9932). *)
-    else if contains_ci_bounded ~haystack:reason ~needle:"rejected the request" then
+    else if contains_ci_limited ~haystack:reason ~needle:"rejected the request" then
       Some Request_rejected
     (* gemini_cli / kimi_cli CLI startup failures. *)
-    else if contains_ci_bounded ~haystack:reason ~needle:"startup crash" then
+    else if contains_ci_limited ~haystack:reason ~needle:"startup crash" then
       Some Startup_crash
     else
       None
@@ -135,7 +135,7 @@ module Http_client = struct
       JSON parse failure (M04).
       Ollama fails with "can't find closing '}'" on large bodies (~175 KB+). *)
   let is_http_body_parse_error body =
-    contains_ci_bounded ~haystack:body ~needle:"can't find closing"
+    contains_ci_limited ~haystack:body ~needle:"can't find closing"
 
   let classify (err : Llm_provider.Http_client.http_error) :
       cascade_failure_class =

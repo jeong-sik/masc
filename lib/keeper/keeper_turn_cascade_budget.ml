@@ -631,7 +631,11 @@ let enqueue_partial_commit_continue_gate
          | Error err ->
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
-               meta.name err)
+               meta.name err);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
+               ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
          | Ok paused_meta ->
@@ -644,7 +648,11 @@ let enqueue_partial_commit_continue_gate
          | Error err ->
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
-               meta.name err reason))
+               meta.name err reason);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
+               ())
     ()
 
 (* Dedupe "mixed cascade context budget" log: the values are constant

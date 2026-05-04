@@ -560,6 +560,26 @@ let metric_keeper_toml_reconcile_sweep_failures =
   "masc_keeper_toml_reconcile_sweep_failures_total"
 let metric_keeper_tool_usage_flush_failures =
   "masc_keeper_tool_usage_flush_failures_total"
+let metric_keeper_turn_livelock_blocks =
+  "masc_keeper_turn_livelock_blocks_total"
+let metric_keeper_turn_timeout_committed =
+  "masc_keeper_turn_timeout_committed_total"
+let metric_keeper_turn_error_after_tools =
+  "masc_keeper_turn_error_after_tools_total"
+let metric_keeper_cascade_sync_failures =
+  "masc_keeper_cascade_sync_failures_total"
+let metric_keeper_thinking_persist_failures =
+  "masc_keeper_thinking_persist_failures_total"
+let metric_keeper_checkpoint_failures =
+  "masc_keeper_checkpoint_failures_total"
+let metric_keeper_memory_write_failures =
+  "masc_keeper_memory_write_failures_total"
+let metric_keeper_write_meta_cycle_failures =
+  "masc_keeper_write_meta_cycle_failures_total"
+let metric_keeper_alert_persist_failures =
+  "masc_keeper_alert_persist_failures_total"
+let metric_keeper_metrics_sse_failures =
+  "masc_keeper_metrics_sse_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1326,6 +1346,45 @@ let init () =
   add metric_keeper_tool_usage_flush_failures
     "Total tool usage JSONL flush failures in keeper_registry. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_livelock_blocks
+    "Total turn dispatches blocked by livelock guard in keeper_unified_turn."
+    Counter;
+  add metric_keeper_turn_timeout_committed
+    "Total wall-clock turn timeouts after committed mutating tools. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_error_after_tools
+    "Total provider errors after committed mutating tool calls. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_cascade_sync_failures
+    "Total cascade state synchronization failures (pause/resume/auto-pause). \
+     Labeled by keeper and site."
+    Counter;
+  add metric_keeper_thinking_persist_failures
+    "Total thinking content persistence failures in keeper_agent_run. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_checkpoint_failures
+    "Total OAS checkpoint save or missing-checkpoint failures. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_memory_write_failures
+    "Total memory write failures (notes/kinds) in keeper_agent_run. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_write_meta_cycle_failures
+    "Total write_meta failures after turn/cycle in keeper_unified_turn. \
+     Labeled by keeper and site."
+    Counter;
+  add metric_keeper_alert_persist_failures
+    "Total alert JSONL write failures (alert/failed-channels/deadletter). \
+     Labeled by kind."
+    Counter;
+  add metric_keeper_metrics_sse_failures
+    "Total SSE broadcast failures during metrics compaction/handoff. \
+     Labeled by kind."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

@@ -623,6 +623,16 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Prometheus.metric_keeper_supervisor_sweep_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_toml_reconcile_sweep_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_tool_usage_flush_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_livelock_blocks |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_timeout_committed |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_turn_error_after_tools |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_cascade_sync_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_thinking_persist_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_checkpoint_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_memory_write_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_write_meta_cycle_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_alert_persist_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_metrics_sse_failures |> int_of_float)
       in
       let tool_suffix =
         if tool_failures > 0

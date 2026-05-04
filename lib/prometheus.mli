@@ -221,6 +221,16 @@ val metric_keeper_episode_create_failures : string
 val metric_keeper_supervisor_sweep_failures : string
 val metric_keeper_toml_reconcile_sweep_failures : string
 val metric_keeper_tool_usage_flush_failures : string
+val metric_keeper_turn_livelock_blocks : string
+val metric_keeper_turn_timeout_committed : string
+val metric_keeper_turn_error_after_tools : string
+val metric_keeper_cascade_sync_failures : string
+val metric_keeper_thinking_persist_failures : string
+val metric_keeper_checkpoint_failures : string
+val metric_keeper_memory_write_failures : string
+val metric_keeper_write_meta_cycle_failures : string
+val metric_keeper_alert_persist_failures : string
+val metric_keeper_metrics_sse_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

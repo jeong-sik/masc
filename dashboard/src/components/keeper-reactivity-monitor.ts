@@ -558,12 +558,12 @@ function StaleTerminationPanel({
 
 // ── View type ──────────────────────────────────────────────────────────────
 
-type ReactivityView = 'health' | 'lifecycle' | 'lifecycle_events' | 'pause' | 'proactive' | 'stale'
+type ReactivityView = 'health' | 'lifecycle' | 'events' | 'pause' | 'proactive' | 'stale'
 
 const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> = [
   { key: 'health',           label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
   { key: 'lifecycle',        label: '상태 전환',       title: '키퍼 FSM 전환 타임라인' },
-  { key: 'lifecycle_events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
+  { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
   { key: 'pause',            label: '자동 일시정지',   title: '스톰/버짓 자동 일시정지 이벤트' },
   { key: 'proactive',        label: '프로액티브 스킵', title: '프로액티브 스케줄러 스킵 이유' },
   { key: 'stale',            label: 'Stale 종료',      title: '키퍼별 stale 종료 클래스 분포' },
@@ -600,7 +600,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
   }
 
   useEffect(() => {
-    if (activeView.value !== 'lifecycle' && activeView.value !== 'lifecycle_events') {
+    if (activeView.value !== 'lifecycle' && activeView.value !== 'events') {
       void loadMetrics()
     } else if (activeView.value === 'lifecycle') {
       void refreshKeeperPhaseTimeline()
@@ -614,7 +614,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
   const proactiveRows = extractProactiveSkips(parsedMetrics.value)
   const batchRows = extractBatchTerminations(parsedMetrics.value)
 
-  const isNonLifecycle = activeView.value !== 'lifecycle' && activeView.value !== 'lifecycle_events'
+  const isNonLifecycle = activeView.value !== 'lifecycle' && activeView.value !== 'events'
 
   return html`
     <div class="flex flex-col gap-4">
@@ -672,7 +672,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
             `
           : activeView.value === 'lifecycle'
             ? html`<${KeeperPhaseTimeline} />`
-          : activeView.value === 'lifecycle_events'
+          : activeView.value === 'events'
             ? html`<${KeeperLifecycleTimeline} />`
           : activeView.value === 'pause'
             ? html`<${AutoPausePanel} allKeepers=${allKeepers} summaries=${stopSummaries} />`

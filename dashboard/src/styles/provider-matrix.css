@@ -181,3 +181,70 @@
   background: var(--white-4, var(--color-bg-hover));
   color: var(--color-fg-muted);
 }
+
+/* ════════ HEATMAP BUCKETS (z0–z4) ════════
+   Cockpit UI Kit pattern: 5-step thermal coloring for matrix cells.
+   z0 = no data/N/A (ghosted), z4 = full support (saturated accent). */
+.pm-cell-badge.z0 {
+  color: var(--color-fg-disabled);
+  opacity: .3;
+}
+.pm-cell-badge.z1 {
+  color: var(--color-fg-secondary);
+  background: rgb(var(--brass-glow) / .05);
+}
+.pm-cell-badge.z2 {
+  color: var(--color-fg-primary);
+  background: rgb(var(--brass-glow) / .12);
+}
+.pm-cell-badge.z3 {
+  color: var(--color-accent-brass);
+  background: rgb(var(--brass-glow) / .22);
+  font-weight: 600;
+}
+.pm-cell-badge.z4 {
+  color: var(--color-bg-page);
+  background: var(--color-accent-brass);
+  font-weight: 600;
+}
+
+/* ════════ WIRING GAPS ROW BUCKETS ════════
+   Row-level heatmap for wiring gap severity.
+   Reuses z0–z4 thermal tokens with row-appropriate opacity. */
+.pm-wg-row--z4 {
+  background: rgb(var(--brass-glow) / .15);
+}
+.pm-wg-row--z4 td {
+  font-weight: 500;
+}
+.pm-wg-row--z2 {
+  background: rgb(var(--brass-glow) / .07);
+}
+.pm-wg-row--z1 {
+  background: var(--color-bg-hover);
+}
+.pm-wg-row--z0 {
+  opacity: .5;
+}
+
+/* ════════ CATEGORY COVERAGE INDICATOR ════════
+   Inline % badge in category header rows. */
+.pm-cat-coverage {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-bold);
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-1);
+}
+.pm-cat-coverage.is-high {
+  color: var(--color-status-ok);
+  background: rgb(var(--ok-rgb, 34 197 94) / .1);
+}
+.pm-cat-coverage.is-mid {
+  color: var(--color-status-warn);
+  background: rgb(var(--warn-rgb, 234 179 8) / .1);
+}
+.pm-cat-coverage.is-low {
+  color: var(--color-status-err);
+  background: rgb(var(--err-rgb, 239 68 68) / .1);
+}

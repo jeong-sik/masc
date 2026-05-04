@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { navigate } from '../router'
+import { formatPct1 } from '../lib/format-number'
 import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { MermaidGraph } from './common/mermaid-graph'
@@ -246,9 +247,9 @@ export function HarnessHealth() {
   const data = s.status === 'loaded' ? s.data : undefined
   const cal = data?.calibration
   const rejectRate = cal && cal.total_verdicts > 0
-    ? ((cal.reject_count / cal.total_verdicts) * 100).toFixed(1)
+    ? formatPct1(cal.reject_count / cal.total_verdicts)
     : '0'
-  const agreementPct = cal ? (cal.agreement_rate * 100).toFixed(1) : '-'
+  const agreementPct = cal ? formatPct1(cal.agreement_rate) : '-'
   const fallbackCount = cal?.fallback_count ?? 0
   const fallbackPct = data ? Math.round((data.overview.fallback_ratio ?? 0) * 100) : 0
   const fallbackReasons = cal?.recent_fallback_reasons ?? []

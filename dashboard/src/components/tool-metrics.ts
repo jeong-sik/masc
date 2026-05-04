@@ -1,6 +1,7 @@
 // Tool Metrics — P4 Phase 4.5
 import { ActionButton } from './common/button'
 import { ErrorState } from './common/feedback-state'
+import { StatTile } from './common/stat-tile'
 // Displays tool usage statistics from Tool_unified.summary_report()
 
 import { html } from 'htm/preact'
@@ -48,15 +49,6 @@ export function filterTools<T extends Pick<ToolMetricsTopEntry, 'name'>>(
   )
 }
 
-function KpiCard({ children, label }: { children: unknown; label: string }) {
-  return html`
-    <div class="flex flex-col items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
-      <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${children}</span>
-      <span class="text-2xs text-[var(--color-fg-muted)] font-medium">${label}</span>
-    </div>
-  `
-}
-
 function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
 }
@@ -98,11 +90,15 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
+function distSegStyle(pct: number): string {
+  return pct > 0 ? `width:${pct.toFixed(1)}%` : ''
+}
+
 function ToolDistribution({ dist }: { dist: { total: number; public: number; visible: number; hidden: number } | null | undefined }) {
   if (!dist) return html`<div class="text-2xs text-[var(--color-fg-muted)] italic">도구 분포 데이터가 없습니다.</div>`
-  // Mutually exclusive segments: public ⊂ visible, hidden = total - visible
   const visibleExclusive = Math.max(0, dist.visible - dist.public)
   const pct = (n: number) => dist.total > 0 ? ((n / dist.total) * 100).toFixed(1) : '0'
+  const segPct = (n: number) => dist.total > 0 ? (n / dist.total) * 100 : 0
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
@@ -120,6 +116,13 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
         <span class="text-[var(--color-fg-secondary)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
         <span class="text-[var(--color-fg-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
+      ${dist.total > 0 ? html`
+        <div class="bar-seg mt-1" style="height:var(--sp-1)">
+          ${dist.public > 0 ? html`<span class="seg-ok" style=${distSegStyle(segPct(dist.public))}></span>` : null}
+          ${visibleExclusive > 0 ? html`<span class="seg-idle" style=${distSegStyle(segPct(visibleExclusive))}></span>` : null}
+          ${dist.hidden > 0 ? html`<span class="seg-warn" style=${distSegStyle(segPct(dist.hidden))}></span>` : null}
+        </div>
+      ` : null}
       <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">전체 ${dist.total}개 (공개 ${dist.public} + 내부 ${visibleExclusive} + 숨김 ${dist.hidden})</div>
     </div>
   `
@@ -157,11 +160,11 @@ export function ToolMetrics() {
           서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
         </div>
         <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
-          <${KpiCard} label="총 호출 수">${data.total_calls}</${KpiCard}>
-          <${KpiCard} label="사용된 도구">${data.distinct_tools_called}</${KpiCard}>
-          <${KpiCard} label="미사용 도구">${data.never_called_count}</${KpiCard}>
-          <${KpiCard} label="등록됨 (v2)">${data.registered_count}</${KpiCard}>
-          <${KpiCard} label="Dispatch v2">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</${KpiCard}>
+          <${StatTile} label="총 호출 수" value=${String(data.total_calls)} status="brass" />
+          <${StatTile} label="사용된 도구" value=${String(data.distinct_tools_called)} status="ok" delta=${{ direction: 'up', text: '활성' }} />
+          <${StatTile} label="미사용 도구" value=${String(data.never_called_count)} status=${data.never_called_count > 0 ? 'warn' : 'ok'} delta=${data.never_called_count > 0 ? { direction: 'flat', text: '유휴' } : undefined} />
+          <${StatTile} label="등록됨 (v2)" value=${String(data.registered_count)} status="brass" />
+          <${StatTile} label="Dispatch v2" value=${data.dispatch_v2_enabled ? 'ON' : 'OFF'} status=${data.dispatch_v2_enabled ? 'ok' : 'crit'} delta=${data.dispatch_v2_enabled ? { direction: 'up', text: '활성' } : { direction: 'down', text: '비활성' }} />
         </div>
 
         <div class="tool-metrics-sections">

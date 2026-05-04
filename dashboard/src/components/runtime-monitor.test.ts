@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency, metricCoverageText, recentEntryMissingLabel } from './runtime-monitor'
+import { runtimeProviderTone, modelMetricTone, fmtSuccessRate, filterModelMetrics, sortModelMetricsByUrgency, metricCoverageText, recentEntryMissingLabel } from './runtime-monitor'
+import { formatCost as fmtCost, formatNumber as fmtNumber } from '../lib/format-number'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
 
 type RecentEntry = NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number]

@@ -96,7 +96,7 @@ export function IdePresenceStrip() {
         color: 'var(--color-fg-muted)',
       }}
     >
-      <span style=${{ color: current.connected ? 'var(--color-status-ok, var(--ok))' : 'var(--color-fg-disabled)' }}>●</span>
+      <span style=${{ color: current.connected ? 'var(--color-status-ok)' : 'var(--color-fg-disabled)' }}>●</span>
       <span>${current.runtime_id}</span>
       <span>/</span>
       <span>${current.branch}</span>

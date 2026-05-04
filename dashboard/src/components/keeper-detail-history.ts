@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { formatPct1 } from '../lib/format-number'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
@@ -387,10 +388,6 @@ function compactTraceId(traceId: string): string {
     : traceId
 }
 
-function formatLineageRatio(value: number | undefined): string {
-  return typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '-'
-}
-
 export function lineageVerdictMeta(verdict: string | undefined): LineageVerdictMeta {
   switch (verdict) {
     case 'verified':
@@ -476,7 +473,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   : null}
               </div>
               <div class="text-2xs text-[var(--color-fg-primary)]">
-                ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatLineageRatio(latestEntry.context_ratio)}
+                ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatPct1(latestEntry.context_ratio)}
               </div>
               <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
                 ${latestEntryMeta?.detail}
@@ -527,7 +524,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                   <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">트리거</div>
                   <div class="text-[var(--color-fg-secondary)]">${manifest.trigger_reason ?? '-'}</div>
-                  <div class="text-[var(--color-fg-disabled)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
+                  <div class="text-[var(--color-fg-disabled)]">context ratio ${formatPct1(manifest.context_ratio)}</div>
                 </div>
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
@@ -539,7 +536,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   `
                   : null}
                 ${continuity?.similarity != null
-                  ? html`<${StatusChip} tone="neutral" uppercase=${false}>similarity ${(continuity.similarity * 100).toFixed(1)}%</${StatusChip}>`
+                  ? html`<${StatusChip} tone="neutral" uppercase=${false}>similarity ${formatPct1(continuity.similarity)}</${StatusChip}>`
                   : null}
               </div>
               ${continuity?.verdict
@@ -582,7 +579,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                       <div class="mt-1 text-2xs text-[var(--color-fg-primary)]">
                         ${lineageTransitionLabel(entry.parent_generation, entry.generation)}
                         ${entry.trigger_reason ? ` · ${entry.trigger_reason}` : ''}
-                        ${entry.context_ratio != null ? ` · ratio ${formatLineageRatio(entry.context_ratio)}` : ''}
+                        ${entry.context_ratio != null ? ` · ratio ${formatPct1(entry.context_ratio)}` : ''}
                       </div>
                       <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)] truncate" title=${entry.trace_id}>
                         ${compactTraceId(entry.trace_id)}

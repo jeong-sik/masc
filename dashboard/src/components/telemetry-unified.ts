@@ -27,6 +27,7 @@ import { Btn } from './btn'
 import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
 import { ringFocusClasses } from './common/ring'
+import { StatTile } from './common/stat-tile'
 
 interface StoreSnapshot {
   keepers: number
@@ -474,17 +475,6 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
-function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
-  const toneColor = tone === 'ok' ? 'text-[var(--color-status-ok)]' : tone === 'warn' ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'
-  return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
-      <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">${title}</div>
-      <div class="text-2xl font-bold ${toneColor}">${value}</div>
-      <div class="text-3xs text-[var(--color-fg-disabled)]">${detail}</div>
-    </div>
-  `
-}
-
 function EntryRow({ entry }: { entry: TelemetryEntry }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
@@ -823,36 +813,36 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
-          <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">전체</div>
-          <div class="text-2xl font-bold text-[var(--color-fg-primary)]">${totalEntries.toLocaleString()}</div>
-        </div>
+        <${StatTile}
+          label="전체"
+          value=${totalEntries.toLocaleString()}
+        />
       </div>
 
       <div class="flex flex-wrap gap-3">
-        <${DiagnosisCard}
-          title="키퍼 현황 (실시간)"
+        <${StatTile}
+          label="키퍼 현황 (실시간)"
           value=${String(store.keepers)}
-          detail=${[
+          status=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : undefined}
+          delta=${{ direction: store.continuityAlerts > 0 ? 'down' as const : 'up' as const, text: [
             `${store.activeOperations} 활성 작업`,
             store.blockedOperations > 0 ? `${store.blockedOperations} 차단 작업` : null,
             `${store.continuityAlerts} continuity 알림`,
             store.version ? `v${store.version}` : null,
             store.uptime != null ? `uptime ${Math.floor(store.uptime / 60)}m` : null,
-          ].filter(Boolean).join(' · ')}
-          tone=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : 'neutral'}
+          ].filter(Boolean).join(' · ') }}
         />
-        <${DiagnosisCard}
-          title="도구 등록 현황 (실시간)"
+        <${StatTile}
+          label="도구 등록 현황 (실시간)"
           value=${String(store.toolsRegistered)}
-          detail=${`${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용`}
-          tone=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
+          status=${store.toolsRegistered > 0 ? 'ok' : 'warn'}
+          delta=${{ direction: store.toolsRegistered > 0 ? 'up' as const : 'flat' as const, text: `${store.toolsPublic} public · ${store.toolsTotalCalls.toLocaleString()} 총 호출 · ${store.toolsNeverCalled} 미사용` }}
         />
-        <${DiagnosisCard}
-          title="에이전트 현황 (실시간)"
+        <${StatTile}
+          label="에이전트 현황 (실시간)"
           value=${String(store.agents)}
-          detail=${`${store.tasks} 태스크 · ${store.activeOperations} 활성 작전`}
-          tone=${store.agents > 0 ? 'ok' : 'neutral'}
+          status=${store.agents > 0 ? 'ok' : undefined}
+          delta=${{ direction: store.agents > 0 ? 'up' as const : 'flat' as const, text: `${store.tasks} 태스크 · ${store.activeOperations} 활성 작전` }}
         />
       </div>
 

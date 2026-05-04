@@ -9,14 +9,16 @@ import {
   PROVIDER_LABELS,
   PROVIDER_CATEGORY,
   FEATURE_CATEGORIES,
-  supportCellClass,
+  supportHeatBucket,
   computeMatrixSummary,
+  computeCategoryCoverage,
   runtimeProviderToMatrixId,
 } from './data'
 import { StatusDot } from '../common/status-dot'
 import { StatTile } from '../common/stat-tile'
 import { HeartbeatStrip } from '../common/heartbeat-strip'
 import { statusLabel } from '../../lib/status-label'
+import { formatPct } from '../../lib/format-number'
 import type { DashboardRuntimeProviderSnapshot } from '../../api/dashboard'
 import {
   recordHeartbeat,
@@ -115,6 +117,8 @@ function ProviderHeartbeatCell({
 
 export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRuntimeProviderSnapshot[] }) {
   const summary = useMemo(() => computeMatrixSummary(), [])
+  const catCoverage = useMemo(() => computeCategoryCoverage(), [])
+  const catCoverageMap = useMemo(() => new Map(catCoverage.map(c => [c.id, c])), [catCoverage])
   const cloudCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cloud').length
   const localCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'local').length
   const cliCount = Object.values(PROVIDER_CATEGORY).filter(c => c === 'cli').length
@@ -132,12 +136,12 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
   return html`
     <div class="flex flex-col gap-2">
       <div class="grid grid-cols-6 gap-2">
-        <${StatTile} label="네이티브" value=${summary.native} variant="gold" hint=${`${((summary.native / summary.total) * 100).toFixed(0)}%`} />
-        <${StatTile} label="부분 지원" value=${summary.partial} hint="◐" />
-        <${StatTile} label="미지원" value=${summary.unsupported} variant="warn" hint="○" />
-        <${StatTile} label="Cloud API" value=${cloudCount} hint="direct" />
-        <${StatTile} label="Local" value=${localCount} hint="self-host" />
-        <${StatTile} label="CLI Wrapper" value=${cliCount} hint="usage: strip" />
+        <${StatTile} label="네이티브" value=${summary.native} status="brass" delta=${{ direction: 'up', text: formatPct(summary.native / summary.total) }} />
+        <${StatTile} label="부분 지원" value=${summary.partial} status="warn" delta=${{ direction: 'flat', text: '◐' }} />
+        <${StatTile} label="미지원" value=${summary.unsupported} status="crit" delta=${{ direction: 'down', text: '○' }} />
+        <${StatTile} label="Cloud API" value=${cloudCount} status="ok" />
+        <${StatTile} label="Local" value=${localCount} status="brass" />
+        <${StatTile} label="CLI Wrapper" value=${cliCount} />
       </div>
 
       <div class="pm-scroll">
@@ -176,10 +180,14 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
         <tbody>
           ${FEATURE_CATEGORIES.map(cat => {
             const catFeatures = cat.featureIds.map(id => featById.get(id)).filter(Boolean)
+            const cc = catCoverageMap.get(cat.id)
             return html`
               <tr key=${`cat-${cat.id}`} class="pm-cat-row">
                 <td class="pm-th--sticky" colSpan=${PROVIDER_IDS.length + 1}>
-                  ${cat.label}
+                  <div class="flex items-center justify-between w-full">
+                    <span>${cat.label}</span>
+                    ${cc ? html`<span class="pm-cat-coverage ${cc.pct >= 80 ? 'is-high' : cc.pct >= 50 ? 'is-mid' : 'is-low'}">${cc.pct}%</span>` : null}
+                  </div>
                 </td>
               </tr>
               ${catFeatures.map((feat, j) => {
@@ -194,7 +202,7 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
                       const v = feat.providers[pid] ?? '—'
                       return html`
                         <td key=${pid} class="pm-td pm-td--center">
-                          <span class="pm-cell-badge ${supportCellClass(v)}">
+                          <span class="pm-cell-badge ${supportHeatBucket(v)}">
                             ${v}
                           </span>
                         </td>

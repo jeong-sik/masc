@@ -3,6 +3,7 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
+import { formatCost } from './lib/format-number'
 import {
   removeBoardPost,
 } from './store'
@@ -506,7 +507,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)} turn ${event.turn ?? '?'}`
-            + ` (${event.model_used ?? '?'}, $${(event.cost_usd ?? 0).toFixed(4)}, tools=${event.tool_calls_made ?? 0})`,
+            + ` (${event.model_used ?? '?'}, ${formatCost(event.cost_usd ?? 0)}, tools=${event.tool_calls_made ?? 0})`,
         },
       )
       break

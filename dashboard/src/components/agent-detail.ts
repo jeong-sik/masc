@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
+import { formatPct } from '../lib/format-number'
 import { useMemo, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState, ErrorState } from './common/feedback-state'
@@ -374,15 +375,15 @@ export function AgentDetailOverlay() {
           ${agentFitness.value ? html`
             <${Card} title="적합도 (7일)" role="region" ariaLabel="에이전트 적합도">
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                ${[
+                ${([
                   ['완료율', agentFitness.value.completion_rate],
                   ['신뢰도', agentFitness.value.reliability_score],
                   ['속도', agentFitness.value.speed_score],
                   ['종합', agentFitness.value.overall_fitness],
-                ].map(([label, val]) => html`
+                ] as [string, number][]).map(([label, val]) => html`
                   <div class="rounded-[var(--r-1)] border border-card-border/50 bg-card/30 p-3 text-center">
                     <div class="text-3xs font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
-                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
+                    <div class="text-lg font-bold ${val >= 0.7 ? 'text-ok' : val >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-bad'}">${formatPct(val)}</div>
                   </div>
                 `)}
               </div>

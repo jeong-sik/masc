@@ -30,6 +30,7 @@ import { AntiPatternList } from './anti-patterns'
 import { OasProviderTable } from './oas-provider-table'
 import { Roadmap } from './roadmap'
 import { ModelCatalog } from './model-catalog'
+import { CapabilitySummaryStrip } from './capability-summary'
 
 type CapView = 'providers' | 'matrix' | 'models' | 'cascade' | 'benchmarks' | 'wiring' | 'roadmap' | 'anti-patterns'
 
@@ -96,6 +97,8 @@ export function ProviderCapabilityMatrix() {
           </span>
         ` : null}
       </div>
+
+      <${CapabilitySummaryStrip} liveProviders=${liveProviders.value} />
 
       ${activeView.value === 'providers' ? html`
         <${Card}>

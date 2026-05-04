@@ -3,6 +3,7 @@
 // Extracted from keeper-detail.ts to reduce file size.
 
 import { html } from 'htm/preact'
+import { formatPct, formatPct1 } from '../lib/format-number'
 import { signal } from '@preact/signals'
 import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
@@ -61,8 +62,8 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">장애 유형 분포</div>
       <div class="flex w-full h-3 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-elevated)]">
         ${entries.map(([key, count]) => html`
-          <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
-               title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
+          <div style="width: ${formatPct1(count / total)}; background: ${COHORT_COLORS[key]}"
+               title="${key}: ${count}건 (${formatPct(count / total)})"
                class="h-full"></div>
         `)}
       </div>

@@ -23,9 +23,9 @@
 //   .spark > i         — block, width 2px, min-height 1px,
 //                         background var(--color-fg-muted) (default)
 //   .spark.is-brass>i  — background var(--brass-2)
-//   .spark.is-ok>i     — background var(--ok)
-//   .spark.is-err>i    — background var(--err)
-//   .spark.is-warn>i   — background var(--warn)
+//   .spark.is-ok>i     — background var(--color-status-ok)
+//   .spark.is-err>i    — background var(--color-status-err)
+//   .spark.is-warn>i   — background var(--color-status-warn)
 //   last bar           — accent fg + 3px glow shadow ("now" signal)
 
 import { html } from 'htm/preact'

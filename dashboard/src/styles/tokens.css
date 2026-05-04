@@ -114,20 +114,50 @@
   --k-rama-ring:   0 0 0 1px rgb(138 106 160 / .45), 0 0 8px rgb(138 106 160 / .35);
 
   /* Provider palette — for cascade chips and provider cells */
-  --p-anthropic: #c9a88a;  /* warm sand */
-  --p-moonshot:  #8a98c9;  /* cool indigo */
-  --p-openai:    #6b9e8e;  /* muted teal */
-  --p-xai:       #a896a0;  /* mauve */
+  --p-anthropic:  #c9a88a;  /* warm sand */
+  --p-kimi:       #8a98c9;  /* cool indigo */
+  --p-openai:     #6b9e8e;  /* muted teal */
+  --p-xai:        #a896a0;  /* mauve */
+  --p-gemini:     #7b8fb0;  /* slate blue */
+  --p-deepseek:   #6aaa8a;  /* seafoam */
+  --p-qwen:       #c99060;  /* warm amber */
+  --p-mistral:    #7a8ec0;  /* periwinkle */
+  --p-nemotron:   #7aaa6b;  /* sage green */
+  --p-ollama:     #8a8a7a;  /* driftwood */
+  --p-llamacpp:   #9a9a8a;  /* warm stone */
+  --p-glm:        #9a7aaa;  /* muted plum */
+  --p-gemini-cli: #7b8fb0;  /* slate blue (cli) */
+  --p-codex-cli:  #6b9e8e;  /* muted teal (cli) */
 
-  /* Provider 4-slot — soft tint + border for provider cells & cascade pills */
+  /* Provider 2-slot — soft tint + border for provider cells & cascade pills */
   --p-anthropic-soft:   rgb(201 168 138 / .10);
   --p-anthropic-border: rgb(201 168 138 / .3);
-  --p-moonshot-soft:    rgb(138 152 201 / .10);
-  --p-moonshot-border:  rgb(138 152 201 / .3);
+  --p-kimi-soft:        rgb(138 152 201 / .10);
+  --p-kimi-border:      rgb(138 152 201 / .3);
   --p-openai-soft:      rgb(107 158 142 / .10);
   --p-openai-border:    rgb(107 158 142 / .3);
   --p-xai-soft:         rgb(168 150 160 / .10);
   --p-xai-border:       rgb(168 150 160 / .3);
+  --p-gemini-soft:      rgb(123 143 176 / .10);
+  --p-gemini-border:    rgb(123 143 176 / .3);
+  --p-deepseek-soft:    rgb(106 170 138 / .10);
+  --p-deepseek-border:  rgb(106 170 138 / .3);
+  --p-qwen-soft:        rgb(201 144 96 / .10);
+  --p-qwen-border:      rgb(201 144 96 / .3);
+  --p-mistral-soft:     rgb(122 142 192 / .10);
+  --p-mistral-border:   rgb(122 142 192 / .3);
+  --p-nemotron-soft:    rgb(122 170 107 / .10);
+  --p-nemotron-border:  rgb(122 170 107 / .3);
+  --p-ollama-soft:      rgb(138 138 122 / .10);
+  --p-ollama-border:    rgb(138 138 122 / .3);
+  --p-llamacpp-soft:    rgb(154 154 138 / .10);
+  --p-llamacpp-border:  rgb(154 154 138 / .3);
+  --p-glm-soft:         rgb(154 122 170 / .10);
+  --p-glm-border:       rgb(154 122 170 / .3);
+  --p-gemini-cli-soft:  rgb(123 143 176 / .10);
+  --p-gemini-cli-border: rgb(123 143 176 / .3);
+  --p-codex-cli-soft:   rgb(107 158 142 / .10);
+  --p-codex-cli-border: rgb(107 158 142 / .3);
 
   /* Diff — muted overlay tints on top of bg */
   --diff-add:     rgb(107 158 107 / .08);

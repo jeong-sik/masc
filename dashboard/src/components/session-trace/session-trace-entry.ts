@@ -8,6 +8,7 @@ import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
+import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
@@ -295,7 +296,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ${'' /* Metadata row */}
       ${event.cost_usd != null && event.cost_usd > 0 ? html`
         <div class="flex gap-3 text-3xs text-[var(--color-fg-disabled)]">
-          <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">$${event.cost_usd.toFixed(4)}</span></span>
+          <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">${formatCost(event.cost_usd)}</span></span>
           ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatDuration(event.duration_ms)}</span></span>` : null}
         </div>
       ` : null}

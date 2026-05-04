@@ -10,6 +10,12 @@ import {
   deriveTaskAlerts,
   type FunnelCounts,
 } from './overview'
+
+// bar-seg ratio helper (mirrors FunnelCard inline logic)
+function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
+  const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
+  return total > 0 ? (counts[key] / total) * 100 : 0
+}
 import type { Agent, Task, Keeper } from '../../types/core'
 import type {
   DashboardMissionResponse,
@@ -112,6 +118,26 @@ describe('computeFunnelCounts', () => {
     const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
     expect(counts.created).toBe(0)
     expect(counts.completed).toBe(0)
+  })
+
+  it('bar-seg ratio sums to ~100% across all funnel stages', () => {
+    const tasks = [
+      makeTask({ id: 'a', created_at: localIsoAt(1), status: 'in_progress' }),
+      makeTask({ id: 'b', created_at: localIsoAt(2), status: 'awaiting_verification' }),
+      makeTask({ id: 'c', created_at: localIsoAt(3), status: 'done', completed_at: localIsoAt(4) }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
+    const pcts = [counts.inProgress, counts.awaiting, counts.completed, counts.created]
+      .map(n => total > 0 ? (n / total) * 100 : 0)
+    const sum = pcts.reduce((a, b) => a + b, 0)
+    expect(Math.round(sum)).toBe(100)
+  })
+
+  it('bar-seg ratio returns 0 when funnel is empty', () => {
+    const counts = computeFunnelCounts([], null, FIXED_NOW)
+    expect(segPct(counts, 'created')).toBe(0)
+    expect(segPct(counts, 'completed')).toBe(0)
   })
 })
 

@@ -1030,6 +1030,7 @@
 (include stanzas/test_cascade_fsm.inc)
 (include stanzas/test_cascade_health_tracker.inc)
 (include stanzas/test_cascade_inventory.inc)
+(include stanzas/test_cascade_per_candidate_telemetry.inc)
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)

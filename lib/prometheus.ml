@@ -564,6 +564,8 @@ let metric_keeper_task_load_failures =
   "masc_keeper_task_load_failures_total"
 let metric_keeper_tool_selection_failures =
   "masc_keeper_tool_selection_failures_total"
+let metric_keeper_tool_policy_failures =
+  "masc_keeper_tool_policy_failures_total"
 let metric_keeper_reconcile_failures =
   "masc_keeper_reconcile_failures_total"
 let metric_keeper_decision_audit_flush_failures =
@@ -1453,6 +1455,12 @@ let init () =
   add metric_keeper_tool_selection_failures
     "Total tool selection exceptions during per-turn tool set assembly. \
      Labeled by keeper and phase=topk_llm|tool_discovery."
+    Counter;
+  add metric_keeper_tool_policy_failures
+    "Total tool-policy preset resolution failures (e.g. policy_config_not_loaded). \
+     Labels: site, preset. The policy layer runs at module-init and preset \
+     resolution time so it does not carry keeper context; keeper attribution \
+     is recovered from the surrounding Log.Keeper line."
     Counter;
   add metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \

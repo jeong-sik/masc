@@ -326,7 +326,7 @@ let preset_allowlist preset =
   match !policy_config with
   | None ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_config_env_parse_failures
+      Prometheus.metric_keeper_tool_policy_failures
       ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
       ();
     Log.Keeper.error

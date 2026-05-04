@@ -405,12 +405,12 @@ export interface OasProviderCap {
 }
 
 export const OAS_PROVIDER_CAPS: OasProviderCap[] = [
-  { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 200_000,  maxOutput: 8_192,  tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 1_000_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'kimi',           label: 'Kimi',           kind: 'Kimi',           maxContext: 262_144,  maxOutput: 32_768, tools: true,  toolChoice: true,  reasoning: true,  vision: false, topK: false, usage: 'emit' },
-  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: false, vision: true,  topK: false, usage: 'emit' },
-  { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: false, usage: 'emit' },
+  { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'ollama',         label: 'Ollama',         kind: 'Ollama',         maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: false, reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
-  { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 1_000_000, maxOutput: 65_536, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'glm',            label: 'GLM',            kind: 'GLM',            maxContext: 200_000,  maxOutput: 40_960, tools: true,  toolChoice: false, reasoning: true,  vision: false, topK: false, usage: 'emit' },
   { id: 'gemini',         label: 'Gemini',         kind: 'Gemini',         maxContext: 1_000_000, maxOutput: 65_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'claude-code',    label: 'Claude Code',    kind: 'Claude_code',    maxContext: 1_000_000, maxOutput: 64_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
@@ -543,8 +543,11 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'openai',
     models: [
-      { id: 'gpt-4.1', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal' },
-      { id: 'gpt-4.1-mini', context: '1M', tier: 'standard', inputPrice: '$0.40', outputPrice: '$1.60' },
+      { id: 'gpt-5.5', context: '1.05M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$30.00', notes: '128K output, ≤270K standard rate' },
+      { id: 'gpt-5.4', context: '1.05M', tier: 'standard', inputPrice: '$2.50', outputPrice: '$15.00', notes: '128K output, ≤270K standard rate' },
+      { id: 'gpt-5.4-mini', context: '400K', tier: 'fast', inputPrice: '$0.75', outputPrice: '$4.50', notes: '128K output, Computer Use, Subagents' },
+      { id: 'gpt-4.1', context: '1M', tier: 'standard', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal, 1M context' },
+      { id: 'gpt-4.1-mini', context: '1M', tier: 'fast', inputPrice: '$0.40', outputPrice: '$1.60' },
       { id: 'gpt-4.1-nano', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
       { id: 'o4-mini', context: '200K', tier: 'standard', inputPrice: '$1.10', outputPrice: '$4.40', notes: 'Reasoning' },
     ],
@@ -552,27 +555,30 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'claude',
     models: [
-      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Extended+Interleaved Thinking' },
-      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Adaptive Thinking' },
-      { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00', notes: 'BFCL V4 #6' },
-      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
+      { id: 'claude-opus-4-7', context: '1M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended+Interleaved Thinking, 1M context' },
+      { id: 'claude-opus-4-6', context: '1M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended Thinking, 1M context' },
+      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended+Interleaved Thinking' },
+      { id: 'claude-sonnet-4-6', context: '1M', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking, 1M context' },
+      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
+      { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$1.00', outputPrice: '$5.00' },
     ],
   },
   {
     providerId: 'gemini',
     models: [
-      { id: 'gemini-2.5-pro', context: '1M', tier: 'flagship', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking' },
-      { id: 'gemini-2.5-flash', context: '1M', tier: 'standard', inputPrice: '$0.15', outputPrice: '$0.60', notes: 'Thinking' },
+      { id: 'gemini-3.1-pro-preview', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$12.00', notes: 'Preview, ≤200K $2/$12, >200K $4/$18' },
+      { id: 'gemini-2.5-pro', context: '1M', tier: 'standard', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking, ≤200K $1.25/$10' },
+      { id: 'gemini-3.1-flash-preview', context: '1M', tier: 'standard', inputPrice: '$1.00', outputPrice: '$6.00', notes: 'Preview' },
+      { id: 'gemini-3.1-flash-lite-preview', context: '1M', tier: 'standard', inputPrice: '$0.25', outputPrice: '$1.50', notes: 'Preview, cost-efficient' },
+      { id: 'gemini-2.5-flash', context: '1M', tier: 'fast', inputPrice: '$0.30', outputPrice: '$2.50', notes: 'Thinking, batch $0.15/$1.25' },
       { id: 'gemini-2.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
     ],
   },
   {
     providerId: 'deepseek',
     models: [
-      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning, vLLM 경로만 tool calling 지원' },
-      { id: 'deepseek-v3.1', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'Strict FC (Beta), tool_choice=required/none 가능' },
-      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14, Prompt+Thinking, V3.2 Speciale은 FC 미지원' },
-      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3.1 hybrid: Non-Think+Think 통합 모드' },
+      { id: 'deepseek-v4-pro', context: '1M', tier: 'flagship', inputPrice: '$0.435', outputPrice: '$0.87', notes: '75% 할인, 1M context, 384K max output' },
+      { id: 'deepseek-v4-flash', context: '1M', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: '1M context, 384K max output' },
     ],
   },
   {
@@ -664,9 +670,9 @@ export interface CliTransportInfo {
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답. Gemini 2.5 Flash infinite thinking bug (#2025)' },
-  { providerId: 'codex_cli', binary: 'codex', contextWindow: '1M', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
-  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '-p', streamFormat: 'JSON (sync)', argvThreshold: '—', notes: '--output-format json, 동기식 단일 응답 (streaming 없음). Gemini 2.5 Flash infinite thinking bug (#2025)' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '1M', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '512KB', notes: 'default_prompt_argv_threshold=512KB, GPT-5.2-Codex 기본, 내부 5-model rotation' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '32KB', notes: 'default_prompt_argv_threshold=32KB, Anthropic API 호환 포맷' },
 ]
 
 // ── GLM Model Mapping ─────────────────────────────────────────
@@ -741,7 +747,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 820, reason: 'rate-limit.soft' },
       { provider: 'OpenAI',    status: 'miss', ms: 540, reason: 'timeout' },
-      { provider: 'Moonshot',  status: 'hit',  ms: 420, reason: 'ok' },
+      { provider: 'Kimi',      status: 'hit',  ms: 420, reason: 'ok' },
     ],
   },
   {
@@ -751,7 +757,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'hit',     ms: 380, reason: 'ok' },
       { provider: 'OpenAI',    status: 'skipped',  ms: 0,   reason: 'skipped' },
-      { provider: 'Moonshot',  status: 'skipped',  ms: 0,   reason: 'skipped' },
+      { provider: 'Kimi',      status: 'skipped',  ms: 0,   reason: 'skipped' },
     ],
   },
   {
@@ -761,7 +767,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 1240, reason: 'rate-limit.hard' },
       { provider: 'OpenAI',    status: 'miss', ms: 980,  reason: 'server_error' },
-      { provider: 'Moonshot',  status: 'miss', ms: 650,  reason: 'auth_failure' },
+      { provider: 'Kimi',      status: 'miss', ms: 650,  reason: 'auth_failure' },
       { provider: 'Ollama',    status: 'miss', ms: 320,  reason: 'model_unloaded' },
     ],
   },
@@ -772,7 +778,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 100, reason: 'cooldown (30s remaining)' },
       { provider: 'OpenAI',    status: 'hit',  ms: 460, reason: 'ok' },
-      { provider: 'Moonshot',  status: 'skipped', ms: 0, reason: 'skipped' },
+      { provider: 'Kimi',      status: 'skipped', ms: 0, reason: 'skipped' },
     ],
   },
 ]

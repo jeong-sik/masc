@@ -896,10 +896,10 @@ export function applicabilitySymbol(a: Applicability): string {
 
 export function applicabilityCellClass(a: Applicability): string {
   switch (a) {
-    case 'full': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    case 'partial': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-    case 'none': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
-    case 'na': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+    case 'full': return 'z4'
+    case 'partial': return 'z2'
+    case 'none': return 'z0'
+    case 'na': return 'z0'
   }
 }
 

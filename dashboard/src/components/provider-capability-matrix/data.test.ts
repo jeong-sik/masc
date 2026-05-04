@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { supportHeatBucket, impactBucket, riskBucket, computeCategoryCoverage, scoreBucket } from './data'
+import { supportHeatBucket, impactBucket, riskBucket, computeCategoryCoverage, scoreBucket, applicabilityCellClass } from './data'
 import type { FeatureSupport, WiringImpact, RiskLevel } from './data'
 
 describe('supportHeatBucket', () => {
@@ -70,5 +70,16 @@ describe('scoreBucket', () => {
     ['14.12', 'z0'],
   ])('maps %s → %s', (input, expected) => {
     expect(scoreBucket(input)).toBe(expected)
+  })
+})
+
+describe('applicabilityCellClass', () => {
+  it.each([
+    ['full', 'z4'],
+    ['partial', 'z2'],
+    ['none', 'z0'],
+    ['na', 'z0'],
+  ] as const)('maps %s → %s', (input, expected) => {
+    expect(applicabilityCellClass(input)).toBe(expected)
   })
 })

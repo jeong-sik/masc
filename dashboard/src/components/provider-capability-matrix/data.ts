@@ -625,7 +625,7 @@ export interface CliTransportInfo {
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
   { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답. Gemini 2.5 Flash infinite thinking bug (#2025)' },
-  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '1M', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
   { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
 ]
 

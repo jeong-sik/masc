@@ -30,6 +30,8 @@ let info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     p50_latency_ms = None;
     p95_latency_ms = None;
     latency_samples = 0;
+    avg_confidence = None;
+    confidence_samples = 0;
   }
 
 (* --- Trust score computation --- *)

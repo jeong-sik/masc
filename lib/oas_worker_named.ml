@@ -959,6 +959,7 @@ let run_named
          (dashboard_cascade, bin/masc_trace) already render [None] as
          a JSON [null] so producers can adopt incrementally. *)
       trace_id = None;
+      confidence_score = None;
     }
   in
   let rec cycle_loop n =

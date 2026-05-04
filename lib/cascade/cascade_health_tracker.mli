@@ -77,6 +77,13 @@ val latency_ring_size : int
     disable latency tracking entirely (the ring is treated as empty and
     [p50_latency_ms] / [p95_latency_ms] always return [None]). *)
 
+val confidence_ring_size : int
+(** Number of recent avg-log-probability samples retained per provider.
+    Mirrors {!latency_ring_size} semantics: ring buffer, drop-oldest,
+    lazy allocation.  Default 100, env
+    [MASC_CASCADE_CONFIDENCE_RING_SIZE].  Values [<= 0] disable
+    confidence tracking. *)
+
 
 (** Opaque health tracker state. *)
 type t
@@ -105,6 +112,7 @@ val record_success :
   t ->
   provider_key:string ->
   ?latency_ms:float ->
+  ?confidence:float ->
   unit ->
   unit
 
@@ -287,6 +295,15 @@ type provider_info = {
   (** Number of latency samples currently retained in the ring buffer.
       [0] iff both percentile fields are [None].  Bounded by
       {!latency_ring_size}.  @since 0.180.0 *)
+  avg_confidence : float option;
+  (** Mean of recent avg-log-probability samples from the per-provider
+      confidence ring.  [None] when no samples have been recorded.
+      Lower (more negative) values indicate higher response confidence.
+      @since 0.183.0 *)
+  confidence_samples : int;
+  (** Number of confidence samples currently retained.  [0] iff
+      [avg_confidence] is [None].  Bounded by {!confidence_ring_size}.
+      @since 0.183.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

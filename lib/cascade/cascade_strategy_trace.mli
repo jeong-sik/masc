@@ -67,6 +67,11 @@ type event = {
           Producers that do not yet thread the identifier should pass
           [None]; downstream consumers must treat [None] as "unknown",
           not as failure. *)
+  confidence_score : float option;
+      (** Average log probability per token from the LLM response, if
+          available.  Populated from {!Cascade_health_tracker} on
+          [Ordered] outcomes; [None] for [Filtered_empty] and
+          [Exhausted]. *)
 }
 
 val record : event -> unit

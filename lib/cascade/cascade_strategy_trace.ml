@@ -12,6 +12,7 @@ type event = {
   backoff_ms : int;
   kind : event_kind;
   trace_id : string option;
+  confidence_score : float option;
 }
 
 let kind_to_string = function

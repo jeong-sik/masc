@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { formatPct1 } from '../lib/format-number'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
@@ -340,11 +341,6 @@ export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
 
 // ── Runtime Signals ──────────────────────────────────────
 
-// Helper: format a 0–1 ratio as percentage or '-'
-function fmtRate(v: number | undefined): string {
-  return v != null ? `${(v * 100).toFixed(1)}%` : '-'
-}
-
 // Helper: format a float with fixed decimals or '-'
 function fmtFixed(v: number | undefined, digits = 3): string {
   return v != null ? v.toFixed(digits) : '-'
@@ -397,9 +393,9 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '폴백',
       rows: [
-        { label: '전체 폴백', value: fmtRate(mw?.fallback_rate) },
-        { label: '모델 폴백', value: fmtRate(mw?.model_fallback_rate) },
-        { label: '프로액티브 폴백', value: fmtRate(mw?.proactive_fallback_rate) },
+        { label: '전체 폴백', value: formatPct1(mw?.fallback_rate) },
+        { label: '모델 폴백', value: formatPct1(mw?.model_fallback_rate) },
+        { label: '프로액티브 폴백', value: formatPct1(mw?.proactive_fallback_rate) },
       ],
     },
     {
@@ -414,33 +410,33 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '자율 행동 & 반응',
       rows: [
-        { label: '자동 성찰 비율', value: fmtRate(mw?.auto_reflect_rate) },
-        { label: '자동 계획 비율', value: fmtRate(mw?.auto_plan_rate) },
-        { label: '자동 컴팩션 비율', value: fmtRate(mw?.auto_compact_rate) },
-        { label: '자동 핸드오프 비율', value: fmtRate(mw?.auto_handoff_rate) },
+        { label: '자동 성찰 비율', value: formatPct1(mw?.auto_reflect_rate) },
+        { label: '자동 계획 비율', value: formatPct1(mw?.auto_plan_rate) },
+        { label: '자동 컴팩션 비율', value: formatPct1(mw?.auto_compact_rate) },
+        { label: '자동 핸드오프 비율', value: formatPct1(mw?.auto_handoff_rate) },
         { label: '가드레일 정지', value: fmtCount(mw?.guardrail_stop_count) },
         { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
-        { label: '프리뷰 유사도', value: fmtRate(mw?.proactive_preview_similarity_avg) },
+        { label: '프리뷰 유사도', value: formatPct1(mw?.proactive_preview_similarity_avg) },
       ],
     },
     {
       title: '드리프트 보정',
       rows: [
         { label: '보정 횟수', value: fmtCount(mw?.drift_applied_count) },
-        { label: '보정 비율', value: fmtRate(mw?.drift_applied_rate) },
-        { label: '개입 비중', value: fmtRate(mw?.intervention_share) },
+        { label: '보정 비율', value: formatPct1(mw?.drift_applied_rate) },
+        { label: '개입 비중', value: formatPct1(mw?.intervention_share) },
         { label: '턴당 개입', value: fmtFixed(mw?.intervention_per_turn, 2) },
       ],
     },
     {
       title: '메모리 & 컴팩션',
       rows: [
-        { label: '메모리 통과율', value: fmtRate(mw?.memory_pass_rate) },
+        { label: '메모리 통과율', value: formatPct1(mw?.memory_pass_rate) },
         { label: '메모리 평균 점수', value: fmtFixed(mw?.memory_avg_score) },
         { label: '메모리 교정', value: fmtCount(mw?.memory_corrections) },
         { label: '교정 성공', value: fmtCount(mw?.memory_correction_success) },
-        { label: '컴팩션 드롭 비율', value: fmtRate(mw?.memory_compaction_drop_ratio) },
-        { label: '컴팩션 절감', value: fmtRate(mw?.compaction_saved_ratio) },
+        { label: '컴팩션 드롭 비율', value: formatPct1(mw?.memory_compaction_drop_ratio) },
+        { label: '컴팩션 절감', value: formatPct1(mw?.compaction_saved_ratio) },
         { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },
       ],
     },

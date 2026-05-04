@@ -7,7 +7,7 @@ export function formatPct(value: number | null | undefined, fallback = '-'): str
 }
 
 /** Format a 0–1 ratio as percentage with 1 decimal. Returns fallback for null/NaN. */
-export function formatPct1(value: number | null | undefined, fallback = '--'): string {
+export function formatPct1(value: number | null | undefined, fallback = '-'): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return `${(value * 100).toFixed(1)}%`
 }

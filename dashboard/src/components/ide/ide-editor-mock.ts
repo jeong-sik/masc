@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { useMemo, useState, useEffect } from 'preact/hooks'
+import { activeKeeperName } from '../../keeper-state'
 import { activeIdeFile } from './ide-shell'
 import {
   createCodeDocumentStore,
@@ -154,10 +155,14 @@ export function IdeEditorMock({
   activeLayers = EMPTY_ACTIVE_LAYERS,
 }: IdeEditorMockProps) {
   const [sourceCode, setSourceCode] = useState<string[]>([])
-  
+  const [keeperName, setKeeperName] = useState(activeKeeperName.value)
+  useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
+
   useEffect(() => {
     let canceled = false;
-    fetch('/api/v1/workspace/file?path=' + encodeURIComponent(activeIdeFile.value))
+    const params = new URLSearchParams({ path: activeIdeFile.value })
+    if (keeperName) params.set('keeper', keeperName)
+    fetch('/api/v1/workspace/file?' + params.toString())
       .then(r => r.json())
       .then(d => {
         if (!canceled && d.ok && d.content) {
@@ -166,7 +171,7 @@ export function IdeEditorMock({
       })
       .catch(console.error);
     return () => { canceled = true };
-  }, [activeIdeFile.value]);
+  }, [activeIdeFile.value, keeperName]);
 
   const documentStore = useMemo(
     () => createCodeDocumentStore({

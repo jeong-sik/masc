@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { activeKeeperName } from '../../keeper-state'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import { activeIdeFile } from './ide-shell'
 
@@ -23,9 +24,11 @@ const FALLBACK_SEED: ReadonlyArray<FileTreeNode> = [
   { path: 'README.md', label: 'README.md', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
 ]
 
-async function fetchTree(depth = 3): Promise<FileTreeNode[]> {
+async function fetchTree(depth = 3, keeper = ''): Promise<FileTreeNode[]> {
   try {
-    const res = await fetch(`/api/v1/workspace/tree?depth=${depth}`)
+    const params = new URLSearchParams({ depth: String(depth) })
+    if (keeper) params.set('keeper', keeper)
+    const res = await fetch(`/api/v1/workspace/tree?${params.toString()}`)
     if (!res.ok) return FALLBACK_SEED
     const data = await res.json()
     if (!Array.isArray(data) || data.length === 0) return FALLBACK_SEED
@@ -40,11 +43,14 @@ export function IdeExplorer() {
     return s
   }, [])
 
+  const [keeperName, setKeeperName] = useState(activeKeeperName.value)
+  useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
+
   useEffect(() => {
     let cancelled = false
-    fetchTree().then(nodes => { if (!cancelled) store.seed(nodes) })
+    fetchTree(3, keeperName).then(nodes => { if (!cancelled) store.seed(nodes) })
     return () => { cancelled = true }
-  }, [store])
+  }, [store, keeperName])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -82,7 +88,7 @@ export function IdeExplorer() {
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>EXPLORER</span>
+        <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
         <span>${fileCount} FILES</span>
       </header>
       <ul

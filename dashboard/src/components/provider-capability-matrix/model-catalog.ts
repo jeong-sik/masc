@@ -60,7 +60,7 @@ function ModelTable({ group }: { group: typeof PROVIDER_MODELS[number] }) {
                 공식 모델 카탈로그 미등록. Provider capability는 matrix/providers 탭에서 추적.
               </td>
             </tr>
-          ` : group.models.map((m, i) => html`
+          ` : group.models.map((m) => html`
               <tr key=${m.id} class="pm-row-alt">
                 <td class="pm-td pm-td--mono font-semibold">${m.id}</td>
                 <td class="pm-td pm-td--center">
@@ -94,7 +94,7 @@ function CliTransportTable() {
           </tr>
         </thead>
         <tbody>
-          ${CLI_TRANSPORTS.map((t, i) => html`
+          ${CLI_TRANSPORTS.map((t) => html`
             <tr key=${t.providerId} class="pm-row-alt">
               <td class="pm-td font-semibold">${PROVIDER_LABELS[t.providerId] ?? t.providerId}</td>
               <td class="pm-td pm-td--mono">${t.binary}</td>
@@ -164,7 +164,7 @@ function ClaudeCodeArchSection() {
               </tr>
             </thead>
             <tbody>
-              ${CLAUDE_CODE_EXTENSIONS.map((ext, i) => html`
+              ${CLAUDE_CODE_EXTENSIONS.map((ext) => html`
                 <tr key=${ext.name} class="pm-row-alt">
                   <td class="pm-td pm-td--mono font-semibold">${ext.name}</td>
                   <td class="pm-td pm-td--center pm-td--mono t-dim">${ext.since}</td>

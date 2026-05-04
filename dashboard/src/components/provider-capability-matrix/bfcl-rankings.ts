@@ -23,7 +23,7 @@ function V4CategoryTable() {
           </tr>
         </thead>
         <tbody>
-          ${BFCL_V4_CATEGORIES.map((cat, i) => html`
+          ${BFCL_V4_CATEGORIES.map((cat) => html`
             <tr key=${cat.id} class="pm-row-alt">
               <td class="pm-td font-semibold">${cat.label}</td>
               <td class="pm-td t-meta">${cat.description}</td>
@@ -54,7 +54,7 @@ function ModelBreakdownTable() {
           </tr>
         </thead>
         <tbody>
-          ${BFCL_MODEL_BREAKDOWN.map((m, i) => html`
+          ${BFCL_MODEL_BREAKDOWN.map((m) => html`
             <tr key=${m.model} class="pm-row-alt">
               <td class="pm-td font-semibold">${m.model}</td>
               <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>

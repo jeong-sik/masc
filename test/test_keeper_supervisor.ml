@@ -1189,14 +1189,14 @@ let () =
     ];
     "liveness_recovery", [
       test_case "backoff_base * 2^attempt, capped at max" `Quick (fun () ->
-        let base = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
-        let max_s = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+        let base = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_base_sec in
+        let max_s = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_max_sec in
         let d0 = Sup.liveness_recovery_backoff 0 in
         let d1 = Sup.liveness_recovery_backoff 1 in
         check (float 0.1) "attempt 0 = base" base d0;
         check (float 0.1) "attempt 1 = 2*base" (Float.min max_s (base *. 2.0)) d1);
       test_case "backoff capped at max" `Quick (fun () ->
-        let max_s = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+        let max_s = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_max_sec in
         let d_big = Sup.liveness_recovery_backoff 100 in
         check (float 0.1) "large attempt capped" max_s d_big);
       test_case "should_attempt: Dead phase + elapsed → true" `Quick (fun () ->

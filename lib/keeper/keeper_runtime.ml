@@ -742,6 +742,17 @@ let start_supervisor_sweep ctx =
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
+          (* #12801 Liveness Recovery Supervisor: attempt to auto-recover Dead
+             keepers whose root cause has cleared.  Runs after sweep_and_recover
+             so any newly-crashed keepers are processed by sweep first. *)
+          (try Keeper_supervisor.liveness_recovery_scan ctx
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "liveness_recovery")]
+               ();
+             Log.Keeper.error "liveness recovery scan failed: %s"
+               (Printexc.to_string exn));
           (* TOML hot-reload: re-sync declarative fields for running keepers.
              Runs after sweep_and_recover so TOML edits take effect within
              one sweep cycle (~30s) without server restart. *)

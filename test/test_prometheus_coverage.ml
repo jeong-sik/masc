@@ -246,6 +246,22 @@ let test_keeper_metrics_registered () =
   check bool "has tool call counter" true
     (has "masc_tool_call_total")
 
+(* #12801 / #12797 / #12799: new metrics registration coverage *)
+let test_new_issue_metrics_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  let check_metric_name name =
+    let has_help =
+      try
+        let _ = Str.search_forward (Str.regexp ("# HELP " ^ name ^ " ")) text 0 in true
+      with Not_found -> false
+    in
+    check bool (name ^ " registered") true has_help
+  in
+  check_metric_name Prometheus.metric_keeper_liveness_recovery_attempts;
+  check_metric_name Prometheus.metric_keeper_liveness_recovery_outcomes;
+  check_metric_name Prometheus.metric_cascade_server_error_skip_total;
+  check_metric_name Prometheus.metric_keeper_passive_loop_detected_total
+
 let test_review_blocker_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
   let check_registered metric =
@@ -437,6 +453,8 @@ let () =
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
       test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
       test_case "keeper metrics registered" `Quick test_keeper_metrics_registered;
+      test_case "new issue metrics registered (#12801/#12797/#12799)" `Quick
+        test_new_issue_metrics_registered;
       test_case "review blocker metrics registered" `Quick
         test_review_blocker_metrics_registered;
       test_case "distributed lock metric registered" `Quick

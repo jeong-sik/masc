@@ -830,6 +830,26 @@ let metric_keeper_restart_attempts =
   "masc_keeper_restart_attempts_total"
 let metric_keeper_restart_outcomes =
   "masc_keeper_restart_outcomes_total"
+(* #12801: Liveness Recovery Supervisor — auto-recover Dead keepers
+   whose root cause has cleared.  [attempts] increments each time the
+   scan selects a Dead keeper for recovery; [outcomes] breaks out the
+   result by outcome label (started | not_running | meta_missing |
+   meta_read_failed | meta_write_failed). Labels: keeper (for
+   attempts) and keeper+outcome (for outcomes). *)
+let metric_keeper_liveness_recovery_attempts =
+  "masc_keeper_liveness_recovery_attempts_total"
+let metric_keeper_liveness_recovery_outcomes =
+  "masc_keeper_liveness_recovery_outcomes_total"
+(* #12797: Cascade server-error score decay — provider deprioritised
+   after recent 5xx events.  Increments each time a provider's server-
+   error score drops the effective weight below the skip threshold.
+   Labels: provider_key. *)
+let metric_cascade_server_error_skip_total =
+  "masc_cascade_server_error_skip_total"
+(* #12799: Passive loop detector — keeper emitting only read-only tool
+   calls for N consecutive turns.  Labels: keeper. *)
+let metric_keeper_passive_loop_detected_total =
+  "masc_keeper_passive_loop_detected_total"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
@@ -1245,6 +1265,22 @@ let init () =
   add metric_keeper_restart_outcomes
     "Total supervisor restart outcomes. Labeled by keeper and bounded \
      outcome=started|meta_unavailable."
+    Counter;
+  add metric_keeper_liveness_recovery_attempts
+    "#12801 Total Liveness Recovery Supervisor attempts to auto-recover Dead \
+     keepers whose root cause has cleared. Labeled by keeper."
+    Counter;
+  add metric_keeper_liveness_recovery_outcomes
+    "#12801 Total Liveness Recovery Supervisor outcomes. Labeled by keeper \
+     and outcome=started|not_running|meta_missing|meta_read_failed|meta_write_failed."
+    Counter;
+  add metric_cascade_server_error_skip_total
+    "#12797 Total cascade label-ranking skips triggered by recent server \
+     error (5xx) score decay. Labeled by provider_key."
+    Counter;
+  add metric_keeper_passive_loop_detected_total
+    "#12799 Total passive-loop detections: keeper issued only read-only tool \
+     calls for N consecutive turns. Labeled by keeper."
     Counter;
   add metric_keeper_tool_alias_canonicalizations
     "Total observed LLM-facing tool names canonicalized to keeper internal \

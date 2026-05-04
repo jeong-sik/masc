@@ -7,6 +7,7 @@ module Sup = Masc_mcp.Keeper_supervisor
 module Reg = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module AQ = Masc_mcp.Keeper_approval_queue
+module KSM = Masc_mcp.Keeper_state_machine
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -1185,5 +1186,64 @@ let () =
         test_initial_auto_resume_capped_at_max;
       test_case "persisted blocker survives unregister" `Quick
         test_persisted_blocker_survives_unregister;
+    ];
+    "liveness_recovery", [
+      test_case "backoff_base * 2^attempt, capped at max" `Quick (fun () ->
+        let base = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
+        let max_s = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+        let d0 = Sup.liveness_recovery_backoff 0 in
+        let d1 = Sup.liveness_recovery_backoff 1 in
+        check (float 0.1) "attempt 0 = base" base d0;
+        check (float 0.1) "attempt 1 = 2*base" (Float.min max_s (base *. 2.0)) d1);
+      test_case "backoff capped at max" `Quick (fun () ->
+        let max_s = Masc_mcp.Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+        let d_big = Sup.liveness_recovery_backoff 100 in
+        check (float 0.1) "large attempt capped" max_s d_big);
+      test_case "should_attempt: Dead phase + elapsed → true" `Quick (fun () ->
+        Reg.clear ();
+        let name = "lr-should-attempt-1" in
+        let _reg = Reg.register ~base_path:bp name (make_meta name) in
+        Reg.mark_dead ~base_path:bp name ~at:0.0;
+        (match Reg.get ~base_path:bp name with
+         | None -> fail "expected entry"
+         | Some entry ->
+             let result =
+               Sup.should_attempt_liveness_recovery
+                 ~now:99999.0 entry
+             in
+             check bool "Dead + elapsed → true" true result));
+      test_case "should_attempt: Dead phase + too recent → false" `Quick (fun () ->
+        Reg.clear ();
+        let name = "lr-should-attempt-2" in
+        let _reg = Reg.register ~base_path:bp name (make_meta name) in
+        let now = Unix.gettimeofday () in
+        Reg.mark_dead ~base_path:bp name ~at:now;
+        (match Reg.get ~base_path:bp name with
+         | None -> fail "expected entry"
+         | Some entry ->
+             let result = Sup.should_attempt_liveness_recovery ~now entry in
+             check bool "Dead but too recent → false" false result));
+      test_case "should_attempt: non-Dead phase → false" `Quick (fun () ->
+        Reg.clear ();
+        let name = "lr-should-attempt-3" in
+        let _reg = Reg.register ~base_path:bp name (make_meta name) in
+        (match Reg.get ~base_path:bp name with
+         | None -> fail "expected entry"
+         | Some entry ->
+             let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
+             check bool "Offline phase → false" false result));
+      test_case "should_attempt: credential_archived → false" `Quick (fun () ->
+        Reg.clear ();
+        let name = "lr-should-attempt-4" in
+        let _reg = Reg.register ~base_path:bp name (make_meta name) in
+        Reg.mark_dead ~base_path:bp name ~at:0.0;
+        (* Simulate credential_archived by dispatching event *)
+        ignore (Reg.dispatch_event ~base_path:bp name
+          KSM.Credential_archived);
+        (match Reg.get ~base_path:bp name with
+         | None -> fail "expected entry"
+         | Some entry ->
+             let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
+             check bool "credential_archived → false" false result));
     ];
   ]

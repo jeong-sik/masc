@@ -1100,6 +1100,7 @@
 (include stanzas/test_keeper_meta_merge.inc)
 (include stanzas/test_keeper_mutex_coverage.inc)
 (include stanzas/test_keeper_path_roots_leak_10349.inc)
+(include stanzas/test_keeper_passive_loop_detector.inc)
 (include stanzas/test_keeper_pause_silent_failure_source.inc)
 (include stanzas/test_keeper_paused_cas_retain_9733.inc)
 (include stanzas/test_keeper_personality_round_trip.inc)

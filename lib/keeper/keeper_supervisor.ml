@@ -103,6 +103,13 @@ let committed_tools_of_ambiguous_blocker (blocker : string) =
    originally addressed at runtime by #8572 / #8575. *)
 let publish_lifecycle
     ~(event : Keeper_lifecycle_events.lifecycle_event) keeper_name detail () =
+  let event_name = Keeper_lifecycle_events.lifecycle_event_to_string event in
+  let phase =
+    Option.map Keeper_state_machine.phase_to_string
+      (Keeper_lifecycle_events.lifecycle_event_phase event)
+  in
+  (* #12798: record in the per-keeper lifecycle audit ring for dashboard. *)
+  Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
   match Keeper_keepalive.get_bus () with
   | Some bus ->
       Oas_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
@@ -1307,3 +1314,155 @@ let sweep_and_recover (ctx : _ context) =
            | _ -> ());
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx
+
+(* ── Liveness Recovery (#12801) ─────────────────────────── *)
+
+(** Per-keeper state for the liveness recovery scan. Tracks how many recovery
+    attempts have been made and when the last attempt occurred so the scan
+    can apply exponential backoff. *)
+type liveness_recovery_state = {
+  mutable attempt_count : int;
+  mutable last_attempt_ts : float;
+}
+
+let liveness_recovery_table : (string, liveness_recovery_state) Hashtbl.t =
+  Hashtbl.create 4
+
+let liveness_recovery_table_mu = Eio.Mutex.create ()
+
+let get_or_create_recovery_state name =
+  Eio.Mutex.use_rw ~protect:true liveness_recovery_table_mu (fun () ->
+    match Hashtbl.find_opt liveness_recovery_table name with
+    | Some s -> s
+    | None ->
+        let s = { attempt_count = 0; last_attempt_ts = 0.0 } in
+        Hashtbl.replace liveness_recovery_table name s;
+        s)
+
+let liveness_recovery_backoff attempt =
+  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
+  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+  Float.min max_delay (base *. Float.of_int (1 lsl (min attempt 20)))
+
+let should_attempt_liveness_recovery ~now
+    (entry : Keeper_registry.registry_entry) : bool =
+  (* Only Dead keepers, not Zombie (terminal_failure_latched = structural) *)
+  if entry.phase <> Keeper_state_machine.Dead then false
+  (* Credential-archived Dead: non-recoverable — credential must be re-issued *)
+  else if entry.conditions.credential_archived then false
+  (* Zombie timeout reached: structural terminal — skip *)
+  else if entry.conditions.zombie_timeout_reached then false
+  else
+    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
+    let dead_since = Option.value ~default:0.0 entry.dead_since_ts in
+    dead_since > 0.0 && now -. dead_since >= min_dead_sec
+
+let liveness_recovery_scan (ctx : _ context) =
+  if not Env_config.KeeperSupervisor.liveness_recovery_enabled then ()
+  else begin
+    let now = Time_compat.now () in
+    let base_path = ctx.config.base_path in
+    let max_attempts = Env_config.KeeperSupervisor.liveness_recovery_max_attempts in
+    let entries = Keeper_registry.all ~base_path () in
+    List.iter (fun (entry : Keeper_registry.registry_entry) ->
+      if not (should_attempt_liveness_recovery ~now entry) then ()
+      else begin
+        let rs = get_or_create_recovery_state entry.name in
+        if rs.attempt_count >= max_attempts then
+          (* Budget exhausted — log at debug to avoid spam *)
+          Log.Keeper.debug
+            "%s: liveness recovery budget exhausted (%d/%d attempts)"
+            entry.name rs.attempt_count max_attempts
+        else begin
+          let backoff = liveness_recovery_backoff rs.attempt_count in
+          if now -. rs.last_attempt_ts < backoff then ()
+          else begin
+            let dead_secs = now -. (Option.value ~default:now entry.dead_since_ts) in
+            Log.Keeper.warn
+              "%s: liveness recovery attempt %d/%d \
+               (dead_for=%.0fs, backoff=%.0fs)"
+              entry.name (rs.attempt_count + 1) max_attempts
+              dead_secs backoff;
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_liveness_recovery_attempts
+              ~labels:[("keeper", entry.name)] ();
+            (* Step 1: unregister the dead tombstone *)
+            Keeper_registry.unregister ~base_path entry.name;
+            Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+            Keeper_stay_silent_loop_detector.reset ~keeper_name:entry.name;
+            Keeper_passive_loop_detector.reset ~keeper_name:entry.name;
+            (* Step 2: clear paused and last_blocker from meta *)
+            (match read_meta ctx.config entry.name with
+             | Ok (Some meta) ->
+                 let recovery_meta =
+                   { meta with
+                     paused = false;
+                     auto_resume_after_sec = None;
+                     updated_at = now_iso ();
+                     runtime =
+                       { meta.runtime with
+                         last_blocker = "";
+                         last_blocker_class = None;
+                       };
+                   }
+                 in
+                 (match
+                    write_meta_with_merge
+                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                      ctx.config recovery_meta
+                  with
+                  | Ok () ->
+                      (* Step 3: re-register and launch a fresh fiber *)
+                      supervise_keepalive ~proactive_warmup_sec:0 ctx recovery_meta;
+                      (* Update recovery state regardless of launch result *)
+                      Eio.Mutex.use_rw ~protect:true liveness_recovery_table_mu
+                        (fun () ->
+                           rs.attempt_count <- rs.attempt_count + 1;
+                           rs.last_attempt_ts <- now);
+                      if Keeper_registry.is_running ~base_path entry.name then begin
+                        Prometheus.inc_counter
+                          Prometheus.metric_keeper_liveness_recovery_outcomes
+                          ~labels:[("keeper", entry.name); ("outcome", "started")] ();
+                        publish_lifecycle
+                          ~event:(Keeper_lifecycle_events.Custom_event
+                                    { verb = Keeper_lifecycle_events.Restarted;
+                                      phase = Some Keeper_state_machine.Running })
+                          entry.name
+                          (Printf.sprintf
+                             "liveness recovery attempt %d"
+                             rs.attempt_count) ();
+                        Log.Keeper.warn
+                          "%s: liveness recovery SUCCESS (attempt %d/%d)"
+                          entry.name rs.attempt_count max_attempts
+                      end else begin
+                        Prometheus.inc_counter
+                          Prometheus.metric_keeper_liveness_recovery_outcomes
+                          ~labels:[("keeper", entry.name); ("outcome", "not_running")] ();
+                        Log.Keeper.error
+                          "%s: liveness recovery: keeper not in Running state \
+                           after relaunch (attempt %d/%d)"
+                          entry.name rs.attempt_count max_attempts
+                      end
+                  | Error err ->
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_liveness_recovery_outcomes
+                        ~labels:[("keeper", entry.name); ("outcome", "meta_write_failed")] ();
+                      Log.Keeper.error
+                        "%s: liveness recovery meta write failed: %s" entry.name err)
+             | Ok None ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_liveness_recovery_outcomes
+                   ~labels:[("keeper", entry.name); ("outcome", "meta_missing")] ();
+                 Log.Keeper.error
+                   "%s: liveness recovery: meta file missing" entry.name
+             | Error err ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_liveness_recovery_outcomes
+                   ~labels:[("keeper", entry.name); ("outcome", "meta_read_failed")] ();
+                 Log.Keeper.error
+                   "%s: liveness recovery read_meta failed: %s" entry.name err)
+          end
+        end
+      end
+    ) entries
+  end

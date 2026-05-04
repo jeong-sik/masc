@@ -124,6 +124,28 @@ val rate_limit_score_for_provider :
 
     @since 0.183.0 (PR3b of cascade resilience track) *)
 
+val server_error_score_for_provider :
+  Cascade_health_tracker.t -> provider_key:string -> float
+(** [server_error_score_for_provider health ~provider_key] returns a
+    [0.0–1.0] multiplier that decays with the count of recent
+    [Failure] events (HTTP 5xx / provider errors) for [provider_key].
+
+    Formula: [score = decay_base ^ count] until [count] reaches the
+    hard-skip threshold.  Default window 120 s (env
+    [MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S]), default decay base 0.6
+    (env [MASC_CASCADE_SERVER_ERROR_DECAY_BASE]), default hard-skip
+    threshold 4 (env [MASC_CASCADE_SERVER_ERROR_SKIP_AFTER], 0 disables).
+
+    When [se = 0.0] the provider is excluded from the weighted pick for
+    this ordering pass and [metric_cascade_server_error_skip_total] is
+    incremented.
+
+    - Unknown provider, no recent failures, or window disabled → [1.0].
+    - Interacts with [rate_limit_score_for_provider]: a provider in both
+      a 429 burst and a 500 storm gets both penalties multiplied.
+
+    @since #12797 *)
+
 (** {1 Strategy kind} *)
 
 type kind =

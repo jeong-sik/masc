@@ -343,6 +343,15 @@ export function scoreColor(score: string): string {
   return 'text-[var(--bad-light)]'
 }
 
+export function scoreBucket(score: string): string {
+  const v = parseFloat(score)
+  if (v >= 75) return 'z4'
+  if (v >= 60) return 'z3'
+  if (v >= 55) return 'z2'
+  if (v >= 40) return 'z1'
+  return 'z0'
+}
+
 
 // ── Function Calling Harness Case Study ──────────────────────────
 

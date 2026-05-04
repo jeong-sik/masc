@@ -9,7 +9,42 @@ import {
   HARNESS_MODELS,
   MCPMARK_ENTRIES,
   scoreColor,
+  scoreBucket,
 } from './data'
+
+const BFCL_MAX_SCORE = 77.47
+const BFCL_BUCKET_COLORS: Record<string, string> = {
+  z4: 'var(--color-status-ok)',
+  z3: 'var(--color-accent-fg)',
+  z2: 'var(--amber-bright)',
+  z1: 'var(--color-status-warn)',
+  z0: 'var(--color-status-err)',
+}
+
+function BfclScoreBar() {
+  return html`
+    <div class="flex flex-col gap-1">
+      ${BFCL_RANKINGS.map((entry) => {
+        const raw = parseFloat(entry.bfclV4)
+        if (isNaN(raw)) return null
+        const pct = (raw / 100) * 100
+        const bucket = scoreBucket(entry.bfclV4)
+        const fill = BFCL_BUCKET_COLORS[bucket] ?? 'var(--color-fg-muted)'
+        return html`
+          <div class="flex items-center gap-2 py-0.5" key=${entry.model}>
+            <span class="w-6 text-right text-2xs font-mono text-[var(--color-fg-muted)]">${entry.rank}</span>
+            <span class="w-36 flex-shrink-0 text-2xs font-medium truncate" title=${entry.model}>${entry.model}</span>
+            <div class="flex-1 h-2.5 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+              <div class="h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)]"
+                style="width: ${pct.toFixed(1)}%; background: ${fill}; opacity: 0.75"></div>
+            </div>
+            <span class="w-12 text-right text-2xs font-mono font-bold" style="color: ${fill}">${entry.bfclV4}</span>
+          </div>
+        `
+      })}
+    </div>
+  `
+}
 
 function V4CategoryTable() {
   return html`
@@ -40,31 +75,65 @@ function V4CategoryTable() {
 
 function ModelBreakdownTable() {
   return html`
-    <div class="pm-scroll">
-      <table class="pm-table">
-        <thead class="pm-thead">
-          <tr>
-            <th class="pm-th min-w-[120px]">모델</th>
-            <th class="pm-th pm-th--center min-w-[60px]">Overall</th>
-            <th class="pm-th pm-th--center">Single</th>
-            <th class="pm-th pm-th--center">Multi-turn</th>
-            <th class="pm-th pm-th--center">Agentic</th>
-            <th class="pm-th pm-th--center">Halluc.</th>
-            <th class="pm-th pm-th--center">Format</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${BFCL_MODEL_BREAKDOWN.map((m) => html`
-            <tr key=${m.model} class="pm-row-alt">
-              <td class="pm-td font-semibold">${m.model}</td>
-              <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
-              ${([m.singleTurn, m.multiTurn, m.agentic, m.hallucination, m.format] as const).map((score, j) => html`
-                <td key=${j} class="pm-td pm-td--center pm-td--mono ${scoreColor(score)}">${score}</td>
-              `)}
+    <div class="flex flex-col gap-2">
+      <div class="pm-scroll">
+        <table class="pm-table">
+          <thead class="pm-thead">
+            <tr>
+              <th class="pm-th min-w-[120px]">모델</th>
+              <th class="pm-th pm-th--center min-w-[60px]">Overall</th>
+              <th class="pm-th pm-th--center">Single</th>
+              <th class="pm-th pm-th--center">Multi-turn</th>
+              <th class="pm-th pm-th--center">Agentic</th>
+              <th class="pm-th pm-th--center">Halluc.</th>
+              <th class="pm-th pm-th--center">Format</th>
             </tr>
-          `)}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${BFCL_MODEL_BREAKDOWN.map((m) => html`
+              <tr key=${m.model} class="pm-row-alt">
+                <td class="pm-td font-semibold">${m.model}</td>
+                <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
+                ${([m.singleTurn, m.multiTurn, m.agentic, m.hallucination, m.format] as const).map((score, j) => html`
+                  <td key=${j} class="pm-td pm-td--center pm-td--mono ${scoreColor(score)}">${score}</td>
+                `)}
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">카테고리별 분포</div>
+        ${BFCL_MODEL_BREAKDOWN.map((m) => {
+          const cats = [
+            { label: 'S', value: m.singleTurn },
+            { label: 'M', value: m.multiTurn },
+            { label: 'A', value: m.agentic },
+            { label: 'H', value: m.hallucination },
+            { label: 'F', value: m.format },
+          ]
+          return html`
+            <div class="flex items-center gap-2 py-0.5" key=${m.model}>
+              <span class="w-24 flex-shrink-0 text-2xs font-medium truncate" title=${m.model}>${m.model}</span>
+              <div class="flex gap-0.5 flex-1">
+                ${cats.map((c) => {
+                  const v = parseFloat(c.value)
+                  const bucket = scoreBucket(c.value)
+                  const fill = BFCL_BUCKET_COLORS[bucket] ?? 'var(--color-fg-muted)'
+                  return html`
+                    <div key=${c.label} class="flex-1 flex flex-col items-center gap-0.5">
+                      <div class="w-full h-2 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+                        <div class="h-full rounded-[var(--r-0)]" style="width: ${isNaN(v) ? 0 : v}%; background: ${fill}; opacity: 0.7"></div>
+                      </div>
+                      <span class="text-3xs font-mono ${scoreColor(c.value)}">${isNaN(v) ? '—' : c.value}</span>
+                    </div>
+                  `
+                })}
+              </div>
+            </div>
+          `
+        })}
+      </div>
     </div>
   `
 }
@@ -215,6 +284,11 @@ export function BfclRankings() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div>
+        <h4 class="t-label font-semibold mb-2">V4 점수 분포</h4>
+        <${BfclScoreBar} />
       </div>
 
       <div>

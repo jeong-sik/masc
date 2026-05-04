@@ -335,7 +335,7 @@ export function HandoffTimeline({
                         <line
                           x1=${`${a.xPct}%`} y1=${rowCenterY(a.fromIdx)}
                           x2=${`${a.xPct}%`} y2=${rowCenterY(a.toIdx)}
-                          stroke="rgb(251 146 60)" stroke-width="1.5"
+                          stroke="var(--amber-bright)" stroke-width="1.5"
                           stroke-dasharray="3,3" opacity="0.8"
                         ><title>${`${a.fromAgent} → ${a.toAgent} · ${new Date(a.ts).toLocaleTimeString()}`}</title></line>
                       `)}

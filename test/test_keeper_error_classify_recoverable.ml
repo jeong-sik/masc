@@ -160,14 +160,15 @@ let test_soft_rate_limit_no_retry_after_is_recoverable () =
     Agent_sdk.Error.Api
       (Retry.RateLimited { retry_after = None; message = "slow down" })
   in
-  (* Only recoverable if NOT classified as hard quota *)
-  if not (Owne.sdk_error_is_hard_quota err) then begin
-    match KEC.recoverable_cascade_failure_reason err with
-    | Some reason ->
-      check string "no-retry_after rate_limit -> rate_limit" "rate_limit" reason
-    | None ->
-      fail "Non-hard-quota RateLimited without retry_after should be recoverable"
-  end
+  (* Pin the precondition explicitly so a classifier change cannot turn
+     this assertion into a silent no-op. *)
+  check bool "rate-limit fixture is not hard-quota" false
+    (Owne.sdk_error_is_hard_quota err);
+  (match KEC.recoverable_cascade_failure_reason err with
+   | Some reason ->
+     check string "no-retry_after rate_limit -> rate_limit" "rate_limit" reason
+   | None ->
+     fail "Non-hard-quota RateLimited without retry_after should be recoverable")
 
 let test_server_error_500_is_recoverable () =
   let err =
@@ -222,13 +223,13 @@ let test_hard_quota_not_reclassified_as_rate_limit () =
     Agent_sdk.Error.Api
       (Retry.RateLimited { retry_after = None; message = "resource exhausted" })
   in
-  if Owne.sdk_error_is_hard_quota err then begin
-    match KEC.recoverable_cascade_failure_reason err with
-    | Some reason ->
-      check string "hard quota keeps hard_quota label" "hard_quota" reason
-    | None ->
-      fail "Hard quota should be recoverable with hard_quota label"
-  end
+  check bool "hard-quota fixture is hard-quota" true
+    (Owne.sdk_error_is_hard_quota err);
+  (match KEC.recoverable_cascade_failure_reason err with
+   | Some reason ->
+     check string "hard quota keeps hard_quota label" "hard_quota" reason
+   | None ->
+     fail "Hard quota should be recoverable with hard_quota label")
 
 let test_server_error_400_not_recoverable_by_new_arm () =
   (* 4xx client errors below 500 should NOT be recovered by the server_error

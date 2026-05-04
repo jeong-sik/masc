@@ -281,9 +281,10 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
 
            Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
            so only soft (non-hard-quota) rate limits reach this arm. *)
+        (* hard_quota was already returned above by the sdk_error_is_hard_quota
+           check, so the RateLimited arm here is necessarily soft. *)
         (match err with
-         | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
-           when not (Oas_worker_named.sdk_error_is_hard_quota err) ->
+         | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some "rate_limit"
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->

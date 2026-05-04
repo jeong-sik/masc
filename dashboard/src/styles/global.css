@@ -203,8 +203,8 @@ tbody tr:hover {
 }
 
 #app > div > div.flex-1 {
-  gap: 6px;
-  padding: 6px;
+  gap: var(--sp-1h);
+  padding: var(--sp-1h);
 }
 
 #dashboard-side-rail,

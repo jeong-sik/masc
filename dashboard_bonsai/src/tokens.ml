@@ -90,6 +90,7 @@ type semantic =
   | `Sp_7
   | `Sp_8
   | `Sp_0h
+  | `Sp_1h
   | `R_0
   | `R_1
   | `R_2
@@ -625,6 +626,7 @@ let name_of = function
   | `Sp_7 -> "sp-7"
   | `Sp_8 -> "sp-8"
   | `Sp_0h -> "sp-0h"
+  | `Sp_1h -> "sp-1h"
   | `R_0 -> "r-0"
   | `R_1 -> "r-1"
   | `R_2 -> "r-2"

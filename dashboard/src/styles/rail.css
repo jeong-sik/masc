@@ -54,7 +54,7 @@
 
 .cascade-models { display: flex; flex-direction: column; gap: var(--sp-0h); padding: var(--sp-0h) 0; }
 .cascade-model {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 3px 6px; background: var(--color-bg-elevated);
   border-radius: var(--r-1); font-size: var(--fs-11);
 }
@@ -136,7 +136,7 @@
   max-height: 180px; overflow-y: auto;
 }
 .tl-legend-row {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 3px 2px;
   font-size: var(--fs-11);
   border-bottom: 1px dotted var(--color-border-strong);

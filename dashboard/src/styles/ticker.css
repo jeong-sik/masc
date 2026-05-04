@@ -28,7 +28,7 @@
 .tk-rail::-webkit-scrollbar { display: none; }
 
 .tk-item {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   flex-shrink: 0;
   padding: 6px 14px;
   background: transparent;

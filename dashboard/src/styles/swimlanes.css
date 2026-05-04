@@ -15,7 +15,7 @@
 }
 
 .sl-toolbar {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 0 var(--sp-3); height: 28px;
   background: linear-gradient(to bottom, var(--color-bg-surface), var(--color-bg-surface) 80%, var(--color-bg-page));
   border-bottom: 1px solid var(--color-border-strong);
@@ -29,7 +29,7 @@
   color: var(--color-fg-muted); letter-spacing: .08em; font-weight: var(--fw-semi);
   font-size: var(--fs-10);
 }
-.sl-tb-brand { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.sl-tb-brand { display: inline-flex; align-items: center; gap: var(--sp-1h); flex-shrink: 0; }
 .sl-tb-sep {
   width: 1px; height: 14px;
   background: var(--color-border-strong);
@@ -197,7 +197,7 @@
 
 /* ─── lane label ─── */
 .sl-label {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 0 var(--sp-3);
   height: 100%;
   border-right: 1px solid var(--color-border-default);

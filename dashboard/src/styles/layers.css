@@ -321,7 +321,7 @@ body[data-explode="1"] .lyr::before {
   box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6);
 }
 .note-pin .np-head {
-  display: flex; align-items: baseline; gap: 6px;
+  display: flex; align-items: baseline; gap: var(--sp-1h);
   margin-bottom: 4px;
   font-family: var(--font-mono); font-size: var(--fs-9);
   color: var(--stalled);
@@ -352,7 +352,7 @@ body[data-explode="1"] .lyr::before {
   background: rgb(var(--stalled-glow) / .05);
   border: 1px dashed rgb(var(--stalled-glow) / .3);
   border-radius: var(--r-1);
-  padding: 8px;
+  padding: var(--sp-2);
   color: var(--stalled);
   font-size: var(--fs-10);
   font-family: var(--font-mono);

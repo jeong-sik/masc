@@ -113,6 +113,10 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_guards_failures
+        ~labels:[("keeper", keeper_name); ("site", "sse_broadcast")]
+        ();
       Log.Keeper.warn
         "tool skip SSE broadcast failed: keeper=%s tool=%s reason=%s err=%s"
         keeper_name tool_name reason_code (Printexc.to_string exn))
@@ -169,6 +173,10 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_guards_failures
+        ~labels:[("keeper", "unknown"); ("site", "gate_observer")]
+        ();
       Log.Keeper.warn
         "keeper_guards: gate observer failed stage=%s tool=%s err=%s"
         event.stage event.tool_name (Printexc.to_string exn)
@@ -270,6 +278,10 @@ let emit_gate_event
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_guards_failures
+        ~labels:[("keeper", "unknown"); ("site", "event_emit")]
+        ();
       Log.Keeper.warn
         "keeper_guards: event emit failed stage=%s tool=%s err=%s"
         stage tool_name (Printexc.to_string exn))
@@ -395,6 +407,10 @@ let streak_guard
             tool_name new_count
         in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_guards_failures
+          ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
+          ();
         Log.Keeper.warn
           "keeper:%s streak_gate: %s called %d times consecutively, blocking"
           keeper_name tool_name new_count;
@@ -428,6 +444,10 @@ let deny_guard
       if List.mem tool_name denied then begin
         let reason_text = "tool is on the keeper deny list" in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_guards_failures
+          ~labels:[("keeper", keeper_name); ("site", "deny_list")]
+          ();
         Log.Keeper.warn "keeper:%s deny list: blocked %s"
           keeper_name tool_name;
         broadcast_tool_skipped
@@ -465,6 +485,10 @@ let cost_guard
              accumulated_cost_usd limit
          in
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_guards_failures
+           ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
+           ();
          Log.Keeper.warn
            "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
            keeper_name accumulated_cost_usd limit tool_name;
@@ -507,6 +531,10 @@ let destructive_guard
              Printf.sprintf "pattern='%s' (%s)" pattern desc
            in
            let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_guards_failures
+             ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
+             ();
            Log.Keeper.warn
              "keeper:%s destructive pattern in %s: '%s' (%s)"
              keeper_name tool_name pattern desc;

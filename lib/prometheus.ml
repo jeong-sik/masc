@@ -476,6 +476,8 @@ let metric_keeper_approval_queue_failures =
   "masc_keeper_approval_queue_failures_total"
 let metric_keeper_guards_failures =
   "masc_keeper_guards_failures_total"
+let metric_keeper_profile_load_failures =
+  "masc_keeper_profile_load_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1241,6 +1243,9 @@ let init () =
     Counter;
   add metric_keeper_guards_failures
     "Total keeper guard warnings, labeled by keeper and site"
+    Counter;
+  add metric_keeper_profile_load_failures
+    "Total keeper profile/TOML load failures, labeled by site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

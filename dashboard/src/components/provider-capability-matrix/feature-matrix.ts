@@ -135,12 +135,12 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
   return html`
     <div class="flex flex-col gap-2">
       <div class="grid grid-cols-6 gap-2">
-        <${StatTile} label="네이티브" value=${summary.native} variant="gold" hint=${`${((summary.native / summary.total) * 100).toFixed(0)}%`} />
-        <${StatTile} label="부분 지원" value=${summary.partial} hint="◐" />
-        <${StatTile} label="미지원" value=${summary.unsupported} variant="warn" hint="○" />
-        <${StatTile} label="Cloud API" value=${cloudCount} hint="direct" />
-        <${StatTile} label="Local" value=${localCount} hint="self-host" />
-        <${StatTile} label="CLI Wrapper" value=${cliCount} hint="usage: strip" />
+        <${StatTile} label="네이티브" value=${summary.native} status="brass" delta=${{ direction: 'up', text: `${((summary.native / summary.total) * 100).toFixed(0)}%` }} />
+        <${StatTile} label="부분 지원" value=${summary.partial} status="warn" delta=${{ direction: 'flat', text: '◐' }} />
+        <${StatTile} label="미지원" value=${summary.unsupported} status="crit" delta=${{ direction: 'down', text: '○' }} />
+        <${StatTile} label="Cloud API" value=${cloudCount} status="ok" />
+        <${StatTile} label="Local" value=${localCount} status="brass" />
+        <${StatTile} label="CLI Wrapper" value=${cliCount} />
       </div>
 
       <div class="pm-scroll">

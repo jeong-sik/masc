@@ -25,10 +25,10 @@ export function WiringGaps() {
   return html`
     <div class="flex flex-col gap-3">
       <div class="grid grid-cols-4 gap-2">
-        <${StatTile} label="HIGH" value=${high} variant="warn" hint="tool calling 직접 영향" />
-        <${StatTile} label="MEDIUM" value=${medium} hint="기능 제한" />
-        <${StatTile} label="LOW" value=${low} hint="사소한 불일치" />
-        <${StatTile} label="정확" value=${correct.length} variant="gold" hint=${`${WIRING_GAPS.length} 중`} />
+        <${StatTile} label="HIGH" value=${high} status="crit" delta=${{ direction: 'down', text: 'tool calling 직접 영향' }} />
+        <${StatTile} label="MEDIUM" value=${medium} status="warn" delta=${{ direction: 'flat', text: '기능 제한' }} />
+        <${StatTile} label="LOW" value=${low} delta=${{ direction: 'flat', text: '사소한 불일치' }} />
+        <${StatTile} label="정확" value=${correct.length} status="ok" delta=${{ direction: 'up', text: `${WIRING_GAPS.length} 중` }} />
       </div>
 
       <div class="flex items-center gap-2 flex-wrap t-micro mono t-dim px-1">
@@ -53,7 +53,7 @@ export function WiringGaps() {
             </tr>
           </thead>
           <tbody>
-            ${gaps.map((gap, i) => {
+            ${gaps.map((gap) => {
               return html`
                 <tr key=${gap.id} class="pm-wg-row pm-wg-row--${impactBucket(gap.impact)}">
                   <td class="pm-td pm-td--mono t-dim">${gap.id}</td>

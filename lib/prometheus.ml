@@ -579,10 +579,7 @@ let metric_keeper_write_meta_cycle_failures =
 let metric_keeper_alert_persist_failures =
   "masc_keeper_alert_persist_failures_total"
 let metric_keeper_metrics_sse_failures =
-  "masc_keeper_metrics_sse_failures_total"
-let metric_keeper_dispatch_event_failures =
-  "masc_keeper_dispatch_event_failures_total"
-let metric_keeper_session_cleanup_failures =
+  "masc_keeper_metrics_sse_failures_total"let metric_keeper_session_cleanup_failures =
   "masc_keeper_session_cleanup_failures_total"
 let metric_keeper_chat_store_failures =
   "masc_keeper_chat_store_failures_total"
@@ -943,6 +940,24 @@ let metric_empty_tool_universe_observed =
 let metric_coord_join_normalize_outcome =
   "masc_coord_join_normalize_outcome_total"
 
+
+
+(* Centralized from keeper_stale_watchdog.ml.  Originally each metric was
+   an inline string literal passed to inc_counter / register_counter.
+   Constants make grep/audit trivial and prevent typo-induced metric
+   proliferation (a single-character typo creates a new invisible metric). *)
+let metric_keeper_stale_termination_total =
+  "masc_keeper_stale_termination_total"
+let metric_keeper_stale_termination_by_class =
+  "masc_keeper_stale_termination_by_class_total"
+let metric_keeper_oas_timeout_budget_watchdog_termination =
+  "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+let metric_keeper_stale_termination_threshold_breached =
+  "masc_keeper_stale_termination_threshold_breached_total"
+let metric_keeper_stale_termination_batch =
+  "masc_keeper_stale_termination_batch_total"
+let metric_keeper_stale_broadcast_emit_failures =
+  "masc_keeper_stale_broadcast_emit_failures"
 
 (** {1 Built-in Metrics} *)
 
@@ -1638,6 +1653,47 @@ let init () =
     "Maximum SSE event queue depth across live sessions" Gauge;
   add metric_sse_external_subscribers
     "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
+
+  add metric_keeper_turn_livelock_blocks
+    "Total livelock-block events where keeper found a turn already in-progress      during unified_turn start. Labels: keeper." Counter;
+  add metric_keeper_turn_timeout_committed
+    "Total wall-clock timeout events after tools were committed but before      response completed. Labels: keeper." Counter;
+  add metric_keeper_turn_error_after_tools
+    "Total errors after tool calls were committed in unified_turn.      Labels: keeper." Counter;
+  add metric_keeper_cascade_sync_failures
+    "Total failures to sync cascade state during turn pause/rejection.      Labels: keeper, site." Counter;
+  add metric_keeper_thinking_persist_failures
+    "Total failures persisting thinking content to disk. Labels: keeper." Counter;
+  add metric_keeper_checkpoint_failures
+    "Total checkpoint save/restore failures. Labels: keeper, operation." Counter;
+  add metric_keeper_memory_write_failures
+    "Total failures writing keeper memory to disk. Labels: keeper." Counter;
+  add metric_keeper_write_meta_cycle_failures
+    "Total CAS-race or write failures in write_meta during turn cycle.      Labels: keeper." Counter;
+  add metric_keeper_alert_persist_failures
+    "Total failures persisting alert notifications. Labels: keeper." Counter;
+  add metric_keeper_metrics_sse_failures
+    "Total failures pushing metrics via SSE to dashboard. Labels: keeper." Counter;
+  add metric_keeper_dispatch_event_failures
+    "Total failures dispatching state events to keeper event bus.      Labels: keeper, event." Counter;
+  add metric_keeper_session_cleanup_failures
+    "Total failures cleaning up keeper session directories on shutdown." Counter;
+  add metric_keeper_chat_store_failures
+    "Total failures in keeper chat store append/load operations.      Labels: operation." Counter;
+  add metric_keeper_observation_query_failures
+    "Total failures in world observation queries (backlog, agents, board).      Labels: operation." Counter;
+  add metric_keeper_stale_termination_total
+    "Total stale watchdog terminations (all classes). Labels: keeper." Counter;
+  add metric_keeper_stale_termination_by_class
+    "Total stale watchdog terminations broken down by kill class      (idle_turn | in_turn_hung | noop_failure_loop). Labels: keeper, class." Counter;
+  add metric_keeper_oas_timeout_budget_watchdog_termination
+    "Total watchdog terminations preserving unresolved oas_timeout_budget      failure reason. Labels: keeper." Counter;
+  add metric_keeper_stale_termination_threshold_breached
+    "Total stale termination threshold breaches triggering auto-pause.      Labels: keeper." Counter;
+  add metric_keeper_stale_termination_batch
+    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window)." Counter;
+  add metric_keeper_stale_broadcast_emit_failures
+    "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

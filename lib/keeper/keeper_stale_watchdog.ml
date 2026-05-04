@@ -141,7 +141,7 @@ let pending_oas_timeout_budget_count
 
 let () =
   Prometheus.register_counter
-    ~name:"masc_keeper_stale_termination_by_class_total"
+    ~name:Prometheus.metric_keeper_stale_termination_by_class
     ~help:
       "Total stale watchdog terminations broken down by typed kill \
        class (idle_turn | in_turn_hung | noop_failure_loop).  \
@@ -153,7 +153,7 @@ let () =
 
 let () =
   Prometheus.register_counter
-    ~name:"masc_keeper_oas_timeout_budget_watchdog_termination_total"
+    ~name:Prometheus.metric_keeper_oas_timeout_budget_watchdog_termination
     ~help:
       "Total watchdog terminations that preserved an unresolved \
        oas_timeout_budget failure reason instead of reclassifying the \
@@ -303,7 +303,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     root cause for supervisor auto-pause. *)
                  request_watchdog_stop ();
                  Prometheus.inc_counter
-                   "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+                   Prometheus.metric_keeper_oas_timeout_budget_watchdog_termination
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  Log.Keeper.error
@@ -373,11 +373,11 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                request_watchdog_stop ();
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter
-                 "masc_keeper_stale_termination_total"
+                 Prometheus.metric_keeper_stale_termination_total
                  ~labels:[ ("keeper", meta.name) ]
                  ();
                Prometheus.inc_counter
-                 "masc_keeper_stale_termination_by_class_total"
+                 Prometheus.metric_keeper_stale_termination_by_class
                  ~labels:[
                    ("keeper", meta.name);
                    ("class", stale_kill_class_label kill_class);
@@ -423,7 +423,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name meta.cascade_name
                  else begin
                  Prometheus.inc_counter
-                   "masc_keeper_stale_termination_threshold_breached_total"
+                   Prometheus.metric_keeper_stale_termination_threshold_breached
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  (* Phase 2 (#10765): override the [Stale_turn_timeout] latch
@@ -454,7 +454,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let batch = record_batch_termination meta.name now in
                if List.length batch >= batch_threshold then begin
                  Prometheus.inc_counter
-                   "masc_keeper_stale_termination_batch_total"
+                   Prometheus.metric_keeper_stale_termination_batch
                    ();
                  Log.Keeper.error
                    "FLEET BATCH TERMINATION: %d distinct keepers \
@@ -484,7 +484,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
                   Prometheus.inc_counter
-                    "masc_keeper_stale_broadcast_emit_failures"
+                    Prometheus.metric_keeper_stale_broadcast_emit_failures
                     ~labels:[("keeper", meta.name)]
                     ();
                   Log.Keeper.warn

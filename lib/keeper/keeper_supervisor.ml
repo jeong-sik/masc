@@ -131,6 +131,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
          (Keeper_state_machine.transition_error_to_string err));
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_supervisor_cleanup_failures
+    ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
+  ();
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -529,7 +533,11 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
         | Agent_sdk.Hooks.Reject reason ->
             Log.Keeper.warn
               "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
-              meta.name reason)
+              meta.name reason;
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_supervisor_cleanup_failures
+              ~labels:[("keeper", meta.name); ("site", "reconcile_gate_rejected")]
+              ())
       ()
   in
   Log.Keeper.warn
@@ -644,7 +652,11 @@ let cleanup_dead_tombstone (ctx : _ context)
           ~event:(Keeper_lifecycle_events.Custom_event
                     { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
           entry.name "meta write failed, unregistered anyway" ();
-        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
+        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name;
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_supervisor_cleanup_failures
+          ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_write")]
+          ()
       end
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
@@ -653,7 +665,11 @@ let cleanup_dead_tombstone (ctx : _ context)
         ~event:(Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
         entry.name "meta missing" ();
-      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_supervisor_cleanup_failures
+        ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_missing")]
+        ()
   | Error err ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
@@ -663,7 +679,11 @@ let cleanup_dead_tombstone (ctx : _ context)
         entry.name
         (Printf.sprintf "meta read error: %s" err) ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
-        entry.name err
+        entry.name err;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_supervisor_cleanup_failures
+        ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_error")]
+        ()
 
 (** Cohort key from structured failure_reason ADT.
     #10584: delegates to [Keeper_registry.failure_reason_cohort_key] so a
@@ -909,11 +929,19 @@ let handle_crash_auto_pause (ctx : _ context)
    | Ok None ->
        Log.Keeper.warn
          "%s: %s pause: meta missing, cannot persist paused=true"
-         entry.name reason_tag
+         entry.name reason_tag;
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", entry.name); ("phase", "pause_meta_missing")]
+         ()
    | Error err ->
        Log.Keeper.warn
          "%s: %s pause read_meta failed: %s"
-         entry.name reason_tag err);
+         entry.name reason_tag err;
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", entry.name); ("phase", "pause_read_meta")]
+         ());
   Prometheus.inc_counter
     metric_name
     ~labels:[ ("keeper", entry.name) ]
@@ -1018,6 +1046,10 @@ let sweep_and_recover (ctx : _ context) =
     Log.Keeper.warn
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name msg;
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_supervisor_cleanup_failures
+      ~labels:[("keeper", entry.name); ("site", "force_watchdog_crash")]
+      ();
     if Keeper_registry.try_resolve_done entry (`Crashed msg) then begin
       ignore
         (Keeper_registry.dispatch_event_and_log
@@ -1196,7 +1228,11 @@ let sweep_and_recover (ctx : _ context) =
                   Log.Keeper.info "%s: stale paused meta pruned" name
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"
-                    name (Printexc.to_string exn))
+                    name (Printexc.to_string exn);
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_supervisor_cleanup_failures
+                    ~labels:[("keeper", name); ("site", "paused_meta_prune")]
+                    ())
            | _ -> ());
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause

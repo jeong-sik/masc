@@ -637,6 +637,9 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Prometheus.metric_keeper_session_cleanup_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_chat_store_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_observation_query_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_termination_threshold_breached |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_termination_batch |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_stale_broadcast_emit_failures |> int_of_float)
       in
       let tool_suffix =
         if tool_failures > 0

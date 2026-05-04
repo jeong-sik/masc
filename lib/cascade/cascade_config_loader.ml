@@ -252,6 +252,54 @@ let update_catalog_builder builder field value =
       in
       { builder with fallback_cascade }
 
+(* Detect fallback_cascade cycles in a freshly loaded catalog.
+
+   2026-05-05 fleet-stuck root cause: the operator-side cascade.toml
+   declared [big_three.fallback_cascade = "glm_coding_plan_only"] AND
+   [glm_coding_plan_only.fallback_cascade = "big_three"].  When the
+   GLM provider stalled, both cascades escalated to each other,
+   producing a silent 600s+ timeout chain with no operator-visible
+   reason.  This helper walks the fallback graph and emits a Prometheus
+   counter + WARN log per cycle entry point so a CI test or operator
+   alert can catch the same shape before it goes live. *)
+let detect_fallback_cycles (entries : catalog_entry list) :
+    string list list =
+  let by_name =
+    List.fold_left
+      (fun acc e -> StringMap.add e.name e acc)
+      StringMap.empty entries
+  in
+  let rec walk visited current =
+    match StringMap.find_opt current by_name with
+    | None -> None
+    | Some entry ->
+      (match entry.fallback_cascade with
+       | None -> None
+       | Some next when List.mem next visited ->
+         (* Cycle: trim [visited] to start at [next]. *)
+         let rec trim = function
+           | [] -> []
+           | x :: _ as l when String.equal x next -> List.rev l
+           | _ :: rest -> trim rest
+         in
+         Some (trim (current :: visited))
+       | Some next ->
+         walk (current :: visited) next)
+  in
+  List.filter_map
+    (fun entry -> walk [] entry.name)
+    entries
+  |> (* Deduplicate cycles up to rotation: sort each cycle and keep
+        unique sets so [A→B→A] and [B→A→B] count as one. *)
+     List.fold_left
+       (fun (seen, acc) cycle ->
+         let key = String.concat "|" (List.sort compare cycle) in
+         if List.mem key seen then (seen, acc)
+         else (key :: seen, cycle :: acc))
+       ([], [])
+  |> snd
+  |> List.rev
+
 let load_catalog ~config_path =
   match load_json config_path with
   | Error _ as err -> err
@@ -287,6 +335,20 @@ let load_catalog ~config_path =
                      fallback_cascade = builder.fallback_cascade;
                    })
       in
+      List.iter
+        (fun cycle ->
+          let entry = match cycle with x :: _ -> x | [] -> "?" in
+          Prometheus.inc_counter
+            Prometheus.metric_cascade_fallback_cycle_detected_total
+            ~labels:[("cascade", entry)] ();
+          Log.warn ~ctx:"CascadeConfig"
+            "fallback_cascade cycle detected at [%s]: %s — provider \
+             stalls in any participant will silently propagate through \
+             the entire loop (no escape).  Break the cycle by setting \
+             at least one fallback_cascade to a non-participating \
+             cascade (e.g. local_recovery) or removing the field."
+            entry (String.concat " → " (cycle @ [entry])))
+        (detect_fallback_cycles entries);
       Ok entries
   | Ok _ -> Ok []
 

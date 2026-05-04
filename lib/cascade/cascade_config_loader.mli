@@ -74,10 +74,28 @@ val is_deprecated_logical_profile_name : string -> bool
     system-only profiles that should remain editable/visible but must
     not appear in keeper-assignment UIs.
 
+    On a successful load this also walks the fallback graph and emits
+    [masc_cascade_fallback_cycle_detected_total] + a WARN log for each
+    cycle discovered (see {!detect_fallback_cycles}).
+
     Returns [Error _] when the file cannot be read or parsed. *)
 val load_catalog :
   config_path:string ->
   (catalog_entry list, string) result
+
+(** Pure helper: walk the [fallback_cascade] graph and return every
+    cycle as a list of cascade names in traversal order (entry point
+    first).  Cycles are deduplicated up to rotation so [A→B→A] and
+    [B→A→B] are reported once.
+
+    Cycles are silent failures: when every participant depends on a
+    stalled provider the cascade rotation never escapes the loop.
+    {!load_catalog} calls this automatically and surfaces results
+    through Prometheus + log; this function is exposed so tests and
+    CI gates can assert "no cycles in catalog" without re-walking the
+    JSON. *)
+val detect_fallback_cycles :
+  catalog_entry list -> string list list
 
 (** Load a named model list from a JSON config file.
 

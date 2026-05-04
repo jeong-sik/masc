@@ -109,7 +109,7 @@ export const FEATURES: FeatureDef[] = [
     id: 'multimodal',
     label: 'Multimodal',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
+      openai: '●', claude: '●', gemini: '●', deepseek: '○',
       qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '◐', codex_cli: '◐',
     },

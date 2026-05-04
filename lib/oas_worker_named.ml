@@ -290,7 +290,13 @@ let run_named
                  stream_idle_timeout_s =
                    (match per_provider_timeout_s with
                     | Some _ as timeout_s -> timeout_s
-                    | None -> stream_idle_timeout_s);
+                    | None ->
+                        Some
+                          (Option.value
+                             ~default:
+                               Env_config_keeper.KeeperKeepalive
+                               .stream_idle_timeout_sec
+                             stream_idle_timeout_s));
                  temperature;
                  max_idle_turns;
                  guardrails;

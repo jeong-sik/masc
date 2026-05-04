@@ -66,6 +66,13 @@ val fallback_cascade_for_unavailable_profile :
     failure is recoverable via [fallback_cascade] or [degraded_rotation].
     Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
     post-commit) that should not trigger same-turn escalation.
+
+    Status-code-aware rotation: raw API errors that are not wrapped in a MASC
+    internal error are also classified when a different cascade may succeed:
+    - [RateLimited] (non-hard-quota) → ["rate_limit"]
+    - [ServerError] with status >= 500 → ["server_error"]
+    - [AuthError] → ["auth_error"]
+
     Exposed for unit tests; production callers go through
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)

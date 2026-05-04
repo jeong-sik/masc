@@ -262,9 +262,35 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Oas_worker_named.No_tool_capable_provider _)
     | Some (Oas_worker_named.Accept_rejected _)
     | Some (Oas_worker_named.Admission_queue_rejected _)
-    | Some (Oas_worker_named.Ambiguous_post_commit _)
-    | None ->
+    | Some (Oas_worker_named.Ambiguous_post_commit _) ->
         None
+    | None ->
+        (* Status-code-aware cascade rotation: raw provider API errors that are
+           not wrapped in a MASC internal error (e.g. single-provider cascades
+           where OAS surfaces the error directly) should still trigger rotation
+           when a different cascade may succeed.
+
+           429 rate-limit (non-hard-quota): the current provider is throttled;
+           a different cascade/provider may have capacity.
+
+           5xx server errors: the provider is unhealthy or overloaded; a
+           different cascade may be healthy.
+
+           401/403 auth errors: the credential for this cascade is invalid; a
+           different cascade with different credentials may succeed.
+
+           Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
+           so only soft (non-hard-quota) rate limits reach this arm. *)
+        (match err with
+         | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+           when not (Oas_worker_named.sdk_error_is_hard_quota err) ->
+             Some "rate_limit"
+         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
+           when status >= 500 ->
+             Some "server_error"
+         | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
+             Some "auth_error"
+         | _ -> None)
 
 let normalized_cascade_name name =
   let trimmed = String.trim name in

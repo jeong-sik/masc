@@ -21,6 +21,31 @@ let with_cache_lock f =
 let invalidate_cache_entry path =
   with_cache_lock (fun () -> Hashtbl.remove config_cache path)
 
+(* 2026-05-05: load_catalog runs 7-10× per startup (snapshot, validation,
+   mcp_audit, dashboard cache warm-up, etc.).  Without dedup, every cycle
+   detected by [detect_fallback_cycles] re-emits the same WARN line on
+   each call → ~10 cascades × 10 phases = 100+ WARN lines per startup that
+   say the exact same thing.  We memo the last-warned cycle set per
+   config_path; the WARN fires only when the set changes (config edit or
+   first load).  Prometheus counter is incremented on every detection so
+   metrics stay honest.
+
+   Separate mutex from [config_cache_mu] to avoid lock-ordering issues if
+   the caller holds the cache lock during [load_catalog] dispatch. *)
+let cycle_warn_seen : (string, string) Hashtbl.t = Hashtbl.create 4
+let cycle_warn_mu = Mutex.create ()
+
+let with_cycle_warn_lock f =
+  Mutex.lock cycle_warn_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock cycle_warn_mu) f
+
+let cycle_set_key (cycles : string list list) : string =
+  cycles
+  |> List.map (fun cycle ->
+       cycle |> List.sort compare |> String.concat ",")
+  |> List.sort compare
+  |> String.concat "|"
+
 let ensure_materialized_json path =
   match Cascade_toml_materializer.ensure_materialized_json ~config_path:path with
   | Ok { wrote_json; _ } ->
@@ -335,20 +360,31 @@ let load_catalog ~config_path =
                      fallback_cascade = builder.fallback_cascade;
                    })
       in
+      let cycles = detect_fallback_cycles entries in
+      let key = cycle_set_key cycles in
+      let should_warn =
+        with_cycle_warn_lock (fun () ->
+          match Hashtbl.find_opt cycle_warn_seen config_path with
+          | Some k when String.equal k key -> false
+          | _ ->
+            Hashtbl.replace cycle_warn_seen config_path key;
+            true)
+      in
       List.iter
         (fun cycle ->
           let entry = match cycle with x :: _ -> x | [] -> "?" in
           Prometheus.inc_counter
             Prometheus.metric_cascade_fallback_cycle_detected_total
             ~labels:[("cascade", entry)] ();
-          Log.warn ~ctx:"CascadeConfig"
-            "fallback_cascade cycle detected at [%s]: %s — provider \
-             stalls in any participant will silently propagate through \
-             the entire loop (no escape).  Break the cycle by setting \
-             at least one fallback_cascade to a non-participating \
-             cascade (e.g. local_recovery) or removing the field."
-            entry (String.concat " → " (cycle @ [entry])))
-        (detect_fallback_cycles entries);
+          if should_warn then
+            Log.warn ~ctx:"CascadeConfig"
+              "fallback_cascade cycle detected at [%s]: %s — provider \
+               stalls in any participant will silently propagate through \
+               the entire loop (no escape).  Break the cycle by setting \
+               at least one fallback_cascade to a non-participating \
+               cascade (e.g. local_recovery) or removing the field."
+              entry (String.concat " → " (cycle @ [entry])))
+        cycles;
       Ok entries
   | Ok _ -> Ok []
 

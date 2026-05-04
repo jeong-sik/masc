@@ -98,7 +98,7 @@ function HarnessCaseStudy() {
               </tr>
             </thead>
             <tbody>
-              ${HARNESS_MODELS.map((hm, i) => html`
+              ${HARNESS_MODELS.map((hm) => html`
                 <tr key=${hm.id} class="pm-row-alt">
                   <td class="pm-td pm-td--mono font-semibold">${hm.id}</td>
                   <td class="pm-td t-micro t-meta">${hm.params}</td>

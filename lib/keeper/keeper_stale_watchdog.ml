@@ -437,6 +437,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  Keeper_registry.set_failure_reason ~base_path meta.name
                    (Some (Keeper_registry.Stale_termination_storm
                             { count = window_count }));
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_stale_termination_threshold_breached
+                   ~labels:[("keeper", meta.name)]
+                   ();
                  Log.Keeper.error
                    "%s: STALE-TERMINATION THRESHOLD BREACHED — %d \
                     terminations in last %.0fs (threshold=%d). \

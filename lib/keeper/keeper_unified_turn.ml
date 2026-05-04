@@ -1106,13 +1106,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   in
                   post_commit_failure_reason := Some failure_reason;
                   let err_preview = short_preview (Agent_sdk.Error.to_string err) in
-                  if EC.is_transient_network_error err then
+                  if EC.is_transient_network_error err then begin
+                    Prometheus.inc_counter
+                      Prometheus.metric_keeper_post_turn_wirein_failures
+                      ~labels:[("keeper", meta.name); ("site", "post_commit_transient")]
+                      ();
                     Log.Keeper.error
                       "%s: transient provider error after committed mutating tool call(s) [%s] — treating as integrity failure, skipping retry to prevent duplicate (error: %s)"
                       meta.name
                       (String.concat ", " committed_tools)
                       err_preview
-                  else
+                  end else
                     Log.Keeper.error
                       "%s: error after committed mutating tool call(s) [%s] — turn outcome is ambiguous and requires reconcile (error: %s)"
                       meta.name

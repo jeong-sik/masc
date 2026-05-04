@@ -832,14 +832,15 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
          meta.name ts post_id (fst base_cursor)
          (Option.value ~default:"" (snd base_cursor))
      | None ->
-       if final_events <> [] then
+       if final_events <> [] then begin
          Prometheus.inc_counter
            Prometheus.metric_keeper_observation_query_failures
            ~labels:[("keeper", meta.name); ("site", "cursor_stale")]
            ();
          Log.Keeper.warn
            "board cursor not updated for %s despite %d events processed"
-           meta.name (List.length final_events));
+           meta.name (List.length final_events)
+       end);
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

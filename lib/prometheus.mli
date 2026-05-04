@@ -730,7 +730,7 @@ val metric_keeper_usage_trust : string
 val metric_keeper_usage_anomaly_reason : string
 val metric_keeper_config_env_parse_failures : string
 val metric_keeper_post_turn_wirein_failures : string
-val metric_keeper_meta_read_failures : string
+(* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
 val metric_keeper_recurring_failures : string
 val metric_keeper_turn_cleanup_failures : string
 

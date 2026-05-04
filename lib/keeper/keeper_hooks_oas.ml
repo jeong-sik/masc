@@ -821,6 +821,10 @@ let emit_cost_event
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_metric_emit_dropped
+          ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
+          ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
           path (Printexc.to_string exn))
 
@@ -1365,6 +1369,10 @@ let make_hooks
              ~provider:summary.provider
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_lifecycle_callback_failures
+                ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
+                ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
         if is_keeper_board_write_tool_name tool_name then
@@ -1401,6 +1409,10 @@ let make_hooks
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_callback_failures
+          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
+          ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
         Agent_sdk.Hooks.Continue
@@ -1408,6 +1420,10 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_callback_failures
+          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
+          ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
         Agent_sdk.Hooks.Continue

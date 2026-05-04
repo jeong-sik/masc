@@ -169,7 +169,7 @@ let run_turn
         ~labels:[("keeper", meta.name); ("site", "tool_cleanup")]
         ();
       Log.Keeper.warn
-        "%s: keeper tool bundle raised: %s%s"
+        "%s: keeper tool bundle cleanup raised: %s%s"
         meta.name
         (Printexc.to_string e)
         (if String.equal backtrace "" then "" else "\n" ^ backtrace)

@@ -1049,8 +1049,10 @@ let metric_keeper_config_env_parse_failures =
   "masc_keeper_config_env_parse_failures_total"
 let metric_keeper_post_turn_wirein_failures =
   "masc_keeper_post_turn_wirein_failures_total"
-let metric_keeper_meta_read_failures =
-  "masc_keeper_meta_read_failures_total"
+(* metric_keeper_meta_read_failures defined earlier at line 473 (single
+   source of truth). Re-binding here would silently shadow without
+   changing behavior because the strings are identical, but it makes
+   the constant look like it has two declaration sites. *)
 let metric_keeper_recurring_failures =
   "masc_keeper_recurring_failures_total"
 let metric_keeper_turn_cleanup_failures =
@@ -1904,8 +1906,10 @@ let init () =
     "Config env var parse failures (non-integer values). Labels: var." Counter;
   add metric_keeper_post_turn_wirein_failures
     "Post-turn wire-in failures (autonomous, tool_emission_drain, multimodal, resilience). Labels: keeper, phase." Counter;
-  add metric_keeper_meta_read_failures
-    "Meta read failures after turn (none returned, read error). Labels: keeper, phase." Counter;
+  (* metric_keeper_meta_read_failures registered earlier in init() with
+     "labeled by keeper and site" — `add` is no-op when the name exists,
+     so re-registering with a divergent help/label description here was
+     silently dropped. Single registration kept. *)
   add metric_keeper_recurring_failures
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
   add metric_keeper_turn_cleanup_failures

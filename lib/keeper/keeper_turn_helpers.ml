@@ -121,6 +121,10 @@ let record_execution_receipt_gap
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_write_meta_failures
+        ~labels:[("keeper", meta.name); ("site", "receipt_coverage_gap")]
+        ();
       Log.Keeper.warn
         "keeper:%s pre-dispatch execution_receipt coverage gap append failed: %s"
         meta.name
@@ -261,6 +265,10 @@ let record_pre_dispatch_terminal_observation
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
       let error = Printexc.to_string exn in
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_write_meta_failures
+        ~labels:[("keeper", meta.name); ("site", "receipt_append")]
+        ();
       Log.Keeper.warn
         "keeper:%s pre-dispatch execution_receipt append failed: %s"
         meta.name error;

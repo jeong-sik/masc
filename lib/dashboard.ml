@@ -652,6 +652,8 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
 	        + (Prometheus.metric_total Prometheus.metric_keeper_approval_queue_failures |> int_of_float)
 	        + (Prometheus.metric_total Prometheus.metric_keeper_guards_failures |> int_of_float)
 	        + (Prometheus.metric_total Prometheus.metric_keeper_profile_load_failures |> int_of_float)
++ (Prometheus.metric_total Prometheus.metric_keeper_compact_audit_failures |> int_of_float)
++ (Prometheus.metric_total Prometheus.metric_keeper_fs_failures |> int_of_float)
 	        + (Prometheus.metric_total Prometheus.metric_keeper_recurring_failures |> int_of_float)
       in
       let tool_suffix =

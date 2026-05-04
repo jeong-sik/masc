@@ -478,6 +478,10 @@ let metric_keeper_guards_failures =
   "masc_keeper_guards_failures_total"
 let metric_keeper_profile_load_failures =
   "masc_keeper_profile_load_failures_total"
+let metric_keeper_compact_audit_failures =
+  "masc_keeper_compact_audit_failures_total"
+let metric_keeper_fs_failures =
+  "masc_keeper_fs_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1246,6 +1250,12 @@ let init () =
     Counter;
   add metric_keeper_profile_load_failures
     "Total keeper profile/TOML load failures, labeled by site"
+    Counter;
+  add metric_keeper_compact_audit_failures
+    "Total keeper compact audit failures (persist/prune/handle), labeled by keeper and site"
+    Counter;
+  add metric_keeper_fs_failures
+    "Total keeper filesystem operation failures (ensure_dir/save_atomic), labeled by path and site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

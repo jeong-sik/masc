@@ -22,15 +22,17 @@ module KeeperBootstrap = struct
 
   (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
   let stale_turn_seconds =
-    get_float ~default:3600.0 "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
+    get_float_nonneg ~default:3600.0
+      "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
 
   (** Max keeper meta files to scan during bootstrap *)
   let max_scan =
-    get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
+    get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
 
   (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
   let max_active_keepers =
-    get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+    get_int_nonneg ~default:10000
+      "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
@@ -75,11 +77,11 @@ end
 module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
   let max_file_bytes =
-    get_int ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
+    get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
   (** Number of rotated files to keep (default: 1, i.e. .1 only) *)
   let max_rotated_files =
-    get_int ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
+    get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
 end
 
 (** {1 Keeper Interesting Alert Configuration} *)
@@ -95,15 +97,15 @@ module KeeperAlert = struct
 
   (** Maximum alert body chars used for external fanout payloads *)
   let max_body_chars =
-    get_int ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
+    get_int_nonneg ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
 
   (** Retry count for each fanout channel (in addition to initial attempt) *)
   let max_retries =
-    get_int ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
+    get_int_nonneg ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
 
   (** Base retry delay in milliseconds (exponential backoff) *)
   let retry_base_delay_ms =
-    get_int ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
+    get_int_nonneg ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
 
   (** Board fanout configuration *)
   let board_enabled =

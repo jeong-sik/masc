@@ -1269,7 +1269,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                                        ();
                                      false
                                  | Error _ ->
-                                     (* Unknown acquisition error; abort retry conservatively. *)
+                                     (* Unknown acquisition error (not a
+                                        Semaphore_wait_timeout); abort retry
+                                        conservatively.  Logging the type would
+                                        require access to a polymorphic printer
+                                        that does not exist here; callers that
+                                        introduce new variants should wire one in. *)
+                                     Log.Keeper.warn
+                                       "%s: slot_yield: unexpected autonomous slot \
+                                        acquisition error; aborting degraded retry \
+                                        to %s"
+                                       meta.name next_execution_cascade_name;
                                      false)
                           in
                           if not can_retry then begin

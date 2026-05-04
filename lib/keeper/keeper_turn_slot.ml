@@ -552,6 +552,11 @@ let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
     (* 4. Re-enter the FIFO queue. *)
     let ticket = enqueue_autonomous_waiter ~keeper_name in
     state.autonomous_ticket := Some ticket;
+    (* Helper to consistently clear ticket bookkeeping. *)
+    let clear_ticket () =
+      drop_autonomous_waiter ~ticket;
+      state.autonomous_ticket := None
+    in
     let queue_entered_at = Time_compat.now () in
     (* 5. Wait for this keeper to reach head of the FIFO queue. *)
     match
@@ -559,8 +564,7 @@ let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
         ~started_at:queue_entered_at
     with
     | Error _ as e ->
-        drop_autonomous_waiter ~ticket;
-        state.autonomous_ticket := None;
+        clear_ticket ();
         e
     | Ok () ->
     (* 6. Reacquire the autonomous semaphore. *)
@@ -569,13 +573,11 @@ let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
         autonomous_turn_semaphore
     with
     | Error _ as e ->
-        drop_autonomous_waiter ~ticket;
-        state.autonomous_ticket := None;
+        clear_ticket ();
         e
     | Ok () ->
         state.acquired_autonomous := true;
-        drop_autonomous_waiter ~ticket;
-        state.autonomous_ticket := None;
+        clear_ticket ();
     (* 7. Reacquire the shared turn semaphore. *)
     match
       acquire_sem_bounded ~label:"turn" ~keeper_name ~channel_label
@@ -598,7 +600,11 @@ let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
         Ok new_semaphore_wait_ms
   end
 
-let with_keeper_turn_slot ~keeper_name ~channel f =
+(* Shared implementation for [with_keeper_turn_slot] and
+   [with_keeper_turn_slot_yieldable].  [make_result] is called with the
+   elapsed semaphore wait and the live slot state once all semaphores are
+   held; its return value becomes the [Ok] payload. *)
+let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -698,7 +704,11 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           slot_state.acquired_turn := true;
           let semaphore_wait_ms =
             int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-          Ok (f ~semaphore_wait_ms))
+          Ok (make_result ~semaphore_wait_ms slot_state))
+
+let with_keeper_turn_slot ~keeper_name ~channel f =
+  with_keeper_turn_slot_impl ~keeper_name ~channel
+    (fun ~semaphore_wait_ms _slot_state -> f ~semaphore_wait_ms)
 ;;
 
 (** Variant of [with_keeper_turn_slot] that also provides a
@@ -710,85 +720,12 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
     The [Fun.protect] cleanup still covers all paths: whether the body
     returns normally, raises, or the reacquisition fails partway through. *)
 let with_keeper_turn_slot_yieldable ~keeper_name ~channel f =
-  let is_autonomous =
-    match channel with
-    | Keeper_world_observation.Scheduled_autonomous -> true
-    | Keeper_world_observation.Reactive -> false
-  in
-  let channel_label = Keeper_world_observation.channel_to_string channel in
-  let t0 = Time_compat.now () in
-  let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
-  Log.Keeper.routine "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
-    keeper_name
-    channel_label
-    (Eio.Semaphore.get_value autonomous_turn_semaphore)
-    (Eio.Semaphore.get_value turn_semaphore)
-    queue_depth;
-  Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
-    ~labels:[("keeper", keeper_name); ("channel", channel_label)]
-    (float_of_int queue_depth);
-  let slot_state =
-    {
-      acquired_autonomous = ref false;
-      acquired_reactive = ref false;
-      acquired_turn = ref false;
-      autonomous_ticket = ref None;
-    }
-  in
-  Fun.protect
-    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
-    (fun () ->
-      let autonomous_result =
-        if is_autonomous
-        then begin
-          maybe_yield_for_fairness ~keeper_name;
-          let ticket = enqueue_autonomous_waiter ~keeper_name in
-          slot_state.autonomous_ticket := Some ticket;
-          let queue_entered_at = Time_compat.now () in
-          match
-            wait_for_autonomous_queue_head ~keeper_name ~ticket
-              ~started_at:queue_entered_at
-          with
-          | Error _ as e -> e
-          | Ok () ->
-            match acquire_sem_bounded ~label:"autonomous" ~keeper_name ~channel_label
-                    autonomous_turn_semaphore with
-            | Error _ as e -> e
-            | Ok () ->
-              slot_state.acquired_autonomous := true;
-              drop_autonomous_waiter ~ticket;
-              slot_state.autonomous_ticket := None;
-              Ok ()
-        end
-        else Ok ()
+  with_keeper_turn_slot_impl ~keeper_name ~channel
+    (fun ~semaphore_wait_ms slot_state ->
+      let yield_fn () =
+        yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel slot_state
       in
-      match autonomous_result with
-      | Error _ as e -> e
-      | Ok () ->
-        let reactive_result =
-          if is_autonomous then Ok ()
-          else
-            match acquire_sem_bounded ~label:"reactive" ~keeper_name ~channel_label
-                    reactive_turn_semaphore with
-            | Error _ as e -> e
-            | Ok () ->
-              slot_state.acquired_reactive := true;
-              Ok ()
-        in
-        match reactive_result with
-        | Error _ as e -> e
-        | Ok () ->
-        match acquire_sem_bounded ~label:"turn" ~keeper_name ~channel_label
-                turn_semaphore with
-        | Error _ as e -> e
-        | Ok () ->
-          slot_state.acquired_turn := true;
-          let semaphore_wait_ms =
-            int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-          let yield_fn () =
-            yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel slot_state
-          in
-          Ok (f ~semaphore_wait_ms ~yield_and_reacquire:yield_fn))
+      f ~semaphore_wait_ms ~yield_and_reacquire:yield_fn)
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =

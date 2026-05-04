@@ -2,15 +2,26 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import {
-  createAnchoredThreadRailStore,
-  type AnchoredThread,
-  type ThreadKind,
-} from './anchored-thread-rail-store'
-import {
   IDE_MOCK_FILE_PATH,
   IDE_MOCK_RELATED_LINE,
   IDE_MOCK_THREADS,
 } from './ide-mock-data'
+import type { AnchoredThread, ThreadKind } from './anchored-thread-rail-store'
+
+interface BoardPost {
+  readonly id: string
+  readonly title: string
+  readonly body: string
+  readonly author_identity: string
+  readonly votes: number
+  readonly comment_count: number
+  readonly created_at_iso: string
+  readonly hearth?: string | null
+}
+
+interface BoardListResponse {
+  readonly posts?: ReadonlyArray<BoardPost>
+}
 
 const KIND_LABEL: Record<ThreadKind, string> = {
   flag: 'FLAG',
@@ -28,25 +39,55 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   suggest: 'var(--color-status-warn, var(--warn))',
 }
 
+const FALLBACK_POSTS: ReadonlyArray<BoardPost> = [
+  { id: 'p-mock-1', title: '', body: "flag: tool schema edge we're seeing in prod - keep tools[] and tool_choice paired.", author_identity: 'nick0cave', votes: 2, comment_count: 2, created_at_iso: '2026-05-02T01:41:18Z' },
+  { id: 'p-mock-2', title: '', body: 'Should normalizeTools also handle tool_choice=none? feels like an edge case.', author_identity: 'operator', votes: 0, comment_count: 1, created_at_iso: '2026-05-02T01:39:02Z' },
+  { id: 'p-mock-3', title: '', body: 'Budget guard reads well. Ship it when tests pass.', author_identity: 'operator', votes: 1, comment_count: 0, created_at_iso: '2026-05-02T01:22:41Z' },
+  { id: 'p-mock-4', title: '', body: 'telemetry event name needs to match the lifeline schema - will rename later.', author_identity: 'operator', votes: 0, comment_count: 0, created_at_iso: '2026-05-02T01:18:04Z' },
+  { id: 'p-mock-5', title: '', body: 'Could you collapse the rest-spread into a small helper? Same pattern appears in provider.ts.', author_identity: 'masc-improver', votes: 0, comment_count: 3, created_at_iso: '2026-05-02T01:14:52Z' },
+]
+
+async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
+  try {
+    const res = await fetch('/api/v1/board?limit=20&exclude_system=true&exclude_automation=true')
+    if (!res.ok) return FALLBACK_POSTS
+    const data = await res.json()
+    if (Array.isArray(data) && data.length > 0) return data as BoardPost[]
+    return FALLBACK_POSTS
+  } catch {
+    return FALLBACK_POSTS
+  }
+}
+
+function parseIsoToMs(iso: string): number {
+  return new Date(iso).getTime()
+}
+
+function boardKindFromPost(post: BoardPost): ThreadKind {
+  const body = (post.body ?? '').toLowerCase()
+  const title = (post.title ?? '').toLowerCase()
+  const text = `${title} ${body}`
+  if (text.includes('approve') || text.includes('ship it') || text.includes('looks good')) return 'approve'
+  if (text.includes('flag') || text.includes('blocker') || text.includes('race condition')) return 'flag'
+  if (text.includes('suggest') || text.includes('could you') || text.includes('recommend')) return 'suggest'
+  if (text.includes('?') || text.includes('question') || text.includes('should')) return 'question'
+  return 'note'
+}
+
 export function IdeConversationRailMock() {
-  const railStore = useMemo(() => {
-    const store = createAnchoredThreadRailStore(IDE_MOCK_FILE_PATH)
-    store.seed(IDE_MOCK_THREADS)
-    return store
+  const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(FALLBACK_POSTS)
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBoardPosts().then(data => { if (!cancelled) setPosts(data) })
+    return () => { cancelled = true }
   }, [])
-  const [, forceRender] = useState(0)
-
-  useEffect(() => railStore.subscribe(() => forceRender(tick => tick + 1)), [railStore])
-
-  const threads = railStore.visibleThreads()
-  const focusedId = railStore.focusedThreadId()
-  const relatedThreads = railStore.threadsForLine(IDE_MOCK_RELATED_LINE)
-  const relatedFile = IDE_MOCK_FILE_PATH.split('/').at(-1) ?? IDE_MOCK_FILE_PATH
 
   return html`
     <div
       role="region"
-      aria-label="CONVERSATION (RFC 0021 anchored thread rail mock)"
+      aria-label="CONVERSATION"
       style=${{
         display: 'flex',
         flexDirection: 'column',
@@ -66,20 +107,7 @@ export function IdeConversationRailMock() {
         }}
       >
         <span>CONVERSATION</span>
-        <span>${threads.length}</span>
-      </div>
-      <div
-        style=${{
-          display: 'flex',
-          gap: 'var(--sp-2)',
-          padding: 'var(--sp-2) var(--sp-3) 0',
-          color: 'var(--color-fg-muted)',
-          fontSize: 'var(--fs-11)',
-        }}
-      >
-        <span>${relatedFile}:${IDE_MOCK_RELATED_LINE}</span>
-        <span>·</span>
-        <span>${relatedThreads.length} related</span>
+        <span>${posts.length}</span>
       </div>
       <ol
         style=${{
@@ -92,26 +120,26 @@ export function IdeConversationRailMock() {
           overflow: 'auto',
         }}
       >
-        ${threads.map(thread => MockThreadCard(
-          thread,
-          focusedId === thread.id,
-          () => railStore.focusThread(thread.id),
+        ${posts.map(post => PostCard(
+          post,
+          focusedId === post.id,
+          () => setFocusedId(focusedId === post.id ? null : post.id),
         ))}
       </ol>
     </div>
   `
 }
 
-function MockThreadCard(thread: AnchoredThread, focused: boolean, onFocus: () => void) {
-  const kindColor = KIND_TOKEN[thread.kind]
-  const keeperSlot = keeperHueIndex(thread.author_keeper_id)
+function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
+  const kind = boardKindFromPost(post)
+  const kindColor = KIND_TOKEN[kind]
+  const keeperSlot = keeperHueIndex(post.author_identity)
   const keeperColor = `var(--color-keeper-${keeperSlot}-glow, var(--k-${keeperSlot}))`
+  const createdMs = parseIsoToMs(post.created_at_iso)
+  const bodyText = post.body || post.title || ''
+
   return html`
-    <li
-      style=${{
-        display: 'block',
-      }}
-    >
+    <li style=${{ display: 'block' }}>
       <button
         type="button"
         aria-current=${focused ? 'true' : undefined}
@@ -132,34 +160,25 @@ function MockThreadCard(thread: AnchoredThread, focused: boolean, onFocus: () =>
         }}
       >
         <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[thread.kind]}</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${thread.author_keeper_id}</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(thread.created_ms)}</span>
+          <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[kind]}</span>
+          <span style=${{ fontSize: 'var(--fs-11)', color: keeperColor }}>${post.author_identity}</span>
+          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(createdMs)}</span>
         </div>
-        <div style=${{ display: 'flex', gap: 'var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
-          <span>${anchorLabel(thread)}</span>
-          ${thread.anchor.symbol_hint
-            ? html`<span>·</span><span>${thread.anchor.symbol_hint}</span>`
-            : null}
-        </div>
-        <p style=${{ font: 'var(--type-body)', color: 'var(--color-fg-secondary)', margin: 0 }}>${thread.body}</p>
+        ${post.hearth ? html`
+          <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
+            ${post.hearth}
+          </div>
+        ` : null}
+        <p style=${{ font: 'var(--type-body)', color: 'var(--color-fg-secondary)', margin: 0 }}>${bodyText}</p>
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
-          ${thread.reply_count > 0 ? `${thread.reply_count} replies · ` : ''}${thread.resolved ? 'resolved' : 'open'}
+          ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${post.votes > 0 ? `${post.votes} votes` : ''}
         </div>
       </button>
     </li>
   `
 }
 
-function anchorLabel(thread: AnchoredThread): string {
-  const fileName = thread.anchor.file_path.split('/').at(-1) ?? thread.anchor.file_path
-  const start = thread.anchor.line_start
-  const end = thread.anchor.line_end
-  if (start === null || end === null) return fileName
-  if (start === end) return `${fileName}:${start}`
-  return `${fileName}:${start}-${end}`
-}
-
 function formatThreadTime(ms: number): string {
+  if (!Number.isFinite(ms)) return ''
   return new Date(ms).toISOString().slice(11, 19)
 }

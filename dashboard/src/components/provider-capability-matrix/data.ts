@@ -987,6 +987,15 @@ export function supportHeatBucket(v: FeatureSupport): string {
   }
 }
 
+export function riskBucket(risk: RiskLevel): string {
+  switch (risk) {
+    case 'C': return 'z4'
+    case 'H': return 'z3'
+    case 'M': return 'z2'
+    case 'L': return 'z1'
+  }
+}
+
 export function riskTone(risk: RiskLevel): 'bad' | 'warn' | 'neutral' | 'info' {
   switch (risk) {
     case 'C': return 'bad'
@@ -1005,7 +1014,18 @@ export function riskLabel(risk: RiskLevel): string {
   }
 }
 
-export function impactTone(impact: 'high' | 'medium' | 'low' | 'correct'): 'bad' | 'warn' | 'neutral' | 'info' {
+export type WiringImpact = 'high' | 'medium' | 'low' | 'correct'
+
+export function impactBucket(impact: WiringImpact): string {
+  switch (impact) {
+    case 'high': return 'z4'
+    case 'medium': return 'z2'
+    case 'low': return 'z1'
+    case 'correct': return 'z0'
+  }
+}
+
+export function impactTone(impact: WiringImpact): 'bad' | 'warn' | 'neutral' | 'info' {
   switch (impact) {
     case 'high': return 'bad'
     case 'medium': return 'warn'

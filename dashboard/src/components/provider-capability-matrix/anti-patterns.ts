@@ -2,10 +2,9 @@
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { StatusChip } from '../common/status-chip'
 import {
   ANTI_PATTERNS,
-  riskTone,
+  riskBucket,
   riskLabel,
   categoryLabel,
   categoryColor,
@@ -75,8 +74,8 @@ export function AntiPatternList() {
                 </td>
                 <td class="pm-td t-meta">${ap.description}</td>
                 <td class="pm-td t-caption">${ap.location}</td>
-                <td class="pm-td">
-                  <${StatusChip} tone=${riskTone(ap.risk)}>${riskLabel(ap.risk)}<//>
+                <td class="pm-td pm-td--center">
+                  <span class="pm-cell-badge ${riskBucket(ap.risk)}">${riskLabel(ap.risk)}</span>
                 </td>
                 <td class="pm-td">
                   <span class="chip sm ${sourceColor(ap.source)}">

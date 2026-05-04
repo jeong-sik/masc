@@ -207,3 +207,22 @@
   background: var(--color-accent-brass);
   font-weight: 600;
 }
+
+/* ════════ WIRING GAPS ROW BUCKETS ════════
+   Row-level heatmap for wiring gap severity.
+   Reuses z0–z4 thermal tokens with row-appropriate opacity. */
+.pm-wg-row--z4 {
+  background: rgb(var(--brass-glow) / .15);
+}
+.pm-wg-row--z4 td {
+  font-weight: 500;
+}
+.pm-wg-row--z2 {
+  background: rgb(var(--brass-glow) / .07);
+}
+.pm-wg-row--z1 {
+  background: var(--color-bg-hover);
+}
+.pm-wg-row--z0 {
+  opacity: .5;
+}

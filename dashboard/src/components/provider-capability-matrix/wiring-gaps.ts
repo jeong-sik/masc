@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { StatusChip } from '../common/status-chip'
 import { StatTile } from '../common/stat-tile'
-import { WIRING_GAPS, impactTone } from './data'
+import { WIRING_GAPS, impactTone, impactBucket } from './data'
 
 const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, correct: 3 }
 const severityRank = (impact: string): number => SEVERITY_ORDER[impact] ?? 99
@@ -55,7 +55,7 @@ export function WiringGaps() {
           <tbody>
             ${gaps.map((gap, i) => {
               return html`
-                <tr key=${gap.id} class="pm-row-alt">
+                <tr key=${gap.id} class="pm-wg-row pm-wg-row--${impactBucket(gap.impact)}">
                   <td class="pm-td pm-td--mono t-dim">${gap.id}</td>
                   <td class="pm-td font-semibold">${gap.provider}</td>
                   <td class="pm-td t-meta">${gap.capability}</td>

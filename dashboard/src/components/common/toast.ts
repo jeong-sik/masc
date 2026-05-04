@@ -29,7 +29,7 @@ const toasts = signal<Toast[]>([])
     pick 5 here because masc-mcp often bursts 3-4 "sidecar started"
     toasts on bulk Start All, and 5 leaves headroom for one incidental
     toast on top. */
-export const MAX_VISIBLE_TOASTS = 5
+const MAX_VISIBLE_TOASTS = 5
 
 function enqueueToast(toast: Toast) {
   const current = toasts.value

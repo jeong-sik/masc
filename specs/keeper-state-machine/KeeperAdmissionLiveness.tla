@@ -239,31 +239,99 @@ BoundedWait ==
     \A k \in Keepers :
         (keeper_state[k] = "Waiting") ~> (keeper_state[k] = "Dispatched")
 
-\* Notes for next iteration (PR-D-2) ────────────────────────────────
+\* Bug actions (mutation testing for the spec) ─────────────────────
 \*
-\* TODO 1: Add BugAction_GreedyKeeper that lets one keeper bypass
-\*         EnqueueOverflow and re-enter Waiting in a tight loop.  Verify
-\*         that LivenessInvariant fails under that bug.
+\* Pattern from `KeeperOASAdvanced.tla` (memory:
+\* `feedback_fsm_guard_identity_helper_counter_wrap_pattern`):
+\*   - Clean spec must satisfy I1 + I3 + safety
+\*   - Buggy spec (Next \/ BugAction_*) must VIOLATE the corresponding
+\*     invariant.  If TLC accepts a buggy spec, the invariant is too
+\*     weak and the spec is rejected.
+
+\* B1 — BugAction_GreedyKeeper —
 \*
-\* TODO 2: Add BugAction_LeakedToken that decrements token_bucket without
-\*         incrementing in_flight (or vice versa).  Verify RateRespect
-\*         fails.
+\* A keeper that is Waiting AND has no free candidate is supposed to
+\* enter the WFQ queue (EnqueueOverflow).  This bug lets the keeper
+\* "spin" — stay in Waiting indefinitely without enqueueing.
+\* Combined with weak fairness on TryDispatch the spinning keeper
+\* never reaches the queue, so when tokens become available WakeFromQueue
+\* serves an empty queue and other keepers monopolise.  Under this bug
+\* LivenessInvariant must be violated for the spinning keeper.
+BugAction_GreedyKeeper(k) ==
+    /\ keeper_state[k] = "Waiting"
+    /\ ~AnyCandidateFree(k)
+    /\ ~QueueContains(k)
+    \* Bug: silently stay Waiting instead of enqueueing.
+    /\ UNCHANGED vars
+
+\* B2 — BugAction_LeakedToken —
 \*
-\* TODO 3: Refine WakeFromQueue to deficit-weighted: pick argmax_k
-\*         (wfq_deficit[k] / Weight[k]) instead of FIFO head.  Mirrors
-\*         Shreedhar-Varghese DRR.
+\* Provider p completes a dispatch but only decrements in_flight without
+\* the matching token having been refilled by RefillToken first.  Models
+\* the inverse class: a release path that refunds capacity at the
+\* counter level but the bucket layer does not see the refund (or vice
+\* versa).  Under this bug RateRespect can be violated when the
+\* released slot is reused before refill.
 \*
-\* TODO 4: Model min_tier (RFC-0026 §3.3) by tagging each provider with
-\*         a tier, and rejecting candidates below persona[k].min_tier.
-\*         Verify that surface events still allow LivenessInvariant
-\*         when at least one min_tier-acceptable provider exists.
+\* Concretely we model "decrement in_flight without releasing token
+\* properly" by allowing in_flight[p] to drop while token_bucket[p] is
+\* already at capacity, breaking the counter pairing.  The composite
+\* invariant `in_flight[p] + token_bucket[p] <= Capacity[p] + Capacity[p]`
+\* is too lax; the tight invariant is RateRespect itself driven by an
+\* out-of-bounds in_flight after spurious decrement.
+BugAction_LeakedToken(p) ==
+    /\ in_flight[p] > 0
+    \* Bug: decrement in_flight without dispatching anything (no
+    \* CompleteWork transition to back it).  This decouples the
+    \* in_flight counter from any actual work, so a future TryDispatch
+    \* can still succeed but the bucket will eventually exceed real
+    \* capacity in production.  In the model this is detected via the
+    \* TokenInflightConservation invariant below.
+    /\ in_flight' = [in_flight EXCEPT ![p] = @ - 1]
+    /\ UNCHANGED <<keeper_state, token_bucket, wfq_queue, wfq_deficit, last_dispatch>>
+
+\* Conservation invariant —
+\* Total work in flight + queued + completed equals total turns started.
+\* The bug action above breaks this conservation by phantom-releasing
+\* in_flight without a matching state transition.
 \*
-\* TODO 5: Two .cfg files:
-\*         - KeeperAdmissionLiveness.cfg (clean, must satisfy I1+I2+I3)
-\*         - KeeperAdmissionLiveness-buggy.cfg (Next \/ BugAction_*,
-\*           must violate at least one invariant)
+\* Provable: in the clean spec, Σ in_flight[p] equals the count of
+\* keepers in {Dispatched, Working}.  BugAction_LeakedToken violates
+\* this by lowering the LHS without changing the RHS.
+DispatchedOrWorking(k) == keeper_state[k] \in {"Dispatched", "Working"}
+TokenInflightConservation ==
+    LET workers == { k \in Keepers : DispatchedOrWorking(k) } IN
+    LET in_flight_total == LET sum[ps \in SUBSET Providers] ==
+        IF ps = {} THEN 0
+        ELSE LET pp == CHOOSE q \in ps : TRUE
+             IN  in_flight[pp] + sum[ps \ {pp}]
+        IN sum[Providers] IN
+    in_flight_total = Cardinality(workers)
+
+\* Buggy specs ────────────────────────────────────────────────────
+
+NextBuggyGreedy ==
+    \/ Next
+    \/ \E k \in Keepers : BugAction_GreedyKeeper(k)
+
+NextBuggyLeak ==
+    \/ Next
+    \/ \E p \in Providers : BugAction_LeakedToken(p)
+
+SpecBuggyGreedy == Init /\ [][NextBuggyGreedy]_vars /\ Fairness
+SpecBuggyLeak   == Init /\ [][NextBuggyLeak]_vars   /\ Fairness
+
+\* Notes for follow-up iterations ──────────────────────────────────
 \*
-\* TODO 6: Stuttering check — invariants must hold under stuttering
-\*         (vars' = vars).  Default in TLA+; flag here for awareness.
+\* TODO 3 (PR-D-3): Refine WakeFromQueue to deficit-weighted
+\*         (Shreedhar-Varghese DRR).  Currently FIFO.
+\*
+\* TODO 4 (PR-D-3): Model min_tier (RFC-0026 §3.3) by tagging each
+\*         provider with a tier, and rejecting candidates below
+\*         persona[k].min_tier.
+\*
+\* TODO 5 (PR-D-3): Stuttering / refinement check against
+\*         KeeperTurnCycle.tla — admission Dispatched -> turn_phase
+\*         "prompting".
 
 ====

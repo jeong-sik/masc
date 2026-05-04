@@ -300,6 +300,10 @@ let wakeup_relevant_keeper_for_board_signal
   let selected, dropped = select_board_wakeup_candidates candidates in
   selected |> List.iter (fun (meta, reason) -> wake_meta meta reason);
   if dropped > 0 then
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_keepalive_signal_failures
+      ~labels:[("site", "board_capped")]
+      ();
     Log.Keeper.warn
       "board signal wakeup capped: dropped=%d post=%s generic_limit=%d total_limit=%d"
       dropped
@@ -387,6 +391,10 @@ let dispatch_keepalive_event_with_audit
      with
      | Ok _ -> ()
      | Error err ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_keepalive_signal_failures
+           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
+           ();
          Log.Keeper.warn
            "%s: keepalive late-event dispatch rejected: %s"
            keeper_name

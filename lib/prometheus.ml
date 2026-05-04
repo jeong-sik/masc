@@ -482,6 +482,18 @@ let metric_keeper_compact_audit_failures =
   "masc_keeper_compact_audit_failures_total"
 let metric_keeper_fs_failures =
   "masc_keeper_fs_failures_total"
+let metric_keeper_crash_persistence_failures =
+  "masc_keeper_crash_persistence_failures_total"
+let metric_keeper_generation_lineage_failures =
+  "masc_keeper_generation_lineage_failures_total"
+let metric_keeper_keepalive_signal_failures =
+  "masc_keeper_keepalive_signal_failures_total"
+let metric_keeper_meta_json_failures =
+  "masc_keeper_meta_json_failures_total"
+let metric_keeper_tools_oas_failures =
+  "masc_keeper_tools_oas_failures_total"
+let metric_keeper_turn_up_update_failures =
+  "masc_keeper_turn_up_update_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1256,6 +1268,24 @@ let init () =
     Counter;
   add metric_keeper_fs_failures
     "Total keeper filesystem operation failures (ensure_dir/save_atomic), labeled by path and site"
+    Counter;
+  add metric_keeper_crash_persistence_failures
+    "Total keeper crash/sp persistence write failures, labeled by site"
+    Counter;
+  add metric_keeper_generation_lineage_failures
+    "Total keeper generation lineage failures (index append/manifest save), labeled by keeper and site"
+    Counter;
+  add metric_keeper_keepalive_signal_failures
+    "Total keeper keepalive signal failures (board capped/late-event rejected), labeled by keeper and site"
+    Counter;
+  add metric_keeper_meta_json_failures
+    "Total keeper meta JSON failures (seed parse/unknown keys), labeled by site"
+    Counter;
+  add metric_keeper_tools_oas_failures
+    "Total keeper OAS tool failures (blocked/error result/deadlock), labeled by tool and site"
+    Counter;
+  add metric_keeper_turn_up_update_failures
+    "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), labeled by keeper and site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

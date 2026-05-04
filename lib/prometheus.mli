@@ -203,6 +203,12 @@ val metric_keeper_guards_failures : string
 val metric_keeper_profile_load_failures : string
 val metric_keeper_compact_audit_failures : string
 val metric_keeper_fs_failures : string
+val metric_keeper_crash_persistence_failures : string
+val metric_keeper_generation_lineage_failures : string
+val metric_keeper_keepalive_signal_failures : string
+val metric_keeper_meta_json_failures : string
+val metric_keeper_tools_oas_failures : string
+val metric_keeper_turn_up_update_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string

@@ -193,7 +193,7 @@ tbody tr:nth-child(even) {
 }
 
 tbody tr:hover {
-  background: rgb(255 255 255 / 0.05);
+  background: var(--hover-overlay-strong);
 }
 
 #app > div > header {

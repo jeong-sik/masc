@@ -37,7 +37,7 @@
 }
 .ll-label .ll-hb {
   width: 6px; height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--brass-1);
   box-shadow: 0 0 6px rgb(var(--brass-glow) / .7);
   animation: anim-heartbeat 1.4s var(--ease-inout) infinite;
@@ -180,7 +180,7 @@
   right: 2px;
   flex: 0 0 auto;
   width: 6px; height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--brass-1);
   box-shadow: 0 0 8px rgb(var(--brass-glow) / .8);
   animation: anim-heartbeat 1.4s var(--ease-inout) infinite;

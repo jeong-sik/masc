@@ -68,6 +68,7 @@
   --fs-20: 20px;
   --fs-28: 28px;
   --fs-36: 36px;
+  --fs-56: 56px;
   --lh-tight: 1.2;
   --lh-body: 1.45;
   --lh-loose: 1.6;
@@ -92,9 +93,6 @@
   --r-1: 3px;
   --r-2: 5px;
   --r-3: 8px;
-  --r-4: 12px;
-  --r-5: 20px;
-  --r-6: 28px;
   --t-fast: 120ms;
   --t-med: 200ms;
   --t-slow: 360ms;
@@ -117,6 +115,7 @@
   --radius-md: 6px;
   --radius-lg: 12px;
   --radius-pill: 999px;
+  --radius-circle: 50%;
   --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
   --font-body: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
   --font-ui: 'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
@@ -363,9 +362,12 @@
   --shadow-glow: 0 0 20px var(--accent-glow);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
   --shadow-ring: inset 0 0 0 1px rgba(196, 162, 101, 0.25);
+  --shadow-cmd-palette: 0 12px 40px rgb(0 0 0 / .6);
+  --shadow-drawer-left: -8px 0 24px rgb(0 0 0 / .4);
   --focus-ring: 0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25);
   --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
   --color-hover-overlay: rgb(255 255 255 / .03);
+  --color-hover-overlay-strong: rgb(255 255 255 / .05);
   --color-active-overlay: rgb(0 0 0 / .25);
   --pressed-scale: 0.97;
   --hover-lift: -1px;

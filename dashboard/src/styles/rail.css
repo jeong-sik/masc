@@ -120,7 +120,7 @@
 }
 .tl-dot {
   position: absolute;
-  width: 7px; height: 7px; border-radius: 50%;
+  width: 7px; height: 7px; border-radius: var(--radius-circle);
   top: 50%; transform: translate(-50%, -50%);
   cursor: pointer;
   border: 1px solid rgb(0 0 0 / 0.3);

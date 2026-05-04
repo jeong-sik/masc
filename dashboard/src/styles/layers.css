@@ -38,7 +38,7 @@
 }
 .layer-toggle:hover { color: var(--color-fg-primary); background: var(--color-bg-hover); }
 .layer-toggle .glyph {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 10px; height: 10px; border-radius: var(--radius-circle);
   background: var(--color-fg-disabled);
   transition: all var(--t-fast) var(--ease);
 }
@@ -75,7 +75,7 @@
 }
 .layer-opacity input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 10px; height: 10px; border-radius: var(--radius-circle);
   background: var(--brass-1); cursor: pointer;
   box-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
 }
@@ -272,7 +272,7 @@ body[data-explode="1"] .lyr::before {
 }
 .approve-stamp .stamp-glyph {
   font-family: var(--font-mono);
-  font-size: 56px;
+  font-size: var(--fs-56);
   font-weight: var(--fw-bold);
   line-height: 1;
   opacity: 0.08;
@@ -316,7 +316,7 @@ body[data-explode="1"] .lyr::before {
   content: "";
   position: absolute; left: -10px; top: 7px;
   width: 6px; height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--stalled);
   box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6);
 }

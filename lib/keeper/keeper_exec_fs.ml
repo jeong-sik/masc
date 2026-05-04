@@ -94,7 +94,7 @@ let handle_keeper_fs_read
        container's mount restrictions are the load-bearing isolation.
        The host containment check above remains as defense-in-depth. *)
     if Keeper_docker_read.should_route_read ~meta then
-      let timeout_sec = 30.0 in
+      let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Fs () in
       match
         Keeper_docker_read.read_file_in_container ?turn_sandbox_factory ~config ~meta
           ~host_path:target ~max_bytes ~timeout_sec ()
@@ -263,7 +263,7 @@ let handle_keeper_fs_edit
                   | Some runtime ->
                     Keeper_turn_sandbox_runtime.overwrite_file runtime
                       ~host_path:target ~content:updated
-                      ~timeout_sec:30.0 ()
+                      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Fs ()) ()
                   | None ->
                     Keeper_fs.save_atomic target updated
                 in
@@ -320,10 +320,10 @@ let handle_keeper_fs_edit
            (match mode with
             | Append ->
               Keeper_turn_sandbox_runtime.append_file runtime
-                ~host_path:target ~content ~timeout_sec:30.0 ()
+                ~host_path:target ~content ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Fs ()) ()
             | Overwrite ->
               Keeper_turn_sandbox_runtime.overwrite_file runtime
-                ~host_path:target ~content ~timeout_sec:30.0 ()
+                ~host_path:target ~content ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Fs ()) ()
             | Patch -> Ok ())
          | None ->
            (match mode with

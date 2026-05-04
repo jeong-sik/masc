@@ -380,7 +380,7 @@ let keeper_context_status_json
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:true
-      ~config ~meta ~timeout_sec:3.0 ~verbose:false ()
+      ~config ~meta ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Memory_audit ()) ~verbose:false ()
   in
   Yojson.Safe.to_string
     (`Assoc

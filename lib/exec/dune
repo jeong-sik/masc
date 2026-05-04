@@ -5,4 +5,4 @@
  (name masc_exec)
  (public_name masc_mcp.masc_exec)
  (wrapped true)
- (libraries masc_process masc_core eio unix yojson re))
+ (libraries masc_process masc_core masc_config eio unix yojson re))

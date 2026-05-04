@@ -505,14 +505,11 @@ val dispatch_event_and_log :
   base_path:string -> string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
-(** [dispatch_event_unit] is a convenience wrapper around
-    [dispatch_event_and_log] that discards the result, returning [unit].
-    Transition failures are already logged and counted by the underlying
-    [dispatch_event] call chain; this replaces [ignore (dispatch_event_and_log ...)]
-    call sites. *)
+(** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
+    on [Error] instead of returning the result. Replaces [ignore (...)] call sites
+    that previously swallowed transition errors silently. *)
 val dispatch_event_unit :
   base_path:string -> string -> Keeper_state_machine.event -> unit
-
 (** Like [dispatch_event_with_audit], but logs and emits a Prometheus
     counter on [Error]. *)
 val dispatch_event_with_audit_and_log :

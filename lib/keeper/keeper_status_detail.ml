@@ -957,7 +957,7 @@ let handle_keeper_status ctx args : tool_result =
          let sandbox_preflight =
            match
              effective_sandbox_image,
-             Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+             Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()) ()
              |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
            with
            | Some _, Some preflight -> Some preflight
@@ -966,7 +966,7 @@ let handle_keeper_status ctx args : tool_result =
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
-             ~config:ctx.config ~meta:m ~timeout_sec:5.0 ~verbose:false ()
+             ~config:ctx.config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
          in
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m

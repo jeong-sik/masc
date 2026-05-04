@@ -707,13 +707,9 @@ val metric_keeper_config_env_parse_failures : string
 val metric_keeper_post_turn_wirein_failures : string
 val metric_keeper_meta_read_failures : string
 val metric_keeper_recurring_failures : string
-<<<<<<< HEAD
-||||||| parent of 8c70bc38ca (fix(observability): align HELP text and label keys for snapshot metric)
-(** Cumulative words promoted from minor to major heap since program start. *)
-=======
 val metric_keeper_turn_cleanup_failures : string
+
 (** Cumulative words promoted from minor to major heap since program start. *)
->>>>>>> 8c70bc38ca (fix(observability): align HELP text and label keys for snapshot metric)
 
 (** {1 Process monitoring} *)
 

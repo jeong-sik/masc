@@ -126,6 +126,10 @@ let handle_keeper_bash
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_shell_bash_failures
+        ~labels:[("keeper", meta.name); ("site", "destructive")]
+        ();
       Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
       Yojson.Safe.to_string
         (Exec_core.blocked_result_json
@@ -158,6 +162,10 @@ let handle_keeper_bash
             && Env_config_keeper.KeeperSandbox.hard_mode ()
             && Keeper_shell_shared.cmd_targets_gh cmd
     then (
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_shell_bash_failures
+        ~labels:[("keeper", meta.name); ("site", "hard_mode")]
+        ();
       Log.Keeper.warn
         "keeper_bash gh blocked by hard mode: keeper=%s cmd=%s"
         meta.name cmd_for_log;
@@ -223,6 +231,10 @@ let handle_keeper_bash
       match validate cmd with
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_shell_bash_failures
+          ~labels:[("site", "generic_blocked")]
+          ();
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
         let hint =
           match reason with

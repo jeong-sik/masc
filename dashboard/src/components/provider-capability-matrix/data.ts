@@ -332,11 +332,13 @@ export function categoryLevelLabel(level: CategoryLevel): string {
   }
 }
 
-export function scoreColor(score: string): string {
+export function scoreBucket(score: string): string {
   const v = parseFloat(score)
-  if (v >= 75) return 'text-[var(--color-status-ok)]'
-  if (v >= 50) return 'text-[var(--color-status-warn)]'
-  return 'text-[var(--bad-light)]'
+  if (v >= 75) return 'z4'
+  if (v >= 65) return 'z3'
+  if (v >= 55) return 'z2'
+  if (v >= 45) return 'z1'
+  return 'z0'
 }
 
 // ── Function Calling Harness Case Study ──────────────────────────

@@ -8,7 +8,7 @@ import {
   BFCL_MODEL_BREAKDOWN,
   HARNESS_MODELS,
   MCPMARK_ENTRIES,
-  scoreColor,
+  scoreBucket,
 } from './data'
 
 function V4CategoryTable() {
@@ -59,7 +59,9 @@ function ModelBreakdownTable() {
               <td class="pm-td font-semibold">${m.model}</td>
               <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
               ${([m.singleTurn, m.multiTurn, m.agentic, m.hallucination, m.format] as const).map((score, j) => html`
-                <td key=${j} class="pm-td pm-td--center pm-td--mono ${scoreColor(score)}">${score}</td>
+                <td key=${j} class="pm-td pm-td--center">
+	                  <span class="pm-cell-badge ${scoreBucket(score)}">${score}</span>
+	                </td>
               `)}
             </tr>
           `)}
@@ -145,10 +147,12 @@ function McpMarkTable() {
               </tr>
             </thead>
             <tbody>
-              ${MCPMARK_ENTRIES.map((e, i) => html`
+              ${MCPMARK_ENTRIES.map((e) => html`
                 <tr key=${e.model} class="pm-row-alt">
                   <td class="pm-td pm-td--mono font-semibold">${e.model}</td>
-                  <td class="pm-td pm-td--center pm-td--mono font-bold ${i === 0 ? 't-ok' : ''}">${e.passAt1}</td>
+                  <td class="pm-td pm-td--center">
+                    <span class="pm-cell-badge ${scoreBucket(e.passAt1)}">${e.passAt1}</span>
+                  </td>
                   <td class="pm-td pm-td--right pm-td--mono">${e.avgAgentTime}</td>
                   <td class="pm-td pm-td--right pm-td--mono">${e.costPerRun}</td>
                   <td class="pm-td t-micro t-dim">${e.note}</td>
@@ -184,7 +188,7 @@ export function BfclRankings() {
             </tr>
           </thead>
           <tbody>
-            ${BFCL_RANKINGS.map((entry, i) => {
+            ${BFCL_RANKINGS.map((entry) => {
               const hasV3 = entry.bfclV3 !== '—' && entry.bfclV3 !== '경쟁력' && entry.bfclV3 !== '개선됨'
               const hasV4 = entry.bfclV4 !== '—' && entry.bfclV4 !== '경쟁력'
               return html`
@@ -196,10 +200,8 @@ export function BfclRankings() {
                   }">
                     ${hasV3 ? html`<span class="font-bold">${entry.bfclV3}</span>` : entry.bfclV3}
                   </td>
-                  <td class="pm-td pm-td--right pm-td--mono ${
-                    hasV4 ? 't-ok font-bold' : 't-dim'
-                  }">
-                    ${hasV4 ? html`<span class="font-bold">${entry.bfclV4}</span>` : entry.bfclV4}
+                  <td class="pm-td pm-td--right">
+                    ${hasV4 ? html`<span class="pm-cell-badge ${scoreBucket(entry.bfclV4)}">${entry.bfclV4}</span>` : html`<span class="t-dim">${entry.bfclV4}</span>`}
                   </td>
                   <td class="pm-td t-meta">${entry.feature}</td>
                   <td class="pm-td">

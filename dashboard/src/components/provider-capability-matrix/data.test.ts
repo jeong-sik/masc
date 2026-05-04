@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { supportHeatBucket, impactBucket, riskBucket, computeCategoryCoverage } from './data'
+import { supportHeatBucket, impactBucket, riskBucket, computeCategoryCoverage, scoreBucket } from './data'
 import type { FeatureSupport, WiringImpact, RiskLevel } from './data'
 
 describe('supportHeatBucket', () => {
@@ -53,5 +53,22 @@ describe('computeCategoryCoverage', () => {
     const toolUse = computeCategoryCoverage().find(c => c.id === 'tool-use')
     expect(toolUse).toBeDefined()
     expect(toolUse!.pct).toBeGreaterThan(50)
+  })
+})
+
+describe('scoreBucket', () => {
+  it.each([
+    ['88.58', 'z4'],
+    ['75.0', 'z4'],
+    ['72.38', 'z3'],
+    ['65.0', 'z3'],
+    ['59.06', 'z2'],
+    ['55.0', 'z2'],
+    ['52.15', 'z1'],
+    ['45.0', 'z1'],
+    ['38.37', 'z0'],
+    ['14.12', 'z0'],
+  ])('maps %s → %s', (input, expected) => {
+    expect(scoreBucket(input)).toBe(expected)
   })
 })

@@ -522,11 +522,11 @@ let run_turn
                    Log.Keeper.error
                      "keeper:%s redacted thinking persist failed: %s"
                      meta.name
-                     (Printexc.to_string exn));
+                     (Printexc.to_string exn);
                    Prometheus.inc_counter
                      Prometheus.metric_keeper_thinking_persist_failures
                      ~labels:[("keeper", meta.name)]
-                     ()
+                     ())
               | _ -> ())
             result.response.content
         | None -> ());

@@ -220,6 +220,7 @@ val metric_keeper_transition_audit_failures : string
 val metric_keeper_execution_receipt_failures : string
 val metric_keeper_llm_bridge_failures : string
 val metric_keeper_shell_bash_failures : string
+val metric_keeper_rollover_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string

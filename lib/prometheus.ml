@@ -516,6 +516,8 @@ let metric_keeper_llm_bridge_failures =
   "masc_keeper_llm_bridge_failures_total"
 let metric_keeper_shell_bash_failures =
   "masc_keeper_shell_bash_failures_total"
+let metric_keeper_rollover_failures =
+  "masc_keeper_rollover_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1341,6 +1343,9 @@ let init () =
     Counter;
   add metric_keeper_shell_bash_failures
     "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by keeper and site"
+    Counter;
+  add metric_keeper_rollover_failures
+    "Total keeper rollover failures (lineage append, checkpoint save, invalid trace ID), labeled by keeper and site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

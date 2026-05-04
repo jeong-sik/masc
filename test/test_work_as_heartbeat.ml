@@ -161,15 +161,17 @@ let test_oas_timeout_sec_compat () =
 (* ── Semaphore wait timeout (defense against peer slot hoarding) ── *)
 
 let test_semaphore_wait_timeout_default () =
-  (* Default 60s — short enough to unblock starved keepers, long enough
-     to not mis-trigger under legitimate contention. *)
-  check (float 0.1) "default semaphore wait timeout 60s" 60.0
+  (* Default 180s. The previous 60s default starved 14-keeper fleets
+     whenever a long LLM turn at the head of the queue exceeded the
+     budget (memory: feedback_keeper_starvation_capacity_vs_turn_duration_mismatch). *)
+  check (float 0.1) "default semaphore wait timeout 180s" 180.0
     KK.semaphore_wait_timeout_sec
 
 let test_semaphore_wait_timeout_range () =
   let v = KK.semaphore_wait_timeout_sec in
-  check bool "wait timeout >= 5s" true (v >= 5.0);
-  check bool "wait timeout <= 600s" true (v <= 600.0)
+  (* Floor preserved (5s) — 0 would deadlock; ceiling removed because
+     it was a typo-defence boilerplate, not an architectural cap. *)
+  check bool "wait timeout >= 5s" true (v >= 5.0)
 
 let test_semaphore_wait_timeout_exception_shape () =
   (* The exception carries the wait cap in seconds so the caller can

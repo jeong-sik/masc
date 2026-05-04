@@ -89,11 +89,11 @@
   --color-info-glow: 62 74 92;
   --color-stalled-glow: 92 62 86;
 
-  --color-ok-soft: rgb(var(--color-ok-glow) / 0.10);
-  --color-warn-soft: rgb(var(--color-warn-glow) / 0.12);
-  --color-err-soft: rgb(var(--color-err-glow) / 0.12);
-  --color-info-soft: rgb(var(--color-info-glow) / 0.12);
-  --color-stalled-soft: rgb(var(--color-stalled-glow) / 0.12);
+  --color-ok-soft: rgb(var(--color-ok-glow) / .10);
+  --color-warn-soft: rgb(var(--color-warn-glow) / .12);
+  --color-err-soft: rgb(var(--color-err-glow) / .12);
+  --color-info-soft: rgb(var(--color-info-glow) / .12);
+  --color-stalled-soft: rgb(var(--color-stalled-glow) / .12);
   --color-idle-soft: rgba(135, 131, 121, 0.10);
 
   /* =====================================================================

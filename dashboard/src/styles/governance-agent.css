@@ -4,7 +4,7 @@
   background:
     linear-gradient(
       135deg,
-      rgb(var(--color-accent-glow) / 0.03) 0%,
+      rgb(var(--color-accent-glow) / .03) 0%,
       var(--color-bg-page) 100%
     );
   box-shadow:

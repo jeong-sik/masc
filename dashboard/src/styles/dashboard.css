@@ -74,7 +74,7 @@
 .agent-card:hover {
   box-shadow: inset 2px 0 0 var(--brass-1);
   transform: none;
-  border-color: rgb(var(--brass-glow) / 0.30);
+  border-color: rgb(var(--brass-glow) / .30);
 }
 
 @utility logs-refresh-btn { &:hover { border-color: var(--brass-1); } }
@@ -175,7 +175,7 @@
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted,
 .swimlane-vis-container .vis-center .vis-group.activity-swimlane-group-highlighted {
-  background: rgb(var(--brass-glow) / 0.08);
+  background: rgb(var(--brass-glow) / .08);
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted {
@@ -208,7 +208,7 @@
 .swimlane-vis-container .vis-item.vis-selected {
   border-color: var(--warn);
   border-width: 2px;
-  box-shadow: 0 0 5px rgb(var(--brass-glow) / 0.5);
+  box-shadow: 0 0 5px rgb(var(--brass-glow) / .5);
   z-index: 10;
 }
 

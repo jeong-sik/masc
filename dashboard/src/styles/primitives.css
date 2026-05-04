@@ -162,6 +162,7 @@
 
 .btn.sm { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-10); }
 .btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-9); letter-spacing: .06em; }
+.btn.lg { height: 28px; padding: 0 var(--sp-4); font-size: var(--fs-14); }
 
 /* icon-only button — square */
 .btn.icon {
@@ -281,8 +282,16 @@
 .stack-loose   > * + * { margin-top: var(--sp-stack); }
 .stack-section > * + * { margin-top: var(--sp-section); }
 
+.row-micro { height: var(--row-h-micro); display: flex; align-items: center; }
+.row-tight { height: var(--row-h-tight); display: flex; align-items: center; }
 .row       { height: var(--row-h);       display: flex; align-items: center; }
+.row-loose { height: var(--row-h-loose); display: flex; align-items: center; }
+.row-tall  { height: var(--row-h-tall);  display: flex; align-items: center; }
+
+.ctrl-xs { height: var(--ctrl-h-xs); }
+.ctrl-sm { height: var(--ctrl-h-sm); }
 .ctrl    { height: var(--ctrl-h); }
+.ctrl-lg { height: var(--ctrl-h-lg); }
 
 /* 8px grid debug overlay — opt-in via body[data-grid="1"] */
 body[data-grid="1"]::before {

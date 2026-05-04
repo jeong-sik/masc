@@ -9,8 +9,8 @@ describe("nodeColor", () => {
     ["task", "active", "var(--color-status-warn)"],
     ["decision", "active", "var(--purple)"],
     ["operation", "active", "var(--color-status-ok)"],
-    ["debate", "active", "#fb923c"],
-    ["post", "active", "#f472b6"],
+    ["debate", "active", "var(--color-amber-bright)"],
+    ["post", "active", "var(--color-rose-light)"],
     ["unknown", "active", "var(--color-fg-muted)"],
     ["keeper", "offline", "var(--color-fg-muted)"],
     ["keeper", "retired", "var(--color-fg-muted)"],
@@ -21,25 +21,25 @@ describe("nodeColor", () => {
 
 describe("edgeColor", () => {
   it("returns muted color when inactive", () => {
-    expect(edgeColor("works_on", false)).toBe("rgba(100, 116, 139, 0.15)")
-    expect(edgeColor("unknown", false)).toBe("rgba(100, 116, 139, 0.15)")
+    expect(edgeColor("works_on", false)).toBe("var(--color-fg-disabled)")
+    expect(edgeColor("unknown", false)).toBe("var(--color-fg-disabled)")
   })
 
   it.each([
-    ["works_on", "rgba(251, 191, 36, 0.5)"],
-    ["creates", "rgba(74, 222, 128, 0.4)"],
-    ["broadcasts", "rgba(34, 211, 238, 0.35)"],
-    ["mentions", "rgba(34, 211, 238, 0.55)"],
+    ["works_on", "var(--warn-border)"],
+    ["creates", "var(--ok-border)"],
+    ["broadcasts", "var(--info-border)"],
+    ["mentions", "var(--info-fg)"],
     ["hands_off_to", "var(--purple-50)"],
-    ["posts", "rgba(244, 114, 182, 0.4)"],
-    ["comments_on", "rgba(244, 114, 182, 0.3)"],
-    ["votes_on", "rgba(167, 139, 250, 0.35)"],
-    ["opens", "rgba(167, 139, 250, 0.4)"],
-    ["governs", "rgba(251, 146, 60, 0.4)"],
-    ["operates_on", "rgba(74, 222, 128, 0.45)"],
-    ["participates_in", "rgba(251, 191, 36, 0.35)"],
+    ["posts", "var(--stalled-border)"],
+    ["comments_on", "var(--stalled-fg)"],
+    ["votes_on", "var(--purple-50)"],
+    ["opens", "var(--purple-50)"],
+    ["governs", "var(--warn-fg)"],
+    ["operates_on", "var(--ok-border)"],
+    ["participates_in", "var(--warn-soft)"],
     ["belongs_to", "var(--color-border-default)"],
-    ["unknown", "rgba(148, 163, 184, 0.25)"],
+    ["unknown", "var(--color-border-default)"],
   ] as const)("edgeColor(%s, true) → %s", (kind, expected) => {
     expect(edgeColor(kind, true)).toBe(expected)
   })

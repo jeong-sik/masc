@@ -270,8 +270,8 @@ describe('statToneGradient (pure)', () => {
     expect(statToneGradient('ok')).toContain('emerald')
     expect(statToneGradient('warn')).toContain('amber')
     expect(statToneGradient('bad')).toContain('rose')
-    // idle is intentionally muted — white-channel variables, no accent color.
-    expect(statToneGradient('idle')).toContain('white')
+    // idle is intentionally muted — surface-channel variables, no accent color.
+    expect(statToneGradient('idle')).toContain('var(--color-bg-')
     for (const s of ['ok', 'warn', 'bad', 'idle'] as const) {
       expect(statToneGradient(s)).toContain('bg-gradient-to-b')
     }

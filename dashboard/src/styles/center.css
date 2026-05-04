@@ -19,7 +19,7 @@
   min-width: 0;
 }
 .wf-bar {
-  position: absolute; top: 2px; height: 10px; border-radius: 1px; min-width: 2px;
+  position: absolute; top: 2px; height: 10px; border-radius: var(--r-00); min-width: 2px;
 }
 .wf-bar.s-err { background: var(--err); }
 .wf-bar.s-info { background: var(--info); }

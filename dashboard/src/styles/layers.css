@@ -161,7 +161,7 @@ body[data-explode="1"] .lyr::before {
 }
 .time-stripe {
   position: absolute; left: 4px; width: 3px;
-  border-radius: 1px;
+  border-radius: var(--r-00);
   background: var(--warn);
   opacity: 0;
   transition: opacity var(--t-med) var(--ease), top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
@@ -233,7 +233,7 @@ body[data-explode="1"] .lyr::before {
 .tool-mark .tool-bar {
   width: 16px; height: 2px;
   background: linear-gradient(90deg, var(--brass-1), transparent);
-  border-radius: 1px;
+  border-radius: var(--r-00);
   box-shadow: 0 0 3px rgb(var(--brass-glow) / .4);
 }
 .tool-mark .tool-count {

@@ -277,8 +277,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_crash_persistence.enqueue_record ~keepers_dir
                 ~name:meta.name ~ts ~reason ~restart_count:rc;
               Keeper_registry.record_error ~base_path meta.name reason;
-              ignore (Keeper_registry.dispatch_event_and_log ~base_path meta.name
-                (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+              Keeper_registry.dispatch_event_unit ~base_path meta.name
+                (Keeper_state_machine.Fiber_terminated { outcome = reason });
               if resolve_done (`Crashed reason) then
                 publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
                   meta.name reason ()
@@ -365,6 +365,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
         (match write_meta ctx.config synced with
          | Ok () -> ()
          | Error msg ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_write_meta_failures
+             ~labels:[("keeper", meta.name); ("phase", "presence_sync")]
+             ();
            Log.Keeper.warn
              "supervisor presence sync: write_meta failed for %s: %s"
              meta.name msg);
@@ -418,10 +422,18 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
    with
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", resumed_meta.name); ("phase", "reconcile_resume_cas_race")]
+         ();
        Log.Keeper.warn
          "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
          resumed_meta.name err
    | Error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", resumed_meta.name); ("phase", "reconcile_resume")]
+         ();
        Log.Keeper.error
          "%s: reconcile gate resume write_meta failed: %s"
          resumed_meta.name err);
@@ -431,9 +443,8 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
     resumed_meta.name None;
   Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path
     resumed_meta.name;
-  ignore
-    (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path
-       resumed_meta.name Keeper_state_machine.Operator_resume);
+  Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path
+    resumed_meta.name Keeper_state_machine.Operator_resume;
   match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
   | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
       (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)
@@ -570,11 +581,19 @@ let cleanup_dead_tombstone (ctx : _ context)
           with
           | Ok () -> true
           | Error err when is_version_conflict_error err ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_write_meta_failures
+                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup_cas_race")]
+                ();
               Log.Keeper.warn
                 "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
                 entry.name err;
               false
           | Error err ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_write_meta_failures
+                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup")]
+                ();
               Log.Keeper.warn
                 "%s: dead tombstone cleanup paused write failed: %s"
                 entry.name err;
@@ -841,6 +860,10 @@ let handle_crash_auto_pause (ctx : _ context)
         with
         | Ok () -> ()
         | Error err ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_write_meta_failures
+              ~labels:[("keeper", entry.name); ("phase", "blocker_pause")]
+              ();
             Log.Keeper.warn
               "%s: %s pause meta write failed (in-memory \
                failure_reason still gates restart, but persisted state \
@@ -1005,8 +1028,8 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_unregister;
   List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
     (* RFC-0002: dispatch budget exhaustion before marking dead *)
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path entry.name
-      Keeper_state_machine.Restart_budget_exhausted);
+    Keeper_registry.dispatch_event_unit ~base_path entry.name
+      Keeper_state_machine.Restart_budget_exhausted;
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
     let detail =
       Printf.sprintf "restart budget exhausted (%d), last: %s"
@@ -1058,8 +1081,8 @@ let sweep_and_recover (ctx : _ context) =
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
         (* RFC-0002: dispatch restart attempt event *)
-        ignore (Keeper_registry.dispatch_event_and_log ~base_path old_entry.name
-          (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
+        Keeper_registry.dispatch_event_unit ~base_path old_entry.name
+          (Keeper_state_machine.Supervisor_restart_attempt { attempt });
         let old_crash_log = old_entry.crash_log in
         let reg =
           Keeper_registry.register_restarting ~base_path old_entry.name meta
@@ -1200,6 +1223,10 @@ let sweep_and_recover (ctx : _ context) =
                            (Env_config.KeeperSupervisor.auto_resume_max_sec)
                            (resume_after_sec *. 2.0))
                   | Error err ->
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_write_meta_failures
+                        ~labels:[("keeper", name); ("phase", "auto_resume")]
+                        ();
                       Log.Keeper.warn
                         "%s: auto-resume meta write failed: %s"
                         name err)

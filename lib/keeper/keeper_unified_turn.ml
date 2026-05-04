@@ -721,10 +721,21 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let meta =
         match Keeper_registry.get ~base_path:config.base_path meta.name with
         | Some entry ->
-          let _ =
-            write_meta_with_merge
+          let () =
+            match write_meta_with_merge
               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
               config entry.meta
+            with
+            | Ok () -> ()
+            | Error err ->
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_write_meta_failures
+                  ~labels:
+                    [("keeper", entry.meta.name); ("phase", "turn_start")]
+                  ();
+                Log.Keeper.warn
+                  "%s: turn-start write_meta_with_merge failed: %s"
+                  entry.meta.name err
           in
           entry.meta
         | None -> meta
@@ -1601,6 +1612,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            with
            | Ok () -> ()
            | Error msg ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:
+                   [ ("keeper", updated_meta.name);
+                     ("phase",
+                      if is_version_conflict_error msg
+                      then "turn_failure_cas_race"
+                      else "turn_failure")
+                   ]
+                 ();
                if is_version_conflict_error msg then
                  Log.Keeper.warn
                    "write_meta lost CAS race after retries (turn failure path): %s" msg
@@ -1821,16 +1842,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                if any_pending then "turn" else "scheduled_autonomous"
              in
              (* Cycle 44: KeeperTaskAcquisition.tla post-action guards
-                pin the structural invariant the decision relied on. *)
+                pin the structural invariant the decision relied on.
+                The [@@fsm_guard] PPX now routes assertions through
+                [Keeper_fsm_guard_runtime.wrap_unit ~stage:"guard"]
+                automatically, so the manual outer wrap is removed to
+                avoid double-counting Prometheus violations. *)
              if any_pending
-             then
-               Keeper_fsm_guard_runtime.wrap_unit
-                 ~action:"AssignTask" ~stage:"post"
-                 (fun () -> post_assign_task ~any_pending ~channel)
-             else
-               Keeper_fsm_guard_runtime.wrap_unit
-                 ~action:"EmptyQueueSleep" ~stage:"post"
-                 (fun () -> post_empty_queue_sleep ~any_pending ~channel);
+             then post_assign_task ~any_pending ~channel
+             else post_empty_queue_sleep ~any_pending ~channel;
              Keeper_unified_metrics.append_metrics_snapshot ~config ~meta:updated_meta ~observation
                ~result ~latency_ms ~turn_cost
                ~turn_generation:lifecycle.turn_generation
@@ -2097,6 +2116,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            with
            | Ok () -> ()
            | Error msg ->
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_write_meta_failures
+                 ~labels:
+                   [ ("keeper", updated_meta.name);
+                     ("phase",
+                      if is_version_conflict_error msg
+                      then "keeper_cycle_cas_race"
+                      else "keeper_cycle")
+                   ]
+                 ();
                if is_version_conflict_error msg then
                  Log.Keeper.warn
                    "write_meta lost CAS race after retries (keeper cycle): %s" msg
@@ -2137,11 +2166,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Keeper_turn_fsm.Done;
           (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action
              — the cycle ran to completion and is about to return an
-             [Ok] result. *)
+             [Ok] result.  Manual [wrap_unit] removed: the PPX-injected
+             [wrap_unit ~stage:"guard"] already routes [Assert_failure]
+             to the Prometheus counter. *)
           cycle_completed := true;
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"post"
-            (fun () -> post_turn_complete_task ~cycle_completed);
+          post_turn_complete_task ~cycle_completed;
           Ok updated_meta))
 
 let run_unified_turn = run_keeper_cycle

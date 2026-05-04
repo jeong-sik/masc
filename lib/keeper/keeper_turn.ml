@@ -485,6 +485,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with
                | Ok () -> ()
                | Error msg ->
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_write_meta_failures
+                     ~labels:
+                       [ ("keeper", updated_meta.name);
+                         ("phase",
+                          if is_version_conflict_error msg
+                          then "keeper_msg_turn_cas_race"
+                          else "keeper_msg_turn")
+                       ]
+                     ();
                    if is_version_conflict_error msg then
                      Log.Keeper.warn
                        "write_meta lost CAS race after retries (keeper_msg turn): %s"

@@ -116,19 +116,18 @@ let set_keeper_paused_state ~agent_name paused =
          }
        in
        persist_directive_meta_update entry ~updated_meta;
-       ignore
-         (Keeper_registry.dispatch_event
-            ~base_path:entry.base_path entry.name
-            (if paused
-             then Keeper_state_machine.Operator_pause
-             else Keeper_state_machine.Operator_resume));
+       Keeper_registry.dispatch_event_unit
+         ~base_path:entry.base_path entry.name
+         (if paused
+          then Keeper_state_machine.Operator_pause
+          else Keeper_state_machine.Operator_resume);
        if not paused then begin
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
-         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition. *)
-         Keeper_fsm_guard_runtime.wrap_unit
-           ~action:"WakeupSignal" ~stage:"post"
-           (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup)
+         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
+            The [@@fsm_guard] PPX routes the assertion through
+            [wrap_unit ~stage:"guard"] automatically. *)
+         post_wakeup_signal ~wakeup:entry.fiber_wakeup
        end)
 ;;
 
@@ -156,10 +155,10 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
        persist_directive_meta_update entry ~updated_meta;
        (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
           guard pins that the directive successfully attached the
-          [task_id] to the keeper's meta. *)
-       Keeper_fsm_guard_runtime.wrap_unit
-         ~action:"SubmitTask" ~stage:"post"
-         (fun () -> post_submit_task ~meta:updated_meta ~task_id);
+          [task_id] to the keeper's meta. The [@@fsm_guard] PPX
+          routes the assertion through [wrap_unit ~stage:"guard"]
+          automatically. *)
+       post_submit_task ~meta:updated_meta ~task_id;
        wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
@@ -496,10 +495,10 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry `Stopped
   then (
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      Keeper_state_machine.Stop_requested);
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      Keeper_state_machine.Drain_complete);
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      Keeper_state_machine.Stop_requested;
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      Keeper_state_machine.Drain_complete;
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Stopped
       ~keeper_name ~detail ();
     true)
@@ -518,8 +517,8 @@ let record_keeper_crashed
   if resolve_registry_done entry (`Crashed reason)
   then (
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
-    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+    Keeper_registry.dispatch_event_unit ~base_path keeper_name
+      (Keeper_state_machine.Fiber_terminated { outcome = reason });
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Crashed
@@ -673,9 +672,7 @@ let stop_keepalive ?base_path name =
           even on stop_keepalive — the wakeup atomic must be observable
           as TRUE before the heartbeat fiber consumes its termination
           signal. *)
-       Keeper_fsm_guard_runtime.wrap_unit
-         ~action:"WakeupSignal" ~stage:"post"
-         (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup);
+       post_wakeup_signal ~wakeup:entry.fiber_wakeup;
        (match Atomic.get entry.grpc_close with
        | Some close_fn ->
           (try close_fn () with

@@ -1333,6 +1333,11 @@ let dispatch_event_and_log ~base_path name event =
       ();
     Error e
 
+let dispatch_event_unit ~base_path name event =
+  match dispatch_event_and_log ~base_path name event with
+  | Ok _ -> ()
+  | Error _ -> ()
+
 let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?selected_event name event =
   match dispatch_event_with_audit ~base_path ?snapshot ?events_fired ?selected_event name event with
   | Ok tr -> Ok tr

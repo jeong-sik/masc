@@ -178,6 +178,10 @@ let sync_keeper_meta_current_task
      with
      | Ok () -> ()
      | Error msg ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
+         ();
        Log.Keeper.warn
          "keeper:%s failed to persist claimed current_task_id=%s: %s"
          meta.name task_id msg)

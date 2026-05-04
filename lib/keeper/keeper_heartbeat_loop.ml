@@ -95,9 +95,9 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
   if stale_turn_failures > 0 then begin
     Keeper_registry.reset_turn_failures
       ~base_path:ctx.config.base_path meta.name;
-    ignore (Keeper_registry.dispatch_event_and_log
+    Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path meta.name
-      Keeper_state_machine.Heartbeat_ok);
+      Keeper_state_machine.Heartbeat_ok;
     Keeper_keepalive_signal.dispatch_keepalive_event ~ctx ~keeper_name:meta.name
       Keeper_state_machine.Turn_succeeded;
     Log.Keeper.info
@@ -145,19 +145,19 @@ let sync_keeper_presence
         (* RFC-0002: dispatch heartbeat failure *)
         Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
           ~labels:[("keeper", meta_current.name)] ();
-        ignore (Keeper_registry.dispatch_event_and_log
+        Keeper_registry.dispatch_event_unit
           ~base_path:ctx.config.base_path meta_current.name
           (Keeper_state_machine.Heartbeat_failed {
             consecutive = !consecutive_failures;
             max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ();
-          })))
+          }))
       else (
         consecutive_failures := 0;
         last_successful_heartbeat_ts := Time_compat.now ();
         (* RFC-0002: dispatch heartbeat success *)
-        ignore (Keeper_registry.dispatch_event_and_log
+        Keeper_registry.dispatch_event_unit
           ~base_path:ctx.config.base_path meta_current.name
-          Keeper_state_machine.Heartbeat_ok);
+          Keeper_state_machine.Heartbeat_ok;
         Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_successes
           ~labels:[("keeper", meta_current.name)] ();
         maybe_recover_from_failing ~ctx ~meta:meta_current);
@@ -178,12 +178,12 @@ let sync_keeper_presence
         (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
         (Printexc.to_string exn);
       (* RFC-0002: dispatch heartbeat failure *)
-      ignore (Keeper_registry.dispatch_event_and_log
+      Keeper_registry.dispatch_event_unit
         ~base_path:ctx.config.base_path meta_current.name
         (Keeper_state_machine.Heartbeat_failed {
           consecutive = !consecutive_failures;
           max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ();
-        }));
+        });
       meta_current)
 ;;
 
@@ -1147,13 +1147,9 @@ let run_heartbeat_loop
               ~proactive_warmup_elapsed
               ~shared_context
           in
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"pre"
-            (fun () -> Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
           turn_running := false;
-          Keeper_fsm_guard_runtime.wrap_unit
-            ~action:"TurnComplete" ~stage:"post"
-            (fun () -> Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running);
+          Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
           r
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),

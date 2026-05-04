@@ -103,10 +103,9 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
             Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
-         FALSE] postcondition. Counter-mode by default. *)
-      Keeper_fsm_guard_runtime.wrap_unit
-        ~action:"HeartbeatTick" ~stage:"post"
-        (fun () -> post_heartbeat_tick ~wakeup);
+         FALSE] postcondition. The [@@fsm_guard] PPX routes the
+         assertion through [wrap_unit ~stage:"guard"] automatically. *)
+      post_heartbeat_tick ~wakeup;
       Woken)
     else if remaining <= 0.0
     then Timeout
@@ -366,8 +365,8 @@ let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_and_log
-      ~base_path:ctx.config.base_path keeper_name event)
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path keeper_name event
 
 let dispatch_keepalive_event_with_audit
       ~(ctx : _ context)
@@ -378,10 +377,17 @@ let dispatch_keepalive_event_with_audit
       event
   =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    ignore (Keeper_registry.dispatch_event_with_audit_and_log
-      ~base_path:ctx.config.base_path
-      ~snapshot
-      ~events_fired
-      ~selected_event
-      keeper_name
-      event)
+    (match Keeper_registry.dispatch_event_with_audit_and_log
+       ~base_path:ctx.config.base_path
+       ~snapshot
+       ~events_fired
+       ~selected_event
+       keeper_name
+       event
+     with
+     | Ok _ -> ()
+     | Error err ->
+         Log.Keeper.warn
+           "%s: keepalive late-event dispatch rejected: %s"
+           keeper_name
+           (Keeper_state_machine.transition_error_to_string err))

@@ -559,6 +559,10 @@ let ensure_keeper_meta config name =
       match write_meta config updated with
       | Ok () -> Ok updated
       | Error e ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_write_meta_failures
+          ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
+          ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok meta
     end

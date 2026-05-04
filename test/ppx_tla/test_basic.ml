@@ -180,6 +180,32 @@ let test_wrap_unit_routing_curried () =
   assert (action = "g_curried");
   assert (stage = "guard")
 
+(* Labeled-only arguments: the PPX should inject the wrapped assert into
+   the function body regardless of whether parameters are labelled. *)
+let h_labeled ~x ~y = x * y
+[@@fsm_guard "x >= 0 && y >= 0"]
+
+let test_fsm_guard_labeled_pass () =
+  assert (h_labeled ~x:3 ~y:4 = 12)
+
+let test_fsm_guard_labeled_fail () =
+  let raised =
+    try
+      ignore (h_labeled ~x:(-1) ~y:2);
+      false
+    with Assert_failure _ -> true
+  in
+  assert raised
+
+let test_wrap_unit_routing_labeled () =
+  Keeper_fsm_guard_runtime.reset_invocations ();
+  let _ = h_labeled ~x:1 ~y:2 in
+  let invocations = Keeper_fsm_guard_runtime.get_invocations () in
+  assert (List.length invocations >= 1);
+  let (action, stage) = List.hd invocations in
+  assert (action = "h_labeled");
+  assert (stage = "guard")
+
 let () =
   test_color_to_tla_symbol ();
   test_color_all_states ();
@@ -198,4 +224,7 @@ let () =
   test_fsm_guard_curried_fail ();
   test_wrap_unit_routing ();
   test_wrap_unit_routing_curried ();
-  print_endline "ppx_tla cycle 2 + 3 + 12 tests: PASS"
+  test_fsm_guard_labeled_pass ();
+  test_fsm_guard_labeled_fail ();
+  test_wrap_unit_routing_labeled ();
+  print_endline "ppx_tla cycle 2 + 3 + 15 tests: PASS"

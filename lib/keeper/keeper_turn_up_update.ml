@@ -308,7 +308,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
            (false, err)
        | Ok () ->
       (match write_meta ctx.config updated with
-       | Error e -> (false, e)
+       | Error e ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_write_meta_failures
+             ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+             ();
+           (false, e)
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;

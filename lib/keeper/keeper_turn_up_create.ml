@@ -532,6 +532,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
+        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
+          ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;
         (false, e)

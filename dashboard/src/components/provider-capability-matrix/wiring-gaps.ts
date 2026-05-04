@@ -10,6 +10,26 @@ import { WIRING_GAPS, impactTone, impactBucket } from './data'
 const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, correct: 3 }
 const severityRank = (impact: string): number => SEVERITY_ORDER[impact] ?? 99
 
+const IMPACT_COLORS: Record<string, string> = {
+  high: 'var(--color-status-err)',
+  medium: 'var(--amber-bright)',
+  low: 'var(--color-fg-muted)',
+}
+
+function SeverityDistBar({ high, medium, low }: { high: number; medium: number; low: number }) {
+  const total = high + medium + low
+  if (total === 0) return null
+  const entries = ([['high', high], ['medium', medium], ['low', low]] as const).filter(([, c]) => c > 0)
+  return html`
+    <div class="flex w-full h-2 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-elevated)]">
+      ${entries.map(([key, count]) => html`
+        <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${IMPACT_COLORS[key]}"
+             title="${key}: ${count}건" class="h-full"></div>
+      `)}
+    </div>
+  `
+}
+
 export function WiringGaps() {
   const sorted = [...WIRING_GAPS].sort((a, b) => severityRank(a.impact) - severityRank(b.impact))
   const gaps = sorted.filter(g => g.impact !== 'correct')
@@ -21,6 +41,7 @@ export function WiringGaps() {
   const providerCountMap = new Map<string, number>()
   for (const g of gaps) providerCountMap.set(g.provider, (providerCountMap.get(g.provider) ?? 0) + 1)
   const providerCounts = [...providerCountMap.entries()].sort((a, b) => b[1] - a[1])
+  const maxProviderGaps = providerCounts[0]?.[1] ?? 1
 
   return html`
     <div class="flex flex-col gap-3">
@@ -31,13 +52,25 @@ export function WiringGaps() {
         <${StatTile} label="정확" value=${correct.length} status="ok" delta=${{ direction: 'up', text: `${WIRING_GAPS.length} 중` }} />
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap t-micro mono t-dim px-1">
-        ${providerCounts.map(([prov, cnt]) => html`
-          <span key=${prov} class="inline-flex items-center gap-1">
-            <span class="font-semibold t-meta">${prov}</span>
-            <span class="t-dim">${cnt}건</span>
-          </span>
-        `)}
+      <div class="flex items-center gap-3">
+        <span class="text-3xs text-[var(--color-fg-muted)] w-16">심각도 분포</span>
+        <div class="flex-1"><${SeverityDistBar} high=${high} medium=${medium} low=${low} /></div>
+      </div>
+
+      <div class="flex flex-col gap-1">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">프로바이더별 갭</div>
+        ${providerCounts.map(([prov, cnt]) => {
+          const barWidth = (cnt / maxProviderGaps) * 100
+          return html`
+            <div class="flex items-center gap-2 py-0.5" key=${prov}>
+              <span class="w-28 flex-shrink-0 text-2xs font-medium truncate" title=${prov}>${prov}</span>
+              <div class="flex-1 h-2 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+                <div class="h-full rounded-[var(--r-0)]" style="width: ${barWidth}%; background: var(--color-accent-fg); opacity: 0.6"></div>
+              </div>
+              <span class="w-4 text-right text-2xs font-mono text-[var(--color-fg-muted)]">${cnt}</span>
+            </div>
+          `
+        })}
       </div>
 
       <div class="pm-scroll">

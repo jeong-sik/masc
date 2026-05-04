@@ -51,8 +51,21 @@ echo
 PREV=""
 total_start="$(date +%s)"
 
+# Warmup helper. Without this, large MLX models (>=64GB) sometimes return
+# zero-metadata responses on the first measured request post cold load.
+# Warmup costs ~load_time + 100ms; measurement reliability gain is large.
+warmup_model() {
+  local m="$1"
+  curl -sS --max-time 90 -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg m "$m" '{model:$m, prompt:"ping", stream:false, think:false, options:{num_predict:1}}')" \
+    http://localhost:11434/api/generate >/dev/null 2>&1 || true
+}
+
+first_model=true
+
 for model in $MODELS; do
   IFS=',' read -r -a wl_arr <<<"$WORKLOADS"
+  first_workload_for_model=true
   for wl in "${wl_arr[@]}"; do
     wl="$(printf '%s' "$wl" | tr -d ' ')"
     [ -z "$wl" ] && continue
@@ -60,14 +73,13 @@ for model in $MODELS; do
     isolate="false"
     if [ -n "$PREV" ] && [ "$PREV" != "$model" ]; then
       isolate="true"
-      # Warmup the new model with a tiny prompt before the actual measurement.
-      # Without this, large MLX models (>=64GB) sometimes return zero-metadata
-      # responses on the first measured request post cold load. Warmup costs
-      # ~load_time + 100ms; measurement reliability gain is large.
-      curl -sS --max-time 90 -H 'Content-Type: application/json' \
-        -d "$(jq -nc --arg m "$model" '{model:$m, prompt:"ping", stream:false, think:false, options:{num_predict:1}}')" \
-        http://localhost:11434/api/generate >/dev/null 2>&1 || true
+      warmup_model "$model"
+    elif [ "$first_model" = "true" ] && [ "$first_workload_for_model" = "true" ]; then
+      # Cover cold-load case for the very first model in the sweep too.
+      # ISOLATE branch never fires (PREV is empty), so warmup happens here.
+      warmup_model "$model"
     fi
+    first_workload_for_model=false
 
     row_start="$(date +%s)"
     echo "→ $model $wl  (isolate=$isolate prev=$PREV)"
@@ -81,6 +93,7 @@ for model in $MODELS; do
     echo
     PREV="$model"
   done
+  first_model=false
 done
 
 # Final eviction (free RAM after sweep)

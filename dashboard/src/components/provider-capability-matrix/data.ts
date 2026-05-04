@@ -942,7 +942,7 @@ export const PHASE_TIMELINE: PhaseMilestone[] = [
   { week: '12–13', phase: 'Phase 4', work: 'P4-1: supports_seed, supports_seed_with_images', deliverable: '27필드 capability 레코드', deps: 'Phase 1–2' },
   { week: '13–14', phase: 'Phase 4', work: 'P4-2: temperature=0 한계 문서화, 이미지 seed 무효화', deliverable: '결정론 제한 경고 (warn_once)', deps: 'P4-1' },
   { week: '14–15', phase: 'Phase 4', work: 'P7-1: Usage tokens 복원 + Capability drift 감지', deliverable: 'Usage 추출, CapabilityDriftAlert', deps: 'Phase 1–3' },
-  { week: '15–16', phase: 'Phase 4', work: 'P7-2: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-1' },
+  { week: '15–16', phase: 'Phase 4', work: 'P7-3: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-2' },
 ]
 
 export const PHASE_COLORS: Record<string, string> = {

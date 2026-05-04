@@ -266,6 +266,11 @@ let wakeup_relevant_keeper_for_board_signal
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
       if e.phase = Keeper_state_machine.Running then Some e.name else None)
   in
+  let signal_kind_label =
+    match signal.kind with
+    | Board_dispatch.Board_post_created -> "post_created"
+    | Board_dispatch.Board_comment_added -> "comment_added"
+  in
   let candidates =
     running_names
     |> List.filter_map (fun name ->
@@ -277,6 +282,24 @@ let wakeup_relevant_keeper_for_board_signal
             ~meta
             ~signal
         in
+        (* Visibility for the REPO_WAKE_UP audit finding: a [None]
+           wake_reason means the running keeper had no explicit_mention
+           match, scope feed disabled, and (for comments) no external
+           reply after a self-comment. Without this counter, operators
+           cannot distinguish between a board post that legitimately
+           had no addressee and one that was silently dropped by a
+           keeper whose [room_signal_prompt_enabled] / mention_targets
+           configuration is too narrow. *)
+        (match wake_reason with
+         | None ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_board_signal_no_wake_total
+             ~labels:[
+               ("keeper", meta.name);
+               ("kind", signal_kind_label);
+             ]
+             ()
+         | Some _ -> ());
         Some (meta, wake_reason)
       | _ -> None)
   in

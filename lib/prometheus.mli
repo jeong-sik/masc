@@ -216,6 +216,18 @@ val metric_keeper_fs_failures : string
 val metric_keeper_crash_persistence_failures : string
 val metric_keeper_generation_lineage_failures : string
 val metric_keeper_keepalive_signal_failures : string
+
+val metric_keeper_board_signal_no_wake_total : string
+(** Total board signals that did not produce a wake decision for a
+    running keeper. Increments per (keeper, kind) when
+    [Keeper_world_observation.board_signal_wake_reason] returns
+    [None] — no explicit_mention, scope feed disabled, and no
+    external reply after a self-comment. Discoverability for the
+    REPO_WAKE_UP audit finding: keepers with
+    [room_signal_prompt_enabled = false] (Minimal preset default)
+    silently drop board posts. Labels: keeper,
+    kind=post_created|comment_added. *)
+
 val metric_keeper_meta_json_failures : string
 val metric_keeper_tools_oas_failures : string
 val metric_keeper_turn_up_update_failures : string

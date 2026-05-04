@@ -420,6 +420,10 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W14', provider: 'DeepSeek', capability: 'V3.2 FC', oasDeclares: '—', actualBehavior: 'V3.1 Strict FC (Beta) 지원, R1은 vLLM 경로만 tool calling, V3.2 Speciale은 FC 미지원', impact: 'medium' },
   { id: 'W15', provider: 'Qwen', capability: 'tool format', oasDeclares: '—', actualBehavior: 'Hermes-style tool format 사용, 1M context (3.6 Plus), Hybrid Thinking Mode', impact: 'low' },
   { id: 'W16', provider: 'Nemotron', capability: 'thinking vs FC', oasDeclares: '—', actualBehavior: 'thinking ON 시 tool calling 미지원, thinking OFF 필요 시에만 FC 활성화 (§2.5)', impact: 'medium' },
+  { id: 'W17', provider: 'Kimi', capability: 'JSON Schema validation', oasDeclares: '—', actualBehavior: 'minimum, maximum, minLength, maxLength 검증 키워드 일부 거부 → tool 호출 실패 사례 보고 (§4.1.6)', impact: 'medium' },
+  { id: 'W18', provider: 'Ollama', capability: 'streaming tool calls', oasDeclares: '—', actualBehavior: 'OpenAI compat 엔드포인트(/v1/chat/completions)에서 streaming 시 tool calls 누락 버그, native /api/chat 권장 (§4.1.7)', impact: 'high' },
+  { id: 'W19', provider: 'Ollama', capability: 'num_ctx default', oasDeclares: '—', actualBehavior: 'num_ctx 기본값 4096으로 대형 시스템 프롬프트+다수 툴 정의가 무시 트렁케이션 (§4.1.7)', impact: 'high' },
+  { id: 'W20', provider: 'Codex CLI', capability: 'sandbox bypass CVE', oasDeclares: '—', actualBehavior: 'CVE-2025-59532 샌드박스 우회 취약점, 0.39.0에서 패치. 컨테이너 격리 한계 (§4.1.10)', impact: 'medium' },
 ]
 
 // ── Anti-patterns ───────────────────────────────────────────────
@@ -527,7 +531,7 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
       { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning, vLLM 경로만 tool calling 지원' },
       { id: 'deepseek-v3.1', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'Strict FC (Beta), tool_choice=required/none 가능' },
       { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14, Prompt+Thinking, V3.2 Speciale은 FC 미지원' },
-      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3 기반, 기본 tool calling' },
+      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3.1 hybrid: Non-Think+Think 통합 모드' },
     ],
   },
   {
@@ -552,6 +556,7 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     providerId: 'glm',
     models: [
       { id: 'glm-4.6', context: '128K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'BFCL V4 #4, FC+thinking' },
+      { id: 'glm-4.6v', context: '128K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '최초 VLM 네이티브 FC, 106B+9B Flash, MIT' },
       { id: 'glm-5-code', context: '128K', tier: 'coding', inputPrice: '$1.20', outputPrice: '$0.30', notes: 'Coding Plan 전용' },
       { id: 'glm-4.5-air', context: '128K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: 'Coding Plan 경량' },
     ],
@@ -565,7 +570,8 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'kimi',
     models: [
-      { id: 'kimi-k2-instruct', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트' },
+      { id: 'kimi-k2.6', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'MoE 1T/32B, SWE-Bench Pro 58.6% > GPT-5.4(57.7%), Context Caching' },
+      { id: 'kimi-k2-instruct', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트, OpenAI 완전 호환' },
       { id: 'kimi-k2-thinking', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '장기 사고' },
       { id: 'kimi-k2-turbo-preview', context: '256K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: '60-100 tok/s' },
       { id: 'moonshot-v1-128k', context: '128K', tier: 'legacy', inputPrice: '—', outputPrice: '—' },
@@ -576,7 +582,8 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     models: [
       { id: 'llama3.3:70b', context: '128K', tier: 'flagship', notes: 'Tool calling 지원' },
       { id: 'qwen3:32b', context: '128K', tier: 'standard', notes: 'Tool + thinking 지원' },
-      { id: 'gemma3:27b', context: '128K', tier: 'standard', notes: '2025.04 추가, Tool 지원' },
+      { id: 'gemma3:27b', context: '128K', tier: 'standard', notes: 'Tool 지원' },
+      { id: 'gemma4:27b', context: '128K', tier: 'standard', notes: 'Apache 2.0, 멀티모달(T/I/A), BFCL v3 76.9%' },
       { id: 'mistral-nemo:12b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },
       { id: 'functionary:v3.2', context: '128K', tier: 'coding', notes: 'FC 특화, Hermes 포맷' },
       { id: 'hermes3:8b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },

@@ -30,7 +30,7 @@ let read_meta_file_path path : (keeper_meta option, string) result =
        | Error e ->
          Prometheus.inc_counter
            Prometheus.metric_keeper_meta_read_failures
-           ~labels:[("keeper", "unknown"); ("site", "meta_parse")]
+           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
          Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
          Error e))
@@ -63,7 +63,7 @@ let persisted_keeper_names config =
   | Error e ->
     Prometheus.inc_counter
       Prometheus.metric_keeper_meta_read_failures
-      ~labels:[("keeper", "unknown"); ("site", "persisted_listdir")]
+      ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
     Log.Keeper.warn "persisted_keeper_names: failed to list directory %s: %s" dir e;
     []
@@ -231,7 +231,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
               operator can correlate stale UI with bad meta JSON. *)
            Prometheus.inc_counter
              Prometheus.metric_keeper_meta_read_failures
-             ~labels:[("keeper", "unknown"); ("site", "changed_parse")]
+             ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
              ();
            Log.Keeper.warn
              "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"

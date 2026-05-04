@@ -128,7 +128,7 @@ let write_heartbeat_snapshot
              meta_current.name (Printexc.to_string exn);
            []
        in
-       if !parse_errors > 0 then
+       if !parse_errors > 0 then begin
          Prometheus.inc_counter
            Prometheus.metric_keeper_heartbeat_failures
            ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
@@ -137,7 +137,8 @@ let write_heartbeat_snapshot
            "write_heartbeat_snapshot: failed to parse %d message(s) from history logs for keeper=%s trace_id=%s path=%s"
            !parse_errors meta_current.name
            (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-           history_path;
+           history_path
+       end;
        messages)
   in
   let c_messages = messages_for_continuity in

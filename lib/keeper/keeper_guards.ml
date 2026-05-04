@@ -175,7 +175,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_guards_failures
-        ~labels:[("keeper", "unknown"); ("site", "gate_observer")]
+        ~labels:[("keeper", "aggregate"); ("site", "gate_observer")]
         ();
       Log.Keeper.warn
         "keeper_guards: gate observer failed stage=%s tool=%s err=%s"

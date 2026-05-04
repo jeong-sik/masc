@@ -27,11 +27,7 @@ function V4CategoryTable() {
             <tr key=${cat.id} class="pm-row-alt">
               <td class="pm-td font-semibold">${cat.label}</td>
               <td class="pm-td t-meta">${cat.description}</td>
-              <td class="pm-td pm-td--center pm-td--mono ${
-                cat.weight === '40%' ? 't-ok font-bold'
-                : cat.weight === '30%' ? 't-warn font-bold'
-                : 't-dim'
-              }">
+              <td class="pm-td pm-td--center pm-td--mono t-dim">
                 ${cat.weight}
               </td>
             </tr>

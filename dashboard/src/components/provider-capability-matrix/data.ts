@@ -259,12 +259,11 @@ export interface BfclV4Category {
 }
 
 export const BFCL_V4_CATEGORIES: BfclV4Category[] = [
-  { id: 'simple',      label: 'Simple Function Calling',   description: '단일 함수 호출',                   weight: '기본' },
-  { id: 'parallel',    label: 'Parallel Function Calling', description: '다중 동시 함수 호출',               weight: '기본' },
-  { id: 'multi-select', label: 'Multiple Function Selection', description: '여러 옵션 중 정확한 도구 선택',   weight: '기본' },
-  { id: 'relevance',   label: 'Relevance Detection',       description: '함수를 호출하지 말아야 할 때 판별', weight: '10% (Irrelevance)' },
-  { id: 'multi-turn',  label: 'Multi-turn Interactions',   description: '맥락 유지 지속 대화',               weight: '30%' },
-  { id: 'agentic',     label: 'Agentic (Holistic)',        description: '전체 에이전트 평가',                 weight: '40%' },
+  { id: 'agentic',       label: 'Agentic (Holistic)',         description: 'Web Search + Memory 전체 에이전트 평가',  weight: '3개 서브카테고리' },
+  { id: 'multi-turn',    label: 'Multi-turn Interactions',    description: 'Multi turn + Non-live (AST) + Live (AST)', weight: '3개 서브카테고리' },
+  { id: 'single-turn',   label: 'Single Turn',                description: 'Simple + Multiple + Parallel + Multi-Parallel', weight: '4개 서브카테고리' },
+  { id: 'hallucination', label: 'Hallucination Measurement',  description: '오류 탐지: Miss Func / Miss Param / Long Context', weight: '6개 서브카테고리' },
+  { id: 'format',        label: 'Format Sensitivity',         description: 'FC vs Prompt 모드 간 격차 측정 (Prompt 전용)', weight: 'Prompt 전용' },
 ]
 
 type CategoryLevel = 'high' | 'mid' | 'low'

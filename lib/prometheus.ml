@@ -552,6 +552,14 @@ let metric_keeper_turn_metrics_snapshot_failures =
   "masc_keeper_turn_metrics_snapshot_failures_total"
 let metric_keeper_oas_execution_errors =
   "masc_keeper_oas_execution_errors_total"
+let metric_keeper_episode_create_failures =
+  "masc_keeper_episode_create_failures_total"
+let metric_keeper_supervisor_sweep_failures =
+  "masc_keeper_supervisor_sweep_failures_total"
+let metric_keeper_toml_reconcile_sweep_failures =
+  "masc_keeper_toml_reconcile_sweep_failures_total"
+let metric_keeper_tool_usage_flush_failures =
+  "masc_keeper_tool_usage_flush_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1301,6 +1309,22 @@ let init () =
     Counter;
   add metric_keeper_oas_execution_errors
     "Total OAS execution errors (non-cancellation) in keeper_llm_bridge. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_episode_create_failures
+    "Total episode creation failures in keeper_agent_memory_episode. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_supervisor_sweep_failures
+    "Total supervisor sweep failures in keeper_runtime periodic beat. \
+     Labeled by origin."
+    Counter;
+  add metric_keeper_toml_reconcile_sweep_failures
+    "Total TOML reconcile sweep failures in keeper_runtime periodic beat. \
+     Labeled by origin."
+    Counter;
+  add metric_keeper_tool_usage_flush_failures
+    "Total tool usage JSONL flush failures in keeper_registry. \
      Labeled by keeper."
     Counter;
   add metric_persistence_read_drops

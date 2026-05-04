@@ -1027,6 +1027,9 @@ let flush_tool_usage ~base_path name =
        Fs_compat.mkdir_p (Filename.dirname path);
        Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Prometheus.inc_counter Prometheus.metric_keeper_tool_usage_flush_failures
+         ~labels:[("keeper", name)]
+         ();
        Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
 
 let restore_tool_usage ~base_path name =

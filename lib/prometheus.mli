@@ -217,6 +217,10 @@ val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_turn_metrics_snapshot_failures : string
 val metric_keeper_oas_execution_errors : string
+val metric_keeper_episode_create_failures : string
+val metric_keeper_supervisor_sweep_failures : string
+val metric_keeper_toml_reconcile_sweep_failures : string
+val metric_keeper_tool_usage_flush_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

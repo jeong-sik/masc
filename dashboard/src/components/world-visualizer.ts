@@ -184,14 +184,14 @@ export function WorldVisualizer() {
   }, [keepers, traces, paletteVersion])
 
   return html`
-    <div style=${{ padding: '20px', background: 'var(--bg-0)', color: 'var(--fg-1)', borderRadius: '8px', marginBottom: '20px' }}>
+    <div style=${{ padding: '20px', background: 'var(--color-bg-page)', color: 'var(--color-fg-primary)', borderRadius: '8px', marginBottom: '20px' }}>
       <h2 style=${{ margin: 0, paddingBottom: '10px' }}>Dream IDE: 7 Physical Laws Visualization</h2>
-      <p style=${{ fontSize: '12px', color: 'var(--fg-3)' }}>Stigmergy Intensity · Local Sight (Max 6) · Active Inference</p>
+      <p style=${{ fontSize: '12px', color: 'var(--color-fg-muted)' }}>Stigmergy Intensity · Local Sight (Max 6) · Active Inference</p>
       <canvas
         ref=${canvasRef}
         width=${800}
         height=${300}
-        style=${{ border: '1px solid var(--line-1)', background: 'var(--bg-0)', display: 'block', margin: '0 auto' }}
+        style=${{ border: '1px solid var(--color-border-default)', background: 'var(--color-bg-page)', display: 'block', margin: '0 auto' }}
       />
     </div>
   `

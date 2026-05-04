@@ -78,8 +78,25 @@ case "$cmd" in
     ;;
   model)
     if [ -z "$arg" ]; then
-      echo "usage: sangsu_bench_toggle.sh model <ollama:model:tag>" >&2
+      echo "usage: sangsu_bench_toggle.sh model <ollama:model:tag> [--force]" >&2
       exit 2
+    fi
+    # Validate the model is actually pulled before mutating cascade.toml.
+    # Without this, a typo (e.g., `ollama:gemma:e2b` instead of
+    # `ollama:gemma4:e2b`) silently writes a bad cascade entry — the swap
+    # itself succeeds but sangsu's next turn fails at provider dispatch.
+    # Pass `--force` (any position after `model`) to bypass when offline.
+    bypass="false"
+    for a in "$@"; do
+      if [ "$a" = "--force" ]; then bypass="true"; fi
+    done
+    if [ "$bypass" != "true" ]; then
+      tag="${arg#ollama:}"  # strip "ollama:" prefix if present
+      if ! ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$tag"; then
+        echo "FAIL: model '$tag' not found in ollama list" >&2
+        echo "      run \`ollama pull $tag\` first, or pass --force to bypass" >&2
+        exit 3
+      fi
     fi
     # Match the [ollama_bench] section's first models = [ ... ] block,
     # rewrite the single entry. Idempotent for our 1-slot profile.

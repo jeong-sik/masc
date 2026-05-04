@@ -238,7 +238,12 @@ let run_grpc_heartbeat_stream
          send (make_grpc_heartbeat_ping ~agent_name ~session_id);
          match recv () with
          | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
-         | Error err -> Log.Keeper.warn "gRPC heartbeat recv: %s" err
+         | Error err ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_heartbeat_failures
+             ~labels:[("keeper", agent_name); ("phase", "grpc_recv")]
+             ();
+           Log.Keeper.warn "gRPC heartbeat recv: %s" err
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file

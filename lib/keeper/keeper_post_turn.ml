@@ -700,6 +700,10 @@ let recover_latest_checkpoint_for_overflow_retry
         sanitize_oas_checkpoint ~repair_orphans:false checkpoint
       in
       if checkpoint_sanitize_changed stats then begin
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_checkpoint_failures
+          ~labels:[("keeper", meta.name); ("site", "overflow_retry_migration")]
+          ();
         Log.Keeper.warn
           "keeper:%s overflow-retry migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
           (Keeper_id.Trace_id.to_string meta.runtime.trace_id)

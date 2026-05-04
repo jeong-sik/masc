@@ -443,6 +443,10 @@ let () =
       update_meta ~base_path:config.base_path meta.name meta)
 
 let mark_dead ~base_path name ~at =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_lifecycle_transitions
+    ~labels:[("keeper", name); ("from_phase", "direct"); ("to_phase", "Dead")]
+    ();
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
     if entry.phase <> Dead then begin

@@ -418,6 +418,10 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_sse_broadcast_failures
+         ~labels:[("keeper", meta_current.name)]
+         ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
     (match Keeper_event_bus.get () with
      | Some bus ->

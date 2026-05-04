@@ -71,7 +71,7 @@ export function KanbanCard(props: KanbanCardProps): VNode {
     flexDirection: 'column' as const,
     gap: '4px',
     padding: `var(--spacing-element) var(--spacing-group)`,
-    borderRadius: '3px',
+    borderRadius: 'var(--r-1)',
     background: 'var(--bg-panel)',
     border: '1px solid var(--border-base)',
     borderLeft: `3px solid ${KIND_BORDER_LEFT_BY_KIND[kind]}`,

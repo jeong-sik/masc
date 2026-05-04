@@ -110,7 +110,7 @@ export function SwimlaneRow(props: SwimlaneRowProps): VNode {
     alignItems: 'center',
     gap: 'var(--spacing-element)',
     padding: `4px var(--spacing-element)`,
-    borderRadius: '3px',
+    borderRadius: 'var(--r-1)',
     border: `1px solid ${props.selected ? 'var(--color-accent-brass)' : 'transparent'}`,
     background: props.selected ? 'var(--bg-panel)' : 'transparent',
     cursor: interactive ? 'pointer' : 'default',
@@ -132,7 +132,7 @@ export function SwimlaneRow(props: SwimlaneRowProps): VNode {
     height: '14px',
     background: 'var(--bg-panel)',
     border: '1px solid var(--border-base)',
-    borderRadius: '2px',
+    borderRadius: 'var(--r-0)',
     overflow: 'hidden',
   }
 
@@ -140,7 +140,7 @@ export function SwimlaneRow(props: SwimlaneRowProps): VNode {
     position: 'absolute' as const,
     top: '3px',
     height: '8px',
-    borderRadius: '1px',
+    borderRadius: 'var(--r-00)',
   }
 
   return html`

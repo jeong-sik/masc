@@ -98,7 +98,7 @@ export function Heartbeat({
 const surfaceStyle = {
   background: 'var(--bg-panel)',
   border: '1px solid var(--border-base)',
-  borderRadius: '3px',
+  borderRadius: 'var(--r-1)',
 }
 
 const labelStyle = {

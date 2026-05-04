@@ -91,7 +91,7 @@ export function Tk(props: TkProps): VNode {
     fontFamily: MONO_STACK,
     fontSize: '0.92em',
     padding: '0 4px',
-    borderRadius: '2px',
+    borderRadius: 'var(--r-0)',
     background: ks.background,
     color: ks.color,
     // Inline content — the primitive shouldn't introduce its own

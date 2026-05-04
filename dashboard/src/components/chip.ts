@@ -179,7 +179,7 @@ export function Chip(props: ChipProps): VNode {
     color: ks.color,
     border: `1px solid ${ks.borderColor}`,
     background: ks.background,
-    borderRadius: '2px',
+    borderRadius: 'var(--r-0)',
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     fontWeight: 500,

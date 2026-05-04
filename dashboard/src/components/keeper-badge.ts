@@ -183,7 +183,7 @@ export function KeeperStack({
             background: 'var(--color-bg-2)',
             color: 'var(--color-text-body)',
             border: `2px solid ${surface}`,
-            borderRadius: '3px',
+            borderRadius: 'var(--r-1)',
             fontFamily: MONO_STACK,
             fontSize: '10px',
             fontWeight: 600,
@@ -200,7 +200,7 @@ export function KeeperStack({
           style=${{
             marginLeft: i === 0 ? '0' : '-4px',
             border: `2px solid ${surface}`,
-            borderRadius: '3px',
+            borderRadius: 'var(--r-1)',
             display: 'inline-flex',
           }}
         ><${KeeperBadge} id=${id} variant="sigil" size=${size} /></span>

@@ -43,7 +43,7 @@ export function Bar(props: BarProps): VNode {
     width: '100%',
     height: '4px',
     background: 'var(--color-bg-elevated)',
-    borderRadius: '2px',
+    borderRadius: 'var(--r-0)',
     overflow: 'hidden' as const,
   }
 

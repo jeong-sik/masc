@@ -61,7 +61,7 @@ export function SidebarRow(props: SidebarRowProps): VNode {
     alignItems: 'center',
     gap: '6px',
     padding: `4px var(--spacing-element)`,
-    borderRadius: '3px',
+    borderRadius: 'var(--r-1)',
     background: props.selected ? 'var(--color-bg-elevated)' : 'transparent',
     border: `1px solid ${props.selected ? 'var(--color-accent-brass)' : 'transparent'}`,
     cursor: interactive ? 'pointer' : 'default',

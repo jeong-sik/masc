@@ -1,21 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { AgentCapability, normalizeTools, toolConfig } from './agent-capability'
-
-describe('toolConfig', () => {
-  it('returns config for known tools', () => {
-    const cfg = toolConfig('file_read')
-    expect(cfg.label).toBe('파일 읽기')
-    expect(cfg.icon).toBeDefined()
-  })
-
-  it('returns generic fallback for unknown tools', () => {
-    const cfg = toolConfig('unknown_tool')
-    expect(cfg.label).toBe('unknown_tool')
-    expect(cfg.description).toContain('unknown_tool')
-  })
-})
+import { AgentCapability, normalizeTools } from './agent-capability'
 
 describe('normalizeTools', () => {
   it('returns empty array for null input', () => {

@@ -28,7 +28,7 @@ interface UptimeChipView {
     Kuma's default "operational / degraded / down" color ramp — two
     nines (≥99) is quiet green, 95-99 is warning amber, below 95 is
     alarming rose. */
-export function formatUptimeChip(summary: HeartbeatSummary): UptimeChipView | null {
+function formatUptimeChip(summary: HeartbeatSummary): UptimeChipView | null {
   if (summary.uptimePct === null) return null
   const pct = summary.uptimePct
   const label = pct >= 99.995 ? '100' : pct.toFixed(pct >= 99 ? 2 : 1)

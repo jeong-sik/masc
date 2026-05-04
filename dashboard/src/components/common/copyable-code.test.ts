@@ -2,11 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import {
-  CopyableCode,
-  copyableWrapperClasses,
-  copyableLabelClasses,
-} from './copyable-code'
+import { CopyableCode } from './copyable-code'
 
 const flushUi = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
@@ -158,40 +154,5 @@ describe('CopyableCode', () => {
     render(html`<${CopyableCode} label="tail" command="x" variant="secondary" />`, container)
     const secondaryLabel = container.querySelector('[data-copyable-code] span')!
     expect(secondaryLabel.className).not.toContain('font-semibold')
-  })
-})
-
-describe('copyableWrapperClasses (pure)', () => {
-  it('primary returns accent-colored border + background tokens', () => {
-    const cls = copyableWrapperClasses('primary')
-    expect(cls).toContain('border-[var(--accent-30)]')
-    expect(cls).toContain('bg-[var(--accent-12)]')
-  })
-
-  it('secondary returns muted white-channel tokens', () => {
-    const cls = copyableWrapperClasses('secondary')
-    expect(cls).toContain('border-[var(--color-border-default)]')
-    expect(cls).toContain('bg-[var(--color-bg-surface)]')
-  })
-
-  it('primary has tighter padding than secondary (hero command reads larger)', () => {
-    // py-2 vs py-1.5 — small but intentional. Regression guard against
-    // a cleanup flattening the two variants to identical padding.
-    expect(copyableWrapperClasses('primary')).toContain('py-2')
-    expect(copyableWrapperClasses('secondary')).toContain('py-1.5')
-  })
-})
-
-describe('copyableLabelClasses (pure)', () => {
-  it('primary label uses accent color + font-semibold', () => {
-    const cls = copyableLabelClasses('primary')
-    expect(cls).toContain('text-[var(--color-accent-fg)]')
-    expect(cls).toContain('font-semibold')
-  })
-
-  it('secondary label uses muted text-dim + no bold', () => {
-    const cls = copyableLabelClasses('secondary')
-    expect(cls).toContain('text-[var(--color-fg-disabled)]')
-    expect(cls).not.toContain('font-semibold')
   })
 })

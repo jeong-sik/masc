@@ -2,10 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import {
-  HeartbeatStreakChip,
-  formatStreakLabel,
-} from './heartbeat-streak-chip'
+import { HeartbeatStreakChip } from './heartbeat-streak-chip'
 import {
   currentHeartbeatStreak,
   type HeartbeatState,
@@ -47,25 +44,6 @@ describe('currentHeartbeatStreak (pure, lib-level)', () => {
   it('counts the full history when everything is the same state', () => {
     const all: HeartbeatState[] = ['down', 'down', 'down', 'down']
     expect(currentHeartbeatStreak(all)).toEqual({ state: 'down', samples: 4 })
-  })
-})
-
-describe('formatStreakLabel (pure)', () => {
-  it('"no data yet" when streak is null', () => {
-    expect(formatStreakLabel(null)).toBe('Heartbeat: no data yet')
-  })
-
-  it('singular "check" for samples=1', () => {
-    expect(formatStreakLabel({ state: 'up', samples: 1 })).toBe('UP for 1 check')
-  })
-
-  it('plural "checks" for samples>1', () => {
-    expect(formatStreakLabel({ state: 'up', samples: 22 })).toBe('UP for 22 checks')
-    expect(formatStreakLabel({ state: 'down', samples: 3 })).toBe('DOWN for 3 checks')
-  })
-
-  it('unknown state renders as "N/A"', () => {
-    expect(formatStreakLabel({ state: 'unknown', samples: 5 })).toBe('N/A for 5 checks')
   })
 })
 

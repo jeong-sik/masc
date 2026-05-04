@@ -27,7 +27,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
 
 /** Pure: lookup a tool's display config. Falls back to a generic
     representation for unknown tools so the UI never renders blank. */
-export function toolConfig(tool: string): ToolConfig {
+function toolConfig(tool: string): ToolConfig {
   return (
     TOOL_CONFIG[tool] ?? {
       icon: '\u{2699}\u{FE0F}',

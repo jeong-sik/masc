@@ -38,6 +38,18 @@ CONSTANTS
     InitialTokens,   \* [Providers -> Nat]: starting token count
     Weight           \* [Keepers -> Nat]: WFQ weight per keeper, default 1
 
+\* Default constant bindings for the bundled .cfg files.
+\* TLC config files cannot express nested record / function literals on
+\* multiple lines, so we expose helper constants in the spec module and
+\* the .cfg files override them via `<-`.  See tla2tools cfg grammar.
+DefaultKeepers == {"k1", "k2"}
+DefaultProviders == {"anthropic", "glm"}
+DefaultCandidates == [k \in DefaultKeepers |->
+    IF k = "k1" THEN <<"anthropic", "glm">> ELSE <<"glm", "anthropic">>]
+DefaultCapacity == [p \in DefaultProviders |-> 1]
+DefaultInitialTokens == [p \in DefaultProviders |-> 1]
+DefaultWeight == [k \in DefaultKeepers |-> 1]
+
 ASSUME
     /\ Keepers # {}
     /\ Providers # {}
@@ -217,15 +229,22 @@ WorkConserving ==
 \* Fairness assumptions (model checked):
 \*   - StartTurn is weakly fair for every keeper (heartbeat ticks).
 \*   - RefillToken is weakly fair for every provider with capacity.
-\*   - TryDispatch is weakly fair for every (keeper, candidate) pair.
+\*   - TryDispatch is *strongly* fair for every (keeper, candidate) pair.
+\*     SF (not WF) is required because TryDispatch may be repeatedly
+\*     enabled and disabled by interleaved CompleteWork/RefillToken;
+\*     under WF a hostile scheduler can starve an enabled-but-flickering
+\*     pair (TLC 6243-state counter-example confirmed this 2026-05-05).
 \*   - WakeFromQueue is weakly fair when the queue is non-empty.
+\*   - EnqueueOverflow is weakly fair so a keeper with no free candidate
+\*     does not silently spin in Waiting.
 Fairness ==
     /\ \A k \in Keepers : WF_vars(StartTurn(k))
     /\ \A k \in Keepers : WF_vars(StartWork(k))
     /\ \A k \in Keepers : WF_vars(CompleteWork(k))
+    /\ \A k \in Keepers : WF_vars(EnqueueOverflow(k))
     /\ \A p \in Providers : WF_vars(RefillToken(p))
     /\ WF_vars(WakeFromQueue)
-    /\ \A k \in Keepers, p \in Providers : WF_vars(TryDispatch(k, p))
+    /\ \A k \in Keepers, p \in Providers : SF_vars(TryDispatch(k, p))
 
 LiveSpec == Spec /\ Fairness
 

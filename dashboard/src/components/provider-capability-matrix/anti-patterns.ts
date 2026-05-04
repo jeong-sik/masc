@@ -61,6 +61,7 @@ export function AntiPatternList() {
               <th class="pm-th w-[160px]">위치</th>
               <th class="pm-th w-[60px]">리스크</th>
               <th class="pm-th w-[60px]">출처</th>
+              <th class="pm-th">개선 방향</th>
             </tr>
           </thead>
           <tbody>
@@ -82,6 +83,7 @@ export function AntiPatternList() {
                     ${SOURCE_LABEL[ap.source]}
                   </span>
                 </td>
+                <td class="pm-td t-micro t-meta">${ap.improvement}</td>
               </tr>
             `)}
           </tbody>

@@ -6,6 +6,8 @@
 
 export type FeatureSupport = '●' | '◐' | '○' | '—'
 
+export type CategoryLevel = 'high' | 'mid' | 'low'
+
 export interface FeatureDef {
   id: string
   label: string

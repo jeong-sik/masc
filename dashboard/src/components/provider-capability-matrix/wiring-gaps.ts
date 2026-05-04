@@ -53,7 +53,7 @@ export function WiringGaps() {
             </tr>
           </thead>
           <tbody>
-            ${gaps.map((gap, i) => {
+            ${gaps.map((gap) => {
               return html`
                 <tr key=${gap.id} class="pm-row-alt">
                   <td class="pm-td pm-td--mono t-dim">${gap.id}</td>

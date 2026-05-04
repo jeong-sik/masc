@@ -19,9 +19,9 @@ export const FEATURES: FeatureDef[] = [
     id: 'tool-calling',
     label: 'Native Tool Calling',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
+      openai: '●', claude: '●', gemini: '●', deepseek: '●',
       qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
-      ollama: '◐', llamacpp: '●', glm: '●', gemini_cli: '◐', codex_cli: '◐',
+      ollama: '◐', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '◐',
     },
   },
   {
@@ -392,6 +392,7 @@ export const WIRING_GAPS: WiringGap[] = [
 
 export type AntiPatternCategory = 'silent-failure' | 'fake-fallback' | 'string-match' | 'hardcoding'
 export type RiskLevel = 'C' | 'H' | 'M' | 'L'
+export type AntiPatternSource = 'masc-mcp' | 'oas' | 'unverified'
 
 export interface AntiPattern {
   id: string
@@ -399,41 +400,46 @@ export interface AntiPattern {
   description: string
   location: string
   risk: RiskLevel
+  source: AntiPatternSource
 }
 
 export const ANTI_PATTERNS: AntiPattern[] = [
-  { id: 'S01', category: 'silent-failure', description: 'Error _ → None이 모든 예외를 삼킴', location: 'cascade_ollama_probe.ml', risk: 'M' },
-  { id: 'S02', category: 'silent-failure', description: 'Yojson parse exception → None', location: 'cascade_ollama_probe.ml', risk: 'M' },
-  { id: 'S03', category: 'silent-failure', description: 'chat_template_kwargs 무시 — Ollama 커스텀 설정 미전달', location: 'capabilities.ml', risk: 'H' },
-  { id: 'S04', category: 'silent-failure', description: '401/403 응답 body 미검사 — auth 만료를 network error로 오분류', location: 'provider_http.ml', risk: 'M' },
-  { id: 'S05', category: 'silent-failure', description: 'empty response → 빈 list 반환, caller가 실패로 감지 못함', location: 'turn_executor.ml', risk: 'M' },
-  { id: 'S06', category: 'silent-failure', description: 'timeout 시 부분 결과 폐기 후 None', location: 'cascade_runner.ml', risk: 'M' },
-  { id: 'S07', category: 'silent-failure', description: 'tool_result 없는 tool_use → 다음 turn에서 LLM이 hallucination', location: 'content_block.ml', risk: 'H' },
-  { id: 'S08', category: 'silent-failure', description: 'max_tokens 미지정 시 4096 fallback — 긴 응답 잘림', location: 'backend_*.ml', risk: 'H' },
-  { id: 'S09', category: 'silent-failure', description: 'usage 필드 누락 시 토큰 계산 스킵 — 비용 추적 불가', location: 'usage_tracker.ml', risk: 'M' },
-  { id: 'S10', category: 'silent-failure', description: 'streaming mid-turn disconnect → 부분 상태로 재시도', location: 'stream_adapter.ml', risk: 'M' },
-  { id: 'F01', category: 'fake-fallback', description: 'unknown provider → local 라우팅 — 의도치 않은 로컬 모델 사용', location: 'cascade_router.ml', risk: 'H' },
-  { id: 'F02', category: 'fake-fallback', description: 'unknown model → $0 비용 — 비용 추적 우회', location: 'cost_estimator.ml', risk: 'M' },
-  { id: 'F03', category: 'fake-fallback', description: 'missing limit → 무제한 — 예산 제어 무력화', location: 'budget_guard.ml', risk: 'H' },
-  { id: 'F04', category: 'fake-fallback', description: 'parse 실패 → 빈 object — schema 검증 무시', location: 'response_parser.ml', risk: 'M' },
-  { id: 'M01', category: 'string-match', description: 'prefix substring match로 provider 분류 — "deepseek-v4" → "deep" 매칭 위험', location: 'provider_classifier.ml', risk: 'H' },
-  { id: 'M02', category: 'string-match', description: '"deepseek-v4" 문자열로 모델 패밀리 식별 — renaming 시 break', location: 'model_registry.ml', risk: 'H' },
-  { id: 'M03', category: 'string-match', description: 'URL contains로 ollama 감지 — "ollama"가 path에 있으면 false positive', location: 'network_defaults.ml', risk: 'M' },
-  { id: 'M04', category: 'string-match', description: '에러 메시지 문자열 파싱으로 rate-limit 감지 — provider 응답 변경 시 silent fail', location: 'error_classifier.ml', risk: 'H' },
-  { id: 'M05', category: 'string-match', description: 'HTTP status code 대신 body 텍스트로 quota 판별', location: 'quota_detector.ml', risk: 'H' },
-  { id: 'M06', category: 'string-match', description: '모델명에 "vision" 포함 여부로 multimodal 판별', location: 'capability_resolver.ml', risk: 'M' },
-  { id: 'H01', category: 'hardcoding', description: '기본 포트 11434가 6파일에 하드코딩', location: 'config/*.ml', risk: 'M' },
-  { id: 'H02', category: 'hardcoding', description: 'timeout 30s가 4파일에 리터럴 — 설정 불가', location: 'cascade/*.ml', risk: 'M' },
-  { id: 'H03', category: 'hardcoding', description: 'max_tokens 4096 기본값이 3백엔드에 산재', location: 'backend_*.ml', risk: 'M' },
-  { id: 'H04', category: 'hardcoding', description: 'API base URL이 테스트에 하드코딩 — 환경 변수 무시', location: 'test/*.ml', risk: 'L' },
-  { id: 'H05', category: 'hardcoding', description: 'keeper heartbeat 간격 5s가 상수 아닌 리터럴', location: 'keeper_loop.ml', risk: 'L' },
-  { id: 'H06', category: 'hardcoding', description: 'retry 횟수 3이 call site마다 하드코딩', location: 'retry_*.ml', risk: 'M' },
-  { id: 'H07', category: 'hardcoding', description: 'model ID 문자열이 match arm에 직접 기입', location: 'routing/*.ml', risk: 'M' },
-  { id: 'H08', category: 'hardcoding', description: '에러 메시지 template이 코드 내에 인라인', location: 'error_*.ml', risk: 'L' },
-  { id: 'H09', category: 'hardcoding', description: 'SSE 재연결 간격 1s 리터럴', location: 'sse_client.ml', risk: 'L' },
-  { id: 'H10', category: 'hardcoding', description: 'Ollama keepalive 5m이 2파일에 중복 정의', location: 'ollama_*.ml', risk: 'M' },
-  { id: 'H11', category: 'hardcoding', description: 'context window size가 모델별로 하드코딩 — 신규 모델 추가 시 수동 갱신', location: 'model_caps.ml', risk: 'H' },
-  { id: 'H12', category: 'hardcoding', description: 'BFCL score threshold가 상수 아닌 리터럴', location: 'model_selector.ml', risk: 'L' },
+  // Silent Failure (S01-S10)
+  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas' },
+  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas' },
+  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas' },
+  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas' },
+  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas' },
+  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas' },
+  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas' },
+  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas' },
+  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas' },
+  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas' },
+  // Fake Fallback (F01-F04)
+  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas' },
+  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas' },
+  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas' },
+  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas' },
+  // String Matching (M01-M06)
+  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas' },
+  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas' },
+  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas' },
+  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas' },
+  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas' },
+  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas' },
+  // Hardcoding (H01-H12)
+  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas' },
+  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas' },
+  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas' },
+  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas' },
+  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas' },
+  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas' },
+  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas' },
+  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas' },
+  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas' },
+  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas' },
+  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas' },
+  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas' },
 ]
 
 // ── Provider Model Catalog ──────────────────────────────────────
@@ -936,6 +942,20 @@ export function categoryColor(cat: AntiPatternCategory): string {
     case 'fake-fallback': return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
     case 'string-match': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
     case 'hardcoding': return 'bg-[var(--white-4)] text-[var(--color-status-info)] border-[var(--color-border-default)]'
+  }
+}
+
+export const SOURCE_LABEL: Record<AntiPatternSource, string> = {
+  'masc-mcp': 'MASC',
+  oas: 'OAS',
+  unverified: '미검증',
+}
+
+export function sourceColor(src: AntiPatternSource): string {
+  switch (src) {
+    case 'masc-mcp': return 'bg-[var(--info-10)] text-[var(--color-status-info)] border-[var(--info-20)]'
+    case 'oas': return 'bg-[var(--good-10)] text-[var(--color-status-ok)] border-[var(--good-20)]'
+    case 'unverified': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
   }
 }
 

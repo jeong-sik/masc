@@ -1089,6 +1089,7 @@
 (include stanzas/test_keeper_pause_silent_failure_source.inc)
 (include stanzas/test_keeper_paused_cas_retain_9733.inc)
 (include stanzas/test_keeper_personality_round_trip.inc)
+(include stanzas/test_keeper_provider_token_bucket.inc)
 (include stanzas/test_keeper_readonly_hints.inc)
 (include stanzas/test_keeper_receipt_authoritative.inc)
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)

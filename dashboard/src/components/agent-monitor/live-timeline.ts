@@ -50,7 +50,7 @@ export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boo
   }
 }
 
-export function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
+function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
   if (isErrorJournalEntry(entry)) return 'bad'
   const eventType = entry.eventType
   switch (eventType) {

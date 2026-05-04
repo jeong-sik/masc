@@ -64,7 +64,7 @@ const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-
  * so the operator retains context (parent goal, horizon) — the tree shape
  * is never broken by the filter.
  */
-export function filterGoalTree(
+function filterGoalTree(
   nodes: readonly GoalTreeNode[],
   query: string,
 ): readonly GoalTreeNode[] {
@@ -102,7 +102,7 @@ function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
   }
 }
 
-export function filterGoalTreeByPhase(
+function filterGoalTreeByPhase(
   nodes: readonly GoalTreeNode[],
   filter: GoalPhaseFilter,
 ): readonly GoalTreeNode[] {
@@ -238,7 +238,7 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
   }
 }
 
-export function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): string {
+function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): string {
   switch (kind) {
     case 'executing': return '실행'
     case 'verification_gate': return '검증 게이트'
@@ -251,7 +251,7 @@ export function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): st
   }
 }
 
-export function goalFsmObservationLabel(
+function goalFsmObservationLabel(
   observation: GoalFsmProjection['activity_observation'],
 ): string {
   switch (observation) {
@@ -264,7 +264,7 @@ export function goalFsmObservationLabel(
   }
 }
 
-export function goalFsmStagnationLabel(
+function goalFsmStagnationLabel(
   status: GoalFsmProjection['stagnation_status'],
 ): string {
   switch (status) {

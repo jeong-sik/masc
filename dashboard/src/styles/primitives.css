@@ -211,11 +211,6 @@
 .tk.is-brass { color: var(--brass-1); background: rgb(var(--brass-glow) / .08); }
 .tk.is-err   { color: var(--err);     background: rgb(var(--err-glow) / .08); }
 
-/* ════════ SCROLL PANEL ════════
-   Standard scrolling inner panel — flex:1 + min-height:0 + overflow. */
-.scroll-y { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-.scroll-x { overflow-x: auto; overflow-y: hidden; }
-
 /* ════════ TYPE ROLE CLASSES ════════
    Prefer these over raw --fs-* sizes in new styles. Role names
    match tokens.css. Each applies font shorthand + sensible color. */
@@ -286,16 +281,8 @@
 .stack-loose   > * + * { margin-top: var(--sp-stack); }
 .stack-section > * + * { margin-top: var(--sp-section); }
 
-.row-micro { height: var(--row-h-micro); display: flex; align-items: center; }
-.row-tight { height: var(--row-h-tight); display: flex; align-items: center; }
 .row       { height: var(--row-h);       display: flex; align-items: center; }
-.row-loose { height: var(--row-h-loose); display: flex; align-items: center; }
-.row-tall  { height: var(--row-h-tall);  display: flex; align-items: center; }
-
-.ctrl-xs { height: var(--ctrl-h-xs); }
-.ctrl-sm { height: var(--ctrl-h-sm); }
 .ctrl    { height: var(--ctrl-h); }
-.ctrl-lg { height: var(--ctrl-h-lg); }
 
 /* 8px grid debug overlay — opt-in via body[data-grid="1"] */
 body[data-grid="1"]::before {
@@ -310,50 +297,9 @@ body[data-grid="1"]::before {
 }
 
 /* ════════ MOTION PRESETS ════════
-   Opt-in animation classes — pair with motion role tokens. */
-@keyframes anim-fade-in     { from { opacity: 0; } to { opacity: 1; } }
-@keyframes anim-fade-out    { from { opacity: 1; } to { opacity: 0; } }
-@keyframes anim-slide-up    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes anim-slide-down  { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-@keyframes anim-slide-left  { from { opacity: 0; transform: translateX(8px); }  to { opacity: 1; transform: none; } }
-@keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-@keyframes anim-pop         { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
-@keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
-@keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--brass-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--brass-glow) / .5); } }
-@keyframes anim-pulse-err   { 0%,100% { box-shadow: 0 0 0 rgb(var(--err-glow)   / 0); } 50% { box-shadow: 0 0 10px rgb(var(--err-glow)   / .55); } }
-@keyframes anim-pulse-warn  { 0%,100% { box-shadow: 0 0 0 rgb(var(--warn-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--warn-glow)  / .5); } }
-@keyframes anim-pulse-ok    { 0%,100% { box-shadow: 0 0 0 rgb(var(--ok-glow)    / 0); } 50% { box-shadow: 0 0 10px rgb(var(--ok-glow)    / .5); } }
-@keyframes anim-pulse-info  { 0%,100% { box-shadow: 0 0 0 rgb(var(--info-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--info-glow)  / .5); } }
-@keyframes anim-pulse-stalled { 0%,100% { box-shadow: 0 0 0 rgb(var(--stalled-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--stalled-glow) / .5); } }
-@keyframes anim-heartbeat   { 0%,100% { transform: scale(1); } 14%,42% { transform: scale(1.08); } 28% { transform: scale(1); } }
-@keyframes anim-shimmer     { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-@keyframes anim-spin        { to { transform: rotate(360deg); } }
-@keyframes anim-blink       { 0%,60% { opacity: 1; } 61%,100% { opacity: 0; } }
-
-.anim-fade-in     { animation: anim-fade-in     var(--motion-enter); }
-.anim-slide-up    { animation: anim-slide-up    var(--motion-enter); }
-.anim-slide-down  { animation: anim-slide-down  var(--motion-enter); }
-.anim-slide-left  { animation: anim-slide-left  var(--motion-enter); }
-.anim-slide-right { animation: anim-slide-right var(--motion-enter); }
-.anim-pop         { animation: anim-pop         var(--motion-pop); }
-.anim-pulse       { animation: anim-pulse 2.4s var(--ease-inout) infinite; }
-.anim-pulse-glow  { animation: anim-pulse-glow 2.4s var(--ease-inout) infinite; }
-.anim-pulse-err   { animation: anim-pulse-err 1.6s var(--ease-inout) infinite; }
-.anim-pulse-warn  { animation: anim-pulse-warn 2.4s var(--ease-inout) infinite; }
-.anim-pulse-ok    { animation: anim-pulse-ok   2.4s var(--ease-inout) infinite; }
-.anim-pulse-info  { animation: anim-pulse-info 2.4s var(--ease-inout) infinite; }
-.anim-pulse-stalled { animation: anim-pulse-stalled 3s var(--ease-inout) infinite; }
-.anim-heartbeat   { animation: anim-heartbeat 1.4s var(--ease-inout) infinite; }
-.anim-blink       { animation: anim-blink 1s steps(1) infinite; }
-.anim-spin        { animation: anim-spin 1.2s linear infinite; }
-
-/* shimmer — skeleton / loading state background */
-.anim-shimmer {
-  background: linear-gradient(90deg,
-    var(--color-bg-elevated) 0%, var(--color-bg-hover) 25%, var(--color-bg-elevated) 50%, var(--color-bg-hover) 75%, var(--color-bg-elevated) 100%);
-  background-size: 200% 100%;
-  animation: anim-shimmer 2s linear infinite;
-}
+   Animation @keyframes + utility classes consolidated in keyframes.css
+   (SPEC v0.4 §14). Only the .caret and .is-loading helpers remain here
+   because they reference anim-blink / anim-shimmer from keyframes.css. */
 
 /* a caret for terminal-style UI */
 .caret::after {

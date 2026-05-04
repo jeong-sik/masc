@@ -462,6 +462,8 @@ let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
 let metric_keeper_heartbeat_failures =
   "masc_keeper_heartbeat_failures_total"
+let metric_keeper_cleanup_tracking_failures =
+  "masc_keeper_cleanup_tracking_failures_total"
 let metric_keeper_dispatch_event_failures =
   "masc_keeper_dispatch_event_failures_total"
 let metric_keeper_tool_call_duration =
@@ -1171,7 +1173,10 @@ let init () =
   add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;
   add metric_keeper_heartbeat_failures
-    "Total keeper heartbeat failures" Counter;
+    "Total keeper heartbeat failures (labels: keeper, phase)" Counter;
+  add metric_keeper_cleanup_tracking_failures
+    "Total keeper cleanup_tracking failures in heartbeat finally \
+     (labels: keeper, site)" Counter;
   register_histogram ~name:metric_keeper_tool_call_duration
     ~help:"Keeper tool call latency in seconds, labeled by keeper, provider, tool, and outcome" ();
   add metric_provider_prefix_cache_creation_tokens

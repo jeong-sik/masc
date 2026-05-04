@@ -500,10 +500,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                        "write_meta lost CAS race after retries (keeper_msg turn): %s"
                        msg
                    else
-                     Prometheus.inc_counter
-                       Prometheus.metric_keeper_write_meta_failures
-                       ~labels:[("keeper", updated_meta.name); ("site", "keeper_msg_turn")]
-                       ();
                      Log.Keeper.error
                        "write_meta failed after keeper_msg turn: %s" msg);
               (try

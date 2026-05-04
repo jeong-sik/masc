@@ -135,14 +135,6 @@ export function WorldVisualizer() {
     const cx = w / 2
     const cy = h / 2
 
-    if (fleet.length === 0) {
-      ctx.fillStyle = cssVar('--color-fg-muted')
-      ctx.font = '13px system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('keeper fleet 데이터 대기 중...', cx, cy)
-      return
-    }
-
     const n = fleet.length
     const ringRadius = Math.min(FLEET_RING_BASE, Math.min(w, h) / 2 - 60)
 
@@ -306,21 +298,23 @@ export function WorldVisualizer() {
     }
   }, [fleet, msgList, taskList, paletteVersion])
 
-  // Animate on data change
-  if (animRef.current) cancelAnimationFrame(animRef.current)
-  animRef.current = requestAnimationFrame(draw)
-
   const fleetSize = fleet.length
   const avgConv = fleetSize > 0
     ? fleet.reduce((s, k) => s + (1 - freeEnergy(k)), 0) / fleetSize
     : 0
+
+  // Skip animation frame scheduling when there's no data — empty state has no canvas to draw
+  if (fleetSize > 0) {
+    if (animRef.current) cancelAnimationFrame(animRef.current)
+    animRef.current = requestAnimationFrame(draw)
+  }
 
   return html`
     <div
       class="relative rounded-[var(--r-2)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-0)] overflow-hidden"
       style="padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5);"
     >
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between ${fleetSize > 0 ? 'mb-3' : ''}">
         <div>
           <h2 class="text-sm font-semibold text-[var(--color-fg-primary)] m-0">
             Physical Laws Visualization
@@ -336,28 +330,34 @@ export function WorldVisualizer() {
           </div>
         ` : null}
       </div>
-      <canvas
-        ref=${canvasRef}
-        style="width: 100%; height: ${CANVAS_H}px; display: block;"
-      />
-      <div class="flex gap-4 mt-2 text-3xs text-[var(--color-fg-muted)]">
-        <span class="inline-flex items-center gap-1">
-          <span class="inline-block w-2 h-2 rounded-full bg-[var(--color-status-ok)] opacity-50"></span>
-          Stigmergy ring = activity intensity
-        </span>
-        <span class="inline-flex items-center gap-1">
-          <span class="inline-block w-4 h-0.5 bg-[var(--color-status-ok)]"></span>
-          Solid = within K=${K_LOCAL_SIGHT} sight
-        </span>
-        <span class="inline-flex items-center gap-1">
-          <span class="inline-block w-4 h-0 border-t border-dashed border-[var(--color-fg-muted)] opacity-40"></span>
-          Dashed = beyond sight
-        </span>
-        <span class="inline-flex items-center gap-1">
-          <span class="inline-block w-1 h-3 bg-[var(--color-status-ok)] opacity-70"></span>
-          Bar = convergence
-        </span>
-      </div>
+      ${fleetSize > 0 ? html`
+        <canvas
+          ref=${canvasRef}
+          style="width: 100%; height: ${CANVAS_H}px; display: block;"
+        />
+        <div class="flex gap-4 mt-2 text-3xs text-[var(--color-fg-muted)]">
+          <span class="inline-flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full bg-[var(--color-status-ok)] opacity-50"></span>
+            Stigmergy ring = activity intensity
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <span class="inline-block w-4 h-0.5 bg-[var(--color-status-ok)]"></span>
+            Solid = within K=${K_LOCAL_SIGHT} sight
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <span class="inline-block w-4 h-0 border-t border-dashed border-[var(--color-fg-muted)] opacity-40"></span>
+            Dashed = beyond sight
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <span class="inline-block w-1 h-3 bg-[var(--color-status-ok)] opacity-70"></span>
+            Bar = convergence
+          </span>
+        </div>
+      ` : html`
+        <p class="mt-3 text-3xs text-[var(--color-fg-muted)] m-0">
+          keeper 플릿 데이터 대기 중 — SSE가 keeper 상태를 수신하면 자동으로 시각화됩니다.
+        </p>
+      `}
     </div>
   `
 }

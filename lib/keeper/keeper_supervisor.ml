@@ -581,11 +581,19 @@ let cleanup_dead_tombstone (ctx : _ context)
           with
           | Ok () -> true
           | Error err when is_version_conflict_error err ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_write_meta_failures
+                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup_cas_race")]
+                ();
               Log.Keeper.warn
                 "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
                 entry.name err;
               false
           | Error err ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_write_meta_failures
+                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup")]
+                ();
               Log.Keeper.warn
                 "%s: dead tombstone cleanup paused write failed: %s"
                 entry.name err;
@@ -852,6 +860,10 @@ let handle_crash_auto_pause (ctx : _ context)
         with
         | Ok () -> ()
         | Error err ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_write_meta_failures
+              ~labels:[("keeper", entry.name); ("phase", "blocker_pause")]
+              ();
             Log.Keeper.warn
               "%s: %s pause meta write failed (in-memory \
                failure_reason still gates restart, but persisted state \
@@ -1211,6 +1223,10 @@ let sweep_and_recover (ctx : _ context) =
                            (Env_config.KeeperSupervisor.auto_resume_max_sec)
                            (resume_after_sec *. 2.0))
                   | Error err ->
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_write_meta_failures
+                        ~labels:[("keeper", name); ("phase", "auto_resume")]
+                        ();
                       Log.Keeper.warn
                         "%s: auto-resume meta write failed: %s"
                         name err)

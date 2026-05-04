@@ -554,6 +554,12 @@ let sync_keeper_paused_state
       config synced_meta
   with
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_write_meta_failures
+        ~labels:[("keeper", meta.name);
+                 ("phase",
+                  if paused then "pause_sync" else "resume_sync")]
+        ();
       Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
         ~config
         ~keeper_name:meta.name

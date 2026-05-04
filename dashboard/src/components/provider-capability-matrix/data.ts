@@ -417,6 +417,9 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W10', provider: 'Anthropic Claude', capability: 'tools', oasDeclares: 'supports_tools=true', actualBehavior: 'tool_use/tool_result 블록 구조, 공식 문서와 일치', impact: 'correct' },
   { id: 'W11', provider: 'Anthropic Claude', capability: 'extended thinking', oasDeclares: 'supports_extended_thinking=true', actualBehavior: 'budget_tokens + Interleaved Thinking (Claude 4+), 정확한 선언', impact: 'correct' },
   { id: 'W12', provider: 'Ollama', capability: 'is_ollama flag', oasDeclares: 'is_ollama=true', actualBehavior: 'tool_calls를 raw JSON 객체로 직렬화, 정확한 선언', impact: 'correct' },
+  { id: 'W13', provider: 'Gemini CLI', capability: 'infinite thinking', oasDeclares: '—', actualBehavior: 'Gemini 2.5 Flash에서 thinking loop 무한 루프 발생 (GitHub #2025), 복잡 프롬프트 시 hang', impact: 'high' },
+  { id: 'W14', provider: 'DeepSeek', capability: 'V3.2 FC', oasDeclares: '—', actualBehavior: 'V3.1 Strict FC (Beta) 지원, R1은 vLLM 경로만 tool calling, V3.2 Speciale은 FC 미지원', impact: 'medium' },
+  { id: 'W15', provider: 'Qwen', capability: 'tool format', oasDeclares: '—', actualBehavior: 'Hermes-style tool format 사용, 1M context (3.6 Plus), Hybrid Thinking Mode', impact: 'low' },
 ]
 
 // ── Anti-patterns ───────────────────────────────────────────────
@@ -504,9 +507,10 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'claude',
     models: [
-      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Thinking' },
-      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Thinking' },
+      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Extended+Interleaved Thinking' },
+      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Adaptive Thinking' },
       { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00', notes: 'BFCL V4 #6' },
+      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
     ],
   },
   {
@@ -550,6 +554,12 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     ],
   },
   {
+    providerId: 'nemotron',
+    models: [
+      { id: 'nemotron-4-340b', context: '4K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'NVIDIA NIM, thinking OFF 필요 시 tool calling' },
+    ],
+  },
+  {
     providerId: 'kimi',
     models: [
       { id: 'kimi-k2-instruct', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트' },
@@ -561,13 +571,19 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'ollama',
     models: [
-      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+      { id: 'llama3.3:70b', context: '128K', tier: 'flagship', notes: 'Tool calling 지원' },
+      { id: 'qwen3:32b', context: '128K', tier: 'standard', notes: 'Tool + thinking 지원' },
+      { id: 'gemma3:27b', context: '128K', tier: 'standard', notes: '2025.04 추가, Tool 지원' },
+      { id: 'mistral-nemo:12b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },
+      { id: 'functionary:v3.2', context: '128K', tier: 'coding', notes: 'FC 특화, Hermes 포맷' },
+      { id: 'hermes3:8b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },
+      { id: 'deepseek-r1:70b', context: '128K', tier: 'standard', notes: 'Tool 실험적 지원' },
     ],
   },
   {
     providerId: 'llamacpp',
     models: [
-      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+      { id: '(local GGUF)', context: 'varies', tier: 'standard', notes: 'Native + Generic tool format, --chat-template-file 오버라이드' },
     ],
   },
 ]
@@ -597,8 +613,8 @@ export interface CliTransportInfo {
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
-  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답. Gemini 2.5 Flash infinite thinking bug (#2025)' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
   { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
 ]
 

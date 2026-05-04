@@ -258,6 +258,19 @@ let filter_candidate_providers_for_tool_support
     in
     if kept = [] && provider_cfgs <> [] then begin
       let signature = signature_of_rejected_providers rejected in
+      (* Forward each rejection to the Prometheus capability_drop counter so
+         operators can alert on cascade-empty silently dropping requests.
+         The WARN log below describes the systemic cause; the per-rejection
+         metric records every provider lost so dashboards can attribute
+         which provider/reason combination drove the drop. *)
+      List.iter
+        (fun (provider_cfg, reason) ->
+          Llm_metric_bridge.emit_capability_drop
+            ~model_id:provider_cfg.Llm_provider.Provider_config.model_id
+            ~field:
+              (Printf.sprintf "cascade_empty:%s"
+                 (filter_rejection_reason_label reason)))
+        rejected;
       if cascade_empty_should_emit_first ~label ~signature then
         Log.Misc.error
           "[#11060/#11356] cascade %s: provider-normalized tool-use gate \

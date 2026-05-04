@@ -568,7 +568,7 @@ export function modelTierStyle(tier: ProviderModel['tier']): string {
 export interface CliTransportInfo {
   providerId: string
   binary: string
-  loc: number
+  contextWindow: string
   promptMode: string
   streamFormat: string
   argvThreshold: string
@@ -576,10 +576,10 @@ export interface CliTransportInfo {
 }
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
-  { providerId: 'claude', binary: 'claude', loc: 1282, promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', loc: 949, promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
-  { providerId: 'codex_cli', binary: 'codex', loc: 1340, promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
-  { providerId: 'kimi', binary: 'kimi-for-coding', loc: 693, promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: '단일 모델 기본 (kimi-for-coding)' },
+  { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
 ]
 
 // ── GLM Model Mapping ─────────────────────────────────────────

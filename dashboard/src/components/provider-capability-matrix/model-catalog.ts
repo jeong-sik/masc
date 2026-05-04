@@ -84,7 +84,7 @@ function CliTransportTable() {
           <tr>
             <th class="pm-th">Provider</th>
             <th class="pm-th">Binary</th>
-            <th class="pm-th pm-th--right">LOC</th>
+            <th class="pm-th pm-th--right">Context</th>
             <th class="pm-th pm-th--center">Prompt</th>
             <th class="pm-th pm-th--center">Stream</th>
             <th class="pm-th pm-th--center">Argv Thresh</th>
@@ -96,7 +96,7 @@ function CliTransportTable() {
             <tr key=${t.providerId} class="pm-row-alt">
               <td class="pm-td font-semibold">${PROVIDER_LABELS[t.providerId] ?? t.providerId}</td>
               <td class="pm-td pm-td--mono">${t.binary}</td>
-              <td class="pm-td pm-td--right pm-td--mono">${t.loc.toLocaleString()}</td>
+              <td class="pm-td pm-td--right pm-td--mono">${t.contextWindow}</td>
               <td class="pm-td pm-td--center pm-td--mono">${t.promptMode}</td>
               <td class="pm-td pm-td--center pm-td--mono">${t.streamFormat}</td>
               <td class="pm-td pm-td--center pm-td--mono">${t.argvThreshold}</td>

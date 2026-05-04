@@ -7,45 +7,79 @@ import {
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
 
-export const IDE_MOCK_PRESENCE: KeeperPresenceSnapshot = {
-  runtime_id: 'runtime',
+const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
+  runtime_id: 'local',
   branch: 'main',
   supervisor: 'local',
-  connected: true,
-  entries: [
-    {
-      keeper_id: 'nick0cave',
-      workspace_label: 'dkr-a1',
-      branch: 'main',
-      role: 'driver',
-      status: 'active',
-      last_seen_ms: Date.UTC(2026, 4, 2, 1, 43, 18),
-    },
-    {
-      keeper_id: 'masc-improver',
-      workspace_label: 'wt-run-47',
-      branch: 'feature/normalize-tools',
-      role: 'improver',
-      status: 'active',
-      last_seen_ms: Date.UTC(2026, 4, 2, 1, 42, 58),
-    },
-  ],
+  connected: false,
+  entries: [],
 }
 
-interface IdePresenceStripProps {
-  readonly snapshot?: KeeperPresenceSnapshot
+interface ApiAgent {
+  readonly name: string
+  readonly status: string
+  readonly current_task: string | null
+  readonly model: string | null
 }
 
-export function IdePresenceStrip({
-  snapshot = IDE_MOCK_PRESENCE,
-}: IdePresenceStripProps) {
-  const presenceStore = useMemo(() => createKeeperPresenceStore(snapshot), [])
+interface ApiStatus {
+  readonly cluster?: string
+  readonly project?: string
+  readonly paused?: boolean
+}
+
+function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
+  if (status === 'active' || status === 'busy') return 'active'
+  if (status === 'listening') return 'idle'
+  return 'idle'
+}
+
+function agentsToPresence(agents: ReadonlyArray<ApiAgent>, status: ApiStatus): KeeperPresenceSnapshot {
+  const now = Date.now()
+  return {
+    runtime_id: status.cluster ?? 'local',
+    branch: status.project ?? 'main',
+    supervisor: 'local',
+    connected: agents.length > 0,
+    entries: agents.map((agent, idx) => ({
+      keeper_id: agent.name,
+      workspace_label: agent.name,
+      branch: status.project ?? 'main',
+      role: agent.model ?? 'agent',
+      status: mapAgentStatus(agent.status),
+      last_seen_ms: now - idx * 1000,
+    })),
+  }
+}
+
+async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
+  try {
+    const [agentsRes, statusRes] = await Promise.all([
+      fetch('/api/v1/agents?limit=20'),
+      fetch('/api/v1/status'),
+    ])
+    if (!agentsRes.ok || !statusRes.ok) return FALLBACK_PRESENCE
+    const agentsData = await agentsRes.json()
+    const statusData = await statusRes.json()
+    const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
+    if (agents.length === 0) return FALLBACK_PRESENCE
+    return agentsToPresence(agents, statusData as ApiStatus)
+  } catch {
+    return FALLBACK_PRESENCE
+  }
+}
+
+export function IdePresenceStrip() {
+  const presenceStore = useMemo(() => createKeeperPresenceStore(FALLBACK_PRESENCE), [])
   const [, forceRender] = useState(0)
 
-  useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])
   useEffect(() => {
-    presenceStore.seed(snapshot)
-  }, [presenceStore, snapshot])
+    let cancelled = false
+    fetchPresence().then(snapshot => { if (!cancelled) presenceStore.seed(snapshot) })
+    return () => { cancelled = true }
+  }, [presenceStore])
+
+  useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()

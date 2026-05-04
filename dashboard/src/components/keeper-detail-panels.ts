@@ -11,6 +11,7 @@ import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
 import { SectionHeader } from './common/section-header'
 import { StatusChip } from './common/status-chip'
+import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 function MutedSpan({ children }: { children: unknown }) {
@@ -104,6 +105,14 @@ export function filterCtxCompositionEntries(
 
 type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
 
+function kpiToneToStatus(tone: KpiTone): 'ok' | 'warn' | 'crit' | undefined {
+  if (tone === 'default') return undefined
+  if (tone === 'bad') return 'crit'
+  return tone
+}
+
+// KpiTone + KPI_TONE/KPI_VALUE_TONE retained: used by inline heartbeat/compression/drop elements.
+
 const KPI_TONE: Record<KpiTone, string> = {
   default: 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]',
   ok: 'border-[var(--ok-20)] bg-[var(--ok-6)]',
@@ -116,43 +125,6 @@ const KPI_VALUE_TONE: Record<KpiTone, string> = {
   ok: 'text-[var(--color-status-ok)]',
   warn: 'text-[var(--color-status-warn)]',
   bad: 'text-[var(--color-status-err)]',
-}
-
-const KPI_ICON: Record<string, string> = {
-  '세대': '🔄',
-  '턴': '↻',
-  '컨텍스트': '📊',
-  '활동': '⚡',
-  '토큰': '🔤',
-  '인계': '🤝',
-  '압축': '📦',
-  '비용 (USD)': '💰',
-}
-
-function KpiCard({ label, value, hint, tone = 'default', progress }: {
-  label: string
-  value: string | number
-  hint?: string
-  tone?: KpiTone
-  /** 0-100 progress bar */
-  progress?: number
-}) {
-  const icon = KPI_ICON[label] ?? ''
-  return html`
-    <div class="p-3.5 rounded-[var(--r-1)] border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
-      <div class="flex items-center justify-between">
-        <${SectionHeader} size="xs">${label}</${SectionHeader}>
-        ${icon ? html`<span class="text-2xs opacity-60">${icon}</span>` : null}
-      </div>
-      <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
-      ${progress != null ? html`
-        <div class="mt-0.5">
-          <${ProgressBar} pct=${progress} size="xs" trackTone="dim" class=${`bg-[${ctxColor(progress)}]`} />
-        </div>
-      ` : null}
-      ${hint ? html`<div class="text-3xs text-[var(--color-fg-disabled)] leading-snug">${hint}</div>` : null}
-    </div>
-  `
 }
 
 // ── Detail Card (shared container) ───────────────────────
@@ -404,20 +376,17 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
     <div class="flex flex-col gap-3 mb-5">
       <${KpiSection} title="정체성" question="얼마나 오래 살았나?">
         <div class="grid grid-cols-3 gap-2">
-          <${KpiCard}
+          <${StatTile}
             label="세대"
-            value=${keeper.generation ?? '-'}
-            hint="같은 keeper의 trace 교체 횟수"
+            value=${String(keeper.generation ?? '-')}
           />
-          <${KpiCard}
+          <${StatTile}
             label="턴"
-            value=${keeper.turn_count ?? '-'}
-            hint="총 루프 회차"
+            value=${String(keeper.turn_count ?? '-')}
           />
-          <${KpiCard}
+          <${StatTile}
             label="인계"
-            value=${keeper.handoff_count_total ?? '-'}
-            hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : '누적 lineage 길이'}
+            value=${String(keeper.handoff_count_total ?? '-')}
           />
         </div>
       <//>
@@ -425,25 +394,22 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       <${KpiSection} title="메모리 압력" question="지금 위험한가?">
         <div class="flex flex-col gap-3">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <${KpiCard}
+            <${StatTile}
               label="컨텍스트"
               value=${ctxPct != null ? `${ctxPct}%` : '-'}
-              hint=${ctxHint}
-              tone=${ctxTone}
-              progress=${ctxPct ?? undefined}
+              status=${kpiToneToStatus(ctxTone)}
+              delta=${ctxHint ? { direction: ctxPct != null && ctxPct > CTX_WARN_PCT ? 'down' as const : 'flat' as const, text: ctxHint } : undefined}
             />
-            <${KpiCard}
+            <${StatTile}
               label="토큰"
               value=${formatTokens(keeper.context_tokens)}
-              hint=${keeper.context_max ? `/ ${formatTokens(keeper.context_max)}` : undefined}
             />
-            <${KpiCard}
+            <${StatTile}
               label="압축"
-              value=${keeper.compaction_count ?? '-'}
-              hint=${(keeper.compaction_count ?? 0) === 0 ? '첫 압축 후 표시' : undefined}
+              value=${String(keeper.compaction_count ?? '-')}
             />
             ${latestCost
-              ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`
+              ? html`<${StatTile} label="비용 (USD)" value=${latestCost} />`
               : null}
           </div>
           <${OperationalHealth} keeper=${keeper} />
@@ -478,27 +444,21 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
 
       <${KpiSection} title="자율성 패턴" question="스스로 돌고 있나?">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <${KpiCard}
+          <${StatTile}
             label="자율 턴"
-            value=${keeper.autonomous_turn_count ?? 0}
-            hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ?? '미발동'}
+            value=${String(keeper.autonomous_turn_count ?? 0)}
           />
-          <${KpiCard}
+          <${StatTile}
             label="자율 행동"
-            value=${keeper.autonomous_action_count ?? 0}
-            hint=${keeper.last_proactive_ago_s != null
-              ? `${formatDuration(keeper.last_proactive_ago_s)} 전${keeper.last_proactive_reason ? ' · ' + keeper.last_proactive_reason : ''}`
-              : autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
+            value=${String(keeper.autonomous_action_count ?? 0)}
           />
-          <${KpiCard}
+          <${StatTile}
             label="보드 반응"
-            value=${keeper.board_reactive_turn_count ?? 0}
-            hint="게시판 반응 턴"
+            value=${String(keeper.board_reactive_turn_count ?? 0)}
           />
-          <${KpiCard}
+          <${StatTile}
             label="비활동"
-            value=${keeper.noop_turn_count ?? 0}
-            hint="아무 작업 없는 턴"
+            value=${String(keeper.noop_turn_count ?? 0)}
           />
         </div>
       <//>

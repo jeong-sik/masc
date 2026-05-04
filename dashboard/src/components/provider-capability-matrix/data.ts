@@ -222,7 +222,8 @@ export function computeMatrixSummary() {
 }
 
 // ── BFCL Benchmarks ─────────────────────────────────────────────
-// Source: sec04 Table 4.2.2
+// Source: BFCL V4 Leaderboard, gorilla.cs.berkeley.edu (Last Updated: 2026-04-12)
+// 109 models evaluated. Selection: top-performing + MASC-relevant providers.
 
 export interface BfclEntry {
   rank: number
@@ -234,16 +235,18 @@ export interface BfclEntry {
 }
 
 export const BFCL_RANKINGS: BfclEntry[] = [
-  { rank: 1,  model: 'GLM-4.5 (FC)',           bfclV3: '70.85%', bfclV4: '—',       feature: '복잡한 스키마 강점, Zhipu AI',           license: '상업적' },
-  { rank: 2,  model: 'Claude Opus 4.1',         bfclV3: '70.36%', bfclV4: '—',       feature: 'Anthropic 최상위, Interleaved Thinking', license: '상업적' },
-  { rank: 3,  model: 'Claude Sonnet 4',         bfclV3: '70.29%', bfclV4: '—',       feature: '성능/비용 효율 균형',                    license: '상업적' },
-  { rank: 4,  model: 'Qwen3.5-397B-A17B',       bfclV3: '—',      bfclV4: '72.9%',   feature: 'BFCL V4 1위, 397B MoE 오픈웨이트',      license: '오픈웨이트' },
-  { rank: 5,  model: 'GPT-5',                   bfclV3: '59.22%', bfclV4: '—',       feature: 'MCPMark 52.6% 선두 (BFCL≠MCPMark)',      license: '상업적' },
-  { rank: 6,  model: 'Claude Haiku 4.5',        bfclV3: '80.6%',  bfclV4: '—',       feature: '소형 모델 최고 효율 (Inspect 벤치마크)', license: '상업적' },
-  { rank: 7,  model: 'Qwen 3-Coder',            bfclV3: '경쟁력', bfclV4: '—',       feature: 'MCPMark $36.46/런 최저비용',             license: '오픈웨이트' },
-  { rank: 8,  model: 'DeepSeek V3.1',           bfclV3: '개선됨', bfclV4: '—',       feature: 'Strict Function Calling (Beta)',         license: '오픈웨이트' },
-  { rank: 9,  model: 'Gemma 4 27B/31B',         bfclV3: '76.9%',  bfclV4: '—',       feature: 'Apache 2.0 멀티모달 오픈웨이트',         license: 'Apache 2.0' },
-  { rank: 10, model: 'Kimi K2.6',               bfclV3: '—',      bfclV4: '경쟁력',  feature: 'SWE-Bench Pro 58.6%, 256K 컨텍스트',    license: 'Modified MIT' },
+  { rank: 1,  model: 'Claude Opus 4.5 (FC)',      bfclV3: '—', bfclV4: '77.47%', feature: 'V4 1위, Interleaved Thinking',           license: '상업적' },
+  { rank: 2,  model: 'Claude Sonnet 4.5 (FC)',     bfclV3: '—', bfclV4: '73.24%', feature: '성능/비용 최적 균형',                     license: '상업적' },
+  { rank: 3,  model: 'Gemini 3 Pro Preview (Prompt)', bfclV3: '—', bfclV4: '72.51%', feature: 'Google 차세대, Prompt mode',             license: '상업적' },
+  { rank: 4,  model: 'GLM-4.6 (FC thinking)',      bfclV3: '—', bfclV4: '72.38%', feature: 'Zhipu AI, FC+thinking 혼합',             license: 'MIT' },
+  { rank: 6,  model: 'Claude Haiku 4.5 (FC)',      bfclV3: '—', bfclV4: '68.70%', feature: '소형 모델 중 최고 수준',                  license: '상업적' },
+  { rank: 11, model: 'Kimi K2 Instruct (FC)',       bfclV3: '—', bfclV4: '59.06%', feature: 'MoonshotAI, MoE 오픈웨이트',             license: 'Modified MIT' },
+  { rank: 14, model: 'DeepSeek V3.2 Exp (Prompt)',  bfclV3: '—', bfclV4: '56.73%', feature: 'Prompt+Thinking 모드',                   license: 'MIT' },
+  { rank: 15, model: 'Gemini 2.5 Flash (FC)',       bfclV3: '—', bfclV4: '56.24%', feature: 'Google 경량, FC mode',                    license: '상업적' },
+  { rank: 16, model: 'GPT-5.2 (FC)',                bfclV3: '—', bfclV4: '55.87%', feature: 'OpenAI 최신, MCPMark와 차이 유의',       license: '상업적' },
+  { rank: 20, model: 'GPT-4.1 (FC)',                bfclV3: '—', bfclV4: '53.96%', feature: 'OpenAI 4.1, 비용 효율',                  license: '상업적' },
+  { rank: 23, model: 'Qwen3-235B-A22B (Prompt)',    bfclV3: '—', bfclV4: '52.15%', feature: 'Alibaba MoE 오픈웨이트',                 license: 'Apache 2.0' },
+  { rank: 46, model: 'Mistral Large 2411 (FC)',     bfclV3: '—', bfclV4: '38.37%', feature: 'Mistral AI 최상위, FC mode',             license: '상업적' },
 ]
 
 // ── BFCL V4 Category Breakdown ──────────────────────────────────
@@ -275,16 +278,20 @@ export interface BfclModelCategoryBreakdown {
   agentic: CategoryLevel
 }
 
+// Category-level breakdown estimated from V4 overall + V3 historical category patterns.
+// BFCL V4 does not publish per-category scores per model publicly.
 export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
-  { model: 'GLM-4.5',         overall: '70.85%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'Claude Opus 4.1', overall: '70.36%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'Claude Sonnet 4', overall: '70.29%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'Claude Haiku 4.5',overall: '80.6%',  simple: 'high', parallel: 'high', multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'GPT-5',           overall: '59.22%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
-  { model: 'GPT-4.1-mini',    overall: '78.8%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Qwen 3-Coder',    overall: '경쟁력', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'DeepSeek V3.1',   overall: '개선됨', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Gemma 4 27B',     overall: '76.9%',  simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Claude Opus 4.5',  overall: '77.47%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'Claude Sonnet 4.5',overall: '73.24%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
+  { model: 'GLM-4.6',          overall: '72.38%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'mid'  },
+  { model: 'Claude Haiku 4.5', overall: '68.70%', simple: 'high', parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Kimi K2',          overall: '59.06%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'DeepSeek V3.2',    overall: '56.73%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'Gemini 2.5 Flash', overall: '56.24%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
+  { model: 'GPT-5.2',          overall: '55.87%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
+  { model: 'GPT-4.1',          overall: '53.96%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
+  { model: 'Qwen3-235B',       overall: '52.15%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
+  { model: 'Mistral Large',    overall: '38.37%', simple: 'mid',  parallel: 'low',  multiTurn: 'low',  agentic: 'low'  },
 ]
 
 export function categoryLevelClass(level: CategoryLevel): string {
@@ -472,9 +479,9 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'claude',
     models: [
-      { id: 'claude-opus-4-7', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'Thinking' },
-      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Thinking' },
-      { id: 'claude-haiku-4-5', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00' },
+      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Thinking' },
+      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Thinking' },
+      { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00', notes: 'BFCL V4 #6' },
     ],
   },
   {
@@ -489,7 +496,7 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     providerId: 'deepseek',
     models: [
       { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning' },
-      { id: 'deepseek-v3-0324', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10' },
+      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14' },
       { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28' },
     ],
   },
@@ -512,17 +519,15 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'glm',
     models: [
-      { id: 'glm-5', context: '200K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'General' },
+      { id: 'glm-4.6', context: '128K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'BFCL V4 #4, FC+thinking' },
       { id: 'glm-5-code', context: '128K', tier: 'coding', inputPrice: '$1.20', outputPrice: '$0.30', notes: 'Coding Plan 전용' },
-      { id: 'glm-4.7', context: '128K', tier: 'standard', inputPrice: '$0.60', outputPrice: '—', notes: 'Coding Plan 기본' },
       { id: 'glm-4.5-air', context: '128K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: 'Coding Plan 경량' },
     ],
   },
   {
     providerId: 'kimi',
     models: [
-      { id: 'kimi-k2.6', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'Multimodal, Thinking' },
-      { id: 'kimi-k2.5', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'SoTA Agent/Code' },
+      { id: 'kimi-k2-instruct', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트' },
       { id: 'kimi-k2-thinking', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '장기 사고' },
       { id: 'kimi-k2-turbo-preview', context: '256K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: '60-100 tok/s' },
       { id: 'moonshot-v1-128k', context: '128K', tier: 'legacy', inputPrice: '—', outputPrice: '—' },

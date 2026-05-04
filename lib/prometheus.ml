@@ -516,6 +516,8 @@ let metric_keeper_tool_selection_failures =
   "masc_keeper_tool_selection_failures_total"
 let metric_keeper_reconcile_failures =
   "masc_keeper_reconcile_failures_total"
+let metric_keeper_decision_audit_flush_failures =
+  "masc_keeper_decision_audit_flush_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1194,6 +1196,10 @@ let init () =
   add metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \
      Labeled by keeper and phase=resolve_agent|task_id_parse|owned_tasks_query."
+    Counter;
+  add metric_keeper_decision_audit_flush_failures
+    "Total decision audit ring-buffer flush failures causing audit data loss. \
+     Labeled by keeper."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

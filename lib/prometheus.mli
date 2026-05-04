@@ -199,6 +199,7 @@ val metric_keeper_write_meta_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string
+val metric_keeper_decision_audit_flush_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

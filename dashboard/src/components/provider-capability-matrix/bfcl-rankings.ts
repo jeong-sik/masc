@@ -12,7 +12,6 @@ import {
   scoreBucket,
 } from './data'
 
-const BFCL_MAX_SCORE = 77.47
 const BFCL_BUCKET_COLORS: Record<string, string> = {
   z4: 'var(--color-status-ok)',
   z3: 'var(--color-accent-fg)',

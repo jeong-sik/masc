@@ -331,6 +331,26 @@ export const HARNESS_MODELS: HarnessModel[] = [
   { id: 'qwen3-coder-next',  params: '3B/80B Coding', compileRate: '100%' },
 ]
 
+// ── MCPMark: MCP Agent Workflow Benchmark ──────────────────────
+// Source: external_research.md §1.2.3, verified 2026-04-30.
+// MCPMark measures pass@1 on MCP-based agent workflows (not schema compliance).
+// BFCL 1위(Claude Opus 4.5) ≠ MCPMark 1위(GPT-5) — benchmark dependency warning.
+
+export interface McpMarkEntry {
+  model: string
+  passAt1: string
+  avgAgentTime: string
+  costPerRun: string
+  note: string
+}
+
+export const MCPMARK_ENTRIES: McpMarkEntry[] = [
+  { model: 'GPT-5',          passAt1: '52.6%', avgAgentTime: '478.21s', costPerRun: '$127.46', note: 'BFCL 7위이나 MCPMark 1위. 에이전트 워크플로우 강점' },
+  { model: 'Claude Opus 4.1', passAt1: '29.9%', avgAgentTime: '361.81s', costPerRun: '고가',     note: 'BFCL 2위. pass@1은 GPT-5에 0.57×' },
+  { model: 'Claude Sonnet 4', passAt1: '28.1%', avgAgentTime: '218.27s', costPerRun: '$252.41',  note: '가장 빠른 에이전트 완주, 비용은 GPT-5의 2×' },
+  { model: 'Qwen 3-Coder',   passAt1: '24.8%', avgAgentTime: '274.29s', costPerRun: '$36.46',   note: '최저 비용 ($36/런). BFCL 미참여' },
+]
+
 // ── OAS Provider Capabilities (sec02 Table 1) ──────────────────
 
 export type UsageBehavior = 'emit' | 'strip'

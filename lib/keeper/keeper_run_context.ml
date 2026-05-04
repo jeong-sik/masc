@@ -170,6 +170,10 @@ let prepare_run_context
   let pre_dispatch_checkpoint_error =
     match checkpoint_hygiene.save_error with
     | Some detail ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_run_context_failures
+        ~labels:[("keeper", meta.name)]
+        ();
       Log.Keeper.error
         "%s: pre-dispatch checkpoint compaction save failed: %s"
         meta.name detail;

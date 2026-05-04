@@ -494,6 +494,22 @@ let metric_keeper_tools_oas_failures =
   "masc_keeper_tools_oas_failures_total"
 let metric_keeper_turn_up_update_failures =
   "masc_keeper_turn_up_update_failures_total"
+let metric_keeper_exec_tools_failures =
+  "masc_keeper_exec_tools_failures_total"
+let metric_keeper_circuit_breaker_trips =
+  "masc_keeper_circuit_breaker_trips_total"
+let metric_keeper_prompt_failures =
+  "masc_keeper_prompt_failures_total"
+let metric_keeper_run_context_failures =
+  "masc_keeper_run_context_failures_total"
+let metric_keeper_shell_ops_failures =
+  "masc_keeper_shell_ops_failures_total"
+let metric_keeper_tag_dispatch_failures =
+  "masc_keeper_tag_dispatch_failures_total"
+let metric_keeper_trace_emit_failures =
+  "masc_keeper_trace_emit_failures_total"
+let metric_keeper_transition_audit_failures =
+  "masc_keeper_transition_audit_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
@@ -1286,6 +1302,30 @@ let init () =
     Counter;
   add metric_keeper_turn_up_update_failures
     "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), labeled by keeper and site"
+    Counter;
+  add metric_keeper_exec_tools_failures
+    "Total keeper exec tool failures (malformed structured payload), labeled by keeper and tool"
+    Counter;
+  add metric_keeper_circuit_breaker_trips
+    "Total keeper failure circuit breaker trips, labeled by keeper and failure_type"
+    Counter;
+  add metric_keeper_prompt_failures
+    "Total keeper prompt render failures, labeled by keeper"
+    Counter;
+  add metric_keeper_run_context_failures
+    "Total keeper run context failures (checkpoint save), labeled by keeper"
+    Counter;
+  add metric_keeper_shell_ops_failures
+    "Total keeper shell operation failures (R2 blocked), labeled by keeper"
+    Counter;
+  add metric_keeper_tag_dispatch_failures
+    "Total keeper tag dispatch exceptions, labeled by tag"
+    Counter;
+  add metric_keeper_trace_emit_failures
+    "Total keeper trace emit failures, labeled by keeper"
+    Counter;
+  add metric_keeper_transition_audit_failures
+    "Total keeper transition audit store failures, labeled by site"
     Counter;
   add metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by event"

@@ -209,6 +209,14 @@ val metric_keeper_keepalive_signal_failures : string
 val metric_keeper_meta_json_failures : string
 val metric_keeper_tools_oas_failures : string
 val metric_keeper_turn_up_update_failures : string
+val metric_keeper_exec_tools_failures : string
+val metric_keeper_circuit_breaker_trips : string
+val metric_keeper_prompt_failures : string
+val metric_keeper_run_context_failures : string
+val metric_keeper_shell_ops_failures : string
+val metric_keeper_tag_dispatch_failures : string
+val metric_keeper_trace_emit_failures : string
+val metric_keeper_transition_audit_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string

@@ -1223,7 +1223,7 @@ let init () =
   add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;
   add metric_keeper_heartbeat_failures
-    "Total keeper heartbeat failures (labels: keeper, phase)" Counter;
+    "Total keeper heartbeat failures (labels: keeper, site)" Counter;
   add metric_keeper_cleanup_tracking_failures
     "Total keeper cleanup_tracking failures in heartbeat finally \
      (labels: keeper, site)" Counter;

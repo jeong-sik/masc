@@ -241,7 +241,7 @@ let run_grpc_heartbeat_stream
          | Error err ->
            Prometheus.inc_counter
              Prometheus.metric_keeper_heartbeat_failures
-             ~labels:[("keeper", agent_name); ("phase", "grpc_recv")]
+             ~labels:[("keeper", agent_name); ("site", "grpc_recv")]
              ();
            Log.Keeper.warn "gRPC heartbeat recv: %s" err
        with
@@ -250,7 +250,7 @@ let run_grpc_heartbeat_stream
        | exn ->
          Prometheus.inc_counter
            Prometheus.metric_keeper_heartbeat_failures
-           ~labels:[("keeper", agent_name); ("phase", "grpc_tick")]
+           ~labels:[("keeper", agent_name); ("site", "grpc_tick")]
            ();
          Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
       if not (Atomic.get stop || Atomic.get close_ref)
@@ -273,7 +273,7 @@ let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
   | `Error exn ->
     Prometheus.inc_counter
       Prometheus.metric_keeper_heartbeat_failures
-      ~labels:[("keeper", agent_name); ("phase", "grpc_stream")]
+      ~labels:[("keeper", agent_name); ("site", "grpc_stream")]
       ();
     Log.Keeper.warn
       "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
@@ -319,7 +319,7 @@ let run_grpc_heartbeat_fiber
         then
           (Prometheus.inc_counter
              Prometheus.metric_keeper_heartbeat_failures
-             ~labels:[("keeper", agent_name); ("phase", "grpc_reconnect_exhausted")]
+             ~labels:[("keeper", agent_name); ("site", "grpc_reconnect_exhausted")]
              ();
            Log.Keeper.error
             "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"

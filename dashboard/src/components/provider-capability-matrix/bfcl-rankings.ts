@@ -23,7 +23,7 @@ function V4CategoryTable() {
           </tr>
         </thead>
         <tbody>
-          ${BFCL_V4_CATEGORIES.map((cat, i) => html`
+          ${BFCL_V4_CATEGORIES.map((cat) => html`
             <tr key=${cat.id} class="pm-row-alt">
               <td class="pm-td font-semibold">${cat.label}</td>
               <td class="pm-td t-meta">${cat.description}</td>
@@ -54,7 +54,7 @@ function ModelBreakdownTable() {
           </tr>
         </thead>
         <tbody>
-          ${BFCL_MODEL_BREAKDOWN.map((m, i) => html`
+          ${BFCL_MODEL_BREAKDOWN.map((m) => html`
             <tr key=${m.model} class="pm-row-alt">
               <td class="pm-td font-semibold">${m.model}</td>
               <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
@@ -98,7 +98,7 @@ function HarnessCaseStudy() {
               </tr>
             </thead>
             <tbody>
-              ${HARNESS_MODELS.map((hm, i) => html`
+              ${HARNESS_MODELS.map((hm) => html`
                 <tr key=${hm.id} class="pm-row-alt">
                   <td class="pm-td pm-td--mono font-semibold">${hm.id}</td>
                   <td class="pm-td t-micro t-meta">${hm.params}</td>
@@ -184,7 +184,7 @@ export function BfclRankings() {
             </tr>
           </thead>
           <tbody>
-            ${BFCL_RANKINGS.map((entry, i) => {
+            ${BFCL_RANKINGS.map((entry) => {
               const hasV3 = entry.bfclV3 !== '—' && entry.bfclV3 !== '경쟁력' && entry.bfclV3 !== '개선됨'
               const hasV4 = entry.bfclV4 !== '—' && entry.bfclV4 !== '경쟁력'
               return html`

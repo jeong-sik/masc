@@ -507,6 +507,13 @@ let metric_keeper_proactive_outcome =
    Labelled by [keeper] and [cascade]. *)
 let metric_keeper_ollama_saturation_skip =
   "masc_keeper_ollama_saturation_skip_total"
+(* Tool-setup and task-load failures during keeper tool surface assembly.
+   task_load: Coord.get_tasks_raw exception while loading current task contract.
+   tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
+let metric_keeper_task_load_failures =
+  "masc_keeper_task_load_failures_total"
+let metric_keeper_tool_selection_failures =
+  "masc_keeper_tool_selection_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1173,6 +1180,14 @@ let init () =
     "Total keeper turns skipped because the resolved cascade is \
      ollama-only and the /api/ps probe reported zero available slots. \
      Labeled by keeper and cascade."
+    Counter;
+  add metric_keeper_task_load_failures
+    "Total Coord.get_tasks_raw exceptions while loading current task contract. \
+     Labeled by keeper and phase=task_contract_load."
+    Counter;
+  add metric_keeper_tool_selection_failures
+    "Total tool selection exceptions during per-turn tool set assembly. \
+     Labeled by keeper and phase=topk_llm|tool_discovery."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

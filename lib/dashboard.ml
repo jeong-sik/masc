@@ -459,13 +459,24 @@ let keepers_section now : section =
   let write_meta_failures =
     Prometheus.metric_total Prometheus.metric_keeper_write_meta_failures |> int_of_float
   in
+  let tool_failures =
+    (Prometheus.metric_total Prometheus.metric_keeper_tool_selection_failures |> int_of_float)
+    + (Prometheus.metric_total Prometheus.metric_keeper_task_load_failures |> int_of_float)
+  in
   let title =
-    match guard_violations, write_meta_failures with
-    | 0, 0 -> "Keepers"
-    | gv, 0 -> Printf.sprintf "Keepers (guard violations: %d)" gv
-    | 0, wm -> Printf.sprintf "Keepers (meta write errors: %d)" wm
-    | gv, wm ->
+    match guard_violations, write_meta_failures, tool_failures with
+    | 0, 0, 0 -> "Keepers"
+    | gv, 0, 0 -> Printf.sprintf "Keepers (guard violations: %d)" gv
+    | 0, wm, 0 -> Printf.sprintf "Keepers (meta write errors: %d)" wm
+    | 0, 0, tf -> Printf.sprintf "Keepers (tool errors: %d)" tf
+    | gv, wm, 0 ->
         Printf.sprintf "Keepers (guard violations: %d, meta write errors: %d)" gv wm
+    | gv, 0, tf ->
+        Printf.sprintf "Keepers (guard violations: %d, tool errors: %d)" gv tf
+    | 0, wm, tf ->
+        Printf.sprintf "Keepers (meta write errors: %d, tool errors: %d)" wm tf
+    | gv, wm, tf ->
+        Printf.sprintf "Keepers (guard violations: %d, meta write errors: %d, tool errors: %d)" gv wm tf
   in
   { title; content; empty_msg = "(no keepers registered)" }
 
@@ -593,6 +604,15 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
       let write_meta_failures =
         Prometheus.metric_total Prometheus.metric_keeper_write_meta_failures |> int_of_float
       in
-      Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d | META-WRITE-ERR: %d"
-        k_running k_dead k_other guard_violations write_meta_failures;
+      let tool_failures =
+        (Prometheus.metric_total Prometheus.metric_keeper_tool_selection_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_task_load_failures |> int_of_float)
+      in
+      let tool_suffix =
+        if tool_failures > 0
+        then Printf.sprintf " | TOOL-ERR: %d" tool_failures
+        else ""
+      in
+      Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d | META-WRITE-ERR: %d%s"
+        k_running k_dead k_other guard_violations write_meta_failures tool_suffix;
     ]

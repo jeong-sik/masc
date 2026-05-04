@@ -548,6 +548,10 @@ let metric_keeper_sse_broadcast_failures =
   "masc_keeper_sse_broadcast_failures_total"
 let metric_keeper_room_heartbeat_failures =
   "masc_keeper_room_heartbeat_failures_total"
+let metric_keeper_turn_metrics_snapshot_failures =
+  "masc_keeper_turn_metrics_snapshot_failures_total"
+let metric_keeper_oas_execution_errors =
+  "masc_keeper_oas_execution_errors_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1289,6 +1293,14 @@ let init () =
     Counter;
   add metric_keeper_room_heartbeat_failures
     "Total room heartbeat failures (consecutive, leads to crash). \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_turn_metrics_snapshot_failures
+    "Total metrics snapshot write failures after keeper turns. \
+     Labeled by keeper and channel."
+    Counter;
+  add metric_keeper_oas_execution_errors
+    "Total OAS execution errors (non-cancellation) in keeper_llm_bridge. \
      Labeled by keeper."
     Counter;
   add metric_persistence_read_drops

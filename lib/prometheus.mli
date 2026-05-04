@@ -215,6 +215,8 @@ val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
+val metric_keeper_turn_metrics_snapshot_failures : string
+val metric_keeper_oas_execution_errors : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

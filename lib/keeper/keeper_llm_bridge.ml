@@ -106,5 +106,8 @@ let run_with_timeout_and_fallback ~timeout_s fn =
   | exn ->
     (* TLA+: HandleError -> Rollback context *)
     let bt = Printexc.get_backtrace () in
+    Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
+      ~labels:[("channel", "oas_bridge")]
+      ();
     Log.Keeper.error "keeper_llm_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;
     Error (Agent_sdk.Error.Internal (Printexc.to_string exn))

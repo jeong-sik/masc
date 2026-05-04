@@ -367,7 +367,7 @@ let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
          | Error msg ->
            Prometheus.inc_counter
              Prometheus.metric_keeper_approval_queue_failures
-             ~labels:[("keeper", "unknown"); ("site", "upsert_rule_save")]
+             ~labels:[("keeper", keeper_name); ("site", "upsert_rule_save")]
              ();
            Log.Keeper.warn "upsert_rule: save failed: %s" msg);
         (candidate, true))
@@ -423,7 +423,7 @@ let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
          | Error msg ->
            Prometheus.inc_counter
              Prometheus.metric_keeper_approval_queue_failures
-             ~labels:[("keeper", "unknown"); ("site", "matching_rule_save")]
+             ~labels:[("keeper", keeper_name); ("site", "matching_rule_save")]
              ();
            Log.Keeper.warn "find_matching_rule: save failed: %s" msg);
         Some { rule_id = rule.id; matched_by = "always_rule" })

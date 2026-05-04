@@ -1,19 +1,16 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useMemo, useState, useEffect } from 'preact/hooks'
-import { activeKeeperName } from '../../keeper-state'
-import { activeIdeFile } from './ide-shell'
+import { useState, useEffect } from 'preact/hooks'
 import {
-  createCodeDocumentStore,
+  type CodeDocumentStore,
   type CodeDocumentLine,
 } from './code-document-store'
 import { CodeLineText, useHighlightedCodeLines } from './ide-code-renderer'
 import {
-  createKeeperLineOwnershipStore,
+  type KeeperLineOwnershipStore,
   type LineOwnership,
 } from './keeper-line-ownership-store'
-import type { KeeperEditKind } from '../../../design-system/headless-core/keeper-line-ownership'
-import { languageFromPath } from './language-detection'
+import type { UnifiedDiffRow } from '../../api/workspace'
 
 const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'explode'] as const
 type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
@@ -23,21 +20,17 @@ type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 // typed contracts. The syntax renderer is deliberately read-only and keeps the
 // same CodeDocumentLine + LineOwnership contracts for a future CodeMirror swap.
 
+type DiffTone = 'context' | 'add' | 'delete'
+
 export type IdeEditorView = 'source' | 'split-diff' | 'unified' | 'blame'
 
 interface IdeEditorMockProps {
   readonly activeView?: IdeEditorView
   readonly activeLayers?: ReadonlySet<string>
+  readonly documentStore: CodeDocumentStore
+  readonly ownershipStore: KeeperLineOwnershipStore
+  readonly diffRows: () => ReadonlyArray<UnifiedDiffRow>
   readonly children?: ComponentChildren
-}
-
-type DiffTone = 'context' | 'add' | 'delete'
-
-interface UnifiedDiffRow {
-  readonly kind: DiffTone
-  readonly oldLine: number | null
-  readonly newLine: number | null
-  readonly text: string
 }
 
 interface SplitDiffCell {
@@ -52,37 +45,6 @@ interface SplitDiffRow {
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
-
-interface BlameBlock {
-  readonly file_path: string
-  readonly line_start: number
-  readonly line_end: number
-  readonly keeper_id: string
-  readonly timestamp_ms: number
-  readonly kind: string
-}
-
-async function fetchBlame(path: string, keeper = ''): Promise<BlameBlock[]> {
-  try {
-    const params = new URLSearchParams({ path })
-    if (keeper) params.set('keeper', keeper)
-    const res = await fetch('/api/v1/git/blame?' + params.toString())
-    if (!res.ok) return []
-    const data = await res.json()
-    return Array.isArray(data) ? data : []
-  } catch { return [] }
-}
-
-async function fetchDiff(path: string, baseRef = 'HEAD', keeper = ''): Promise<UnifiedDiffRow[]> {
-  try {
-    const params = new URLSearchParams({ path, base_ref: baseRef })
-    if (keeper) params.set('keeper', keeper)
-    const res = await fetch('/api/v1/git/diff?' + params.toString())
-    if (!res.ok) return []
-    const data = await res.json()
-    return Array.isArray(data.unified) ? data.unified : []
-  } catch { return [] }
-}
 
 const VIEW_LABEL: Record<IdeEditorView, string> = {
   source: 'SOURCE',
@@ -103,73 +65,17 @@ const LAYER_LABEL: Record<IdeLayerKind, string> = {
 export function IdeEditorMock({
   activeView = 'source',
   activeLayers = EMPTY_ACTIVE_LAYERS,
+  documentStore,
+  ownershipStore,
+  diffRows,
 }: IdeEditorMockProps) {
-  const [sourceCode, setSourceCode] = useState<string[]>([])
-  const [keeperName, setKeeperName] = useState(activeKeeperName.value)
-  useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
-
-  useEffect(() => {
-    let canceled = false;
-    const params = new URLSearchParams({ path: activeIdeFile.value })
-    if (keeperName) params.set('keeper', keeperName)
-    fetch('/api/v1/workspace/file?' + params.toString())
-      .then(r => r.json())
-      .then(d => {
-        if (!canceled && d.ok && d.content) {
-          setSourceCode(d.content.split('\n'));
-        }
-      })
-      .catch(console.error);
-    return () => { canceled = true };
-  }, [activeIdeFile.value, keeperName]);
-
-  const documentStore = useMemo(
-    () => createCodeDocumentStore({
-      file_path: activeIdeFile.value,
-      language: languageFromPath(activeIdeFile.value),
-      content: sourceCode,
-    }),
-    [sourceCode, activeIdeFile.value],
-  )
-  const ownershipStore = useMemo(() => {
-    const store = createKeeperLineOwnershipStore(activeIdeFile.value)
-    return store
-  }, [activeIdeFile.value])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchBlame(activeIdeFile.value, keeperName).then(blocks => {
-      if (cancelled) return
-      ownershipStore.reset(activeIdeFile.value)
-      for (const block of blocks) {
-        ownershipStore.ingest({
-          file_path: block.file_path,
-          line_start: block.line_start,
-          line_end: block.line_end,
-          keeper_id: block.keeper_id,
-          timestamp_ms: block.timestamp_ms,
-          kind: block.kind as KeeperEditKind,
-        })
-      }
-    })
-    return () => { cancelled = true }
-  }, [activeIdeFile.value, keeperName, ownershipStore])
-
-  const [diffRows, setDiffRows] = useState<UnifiedDiffRow[]>([])
-  useEffect(() => {
-    let cancelled = false
-    fetchDiff(activeIdeFile.value, 'HEAD', keeperName).then(rows => {
-      if (!cancelled) setDiffRows(rows)
-    })
-    return () => { cancelled = true }
-  }, [activeIdeFile.value, keeperName])
-
   const document = documentStore.document()
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
   const highlightedLines = useHighlightedCodeLines(document)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
+  const currentDiffRows = diffRows()
 
   return html`
     <div
@@ -203,7 +109,7 @@ export function IdeEditorMock({
       ${activeLayerKinds.length > 0
         ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
         : null}
-      ${EditorViewport(activeView, lines, ownership, highlightedLines, activeLayerKinds, keepers, diffRows)}
+      ${EditorViewport(activeView, lines, ownership, highlightedLines, activeLayerKinds, keepers, currentDiffRows)}
     </div>
   `
 }

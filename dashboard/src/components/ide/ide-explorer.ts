@@ -1,56 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
-import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
+import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
 import { activeIdeFile } from './ide-shell'
 
-// Phase 2 PR-4: real EXPLORER backed by file-tree-store. Replaces the
-// PR-2 ide-explorer-mock placeholder. The fixture below is the same
-// 14-node tree the mock rendered; it now flows through the store so
-// future PRs can swap in keeper-artifact / repo-fs sources without
-// changing the component.
-//
-// The store handles expansion semantics; this component is a thin
-// renderer that subscribes to visibleNodes and dispatches toggle
-// clicks. Headless tree-view (RFC 0014) keyboard navigation lands
-// in a follow-up; for now click-to-expand is enough to validate the
-// store wiring.
-//
-// Audit reference:
-//   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
-
-const FALLBACK_SEED: ReadonlyArray<FileTreeNode> = [
-  { path: 'dune-project', label: 'dune-project', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
-  { path: 'README.md', label: 'README.md', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
-]
-
-async function fetchTree(depth = 3, keeper = ''): Promise<FileTreeNode[]> {
-  try {
-    const params = new URLSearchParams({ depth: String(depth) })
-    if (keeper) params.set('keeper', keeper)
-    const res = await fetch(`/api/v1/workspace/tree?${params.toString()}`)
-    if (!res.ok) return [...FALLBACK_SEED]
-    const data = await res.json()
-    if (!Array.isArray(data) || data.length === 0) return [...FALLBACK_SEED]
-    return data as FileTreeNode[]
-  } catch { return [...FALLBACK_SEED] }
+interface IdeExplorerProps {
+  readonly fileTreeStore: FileTreeStore
 }
 
-export function IdeExplorer() {
-  const store = useMemo(() => {
-    const s = createFileTreeStore()
-    s.seed(FALLBACK_SEED)
-    return s
-  }, [])
-
+export function IdeExplorer({ fileTreeStore: store }: IdeExplorerProps) {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchTree(3, keeperName).then(nodes => { if (!cancelled) store.seed(nodes) })
-    return () => { cancelled = true }
-  }, [store, keeperName])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {

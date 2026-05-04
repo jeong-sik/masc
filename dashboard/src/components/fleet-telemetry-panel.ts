@@ -742,7 +742,7 @@ export function FleetTelemetryPanel() {
 
       <${WarningBanner} warnings=${value.warnings} />
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
         <${SummaryCard}
           title="키퍼 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
@@ -754,6 +754,14 @@ export function FleetTelemetryPanel() {
           value=${`${counts.hot} hot / ${counts.warn} warn`}
           detail=${counts.stale > 0 ? `${counts.stale}개 키퍼가 ${Math.round(STALE_ACTIVITY_SEC / 60)}분 이상 정체 중입니다.` : '정체된 키퍼가 활동 임계값을 넘기지 않았습니다.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
+        />
+        <${SummaryCard}
+          title="차단된 키퍼"
+          value=${counts.blocked.toString()}
+          detail=${counts.blocked > 0
+            ? '런타임은 살아있지만 typed blocker_class를 가진 키퍼 — 행 필터에서 blocker 클래스 이름으로 검색해 원인 확인.'
+            : '활성 차단 사유가 보고된 키퍼가 없습니다 (semaphore_wait_timeout, oas_timeout_budget 등).'}
+          tone=${counts.blocked > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="도구 성공률"

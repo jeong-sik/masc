@@ -98,15 +98,15 @@ let allows_shell_write_for_preset (preset : tool_preset) : bool =
 
 (* ── Git clone config accessors (config-driven) ──────────────── *)
 
-let git_clone_allowed_orgs () : string list =
+let git_clone_allowed_orgs () : string list option =
   match !policy_config with
-  | None -> []
-  | Some cfg -> Keeper_tool_policy_config.git_clone_allowed_orgs cfg
+  | None -> None
+  | Some cfg -> Some (Keeper_tool_policy_config.git_clone_allowed_orgs cfg)
 
-let git_clone_denied_repos () : string list =
+let git_clone_denied_repos () : string list option =
   match !policy_config with
-  | None -> []
-  | Some cfg -> Keeper_tool_policy_config.git_clone_denied_repos cfg
+  | None -> None
+  | Some cfg -> Some (Keeper_tool_policy_config.git_clone_denied_repos cfg)
 
 let clone_depth () : int =
   match !policy_config with

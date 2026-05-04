@@ -43,7 +43,7 @@
   letter-spacing: .04em;
   color: var(--color-fg-secondary);
   background: var(--color-bg-hover);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
 }
 .pill.is-running { color: var(--brass-1); background: rgb(var(--brass-glow) / .12); }

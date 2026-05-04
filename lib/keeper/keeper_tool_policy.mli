@@ -40,8 +40,13 @@ val allows_shell_write_for_preset : tool_preset -> bool
 
 (** {1 Git Clone Config} *)
 
-val git_clone_allowed_orgs : unit -> string list
-val git_clone_denied_repos : unit -> string list
+val git_clone_allowed_orgs : unit -> string list option
+(** [None] if policy config has not been loaded; [Some []] if loaded
+    with an explicitly empty allowlist (any GitHub org is permitted);
+    [Some orgs] if specific orgs are configured. *)
+val git_clone_denied_repos : unit -> string list option
+(** [None] if policy config has not been loaded; [Some repos] otherwise
+    (empty list means no repos are denied). *)
 val clone_depth : unit -> int
 val clone_timeout_sec : unit -> float
 val push_timeout_sec : unit -> float

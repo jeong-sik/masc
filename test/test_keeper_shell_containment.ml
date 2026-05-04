@@ -14,8 +14,18 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
+module Keeper_tool_policy = Masc_mcp.Keeper_tool_policy
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
+
+(* P0-1 fix: tool_policy.toml must be loaded before keeper_shell op=gh
+   can execute.  Previously the policy_config ref started as None and
+   git_clone_allowed_orgs/git_clone_denied_repos returned [] (fail-open),
+   letting any org through the gh command org check even when a policy
+   was configured.  Initialise here so gh tests see the real policy. *)
+let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path))
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 

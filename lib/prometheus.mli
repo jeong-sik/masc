@@ -396,6 +396,14 @@ val metric_cascade_capacity_events : string
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)
+
+val metric_cascade_fallback_cycle_detected_total : string
+(** Total cascade fallback_cascade cycles detected during [load_catalog].
+    A cycle means a provider stall propagates through every cascade in
+    the loop silently for 600s+ without escaping.  Labels: [cascade]
+    (the entry point of the detected cycle).  Discovered during the
+    2026-05-05 fleet-stuck investigation:
+    [big_three → glm_coding_plan_only → big_three]. *)
 val metric_keeper_invariant_violations : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values

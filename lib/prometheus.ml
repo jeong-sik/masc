@@ -912,6 +912,16 @@ let metric_keeper_liveness_recovery_outcomes =
    Labels: provider_key. *)
 let metric_cascade_server_error_skip_total =
   "masc_cascade_server_error_skip_total"
+
+(* 2026-05-05 fleet-stuck diagnosis: cascade A → B → A circular fallback
+   creates a silent 600s timeout chain when every model in both
+   cascades depends on the same provider that has stalled.  This
+   counter increments once per [load_catalog] call when any
+   fallback_cascade chain forms a cycle.  Labels: cascade (the entry
+   point of the cycle).  Operators alert on this counter; cycle
+   participants are listed in the WARN log. *)
+let metric_cascade_fallback_cycle_detected_total =
+  "masc_cascade_fallback_cycle_detected_total"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
 let metric_keeper_passive_loop_detected_total =
@@ -1480,6 +1490,12 @@ let init () =
   add metric_cascade_server_error_skip_total
     "#12797 Total cascade label-ranking skips triggered by recent server \
      error (5xx) score decay. Labeled by provider_key."
+    Counter;
+  add metric_cascade_fallback_cycle_detected_total
+    "Total cascade fallback_cascade cycles detected during load_catalog. \
+     A cycle (e.g. big_three → glm_coding_plan_only → big_three) means \
+     a provider stall propagates through both cascades silently for \
+     600s+ without escaping.  Labeled by [cascade] (cycle entry point)."
     Counter;
   add metric_keeper_passive_loop_detected_total
     "#12799 Total passive-loop detections: keeper issued only read-only tool \

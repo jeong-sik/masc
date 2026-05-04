@@ -13,48 +13,318 @@ let json_response ~status req reqd json =
   Http.Response.json ~status ~request:req
     (Yojson.Safe.to_string json) reqd
 
+(* --- Safe path --- *)
+
+let is_digit c = c >= '0' && c <= '9'
+
+let excluded_dirs =
+  [ ".git"; "node_modules"; "_build"; ".obsidian"; "__pycache__";
+    ".masc"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
+
 let safe_path base requested =
-  (* Extremely naive safe path check for prototype *)
-  let full = Filename.concat base requested in
-  if String.starts_with ~prefix:base full then full else base
+  let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
+  let parts = String.split_on_char '/' requested in
+  let is_dangerous p = p = ".." || p = "." in
+  if List.exists is_dangerous parts then base
+  else
+    let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
+    if String.starts_with ~prefix:base full then full else base
+
+(* --- Recursive file tree --- *)
+
+let file_tree_node ~path ~label ~depth ~parent ~has_children =
+  `Assoc [ ("path", `String path); ("label", `String label)
+         ; ("depth", `Int depth); ("parent", `String parent)
+         ; ("hasChildren", `Bool has_children)
+         ; ("diff", `Null); ("keeperId", `Null); ("hueIndex", `Null) ]
+
+let rec scan_dir ~base ~depth ~max_depth acc dir =
+  if depth > max_depth then acc
+  else
+    let entries =
+      try Sys.readdir dir |> Array.to_list
+      with _ -> []
+    in
+    List.fold_left (fun acc f ->
+      if f = "." || f = ".." then acc
+      else if List.mem f excluded_dirs then acc
+      else
+        let full = Filename.concat dir f in
+        let is_dir = try Sys.is_directory full with _ -> false in
+        let base_len = String.length base in
+        let rel =
+          if String.length full > base_len + 1
+          then String.sub full (base_len + 1) (String.length full - base_len - 1)
+          else f
+        in
+        let has_children = is_dir && depth < max_depth in
+        let parent = if depth = 0 then "" else Filename.dirname rel in
+        let node = file_tree_node
+          ~path:rel ~label:f ~depth ~parent ~has_children in
+        let acc' = node :: acc in
+        if is_dir && depth < max_depth then
+          scan_dir ~base ~depth:(depth + 1) ~max_depth acc' full
+        else acc'
+    ) acc entries
+
+(* --- Git helpers --- *)
+
+let git_run ~cwd args =
+  let argv = "git" :: "-C" :: cwd :: "--no-optional-locks" :: args in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  try
+    let (status, out) =
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"system/workspace_api"
+        ~raw_source
+        ~summary:"workspace api git command"
+        ~timeout_sec:15.0
+        argv
+    in
+    match status with
+    | Unix.WEXITED 0 -> Some (String.trim out)
+    | _ -> None
+  with _ -> None
+
+let git_run_lines ~cwd args =
+  match git_run ~cwd args with
+  | None -> []
+  | Some out ->
+    String.split_on_char '\n' out
+    |> List.filter (fun l -> l <> "")
+
+(* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
+
+type blame_entry = { bl_line: int; bl_author: string; bl_time: int64 }
+
+let parse_blame_porcelain lines =
+  let rec go cur_author cur_time acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | hd :: tl ->
+      if String.starts_with ~prefix:"author " hd then
+        let a = String.sub hd 7 (String.length hd - 7) in
+        go (Some a) cur_time acc tl
+      else if String.starts_with ~prefix:"author-time " hd then
+        let ts = String.sub hd 12 (String.length hd - 12) in
+        (try go cur_author (Some (Int64.of_string ts)) acc tl
+         with _ -> go cur_author cur_time acc tl)
+      else if String.length hd > 0 && is_digit (String.get hd 0)
+              && String.contains hd ' ' then
+        let sp = String.index hd ' ' in
+        let line_num_str = String.sub hd 0 sp in
+        (try
+           let ln = int_of_string line_num_str in
+           let a = Option.value cur_author ~default:"unknown" in
+           let t = Option.value cur_time ~default:0L in
+           go cur_author cur_time ({ bl_line = ln; bl_author = a; bl_time = t } :: acc) tl
+         with _ -> go cur_author cur_time acc tl)
+      else
+        go cur_author cur_time acc tl
+  in
+  go None None [] lines
+
+let blame_entry_to_json file_path ~line_start ~line_end ~author ~time =
+  `Assoc [ ("file_path", `String file_path)
+         ; ("line_start", `Int line_start); ("line_end", `Int line_end)
+         ; ("keeper_id", `String author)
+         ; ("timestamp_ms", `Int (Int64.to_int time * 1000))
+         ; ("kind", `String "edit") ]
+
+let group_blame_entries file_path entries =
+  let sorted = List.sort (fun a b -> compare a.bl_line b.bl_line) entries in
+  let rec go current_start current_end current_author current_time acc remaining =
+    match remaining with
+    | [] ->
+      (match current_start with
+       | Some s ->
+         let json = blame_entry_to_json file_path
+           ~line_start:s ~line_end:current_end
+           ~author:current_author ~time:current_time in
+         List.rev (json :: acc)
+       | None -> List.rev acc)
+    | hd :: tl ->
+      match current_start with
+      | Some s when hd.bl_author = current_author && hd.bl_line = current_end + 1 ->
+        go (Some s) hd.bl_line current_author hd.bl_time acc tl
+      | Some s ->
+        let json = blame_entry_to_json file_path
+          ~line_start:s ~line_end:current_end
+          ~author:current_author ~time:current_time in
+        go (Some hd.bl_line) hd.bl_line hd.bl_author hd.bl_time (json :: acc) tl
+      | None ->
+        go (Some hd.bl_line) hd.bl_line hd.bl_author hd.bl_time acc tl
+  in
+  go None 0 "" 0L [] sorted
+
+(* --- Diff parsing --- *)
+
+let parse_hunk_header line =
+  if not (String.starts_with ~prefix:"@@ -" line) then None
+  else
+    let rest = String.sub line 4 (String.length line - 4) in
+    let sp_idx =
+      let rec find i =
+        if i >= String.length rest then String.length rest
+        else if String.get rest i = ' ' then i
+        else find (i + 1)
+      in
+      find 0
+    in
+    if sp_idx >= String.length rest then None
+    else
+      let old_part = String.sub rest 0 sp_idx in
+      let new_rest = String.sub rest (sp_idx + 1) (String.length rest - sp_idx - 1) in
+      let plus_idx =
+        let rec find i =
+          if i >= String.length new_rest then String.length new_rest
+          else if String.get new_rest i = ' ' then i
+          else find (i + 1)
+        in
+        find 0
+      in
+      let new_part = String.sub new_rest 0 plus_idx in
+      let parse_start s =
+        match String.split_on_char ',' s with
+        | x :: _ -> (try int_of_string x with _ -> 1)
+        | [] -> 1
+      in
+      Some (parse_start old_part, parse_start new_part)
+
+let parse_unified_diff lines =
+  let rec go old_line new_line acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | hd :: tl ->
+      if String.starts_with ~prefix:"@@" hd then
+        (match parse_hunk_header hd with
+         | Some (ol, nl) -> go ol nl acc tl
+         | None -> go old_line new_line acc tl)
+      else if String.starts_with ~prefix:"+++" hd
+           || String.starts_with ~prefix:"---" hd then
+        go old_line new_line acc tl
+      else if String.starts_with ~prefix:"+" hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "add")
+                         ; ("oldLine", `Null); ("newLine", `Int new_line)
+                         ; ("text", `String text) ] in
+        go old_line (new_line + 1) (row :: acc) tl
+      else if String.starts_with ~prefix:"-" hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "delete")
+                         ; ("oldLine", `Int old_line); ("newLine", `Null)
+                         ; ("text", `String text) ] in
+        go (old_line + 1) new_line (row :: acc) tl
+      else if String.starts_with ~prefix:" " hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "context")
+                         ; ("oldLine", `Int old_line); ("newLine", `Int new_line)
+                         ; ("text", `String text) ] in
+        go (old_line + 1) (new_line + 1) (row :: acc) tl
+      else
+        go old_line new_line acc tl
+  in
+  go 1 1 [] lines
+
+(* --- Routes --- *)
 
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/workspace/tree" (fun request reqd ->
-       match get_server_state_result () with
-       | Error message -> json_response ~status:`Internal_server_error request reqd (json_error message)
-       | Ok state ->
+       with_public_read
+         (fun state _req reqd ->
            let base = base_path_of_state state in
-           (* For prototype, we just return a mock or a tiny real listing *)
-           let get_tree dir =
-             if not (Sys.file_exists dir) then []
-             else
-               let files = Sys.readdir dir in
-               Array.to_list files
-               |> List.map (fun f -> 
-                    let path = Filename.concat dir f in
-                    let is_dir = try Sys.is_directory path with _ -> false in
-                    `Assoc [("name", `String f); ("type", `String (if is_dir then "directory" else "file")); ("path", `String f)]
-                  )
+           let uri = Uri.of_string request.target in
+           let depth =
+             match Uri.get_query_param uri "depth" with
+             | Some d -> (try max 1 (min 5 (int_of_string d)) with _ -> 3)
+             | None -> 3
            in
-           let tree = get_tree base in
-           json_response ~status:`OK request reqd (`List tree))
-           
+           let nodes =
+             if not (Sys.file_exists base) then []
+             else scan_dir ~base ~depth:0 ~max_depth:depth [] base
+           in
+           let json = `List (List.rev nodes) in
+           json_response ~status:`OK request reqd json)
+         request reqd)
+
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->
-       match get_server_state_result () with
-       | Error message -> json_response ~status:`Internal_server_error request reqd (json_error message)
-       | Ok state ->
+       with_public_read
+         (fun state _req reqd ->
            let base = base_path_of_state state in
-                      let uri = Uri.of_string request.target in
+           let uri = Uri.of_string request.target in
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->
                let path = safe_path base p in
-               if Sys.file_exists path && not (Sys.is_directory path) then
-                                  try
+               if path = base then
+                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+               else if Sys.file_exists path && not (Sys.is_directory path) then
+                 try
                    let content = Fs_compat.load_file path in
                    let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
                    json_response ~status:`OK request reqd json
                  with _ -> json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
                else
                  json_response ~status:`Not_found request reqd (json_error "File not found"))
+         request reqd)
+
+  |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let base = base_path_of_state state in
+           let uri = Uri.of_string request.target in
+           let file_path =
+             match Uri.get_query_param uri "path" with
+             | Some p -> p
+             | None -> ""
+           in
+           if file_path = "" then
+             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           else
+             let safe = safe_path base file_path in
+             if safe = base then
+               json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+             else if not (Sys.file_exists safe) then
+               json_response ~status:`Not_found request reqd (json_error "File not found")
+             else
+               match git_run_lines ~cwd:base ["blame"; "--porcelain"; file_path] with
+               | [] ->
+                 json_response ~status:`OK request reqd (`List [])
+               | lines ->
+                 let entries = parse_blame_porcelain lines in
+                 let grouped = group_blame_entries file_path entries in
+                 json_response ~status:`OK request reqd (`List grouped))
+         request reqd)
+
+  |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let base = base_path_of_state state in
+           let uri = Uri.of_string request.target in
+           let file_path =
+             match Uri.get_query_param uri "path" with
+             | Some p -> p
+             | None -> ""
+           in
+           if file_path = "" then
+             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           else
+             let base_ref =
+               match Uri.get_query_param uri "base_ref" with
+               | Some r -> r
+               | None -> "HEAD"
+             in
+             let safe = safe_path base file_path in
+             if safe = base then
+               json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+             else
+               match git_run_lines ~cwd:base ["diff"; base_ref; "--"; file_path] with
+               | [] ->
+                 json_response ~status:`OK request reqd
+                   (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
+               | diff_lines ->
+                 let unified = parse_unified_diff diff_lines in
+                 let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
+                 json_response ~status:`OK request reqd json)
+         request reqd)

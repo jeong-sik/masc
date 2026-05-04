@@ -1354,8 +1354,13 @@ let should_attempt_liveness_recovery ~now
   else if entry.conditions.zombie_timeout_reached then false
   else
     let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
-    let dead_since = Option.value ~default:0.0 entry.dead_since_ts in
-    dead_since > 0.0 && now -. dead_since >= min_dead_sec
+    (* Pattern-match dead_since_ts directly: collapsing None -> 0.0 via
+       Option.value created a strict-`>` guard that rejected legitimate
+       at:0.0 fixtures (the synthetic epoch used in tests like
+       liveness_recovery_2 — see #12826). *)
+    match entry.dead_since_ts with
+    | None -> false
+    | Some dead_since -> now -. dead_since >= min_dead_sec
 
 let liveness_recovery_scan (ctx : _ context) =
   if not Env_config.KeeperSupervisor.liveness_recovery_enabled then ()

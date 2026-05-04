@@ -44,6 +44,12 @@ const liveOverrideStyle = {
   boxShadow: '0 0 0 1px var(--color-accent-brass), 0 0 12px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.18)',
 }
 
+const spotlightOverrideStyle = {
+  borderColor: 'var(--color-accent-brass)',
+  boxShadow: '0 0 0 2px var(--color-accent-brass), 0 0 16px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.25)',
+  background: 'linear-gradient(135deg, var(--bg-panel) 0%, rgb(var(--color-keeper-3-glow, 195 146 89) / 0.06) 100%)',
+}
+
 export function KpiCell(props: KpiCellProps): VNode {
   const variant = props.variant ?? 'standard'
   const valueColor = props.kind ? VALUE_COLOR_BY_KIND[props.kind] : 'var(--color-fg-primary)'
@@ -51,18 +57,21 @@ export function KpiCell(props: KpiCellProps): VNode {
   const captionColor = 'var(--color-fg-muted)'
 
   const bare = props.bare === true
+  const isSpotlight = props.spotlight === true
   const containerStyle = {
     ...(bare ? {} : surfaceStyle),
-    ...(!bare && props.live ? liveOverrideStyle : {}),
+    ...(!bare && isSpotlight ? spotlightOverrideStyle : !bare && props.live ? liveOverrideStyle : {}),
     display: 'flex',
     flexDirection: variant === 'compact' ? ('row' as const) : ('column' as const),
     alignItems: variant === 'compact' ? ('baseline' as const) : ('flex-start' as const),
     gap: variant === 'compact' ? 'var(--spacing-element)' : variant === 'stacked' ? '4px' : '6px',
     padding: bare
       ? '0'
-      : variant === 'stacked'
-        ? `14px var(--spacing-card)`
-        : `10px var(--spacing-group)`,
+      : isSpotlight
+        ? `16px var(--spacing-card)`
+        : variant === 'stacked'
+          ? `14px var(--spacing-card)`
+          : `10px var(--spacing-group)`,
     fontFamily: MONO_STACK,
     minWidth: '0',
   }
@@ -133,10 +142,10 @@ export function KpiCell(props: KpiCellProps): VNode {
       role="listitem"
       id=${props.id}
       data-testid=${props.testId}
-      aria-label=${kpiCellAriaLabel(props)}
+      aria-label=${kpiCellAriaLabel(props)}${isSpotlight ? ' (spotlight)' : ''}
       style=${containerStyle}
     >
-      <span aria-hidden="true" style=${labelStyle}>${props.label}</span>
+      <span aria-hidden="true" style=${labelStyle}>${isSpotlight ? `◆ ${props.label}` : props.label}</span>
       <span aria-hidden="true" style=${valueStyle}>${props.value}</span>
       ${captionRow}
       ${progressRow}

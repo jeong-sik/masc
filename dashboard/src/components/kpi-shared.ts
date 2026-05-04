@@ -72,6 +72,11 @@ export interface KpiCellProps {
    *  or just "saturated". `kind` mapping is the caller's job: this
    *  component intentionally doesn't pick warn/err thresholds. */
   progress?: number
+  /** Spotlight cell — visually dominant first cell in a strip. Draws a
+   *  brass accent border + glow halo and renders a ◆ prefix on the label.
+   *  Use for the single most urgent metric (e.g. high-impact wiring gaps,
+   *  critical anti-patterns). Only one cell per strip should be spotlight. */
+  spotlight?: boolean
 }
 
 /** Assemble the screen-reader announcement for one KPI cell.

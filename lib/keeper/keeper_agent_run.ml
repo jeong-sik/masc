@@ -90,6 +90,10 @@ let run_turn
     try Masc_runtime_events.emit_turn_end () with
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_dispatch_event_failures
+        ~labels:[("keeper", meta.name); ("site", "emit_turn_end")]
+        ();
       Log.Keeper.warn
         "%s: emit_turn_end in finally raised: %s"
         meta.name (Printexc.to_string e)
@@ -160,8 +164,12 @@ let run_turn
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
       let backtrace = Printexc.get_backtrace () in
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_dispatch_event_failures
+        ~labels:[("keeper", meta.name); ("site", "tool_cleanup")]
+        ();
       Log.Keeper.warn
-        "%s: keeper tool bundle cleanup raised: %s%s"
+        "%s: keeper tool bundle raised: %s%s"
         meta.name
         (Printexc.to_string e)
         (if String.equal backtrace "" then "" else "\n" ^ backtrace)
@@ -920,6 +928,10 @@ let run_turn
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("site", "activity_emit")]
+                    ();
                   Log.Keeper.warn
                     "keeper:%s activity emit failed (%s): %s"
                     meta.name
@@ -948,6 +960,10 @@ let run_turn
                    else []);
               (match outcome with
                | Cdal_eval_v1.Load_failure (err, _) ->
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_dispatch_event_failures
+                   ~labels:[("keeper", meta.name); ("site", "cdal_load")]
+                   ();
                  Log.Keeper.warn
                    "keeper:%s contract_verdict load failure: %s"
                    meta.name
@@ -1020,6 +1036,10 @@ let run_turn
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_dispatch_event_failures
+                  ~labels:[("keeper", meta.name); ("site", "compaction")]
+                  ();
                 Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
                   meta.cascade_name (Printexc.to_string exn));
            (* Post-turn quality metrics — goal alignment + memory recall.
@@ -1050,6 +1070,10 @@ let run_turn
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_dispatch_event_failures
+                        ~labels:[("keeper", meta.name); ("site", "memory_recall")]
+                        ();
                       Log.Keeper.warn
                         "keeper:%s memory recall history load failed: %s"
                         meta.name
@@ -1099,6 +1123,10 @@ let run_turn
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_dispatch_event_failures
+                ~labels:[("keeper", meta.name); ("site", "post_turn_eval")]
+                ();
               Log.Keeper.warn
                 "keeper:%s post_turn_eval jsonl append failed: %s"
                 meta.name
@@ -1272,6 +1300,10 @@ let run_turn
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         let err_msg = Printexc.to_string exn in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_dispatch_event_failures
+          ~labels:[("keeper", meta.name); ("site", "receipt_append")]
+          ();
         Log.Keeper.warn
           "keeper:%s execution_receipt append failed: %s"
           meta.name err_msg;
@@ -1294,6 +1326,10 @@ let run_turn
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | gap_exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_dispatch_event_failures
+             ~labels:[("keeper", meta.name); ("site", "coverage_gap_append")]
+             ();
            Log.Keeper.warn
              "keeper:%s execution_receipt coverage gap append failed: %s"
              meta.name

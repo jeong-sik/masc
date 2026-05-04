@@ -4,13 +4,19 @@
     [Keeper_keepalive]. Both modules call [fork_stale_watchdog] through
     this shared implementation.
 
-    Two stall detection modes:
-    1. Idle stall: [last_turn_ts] older than 300s while [Running],
-       with no recent keepalive skip verdict proving the fiber is still
-       evaluating work.
-    2. Failure loop: [consecutive_noop_count >= 3] — catches keepers in
-       LLM timeout loops where [last_turn_ts] stays fresh because each
-       failed turn updates it.
+    Three stall detection modes — see {!Keeper_registry.stale_kill_class}:
+    1. [Idle_turn]: [last_turn_ts] older than the idle threshold while
+       the keeper phase is [Running] but no [current_turn_observation]
+       is recorded, with no recent keepalive skip verdict proving the
+       fiber is still evaluating work.
+    2. [In_turn_hung]: a turn started ([current_turn_observation = Some])
+       and ran past [timeout_threshold] seconds — covers the
+       "Orphaned Streaming" pattern (executor FSM analysis §4 I2:
+       [in_turn_age > grace_period → in_turn_stale]).
+    3. [Noop_failure_loop]: turns kept firing but produced no tool
+       calls; the keepalive's [consecutive_noop_count] reached the
+       watchdog threshold — catches keepers in LLM timeout loops where
+       [last_turn_ts] stays fresh because each failed turn updates it.
 
     On detection, sets [fiber_stop] and emits a stale broadcast so the
     supervisor's [sweep_and_recover] can restart the keeper.

@@ -24,8 +24,8 @@
 .wf-bar.s-err { background: var(--err); }
 .wf-bar.s-info { background: var(--info); }
 .wf-bar.s-tool { background: var(--brass-2); }
-.wf-bar.s-text { background: var(--info); opacity: .6; }
-.wf-bar.s-noop { background: var(--idle); opacity: .4; }
+.wf-bar.s-text { background: var(--info); opacity: 0.6; }
+.wf-bar.s-noop { background: var(--idle); opacity: 0.4; }
 .wf-bar:hover { outline: 1px solid var(--color-fg-primary); z-index: 2; }
 
 .wf-scale-ctrl { display: flex; gap: var(--sp-0h); margin-left: auto; }

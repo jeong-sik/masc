@@ -318,7 +318,7 @@ body[data-grid="1"]::before {
 @keyframes anim-slide-left  { from { opacity: 0; transform: translateX(8px); }  to { opacity: 1; transform: none; } }
 @keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes anim-pop         { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
-@keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--brass-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--brass-glow) / .5); } }
 @keyframes anim-pulse-err   { 0%,100% { box-shadow: 0 0 0 rgb(var(--err-glow)   / 0); } 50% { box-shadow: 0 0 10px rgb(var(--err-glow)   / .55); } }
 @keyframes anim-pulse-warn  { 0%,100% { box-shadow: 0 0 0 rgb(var(--warn-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--warn-glow)  / .5); } }
@@ -372,7 +372,7 @@ body[data-grid="1"]::before {
 }
 .interactive:hover:not([aria-disabled="true"]) { background: var(--hover-overlay); color: var(--color-fg-primary); }
 .interactive:active:not([aria-disabled="true"]) { background: var(--active-overlay); }
-.interactive[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
+.interactive[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 
 .is-loading {
   position: relative;

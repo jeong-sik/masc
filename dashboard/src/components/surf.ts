@@ -136,7 +136,7 @@ export function Surf(props: SurfProps): VNode {
     borderStyle: 'solid',
     borderColor: ks.borderColor,
     color: ks.color,
-    borderRadius: props.flat === true ? '0' : '6px',
+    borderRadius: props.flat === true ? '0' : 'var(--r-2)',
     padding,
   }
 

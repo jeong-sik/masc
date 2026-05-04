@@ -57,7 +57,7 @@ export function KpiCell(props: KpiCellProps): VNode {
     display: 'flex',
     flexDirection: variant === 'compact' ? ('row' as const) : ('column' as const),
     alignItems: variant === 'compact' ? ('baseline' as const) : ('flex-start' as const),
-    gap: variant === 'compact' ? 'var(--spacing-element)' : variant === 'stacked' ? '4px' : '6px',
+    gap: variant === 'compact' ? 'var(--spacing-element)' : variant === 'stacked' ? 'var(--sp-1)' : 'var(--sp-1-5)',
     padding: bare
       ? '0'
       : variant === 'stacked'

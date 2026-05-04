@@ -35,7 +35,7 @@ export function Bar(props: BarProps): JSX.Element {
         width: '100%',
         height: '4px',
         background: 'var(--color-bg-elevated)',
-        'border-radius': '2px',
+        'border-radius': 'var(--r-0)',
         overflow: 'hidden',
       }}
     >

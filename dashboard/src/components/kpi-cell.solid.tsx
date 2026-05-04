@@ -31,7 +31,7 @@ export {
 const surfaceStyle: JSX.CSSProperties = {
   background: 'var(--bg-panel)',
   border: '1px solid var(--border-base)',
-  'border-radius': '3px',
+  'border-radius': 'var(--r-1)',
 }
 
 const liveOverrideStyle: JSX.CSSProperties = {

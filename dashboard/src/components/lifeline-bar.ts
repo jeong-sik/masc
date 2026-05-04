@@ -176,7 +176,7 @@ export function LifelineBar({
                 color: 'var(--color-fg-primary)',
                 fontWeight: 700,
                 fontVariantNumeric: 'tabular-nums',
-                marginRight: '4px',
+                marginRight: 'var(--sp-1)',
               }}>${bpm}</span>
               BPM · ${window}
             </span>

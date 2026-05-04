@@ -125,7 +125,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:15.0 ~sandbox_profile
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
         with
         | Error err ->
             Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"

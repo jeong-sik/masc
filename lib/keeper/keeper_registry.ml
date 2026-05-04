@@ -1336,8 +1336,9 @@ let dispatch_event_and_log ~base_path name event =
 let dispatch_event_unit ~base_path name event =
   match dispatch_event_and_log ~base_path name event with
   | Ok _ -> ()
-  | Error _ -> ()
-
+  | Error e ->
+    Log.Keeper.warn "%s: dispatch_event failed: %s" name
+      (Keeper_state_machine.transition_error_to_string e)
 let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?selected_event name event =
   match dispatch_event_with_audit ~base_path ?snapshot ?events_fired ?selected_event name event with
   | Ok tr -> Ok tr

@@ -766,6 +766,22 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_
     ()
 ;;
 
+(** Force-cancel a task regardless of assignee. System privilege.
+    Used by [Verification_protocol.check_timeouts] to expire
+    [AwaitingVerification] tasks whose verifier deadline has passed,
+    so the FSM does not stall and re-emit Timeout posts forever. *)
+let force_cancel_task_r config ~agent_name ~task_id ~reason ()
+  : string Types.masc_result =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Types.Cancel
+    ~reason
+    ~force:true
+    ()
+;;
+
 (** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
   if not (is_initialized config)

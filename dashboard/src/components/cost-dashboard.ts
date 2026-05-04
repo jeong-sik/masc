@@ -35,6 +35,7 @@ import {
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
+import { formatCost, formatPct1 } from '../lib/format-number'
 
 type ViewMode = 'model' | 'keeper'
 
@@ -297,7 +298,7 @@ function ModelRow({
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(inTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
-        $${cost.toFixed(2)}
+        ${formatCost(cost)}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
         <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
@@ -347,7 +348,7 @@ function KeeperRow({
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(inTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
-        $${cost.toFixed(2)}
+        ${formatCost(cost)}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
         <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
@@ -369,7 +370,7 @@ function KeeperRow({
         </div>
       </td>
       <td class="px-2 py-1.5 text-left font-mono text-2xs text-text-muted">
-        ${topModel ? `${topModel.model} ($${topModel.cost_usd.toFixed(2)})` : '—'}
+        ${topModel ? `${topModel.model} (${formatCost(topModel.cost_usd)})` : '—'}
       </td>
     </tr>
   `
@@ -434,7 +435,7 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
                   const z = zone(v)
                   return html`
                     <td key=${j} class="px-2 py-1.5 text-right font-mono text-xs ${zoneClass(z)}">
-                      ${v > 0 ? `$${v.toFixed(2)}` : '—'}
+                      ${v > 0 ? formatCost(v) : '—'}
                     </td>
                   `
                 })}
@@ -507,10 +508,10 @@ function CostLatency({ buckets, p50, p95 }: {
       </div>
       <div class="grid grid-cols-4 gap-px rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
         ${bands.map(b => html`
-          <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%)`}>
+          <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? Math.round((b.count / total) * 100) : 0}%)`}>
             <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${b.label}</span>
             <span class="font-mono text-sm font-semibold ${b.color}">
-              ${b.count}<span class="ml-1 text-2xs font-normal text-text-muted">· ${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%</span>
+              ${b.count}<span class="ml-1 text-2xs font-normal text-text-muted">· ${total > 0 ? Math.round((b.count / total) * 100) : 0}%</span>
             </span>
           </div>
         `)}
@@ -677,7 +678,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
                         <td class="px-2 py-1 text-text-muted">${s.site}</td>
                         <td class="px-2 py-1 text-right font-mono">${s.count}</td>
                         <td class="px-2 py-1 text-right font-mono ${s.triggered_count > 0 ? 'text-[var(--color-status-err)]' : ''}">${s.triggered_count}</td>
-                        <td class="px-2 py-1 text-right font-mono text-text-muted">${s.count > 0 ? ((s.triggered_count / s.count) * 100).toFixed(1) : '0.0'}%</td>
+                        <td class="px-2 py-1 text-right font-mono text-text-muted">${s.count > 0 ? formatPct1(s.triggered_count / s.count) : '0.0%'}</td>
                       </tr>
                     `)}
                   </tbody>
@@ -768,7 +769,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
                 <td class="px-2 py-1.5 text-left font-mono ${e.outcome === 'success' ? 'text-[var(--color-status-ok)]' : e.outcome === 'error' ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${e.outcome ?? '—'}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.model_used ?? '—'}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.latency_ms == null ? '—' : `${Math.round(e.latency_ms)}ms`}</td>
-                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : `$${e.cost_usd.toFixed(4)}`}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : formatCost(e.cost_usd)}</td>
                 <td class="px-2 py-1.5 text-center font-mono text-text-muted">${e.tool ?? '—'}</td>
               </tr>
             `)}
@@ -862,7 +863,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
-              value=${`$${t.totalCost.toFixed(2)}`}
+              value=${formatCost(t.totalCost)}
               status="ok"
               delta=${{ direction: 'up', text: `${t.count} ${viewMode.value === 'model' ? 'models' : 'keepers'}` }}
             />

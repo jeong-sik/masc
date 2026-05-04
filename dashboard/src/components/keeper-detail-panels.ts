@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { formatPct, formatTokens } from '../lib/format-number'
+import { formatPct, formatPct1, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
 import { CopyIdButton } from './common/copy-id-button'
 import { ProgressBar } from './common/progress-bar'
@@ -170,14 +170,14 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
         ${compSavedRatio != null ? html`
           <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
             <${Eyebrow}>압축 절감률</${Eyebrow}>
-            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${(compSavedRatio * 100).toFixed(1)}%</span>
+            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${formatPct1(compSavedRatio)}</span>
             ${avgSaved != null ? html`<${MutedSpan}>avg ${formatTokens(avgSaved)} saved</${MutedSpan}>` : null}
           </div>
         ` : null}
         ${dropRatio != null ? html`
           <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
             <${Eyebrow}>메모리 손실률</${Eyebrow}>
-            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${(dropRatio * 100).toFixed(1)}%</span>
+            <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${formatPct1(dropRatio)}</span>
           </div>
         ` : null}
         ${lastCompAgo != null ? html`
@@ -248,9 +248,9 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="tabular-nums"><span class="text-[var(--color-status-err)]">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
         <div class="mt-2 w-full h-1.5 bg-[var(--color-bg-hover)] rounded-[var(--r-0)] overflow-hidden flex" aria-label="성공/실패 비율 바">
-          <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${pctSuccess.toFixed(0)}%`}></div>
-          <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${pctFail.toFixed(0)}%`}></div>
-          <div class="h-full bg-[var(--color-status-err)]" style="width:${pctReject}%" title=${`거절 ${pctReject.toFixed(0)}%`}></div>
+          <div class="h-full bg-[var(--color-status-ok)]" style="width:${pctSuccess}%" title=${`성공 ${Math.round(pctSuccess)}%`}></div>
+          <div class="h-full bg-[var(--color-status-warn)]" style="width:${pctFail}%" title=${`실패 ${Math.round(pctFail)}%`}></div>
+          <div class="h-full bg-[var(--color-status-err)]" style="width:${pctReject}%" title=${`거절 ${Math.round(pctReject)}%`}></div>
         </div>
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">

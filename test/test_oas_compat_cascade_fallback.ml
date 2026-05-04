@@ -234,6 +234,13 @@ let test_error_message_baseline () =
    [None].  These tests are independent of cascade policy: they verify
    the structured-code layer that replaced the marker list. *)
 
+let retryable_error_to_string = function
+  | None -> "None"
+  | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
+  | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
+  | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
+  | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"
+
 let test_classify_accept_rejected_model_unsupported () =
   let reason = "codex_cli does not support runtime_mcp_auth headers" in
   (match Oas_compat.Http_client.classify_accept_rejected reason with
@@ -241,12 +248,7 @@ let test_classify_accept_rejected_model_unsupported () =
    | other ->
        Alcotest.failf
          "expected Model_unsupported, got %s"
-         (match other with
-          | None -> "None"
-          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
-          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
-          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
-          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+         (retryable_error_to_string other))
 
 let test_classify_accept_rejected_request_rejected () =
   let reason =
@@ -257,12 +259,7 @@ let test_classify_accept_rejected_request_rejected () =
    | other ->
        Alcotest.failf
          "expected Request_rejected, got %s"
-         (match other with
-          | None -> "None"
-          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
-          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
-          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
-          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+         (retryable_error_to_string other))
 
 let test_classify_accept_rejected_startup_crash () =
   let reason =
@@ -273,12 +270,7 @@ let test_classify_accept_rejected_startup_crash () =
    | other ->
        Alcotest.failf
          "expected Startup_crash, got %s"
-         (match other with
-          | None -> "None"
-          | Some Oas_compat.Http_client.Parse_error -> "Parse_error"
-          | Some Oas_compat.Http_client.Model_unsupported -> "Model_unsupported"
-          | Some Oas_compat.Http_client.Request_rejected -> "Request_rejected"
-          | Some Oas_compat.Http_client.Startup_crash -> "Startup_crash"))
+         (retryable_error_to_string other))
 
 let test_classify_accept_rejected_unknown_returns_none () =
   let reason = "output_schema violation: value is not a string" in

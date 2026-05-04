@@ -137,12 +137,6 @@ module Http_client = struct
   let is_http_body_parse_error body =
     contains_ci_bounded ~haystack:body ~needle:"can't find closing"
 
-  (** [retryable_error_cascades] decides whether a structured retryable
-      error code should advance the cascade to the next provider.
-      All current codes represent per-provider failures where a different
-      provider may succeed. *)
-  let retryable_error_cascades (_code : retryable_error) = true
-
   let classify (err : Llm_provider.Http_client.http_error) :
       cascade_failure_class =
     if Llm_provider.Http_client.is_local_resource_exhaustion err then
@@ -162,10 +156,13 @@ module Http_client = struct
           else
             Terminal_http code
       | Llm_provider.Http_client.AcceptRejected { reason } -> (
+          (* All current [retryable_error] codes represent per-provider
+             failures where a different cascade hop may succeed.  A future
+             terminal code (e.g. a global account suspension) would map to
+             [Accept_rejected_terminal] by adding a branch here. *)
           match classify_accept_rejected reason with
-          | Some code when retryable_error_cascades code ->
+          | Some (Parse_error | Model_unsupported | Request_rejected | Startup_crash) ->
               Accept_rejected_capability_mismatch
-          | Some _ -> Accept_rejected_terminal
           | None -> Accept_rejected_terminal)
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required

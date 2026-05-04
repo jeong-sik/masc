@@ -454,7 +454,7 @@ let keepers_section now : section =
   in
   let content = List.map format_entry sorted in
   let guard_violations =
-    Prometheus.metric_total "masc_fsm_guard_violation_total" |> int_of_float
+    Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
   in
   let title =
     if guard_violations > 0
@@ -582,7 +582,7 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
       let guard_violations =
-        Prometheus.metric_total "masc_fsm_guard_violation_total" |> int_of_float
+        Prometheus.metric_total Prometheus.metric_fsm_guard_violation |> int_of_float
       in
       Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d violations"
         k_running k_dead k_other guard_violations;

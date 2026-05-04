@@ -227,4 +227,4 @@ let () =
   test_fsm_guard_labeled_pass ();
   test_fsm_guard_labeled_fail ();
   test_wrap_unit_routing_labeled ();
-  print_endline "ppx_tla cycle 2 + 3 + 12 tests: PASS"
+  print_endline "ppx_tla cycle 2 + 3 + 15 tests: PASS"

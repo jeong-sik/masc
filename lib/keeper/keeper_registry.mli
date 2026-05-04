@@ -505,9 +505,10 @@ val dispatch_event_and_log :
   base_path:string -> string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
-(** [dispatch_event_unit] calls [dispatch_event_and_log] and discards the
-    result, emitting a [Log.Keeper.warn] on [Error] instead of silently
-    ignoring transition failures.  Replaces [ignore (dispatch_event_and_log ...)]
+(** [dispatch_event_unit] is a convenience wrapper around
+    [dispatch_event_and_log] that discards the result, returning [unit].
+    Transition failures are already logged and counted by the underlying
+    [dispatch_event] call chain; this replaces [ignore (dispatch_event_and_log ...)]
     call sites. *)
 val dispatch_event_unit :
   base_path:string -> string -> Keeper_state_machine.event -> unit

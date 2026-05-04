@@ -222,7 +222,7 @@ let handle_keeper_pr_review_reply
              hardcoded.  If a third site needs 5s budget,
              reconsider. *)
           let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec:5.0
+            Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())
               [ "/bin/zsh"; "-lc";
                 Printf.sprintf "cd %s && gh repo view --json nameWithOwner -q .nameWithOwner 2>&1"
                   (Filename.quote root) ] in

@@ -947,7 +947,7 @@ let handle_keeper_shell
          let normalize_existing_origin_to_https clone_path =
            match
              Process_eio.run_argv_with_status
-               ~timeout_sec:10.0
+               ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                [ "git"; "-C"; clone_path; "remote"; "get-url"; "origin" ]
            with
            | Unix.WEXITED 0, origin ->
@@ -957,7 +957,7 @@ let handle_keeper_shell
              else
                (match
                   Process_eio.run_argv_with_status
-                    ~timeout_sec:10.0
+                    ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                     [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; normalized ]
                 with
                 | Unix.WEXITED 0, _ -> Some "origin remote normalized to HTTPS"
@@ -995,12 +995,12 @@ let handle_keeper_shell
                 (* Already cloned — pull latest instead *)
                 let st, out =
                   if docker_hard_mode_brokered then
-                    run_brokered_git ~cwd:repos_dir ~timeout_sec:60.0
+                    run_brokered_git ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
                       [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
                   else if meta.sandbox_profile = Docker then
                     match
                       Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta
-                        ~cwd:repos_dir ~timeout_sec:60.0
+                        ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
                         ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
                                 (Filename.quote repo_name))
                         ~git_creds_enabled:true ~network_mode:Network_inherit
@@ -1008,7 +1008,7 @@ let handle_keeper_shell
                     | Ok result -> (result.status, result.output)
                     | Error msg -> (Unix.WEXITED 127, msg)
                   else
-                    Process_eio.run_argv_with_status ~timeout_sec:60.0
+                    Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
                       [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
                 in
                 if st = Unix.WEXITED 0 then

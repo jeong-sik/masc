@@ -34,6 +34,7 @@ import {
   type KeeperDecisionsResponse,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
+import { StatTile } from './common/stat-tile'
 
 type ViewMode = 'model' | 'keeper'
 
@@ -266,28 +267,6 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return `${n}`
-}
-
-function StatCell({
-  label, value, sub, tone,
-}: {
-  label: string
-  value: string
-  sub?: string
-  tone?: 'ok' | 'warn' | 'err' | 'default'
-}) {
-  const toneClass =
-    tone === 'err' ? 'text-[var(--color-status-err)]'
-      : tone === 'warn' ? 'text-[var(--color-status-warn)]'
-      : tone === 'ok' ? 'text-[var(--color-status-ok)]'
-      : 'text-text-strong'
-  return html`
-    <div class="flex flex-col gap-0.5 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-      <span class="text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${label}</span>
-      <span class="text-lg font-semibold ${toneClass}">${value}</span>
-      ${sub ? html`<span class="text-2xs text-text-disabled">${sub}</span>` : null}
-    </div>
-  `
 }
 
 function ThRight({ children }: { children: unknown }) {
@@ -881,27 +860,27 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
         ${t ? html`
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <${StatCell}
+            <${StatTile}
               label="Total Cost"
               value=${`$${t.totalCost.toFixed(2)}`}
-              sub=${`${t.count} ${viewMode.value === 'model' ? 'models' : 'keepers'}`}
-              tone="ok"
+              status="ok"
+              delta=${{ direction: 'up', text: `${t.count} ${viewMode.value === 'model' ? 'models' : 'keepers'}` }}
             />
-            <${StatCell}
+            <${StatTile}
               label="Tokens In / Out"
               value=${`${formatTokens(t.totalIn)} / ${formatTokens(t.totalOut)}`}
-              sub="aggregated window"
+              delta=${{ direction: 'flat', text: 'aggregated window' }}
             />
-            <${StatCell}
+            <${StatTile}
               label="p50 Latency (avg)"
               value=${`${t.p50Avg}ms`}
-              sub="across entries"
+              delta=${{ direction: 'flat', text: 'across entries' }}
             />
-            <${StatCell}
+            <${StatTile}
               label="p95 Latency (max)"
               value=${`${t.p95Max}ms`}
-              sub=${t.p95Max > 8000 ? 'over 8s budget' : 'within budget'}
-              tone=${t.p95Max > 8000 ? 'err' : 'default'}
+              status=${t.p95Max > 8000 ? 'crit' : undefined}
+              delta=${{ direction: t.p95Max > 8000 ? 'down' : 'flat', text: t.p95Max > 8000 ? 'over 8s budget' : 'within budget' }}
             />
           </div>
         ` : null}

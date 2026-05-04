@@ -311,6 +311,43 @@ let record_attempt_start (capture : cascade_metrics_capture)
     }
     :: capture.attempts_rev
 
+(** [cascade_attempt_terminal_event_json] builds the structured details payload
+    emitted to system_log when a cascade candidate reaches its terminal state
+    (success: latency_ms set, error none; failure: error set). The shape is the
+    contract for downstream log analysers and external operators looking for
+    "why did the cascade exhaust" signals. Errors are recorded verbatim — no
+    string-based classification at this layer (see #12817 spirit and the
+    project memory rule "no string matching for classification"). *)
+let cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
+    ~error =
+  let outcome = if Option.is_some error then "failure" else "success" in
+  `Assoc
+    [
+      ("event", `String "cascade_attempt_terminal");
+      ("model_id", `String model_id);
+      ( "model_label",
+        match model_label with Some s -> `String s | None -> `Null );
+      ( "latency_ms",
+        match latency_ms with Some n -> `Int n | None -> `Null );
+      ("outcome", `String outcome);
+      ( "error_message",
+        match error with Some s -> `String s | None -> `Null );
+    ]
+
+let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
+  let outcome = if Option.is_some error then "failure" else "success" in
+  let details =
+    cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
+      ~error
+  in
+  let summary =
+    Printf.sprintf
+      "cascade candidate terminal: model=%s outcome=%s latency_ms=%s" model_id
+      outcome
+      (match latency_ms with Some n -> string_of_int n | None -> "n/a")
+  in
+  Log.Telemetry.emit Log.Info ~details summary
+
 let ensure_terminal_attempt (capture : cascade_metrics_capture)
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)
     ~(model_id : string) ~(latency_ms : int option) ~(error : string option) =
@@ -320,7 +357,8 @@ let ensure_terminal_attempt (capture : cascade_metrics_capture)
     && Option.is_none attempt.error
   in
   let update attempt = { attempt with latency_ms; error } in
-  match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
+  let model_label = model_label_option_of_model_id ~candidate_cfgs model_id in
+  (match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
   | Some attempts_rev -> capture.attempts_rev <- attempts_rev
   | None ->
       let attempt_index = capture.next_attempt_index in
@@ -329,11 +367,12 @@ let ensure_terminal_attempt (capture : cascade_metrics_capture)
         {
           attempt_index;
           model_id;
-          model_label = model_label_option_of_model_id ~candidate_cfgs model_id;
+          model_label;
           latency_ms;
           error;
         }
-        :: capture.attempts_rev
+        :: capture.attempts_rev);
+  log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error
 
 let record_fallback_event (capture : cascade_metrics_capture)
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)

@@ -18,6 +18,8 @@ import { keepers } from '../store'
 import { navigate } from '../router'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-strip'
+import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
+import { TurnBudgetGaugePanel } from './turn-budget-gauge'
 import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { TimeAgo } from './common/time-ago'
@@ -556,14 +558,15 @@ function StaleTerminationPanel({
 
 // ── View type ──────────────────────────────────────────────────────────────
 
-type ReactivityView = 'health' | 'lifecycle' | 'pause' | 'proactive' | 'stale'
+type ReactivityView = 'health' | 'lifecycle' | 'events' | 'pause' | 'proactive' | 'stale'
 
 const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> = [
-  { key: 'health',    label: '상태 그리드',  title: '전체 키퍼 phase/활동 빠른 뷰' },
-  { key: 'lifecycle', label: '생명주기',     title: '키퍼 FSM 전환 타임라인' },
-  { key: 'pause',     label: '자동 일시정지', title: '스톰/버짓 자동 일시정지 이벤트' },
-  { key: 'proactive', label: '프로액티브 스킵', title: '프로액티브 스케줄러 스킵 이유' },
-  { key: 'stale',     label: 'Stale 종료',   title: '키퍼별 stale 종료 클래스 분포' },
+  { key: 'health',           label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
+  { key: 'lifecycle',        label: '상태 전환',       title: '키퍼 FSM 전환 타임라인' },
+  { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
+  { key: 'pause',            label: '자동 일시정지',   title: '스톰/버짓 자동 일시정지 이벤트' },
+  { key: 'proactive',        label: '프로액티브 스킵', title: '프로액티브 스케줄러 스킵 이유' },
+  { key: 'stale',            label: 'Stale 종료',      title: '키퍼별 stale 종료 클래스 분포' },
 ]
 
 // ── Main component ─────────────────────────────────────────────────────────
@@ -597,10 +600,12 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
   }
 
   useEffect(() => {
-    if (activeView.value !== 'lifecycle') {
+    if (activeView.value !== 'lifecycle' && activeView.value !== 'events') {
       void loadMetrics()
-    } else {
+    } else if (activeView.value === 'lifecycle') {
       void refreshKeeperPhaseTimeline()
+    } else {
+      void refreshKeeperLifecycleTimeline()
     }
   }, [activeView.value])
 
@@ -609,7 +614,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
   const proactiveRows = extractProactiveSkips(parsedMetrics.value)
   const batchRows = extractBatchTerminations(parsedMetrics.value)
 
-  const isNonLifecycle = activeView.value !== 'lifecycle'
+  const isNonLifecycle = activeView.value !== 'lifecycle' && activeView.value !== 'events'
 
   return html`
     <div class="flex flex-col gap-4">
@@ -656,9 +661,19 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
       ` : html`
         <div>
           ${activeView.value === 'health'
-            ? html`<${HealthGrid} allKeepers=${allKeepers} />`
+            ? html`
+              <div class="flex flex-col gap-4">
+                <${HealthGrid} allKeepers=${allKeepers} />
+                <div>
+                  <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">재시작 예산 게이지</div>
+                  <${TurnBudgetGaugePanel} keepers=${allKeepers} />
+                </div>
+              </div>
+            `
           : activeView.value === 'lifecycle'
             ? html`<${KeeperPhaseTimeline} />`
+          : activeView.value === 'events'
+            ? html`<${KeeperLifecycleTimeline} />`
           : activeView.value === 'pause'
             ? html`<${AutoPausePanel} allKeepers=${allKeepers} summaries=${stopSummaries} />`
           : activeView.value === 'proactive'

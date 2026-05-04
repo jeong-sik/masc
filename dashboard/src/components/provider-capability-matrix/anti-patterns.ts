@@ -13,6 +13,49 @@ import {
 } from './data'
 import type { AntiPatternCategory } from './data'
 
+const RISK_COLORS: Record<string, string> = {
+  C: 'var(--color-status-err)',
+  H: 'var(--rose-light)',
+  M: 'var(--amber-bright)',
+  L: 'var(--color-status-ok)',
+}
+
+function RiskDistBar({ counts }: { counts: { C: number; H: number; M: number; L: number } }) {
+  const total = counts.C + counts.H + counts.M + counts.L
+  if (total === 0) return null
+  const entries = (['C', 'H', 'M', 'L'] as const).filter(k => counts[k] > 0)
+  return html`
+    <div class="flex w-full h-2 rounded-[var(--r-0)] overflow-hidden bg-[var(--color-bg-elevated)]">
+      ${entries.map(key => html`
+        <div style="width: ${(counts[key] / total * 100).toFixed(1)}%; background: ${RISK_COLORS[key]}"
+             title="${riskLabel(key)}: ${counts[key]}건" class="h-full"></div>
+      `)}
+    </div>
+  `
+}
+
+function CategoryRiskRow({ category }: { category: AntiPatternCategory }) {
+  const items = ANTI_PATTERNS.filter(ap => ap.category === category)
+  const counts = { C: 0, H: 0, M: 0, L: 0 }
+  items.forEach(ap => counts[ap.risk]++)
+  const total = items.length
+  const highPct = total > 0 ? (counts.C + counts.H) / total : 0
+  return html`
+    <div class="flex items-center gap-2 py-0.5 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-surface)]">
+      <span class="chip sm ${categoryColor(category)}">${categoryLabel(category)}</span>
+      <span class="font-mono text-[var(--color-status-err)] w-4 text-right">${counts.C || '—'}</span>
+      <span class="font-mono text-[var(--rose-light)] w-4 text-right">${counts.H || '—'}</span>
+      <span class="font-mono text-[var(--amber-bright)] w-4 text-right">${counts.M || '—'}</span>
+      <span class="font-mono w-4 text-right">${counts.L || '—'}</span>
+      <div class="flex-1 h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+        <div style="width: ${(highPct * 100).toFixed(0)}%; background: linear-gradient(90deg, var(--color-status-err), var(--amber-bright))"
+             class="h-full rounded-[var(--r-0)]"></div>
+      </div>
+      <span class="font-mono text-[var(--color-fg-muted)] w-4 text-right">${total}</span>
+    </div>
+  `
+}
+
 export function AntiPatternList() {
   const categoryFilter = useSignal<AntiPatternCategory | 'all'>('all')
 
@@ -47,6 +90,16 @@ export function AntiPatternList() {
           <span>H:<strong class="t-err">${riskCounts.H}</strong></span>
           <span>M:<strong class="t-warn">${riskCounts.M}</strong></span>
           <span>L:<strong>${riskCounts.L}</strong></span>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3">
+          <span class="text-3xs text-[var(--color-fg-muted)] w-16">리스크 분포</span>
+          <div class="flex-1"><${RiskDistBar} counts=${riskCounts} /></div>
+        </div>
+        <div class="space-y-0.5">
+          ${categories.map(cat => html`<${CategoryRiskRow} key=${cat} category=${cat} />`)}
         </div>
       </div>
 

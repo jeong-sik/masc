@@ -91,7 +91,7 @@
 .json-section { border-bottom: 1px solid var(--color-border-default); }
 .json-section:last-child { border-bottom: none; }
 .json-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 5px 10px; cursor: pointer; user-select: none;
   font-size: var(--fs-11);
 }
@@ -103,14 +103,14 @@
 
 .fsm-lifeline {
   display: flex; flex-wrap: wrap; gap: var(--sp-0h);
-  padding: 6px; background: var(--color-bg-page);
+  padding: var(--sp-1h); background: var(--color-bg-page);
   border: 1px solid var(--color-border-default); border-radius: var(--r-1);
   margin-top: var(--sp-1); max-height: 120px; overflow-y: auto;
 }
 .fsm-lifeline .ll-cell { width: 8px; height: 14px; }
 .fsm-trans-list { display: flex; flex-direction: column; gap: var(--sp-0h); margin-top: var(--sp-1); }
 .fsm-trans {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   padding: 4px 6px; border-radius: var(--r-1); font-size: var(--fs-11);
 }
 .fsm-trans:hover { background: var(--color-bg-elevated); }

@@ -17,7 +17,7 @@
 .ll-label {
   padding: 0 var(--sp-3);
   border-right: 1px solid var(--color-border-default);
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   overflow: hidden; min-width: 0;
 }
 .ll-label-caps {
@@ -202,7 +202,7 @@
   color: var(--color-fg-muted);
 }
 .ll-tail-meta {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
 }
 .ll-tail-meta b {
   color: var(--color-fg-primary);

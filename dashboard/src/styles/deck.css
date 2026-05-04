@@ -15,7 +15,7 @@
   color: var(--color-fg-muted); font-size: var(--fs-11); font-weight: var(--fw-semi);
   letter-spacing: .08em; text-transform: uppercase;
   padding: 0 12px; height: 30px; cursor: pointer;
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   border-radius: 0;
 }
 .deck-tabs button:hover { color: var(--color-fg-primary); background: var(--color-bg-elevated); }
@@ -69,7 +69,7 @@
 }
 .board-col-head {
   padding: 6px 10px;
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   background: var(--color-bg-surface);
   border-bottom: 1px solid var(--color-border-default);
   font-size: var(--fs-10); text-transform: uppercase; letter-spacing: .1em;
@@ -84,7 +84,7 @@
 .board-thread:hover { background: var(--color-bg-elevated); }
 .board-thread.is-active { background: var(--color-bg-hover); box-shadow: inset 2px 0 0 var(--brass-1); }
 .board-thread .bt-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
   font-size: var(--fs-11);
 }
 .board-thread .bt-from { color: var(--color-fg-primary); font-weight: var(--fw-med); }
@@ -174,7 +174,7 @@
 /* ——— GOALS tree ——— */
 .goal-tree {
   padding: 12px 20px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: var(--sp-1h);
 }
 .goal-node {
   display: grid;
@@ -203,7 +203,7 @@
 .verif-card {
   background: var(--color-bg-page);
   padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: var(--sp-1h);
 }
 .verif-card.is-failing { box-shadow: inset 2px 0 0 var(--err); }
 .verif-card.is-passing { box-shadow: inset 2px 0 0 var(--ok); }
@@ -239,14 +239,14 @@
 .sandbox-card {
   background: var(--color-bg-page);
   padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: var(--sp-1h);
   font-size: var(--fs-11);
 }
 .sandbox-card.is-running { box-shadow: inset 2px 0 0 var(--brass-1); }
 .sandbox-card.is-stopped { box-shadow: inset 2px 0 0 var(--idle); }
 .sandbox-card.is-errored { box-shadow: inset 2px 0 0 var(--err); }
 .sandbox-card .sb-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: var(--sp-1h);
 }
 .sandbox-card .sb-name { font-family: var(--font-mono); color: var(--color-fg-primary); font-size: var(--fs-12); }
 .sandbox-card .sb-type {

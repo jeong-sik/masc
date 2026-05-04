@@ -71,7 +71,7 @@
 /* ── Mermaid rendered output ──────────────────────────────── */
 .mermaid-rendered {
   border-radius: var(--r-2);
-  padding: 16px;
+  padding: var(--sp-4);
   margin: 8px 0;
   background: var(--color-bg-panel-alt);
   border: 1px solid var(--color-border-default);

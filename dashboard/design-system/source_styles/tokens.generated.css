@@ -90,6 +90,7 @@
   --sp-7: 32px;
   --sp-8: 40px;
   --sp-0h: 2px;  /* half-step gutter */
+  --sp-1h: 6px;  /* half-step between sp-1 (4px) and sp-2 (8px) — 50+ consumers for tight gap/padding */
   --r-0: 2px;
   --r-1: 3px;
   --r-2: 5px;

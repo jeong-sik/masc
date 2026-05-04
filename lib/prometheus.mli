@@ -679,6 +679,8 @@ val metric_gc_compactions : string
 (** Number of major-heap compactions since program start. *)
 
 val metric_gc_promoted_words : string
+(** Cumulative words promoted from minor to major heap since program start. *)
+
 val metric_keeper_stale_termination_total : string
 val metric_keeper_stale_termination_by_class : string
 val metric_keeper_oas_timeout_budget_watchdog_termination : string
@@ -705,7 +707,6 @@ val metric_keeper_config_env_parse_failures : string
 val metric_keeper_post_turn_wirein_failures : string
 val metric_keeper_meta_read_failures : string
 val metric_keeper_recurring_failures : string
-(** Cumulative words promoted from minor to major heap since program start. *)
 
 (** {1 Process monitoring} *)
 

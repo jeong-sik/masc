@@ -45,9 +45,12 @@ val get_int_nonneg : default:int -> string -> int
     is [v < 0]. *)
 
 val get_float_nonneg : default:float -> string -> float
-(** Like {!get_float} but floors NaN and negative parses at
-    [default].  Use for env vars whose call sites treat negatives
-    or NaN as nonsensical (timeouts, scores, ratios). *)
+(** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and
+    negative parses at [default].  Use for env vars whose call
+    sites treat negatives or non-finite values as nonsensical
+    (timeouts, scores, ratios).  [+∞] is rejected because
+    [float_of_string "inf"] succeeds and [+∞ > 0.0] would
+    otherwise pass an effectively unbounded value through. *)
 
 (** {1 String / path helpers} *)
 

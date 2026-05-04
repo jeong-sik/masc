@@ -317,8 +317,8 @@ let add_routes router =
   |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
-           let base = base_path_of_state state in
            let uri = Uri.of_string request.target in
+           let base, _source = resolve_workspace_base ~state ~uri in
            let file_path =
              match Uri.get_query_param uri "path" with
              | Some p -> p
@@ -345,8 +345,8 @@ let add_routes router =
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
-           let base = base_path_of_state state in
            let uri = Uri.of_string request.target in
+           let base, _source = resolve_workspace_base ~state ~uri in
            let file_path =
              match Uri.get_query_param uri "path" with
              | Some p -> p

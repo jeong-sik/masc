@@ -685,6 +685,23 @@ val metric_keeper_oas_timeout_budget_watchdog_termination : string
 val metric_keeper_stale_termination_threshold_breached : string
 val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
+  (* Centralized metric constants for inline string replacement. *)
+val metric_keeper_tool_use_failure : string
+val metric_after_turn_response_model_empty : string
+val metric_after_turn_response_model_alias : string
+val metric_pricing_catalog_miss : string
+val metric_cost_emit_zero_source : string
+val metric_cost_ledger_status : string
+val metric_keeper_turn_gate_rejected_terminal : string
+val metric_keeper_receipt_unmapped_disposition : string
+val metric_keeper_bash_network_upgrade : string
+val metric_keeper_bash_local_execution : string
+val metric_keeper_docker_runtime_discarded : string
+val metric_keeper_proactive_skip : string
+val metric_keeper_stay_silent_loop_detected : string
+val metric_keeper_usage_trust : string
+val metric_keeper_usage_anomaly_reason : string
+val metric_keeper_config_env_parse_failures : string
 (** Cumulative words promoted from minor to major heap since program start. *)
 
 (** {1 Process monitoring} *)

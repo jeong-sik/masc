@@ -249,8 +249,8 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
    classify sites (append_metrics_snapshot, keeper_turn) serialize
    the trust into the JSONL ledger but do not bump the counter, so
    the counter rate equals the per-turn rate rather than 2–3×. *)
-let usage_trust_outcome_metric = "masc_keeper_usage_trust_total"
-let usage_anomaly_reason_metric = "masc_keeper_usage_anomaly_reason_total"
+let usage_trust_outcome_metric = Prometheus.metric_keeper_usage_trust
+let usage_anomaly_reason_metric = Prometheus.metric_keeper_usage_anomaly_reason
 
 let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   let outcome = usage_trust_to_string trust in

@@ -211,7 +211,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason]   ∈ guard reason_code strings (finite, defined by guards)
     - [decision] ∈ {override, approval_required} *)
 let gate_rejected_terminal_metric =
-  "masc_keeper_turn_gate_rejected_terminal_total"
+  Prometheus.metric_keeper_turn_gate_rejected_terminal
 
 let () =
   Prometheus.register_counter

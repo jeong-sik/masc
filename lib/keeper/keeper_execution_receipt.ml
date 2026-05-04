@@ -227,7 +227,7 @@ let string_contains_ci haystack needle =
    case below ([match outcome_kind_of_string ...] catch-all). *)
 let () =
   Prometheus.register_counter
-    ~name:"masc_keeper_receipt_unmapped_disposition_total"
+    ~name:Prometheus.metric_keeper_receipt_unmapped_disposition
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not \
        match any branch of operator_disposition and fell through to \
@@ -338,7 +338,7 @@ let operator_disposition (receipt : t) =
       ("pass", "healthy")
     | _ ->
       Prometheus.inc_counter
-        "masc_keeper_receipt_unmapped_disposition_total" ();
+        Prometheus.metric_keeper_receipt_unmapped_disposition ();
       Log.Keeper.warn
         "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
          terminal_reason=%s tool_contract_result=%s error_kind=%s) \

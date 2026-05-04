@@ -17,7 +17,7 @@ open Keeper_execution
    produces one of {keeper_paused, approval_pending,
    scheduled_autonomous_disabled, provider_cooldown_pending,
    idle_gate_pending, cooldown_pending, no_signal}. *)
-let proactive_skip_reason_metric = "masc_keeper_proactive_skip_total"
+let proactive_skip_reason_metric = Prometheus.metric_keeper_proactive_skip
 
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec

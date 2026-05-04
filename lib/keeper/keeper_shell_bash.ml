@@ -179,7 +179,7 @@ let handle_keeper_bash
         meta.name cwd cmd_for_log detected_tool
         (network_mode_to_string base_network_mode);
       Prometheus.inc_counter
-        "masc_keeper_bash_network_upgrade_total"
+        Prometheus.metric_keeper_bash_network_upgrade
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
       Keeper_shell_shared.run_docker_with_git_bash
@@ -212,7 +212,7 @@ let handle_keeper_bash
         in_playground
         (Env_config_keeper.KeeperSandbox.hard_mode ());
       Prometheus.inc_counter
-        "masc_keeper_bash_local_execution_total"
+        Prometheus.metric_keeper_bash_local_execution
         ~labels:[ ("keeper", meta.name); ("reason", local_reason) ]
         ();
       (* Local execution path: full validation applies *)

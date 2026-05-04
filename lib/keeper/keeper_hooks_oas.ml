@@ -183,7 +183,7 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = "masc_keeper_tool_use_failure_total"
+let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -201,10 +201,10 @@ let record_tool_use_failure ~keeper_name ~tool_name =
    and emits a labelled counter so the operator can see WHICH
    transport leaked and WHICH resolution path recovered it. *)
 let empty_response_model_metric =
-  "masc_after_turn_response_model_empty_total"
+  Prometheus.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
-  "masc_after_turn_response_model_alias_total"
+  Prometheus.metric_after_turn_response_model_alias
 
 let unknown_model_sentinel = "unknown_provider"
 
@@ -354,7 +354,7 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
     : float =
   let pricing_catalog_miss () =
     Prometheus.inc_counter
-      "masc_pricing_catalog_miss_total"
+      Prometheus.metric_pricing_catalog_miss
       ~labels:[("model", model)] ();
     Log.Keeper.warn
       "pricing_catalog_miss model=%s input_tokens=%d output_tokens=%d \
@@ -580,7 +580,7 @@ let wall_tokens_per_second
                                 [estimate_usage_cost_usd] returned 0.
     - [zero_token_call]       — trusted+priced but tokens=0
                                 (tool-only call or empty completion). *)
-let cost_emit_source_metric = "masc_cost_emit_zero_source_total"
+let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
 
 let () =
   Prometheus.register_counter
@@ -807,7 +807,7 @@ let emit_cost_event
       ()
   in
   Prometheus.inc_counter
-    "masc_cost_ledger_status_total"
+    Prometheus.metric_cost_ledger_status
     ~labels:
       [
         ("provider", assembled.provider);
@@ -1080,11 +1080,11 @@ let make_hooks
            let cr = u.cache_read_input_tokens in
            if cc > 0 then
              Prometheus.inc_counter
-               "masc_provider_prefix_cache_creation_tokens_total"
+               Prometheus.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
            if cr > 0 then
              Prometheus.inc_counter
-               "masc_provider_prefix_cache_read_tokens_total"
+               Prometheus.metric_provider_prefix_cache_read_tokens
                ~delta:(Float.of_int cr) ()
          | Some _ | None -> ());
         (* Inference latency histogram for /metrics endpoint.
@@ -1093,7 +1093,7 @@ let make_hooks
            the hook isn't running". Without this split a histogram sum/count
            of 0 is ambiguous between the two. *)
         Prometheus.inc_counter
-          "masc_after_turn_hook_total"
+          Prometheus.metric_after_turn_hook
           ~labels:[("model", model)] ();
         (match response.telemetry with
          | Some t when t.request_latency_ms > 0 ->
@@ -1103,11 +1103,11 @@ let make_hooks
              (Float.of_int t.request_latency_ms /. 1000.0)
          | Some _ ->
            Prometheus.inc_counter
-             "masc_after_turn_telemetry_zero_latency_total"
+             Prometheus.metric_after_turn_telemetry_zero_latency
              ~labels:[("model", model)] ()
          | None ->
            Prometheus.inc_counter
-             "masc_after_turn_telemetry_missing_total"
+             Prometheus.metric_after_turn_telemetry_missing
              ~labels:[("model", model)] ());
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v

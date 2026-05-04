@@ -959,6 +959,45 @@ let metric_keeper_stale_termination_batch =
 let metric_keeper_stale_broadcast_emit_failures =
   "masc_keeper_stale_broadcast_emit_failures"
 
+
+(* Centralized metric constants for inline string replacement.
+   keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
+   keeper_shell_bash.ml, keeper_shell_docker.ml,
+   keeper_heartbeat_snapshot.ml, keeper_stay_silent_loop_detector.ml,
+   keeper_unified_metrics.ml. *)
+let metric_keeper_tool_use_failure =
+  "masc_keeper_tool_use_failure_total"
+let metric_after_turn_response_model_empty =
+  "masc_after_turn_response_model_empty_total"
+let metric_after_turn_response_model_alias =
+  "masc_after_turn_response_model_alias_total"
+let metric_pricing_catalog_miss =
+  "masc_pricing_catalog_miss_total"
+let metric_cost_emit_zero_source =
+  "masc_cost_emit_zero_source_total"
+let metric_cost_ledger_status =
+  "masc_cost_ledger_status_total"
+let metric_keeper_turn_gate_rejected_terminal =
+  "masc_keeper_turn_gate_rejected_terminal_total"
+let metric_keeper_receipt_unmapped_disposition =
+  "masc_keeper_receipt_unmapped_disposition_total"
+let metric_keeper_bash_network_upgrade =
+  "masc_keeper_bash_network_upgrade_total"
+let metric_keeper_bash_local_execution =
+  "masc_keeper_bash_local_execution_total"
+let metric_keeper_docker_runtime_discarded =
+  "masc_keeper_docker_runtime_discarded_total"
+let metric_keeper_proactive_skip =
+  "masc_keeper_proactive_skip_total"
+let metric_keeper_stay_silent_loop_detected =
+  "masc_keeper_stay_silent_loop_detected_total"
+let metric_keeper_usage_trust =
+  "masc_keeper_usage_trust_total"
+let metric_keeper_usage_anomaly_reason =
+  "masc_keeper_usage_anomaly_reason_total"
+let metric_keeper_config_env_parse_failures =
+  "masc_keeper_config_env_parse_failures_total"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -1694,6 +1733,38 @@ let init () =
     "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window)." Counter;
   add metric_keeper_stale_broadcast_emit_failures
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
+  add metric_keeper_tool_use_failure
+    "Total keeper tool use failures during OAS hooks. Labels: keeper, tool." Counter;
+  add metric_after_turn_response_model_empty
+    "After-turn response model resolution returned empty string." Counter;
+  add metric_after_turn_response_model_alias
+    "After-turn response model matched a known alias." Counter;
+  add metric_pricing_catalog_miss
+    "Pricing catalog lookups that missed. Labels: model." Counter;
+  add metric_cost_emit_zero_source
+    "Cost emission events with no identifiable source." Counter;
+  add metric_cost_ledger_status
+    "Cost ledger status transitions. Labels: status." Counter;
+  add metric_keeper_turn_gate_rejected_terminal
+    "Turn gate rejected a terminal state keeper. Labels: keeper." Counter;
+  add metric_keeper_receipt_unmapped_disposition
+    "Execution receipt with unmapped disposition. Labels: keeper." Counter;
+  add metric_keeper_bash_network_upgrade
+    "Bash shell network upgrade events. Labels: keeper." Counter;
+  add metric_keeper_bash_local_execution
+    "Bash shell local execution events. Labels: keeper." Counter;
+  add metric_keeper_docker_runtime_discarded
+    "Docker shell runtime output discarded. Labels: keeper." Counter;
+  add metric_keeper_proactive_skip
+    "Proactive turn skipped due to heartbeat snapshot conditions. Labels: keeper, reason." Counter;
+  add metric_keeper_stay_silent_loop_detected
+    "Stay-silent loop detector triggered. Labels: keeper." Counter;
+  add metric_keeper_usage_trust
+    "Keeper usage trust level. Labels: keeper, trust." Counter;
+  add metric_keeper_usage_anomaly_reason
+    "Keeper usage anomaly reason. Labels: keeper, reason." Counter;
+  add metric_keeper_config_env_parse_failures
+    "Config env var parse failures (non-integer values). Labels: var." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

@@ -134,6 +134,10 @@ let prepare_agent_setup
              Log.Keeper.warn
                "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
                s;
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_config_env_parse_failures
+               ~labels:[("var", "MASC_KEEPER_TOOL_DECAY_TURNS")]
+               ();
              5)
         | None -> 5
       end)

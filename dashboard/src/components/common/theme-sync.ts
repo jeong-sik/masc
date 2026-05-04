@@ -11,9 +11,6 @@ import type { ThemeId } from './use-theme'
 export const THEME_STORAGE_KEY = 'masc-theme-v2'
 export const THEME_SEARCH_PARAM = 'theme'
 
-/** @deprecated Use updateThemeSearchParam — writing to location.hash breaks hash-based routing. */
-export const THEME_HASH_PREFIX = '#theme='
-
 export function updateThemeSearchParam(theme: ThemeId) {
   if (typeof location === 'undefined') return
   const url = new URL(location.href)
@@ -28,17 +25,6 @@ export function parseThemeFromSearch(search: string): ThemeId | null {
   const theme = sp.get(THEME_SEARCH_PARAM)
   if (theme === 'dark' || theme === 'light' || theme === 'dark-fantasy' || theme === 'paper') {
     return theme
-  }
-  return null
-}
-
-/** @deprecated Use parseThemeFromSearch — theme is no longer stored in location.hash. */
-export function parseThemeFromHash(hash: string): ThemeId | null {
-  if (hash.startsWith(THEME_HASH_PREFIX)) {
-    const theme = hash.slice(THEME_HASH_PREFIX.length)
-    if (theme === 'dark' || theme === 'light' || theme === 'dark-fantasy' || theme === 'paper') {
-      return theme
-    }
   }
   return null
 }

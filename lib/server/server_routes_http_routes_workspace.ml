@@ -6,6 +6,38 @@ module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.room_config.base_path
 
+(* Resolve the workspace base directory for tree/file reads.
+
+   Without [?keeper=<name>] the project root from [base_path_of_state]
+   is used (single shared workspace). With a keeper name the keeper's
+   private workspace root (sandbox playground) is resolved via
+   [Keeper_sandbox.host_root_abs_of_meta] and validated for existence.
+
+   Unknown keeper / missing meta / non-existent playground silently
+   fall back to the project root so the IDE always renders something
+   and never depends on disk state to render a tree. The boolean
+   return signals whether the requested keeper's playground was
+   actually found, so callers can surface "playground 없음" hints
+   without leaking the resolved absolute path back to the client. *)
+let resolve_workspace_base ~state ~uri =
+  let project_base = base_path_of_state state in
+  match Uri.get_query_param uri "keeper" with
+  | None | Some "" -> (project_base, `Project)
+  | Some keeper_name ->
+    let trimmed = String.trim keeper_name in
+    if trimmed = "" then (project_base, `Project)
+    else
+      let config = state.Mcp_server.room_config in
+      match Keeper_types.read_meta config trimmed with
+      | Ok (Some m) ->
+        let playground =
+          Keeper_sandbox.host_root_abs_of_meta ~config m
+        in
+        if Sys.file_exists playground && Sys.is_directory playground
+        then (playground, `Playground trimmed)
+        else (project_base, `PlaygroundMissing trimmed)
+      | _ -> (project_base, `KeeperUnknown trimmed)
+
 let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]
 
@@ -233,8 +265,8 @@ let add_routes router =
   |> Http.Router.get "/api/v1/workspace/tree" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
-           let base = base_path_of_state state in
            let uri = Uri.of_string request.target in
+           let base, _source = resolve_workspace_base ~state ~uri in
            let depth =
              match Uri.get_query_param uri "depth" with
              | Some d -> (try max 1 (min 5 (int_of_string d)) with _ -> 3)
@@ -251,8 +283,8 @@ let add_routes router =
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
-           let base = base_path_of_state state in
            let uri = Uri.of_string request.target in
+           let base, _source = resolve_workspace_base ~state ~uri in
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->

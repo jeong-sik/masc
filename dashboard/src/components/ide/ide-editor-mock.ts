@@ -9,11 +9,11 @@ import {
 import { CodeLineText, useHighlightedCodeLines } from './ide-code-renderer'
 import {
   createKeeperLineOwnershipStore,
+  type KeeperEdit,
   type LineOwnership,
 } from './keeper-line-ownership-store'
 import {
   IDE_LAYER_ORDER,
-  IDE_MOCK_FILE_PATH,
   IDE_MOCK_OWNERSHIP_EVENTS,
   IDE_MOCK_SOURCE,
   ideMockAnnotationsForLayer,
@@ -114,40 +114,6 @@ const UNIFIED_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = [
   { kind: 'context', oldLine: 21, newLine: 23, text: '}' },
 ]
 
-const SPLIT_DIFF_ROWS: ReadonlyArray<SplitDiffRow> = [
-  {
-    before: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-    after: { kind: 'context', line: 16, text: 'export function normalizeTools(req: CascadeReq): CascadeReq {' },
-  },
-  {
-    before: { kind: 'delete', line: 17, text: '  if (req.tools === undefined) {' },
-    after: { kind: 'add', line: 17, text: '  // strip empty tools array' },
-  },
-  {
-    before: { kind: 'delete', line: 18, text: '    return req' },
-    after: { kind: 'add', line: 18, text: '  if (req.tools && req.tools.length === 0) {' },
-  },
-  {
-    before: { kind: 'delete', line: 19, text: '  }' },
-    after: { kind: 'add', line: 19, text: '    const { tools, tool_choice, ...rest } = req' },
-  },
-  {
-    before: null,
-    after: { kind: 'add', line: 20, text: '    return rest as CascadeReq' },
-  },
-  {
-    before: null,
-    after: { kind: 'add', line: 21, text: '  }' },
-  },
-  {
-    before: { kind: 'context', line: 20, text: '  return req' },
-    after: { kind: 'context', line: 22, text: '  return req' },
-  },
-  {
-    before: { kind: 'context', line: 21, text: '}' },
-    after: { kind: 'context', line: 23, text: '}' },
-  },
-]
 
 export function IdeEditorMock({
   activeView = 'source',
@@ -197,7 +163,7 @@ export function IdeEditorMock({
           line_end: block.line_end,
           keeper_id: block.keeper_id,
           timestamp_ms: block.timestamp_ms,
-          kind: block.kind,
+          kind: block.kind as KeeperEdit['kind'],
         })
       }
     })
@@ -208,7 +174,7 @@ export function IdeEditorMock({
   useEffect(() => {
     let cancelled = false
     fetchDiff(activeIdeFile.value).then(rows => {
-      if (!cancelled) setDiffRows(rows.length > 0 ? rows : UNIFIED_DIFF_ROWS)
+      if (!cancelled) setDiffRows(rows.length > 0 ? rows : (UNIFIED_DIFF_ROWS as UnifiedDiffRow[]))
     })
     return () => { cancelled = true }
   }, [activeIdeFile.value])
@@ -655,9 +621,11 @@ function buildSplitDiff(rows: ReadonlyArray<UnifiedDiffRow>): SplitDiffRow[] {
   function flushPending(): void {
     const max = Math.max(deletes.length, adds.length)
     for (let i = 0; i < max; i++) {
+      const del = deletes[i]
+      const add = adds[i]
       result.push({
-        before: deletes[i] ? { kind: 'delete', line: deletes[i].oldLine, text: deletes[i].text } : null,
-        after: adds[i] ? { kind: 'add', line: adds[i].newLine, text: adds[i].text } : null,
+        before: del ? { kind: 'delete', line: del.oldLine, text: del.text } : null,
+        after: add ? { kind: 'add', line: add.newLine, text: add.text } : null,
       })
     }
     deletes.length = 0

@@ -23,13 +23,13 @@ const FALLBACK_SEED: ReadonlyArray<FileTreeNode> = [
   { path: 'README.md', label: 'README.md', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
 ]
 
-async function fetchTree(depth = 3): Promise<FileTreeNode[]> {
+async function fetchTree(depth = 3): Promise<ReadonlyArray<FileTreeNode>> {
   try {
     const res = await fetch(`/api/v1/workspace/tree?depth=${depth}`)
     if (!res.ok) return FALLBACK_SEED
     const data = await res.json()
     if (!Array.isArray(data) || data.length === 0) return FALLBACK_SEED
-    return data as FileTreeNode[]
+    return data as ReadonlyArray<FileTreeNode>
   } catch { return FALLBACK_SEED }
 }
 

@@ -152,7 +152,7 @@
   animation: sl-pulse 2.6s var(--ease-inout) infinite;
 }
 @keyframes sl-pulse {
-  0%, 100% { opacity: .5; }
+  0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
 
@@ -181,10 +181,10 @@
 /* collapsed empty lane — smaller, muted */
 .sl-row-collapsed {
   height: 14px;
-  opacity: .45;
+  opacity: 0.45;
   border-bottom: 1px solid transparent;
 }
-.sl-row-collapsed:hover { opacity: .9; }
+.sl-row-collapsed:hover { opacity: 0.9; }
 .sl-row-collapsed .sl-label { font-size: var(--fs-10); }
 .sl-row-collapsed .sl-meta { font-size: var(--fs-9); }
 .sl-track-empty { position: relative; }
@@ -237,7 +237,7 @@
   display: inline-flex; align-items: flex-end;
   height: 10px; width: 28px;
   gap: 1px; flex-shrink: 0;
-  opacity: .55;
+  opacity: 0.55;
 }
 .sl-row:hover .sl-spark,
 .sl-row.is-active .sl-spark { opacity: 1; }
@@ -273,19 +273,19 @@
   position: absolute; top: 0; bottom: 0;
   width: 1px;
   background: var(--color-border-default);
-  opacity: .4;
+  opacity: 0.4;
   pointer-events: none;
 }
 .sl-grid.is-major {
   background: var(--color-border-strong);
-  opacity: .7;
+  opacity: 0.7;
 }
 
 .sl-crosshair {
   position: absolute; top: 0; bottom: 0;
   width: 1px;
   background: var(--brass-1);
-  opacity: .8;
+  opacity: 0.8;
   pointer-events: none;
   box-shadow: 0 0 3px rgb(var(--brass-glow) / .7);
   z-index: 2;
@@ -329,7 +329,7 @@
 /* text = thin line, info */
 .sl-glyph.k-text .sl-glyph-mark {
   background: var(--info);
-  opacity: .75;
+  opacity: 0.75;
   height: 40%;
   min-width: 2px;
 }
@@ -341,7 +341,7 @@
 .sl-glyph.k-noop .sl-glyph-mark {
   background: var(--color-fg-disabled);
   min-width: 2px;
-  opacity: .6;
+  opacity: 0.6;
 }
 /* error = cross, red */
 .sl-glyph.k-error .sl-glyph-mark {
@@ -404,22 +404,22 @@
   fill: none;
   stroke: var(--brass-3);
   stroke-width: 1;
-  opacity: .35;
+  opacity: 0.35;
   stroke-linecap: round;
   transition: stroke var(--t-fast), stroke-width var(--t-fast), opacity var(--t-fast);
   stroke-dasharray: 2 3;
 }
 .sl-ho-head {
   fill: var(--brass-2);
-  opacity: .6;
+  opacity: 0.6;
   transition: r var(--t-fast), fill var(--t-fast), opacity var(--t-fast);
 }
 .sl-ho-tail {
   fill: var(--brass-3);
-  opacity: .45;
+  opacity: 0.45;
 }
-.sl-ho.is-involved .sl-ho-line { stroke: var(--brass-1); opacity: .65; stroke-dasharray: none; }
-.sl-ho.is-involved .sl-ho-head { fill: var(--brass-1); opacity: .9; }
+.sl-ho.is-involved .sl-ho-line { stroke: var(--brass-1); opacity: 0.65; stroke-dasharray: none; }
+.sl-ho.is-involved .sl-ho-head { fill: var(--brass-1); opacity: 0.9; }
 .sl-ho:hover .sl-ho-line {
   stroke: var(--brass-1);
   stroke-width: 1.6;

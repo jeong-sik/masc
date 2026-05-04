@@ -119,7 +119,7 @@
 .ll-cell.k-tool  { background: var(--brass-2); }
 .ll-cell.k-claim { background: var(--ok); }
 .ll-cell.k-text  { background: var(--info); }
-.ll-cell.k-noop  { background: var(--idle); opacity: .45; }
+.ll-cell.k-noop  { background: var(--idle); opacity: 0.45; }
 .ll-cell.k-error { background: var(--err); }
 
 /* turn separator — thin dashed vertical */
@@ -127,7 +127,7 @@
   flex: 0 0 auto;
   width: 0;
   border-left: 1px dashed var(--color-border-strong);
-  opacity: .5;
+  opacity: 0.5;
   height: 100%;
   margin: 0 2px;
   align-self: stretch;

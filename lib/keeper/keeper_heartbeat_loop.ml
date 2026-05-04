@@ -589,10 +589,8 @@ let run_keepalive_unified_turn
           ~channel:turn_decision.channel
           ~kind:Semaphore_wait_pending;
         match
-          Keeper_turn_slot.with_keeper_turn_slot_yieldable
-            ~keeper_name:meta_after_triage.name
-            ~channel:turn_decision.channel
-            (fun ~semaphore_wait_ms ~yield_and_reacquire ->
+          Keeper_turn_slot.with_keeper_turn_slot ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
             match
               with_in_turn_liveness_pulse ~ctx ~meta:meta_after_observe ~stop
                 (fun () ->
@@ -604,7 +602,6 @@ let run_keepalive_unified_turn
                     ~channel:turn_decision.channel
                     ~semaphore_wait_ms:semaphore_wait_ms
                     ~shared_context
-                    ~yield_and_reacquire_slot:yield_and_reacquire
                     ())
             with
             | Error err ->

@@ -69,35 +69,6 @@ val with_keeper_turn_slot :
   (semaphore_wait_ms:int -> 'a) ->
   ('a, [> `Semaphore_wait_timeout of float ]) result
 
-(** Release the current autonomous slot, re-enter the FIFO fairness queue,
-    and reacquire the slot.  Peer keepers can acquire the slot during the
-    interval between release and reacquisition.
-
-    Returns [Ok new_wait_ms] on successful reacquisition, or
-    [Error `Semaphore_wait_timeout] if reacquisition exceeds
-    [semaphore_wait_timeout_sec].  No-op ([Ok 0]) for reactive turns or
-    when the autonomous slot is not held.
-
-    Must be called with the live [keeper_turn_slot_state] from the enclosing
-    [with_keeper_turn_slot_yieldable] callback. *)
-val yield_and_reacquire_keeper_turn_slot :
-  keeper_name:string ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  keeper_turn_slot_state ->
-  (int, [> `Semaphore_wait_timeout of float ]) result
-
-(** Variant of [with_keeper_turn_slot] that also passes a
-    [~yield_and_reacquire] callback to the body function.  The callback
-    releases the autonomous slot between cascade rotation attempts and
-    reacquires it before returning. *)
-val with_keeper_turn_slot_yieldable :
-  keeper_name:string ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int ->
-   yield_and_reacquire:(unit -> (int, [> `Semaphore_wait_timeout of float ]) result) ->
-   'a) ->
-  ('a, [> `Semaphore_wait_timeout of float ]) result
-
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
 val with_keeper_turn_slot_for_test :
   keeper_name:string ->

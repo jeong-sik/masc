@@ -442,173 +442,7 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
            Eio.Fiber.yield ());
       wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at)
 
-(* Module-level bounded-acquire helper extracted from [with_keeper_turn_slot]
-   so it can also be used by [yield_and_reacquire_keeper_turn_slot]. *)
-let acquire_sem_bounded ~label ~keeper_name ~channel_label sem =
-  match Eio_context.get_clock_opt () with
-  | Some clock ->
-    (try
-      Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
-        Eio.Semaphore.acquire sem);
-      record_holder ~label ~keeper_name
-        ~acquired_at:(Time_compat.now ());
-      Ok ()
-    with Eio.Time.Timeout ->
-      (* Routine, not WARN: the keeper-specific heartbeat loop already
-         emits the operator-facing skip warning with owner/cascade
-         context, while the metric below preserves attribution.
-         2026-05-05: also dump the actual holders so operators are
-         not blind to *which* peer is starving the queue. *)
-      let holders =
-        snapshot_holders ~label ~now:(Time_compat.now ())
-      in
-      let holder_summary =
-        match holders with
-        | [] -> "(none — race or empty)"
-        | _ ->
-          holders
-          |> List.map (fun (n, age) -> Printf.sprintf "%s/%.0fs" n age)
-          |> String.concat ", "
-      in
-      Log.Keeper.routine
-        "semaphore_wait: %s semaphore wait exceeded %.0fs \
-         (channel=%s, holders=[%s]), skipping turn"
-        label semaphore_wait_timeout_sec
-        channel_label holder_summary;
-      (* #9771: per-keeper × per-acquire-channel counter so
-         operators can attribute slot starvation to autonomous
-         vs turn semaphore pressure. *)
-      Prometheus.inc_counter
-        Prometheus.metric_keeper_semaphore_wait_timeout
-        ~labels:[ ("keeper", keeper_name);
-                  ("channel", label) ]
-        ();
-      Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec))
-  | None ->
-    (* No Eio clock available: we are running outside an Eio main loop
-       (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
-       always provides a clock via [Masc_eio_env.init]; reaching this
-       branch at runtime would indicate an environment-setup drift,
-       so log it prominently before falling back to unbounded acquire. *)
-    Log.Keeper.warn
-      "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
-      label;
-    Eio.Semaphore.acquire sem;
-    record_holder ~label ~keeper_name ~acquired_at:(Time_compat.now ());
-    Ok ()
-
-(** Two-tier slot lifecycle (RFC: release autonomous turn slot at inner cancel).
-
-    Release the current autonomous slot, re-enter the FIFO fairness queue,
-    and reacquire the slot.  Peer keepers can acquire the slot during the
-    interval between release and reacquisition, preventing a single hung turn
-    from monopolizing the slot for the full outer wall-clock budget while
-    cascade-rotation retries run.
-
-    Returns [Ok new_wait_ms] on successful reacquisition, where [new_wait_ms]
-    is the milliseconds spent waiting.  Returns
-    [Error `Semaphore_wait_timeout] if the reacquisition exceeds
-    [semaphore_wait_timeout_sec].
-
-    No-op (returns [Ok 0]) for reactive-channel turns or when the autonomous
-    slot is not currently held.
-
-    Precondition: [state] must be the live [keeper_turn_slot_state] from the
-    enclosing [with_keeper_turn_slot_yieldable] callback. *)
-let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
-  let is_autonomous =
-    match channel with
-    | Keeper_world_observation.Scheduled_autonomous -> true
-    | Keeper_world_observation.Reactive -> false
-  in
-  if not is_autonomous || not !(state.acquired_autonomous) then
-    (* Reactive turns or turns not holding the autonomous slot: nothing to yield. *)
-    Ok 0
-  else begin
-    (* channel_label is only needed once we confirm there is work to do. *)
-    let channel_label = Keeper_world_observation.channel_to_string channel in
-    let t0 = Time_compat.now () in
-    (* 1. Release the shared turn semaphore first (outer gate). *)
-    if !(state.acquired_turn) then begin
-      drop_holder ~label:"turn" ~keeper_name;
-      Eio.Semaphore.release turn_semaphore;
-      state.acquired_turn := false
-    end;
-    (* 2. Stamp completion time BEFORE releasing the autonomous semaphore,
-          mirroring [release_keeper_turn_slot]'s ordering so that
-          [maybe_yield_for_fairness] on the NEXT re-entry sees a correct
-          completion timestamp. *)
-    record_autonomous_completion ~keeper_name;
-    drop_holder ~label:"autonomous" ~keeper_name;
-    Eio.Semaphore.release autonomous_turn_semaphore;
-    state.acquired_autonomous := false;
-    Log.Keeper.info
-      "slot_yield: keeper=%s released autonomous slot for cascade rotation \
-       (peers may now acquire)"
-      keeper_name;
-    Prometheus.inc_counter
-      Prometheus.metric_keeper_slot_yield_total
-      ~labels:[("keeper", keeper_name)]
-      ();
-    (* 3. Fairness cooldown so a fast-cycling keeper does not monopolize the
-          slot on the very next re-entry. *)
-    maybe_yield_for_fairness ~keeper_name;
-    (* 4. Re-enter the FIFO queue. *)
-    let ticket = enqueue_autonomous_waiter ~keeper_name in
-    state.autonomous_ticket := Some ticket;
-    (* Helper to consistently clear ticket bookkeeping. *)
-    let clear_ticket () =
-      drop_autonomous_waiter ~ticket;
-      state.autonomous_ticket := None
-    in
-    let queue_entered_at = Time_compat.now () in
-    (* 5. Wait for this keeper to reach head of the FIFO queue. *)
-    match
-      wait_for_autonomous_queue_head ~keeper_name ~ticket
-        ~started_at:queue_entered_at
-    with
-    | Error _ as e ->
-        clear_ticket ();
-        e
-    | Ok () ->
-    (* 6. Reacquire the autonomous semaphore. *)
-    match
-      acquire_sem_bounded ~label:"autonomous" ~keeper_name ~channel_label
-        autonomous_turn_semaphore
-    with
-    | Error _ as e ->
-        clear_ticket ();
-        e
-    | Ok () ->
-        state.acquired_autonomous := true;
-        clear_ticket ();
-    (* 7. Reacquire the shared turn semaphore. *)
-    match
-      acquire_sem_bounded ~label:"turn" ~keeper_name ~channel_label
-        turn_semaphore
-    with
-    | Error _ as e ->
-        (* [acquired_autonomous] is true; [acquired_turn] stays false.
-           The Fun.protect finally block in [with_keeper_turn_slot_yieldable]
-           will release the autonomous semaphore correctly via
-           [release_keeper_turn_slot]. *)
-        e
-    | Ok () ->
-        state.acquired_turn := true;
-        let new_semaphore_wait_ms =
-          int_of_float ((Time_compat.now () -. t0) *. 1000.0)
-        in
-        Log.Keeper.info
-          "slot_yield: keeper=%s reacquired autonomous slot after %dms"
-          keeper_name new_semaphore_wait_ms;
-        Ok new_semaphore_wait_ms
-  end
-
-(* Shared implementation for [with_keeper_turn_slot] and
-   [with_keeper_turn_slot_yieldable].  [make_result] is called with the
-   elapsed semaphore wait and the live slot state once all semaphores are
-   held; its return value becomes the [Ok] payload. *)
-let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
+let with_keeper_turn_slot ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -647,6 +481,59 @@ let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
       autonomous_ticket = ref None;
     }
   in
+  let acquire_bounded ~label sem =
+    match Eio_context.get_clock_opt () with
+    | Some clock ->
+      (try
+        Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
+          Eio.Semaphore.acquire sem);
+        record_holder ~label ~keeper_name
+          ~acquired_at:(Time_compat.now ());
+        Ok ()
+      with Eio.Time.Timeout ->
+        (* Routine, not WARN: the keeper-specific heartbeat loop already
+           emits the operator-facing skip warning with owner/cascade
+           context, while the metric below preserves attribution.
+           2026-05-05: also dump the actual holders so operators are
+           not blind to *which* peer is starving the queue. *)
+        let holders =
+          snapshot_holders ~label ~now:(Time_compat.now ())
+        in
+        let holder_summary =
+          match holders with
+          | [] -> "(none — race or empty)"
+          | _ ->
+            holders
+            |> List.map (fun (n, age) -> Printf.sprintf "%s/%.0fs" n age)
+            |> String.concat ", "
+        in
+        Log.Keeper.routine
+          "semaphore_wait: %s semaphore wait exceeded %.0fs \
+           (channel=%s, holders=[%s]), skipping turn"
+          label semaphore_wait_timeout_sec
+          channel_label holder_summary;
+        (* #9771: per-keeper × per-acquire-channel counter so
+           operators can attribute slot starvation to autonomous
+           vs turn semaphore pressure. *)
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_semaphore_wait_timeout
+          ~labels:[ ("keeper", keeper_name);
+                    ("channel", label) ]
+          ();
+        Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec))
+    | None ->
+      (* No Eio clock available: we are running outside an Eio main loop
+         (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
+         always provides a clock via [Masc_eio_env.init]; reaching this
+         branch at runtime would indicate an environment-setup drift,
+         so log it prominently before falling back to unbounded acquire. *)
+      Log.Keeper.warn
+        "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
+        label;
+      Eio.Semaphore.acquire sem;
+      record_holder ~label ~keeper_name ~acquired_at:(Time_compat.now ());
+      Ok ()
+  in
   Fun.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
@@ -674,8 +561,7 @@ let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
           with
           | Error _ as e -> e
           | Ok () ->
-            match acquire_sem_bounded ~label:"autonomous" ~keeper_name ~channel_label
-                    autonomous_turn_semaphore with
+            match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
             | Error _ as e -> e
             | Ok () ->
               slot_state.acquired_autonomous := true;
@@ -691,8 +577,7 @@ let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
         let reactive_result =
           if is_autonomous then Ok ()
           else
-            match acquire_sem_bounded ~label:"reactive" ~keeper_name ~channel_label
-                    reactive_turn_semaphore with
+            match acquire_bounded ~label:"reactive" reactive_turn_semaphore with
             | Error _ as e -> e
             | Ok () ->
               slot_state.acquired_reactive := true;
@@ -701,35 +586,13 @@ let with_keeper_turn_slot_impl ~keeper_name ~channel make_result =
         match reactive_result with
         | Error _ as e -> e
         | Ok () ->
-        match acquire_sem_bounded ~label:"turn" ~keeper_name ~channel_label
-                turn_semaphore with
+        match acquire_bounded ~label:"turn" turn_semaphore with
         | Error _ as e -> e
         | Ok () ->
           slot_state.acquired_turn := true;
           let semaphore_wait_ms =
             int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-          Ok (make_result ~semaphore_wait_ms slot_state))
-
-let with_keeper_turn_slot ~keeper_name ~channel f =
-  with_keeper_turn_slot_impl ~keeper_name ~channel
-    (fun ~semaphore_wait_ms _slot_state -> f ~semaphore_wait_ms)
-;;
-
-(** Variant of [with_keeper_turn_slot] that also provides a
-    [~yield_and_reacquire] callback to the body function.  The callback
-    releases the autonomous slot mid-turn (for cascade rotation retries)
-    and reacquires it before returning.  See
-    [yield_and_reacquire_keeper_turn_slot] for the full contract.
-
-    The [Fun.protect] cleanup still covers all paths: whether the body
-    returns normally, raises, or the reacquisition fails partway through. *)
-let with_keeper_turn_slot_yieldable ~keeper_name ~channel f =
-  with_keeper_turn_slot_impl ~keeper_name ~channel
-    (fun ~semaphore_wait_ms slot_state ->
-      let yield_fn () =
-        yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel slot_state
-      in
-      f ~semaphore_wait_ms ~yield_and_reacquire:yield_fn)
+          Ok (f ~semaphore_wait_ms))
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =

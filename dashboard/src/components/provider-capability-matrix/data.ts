@@ -20,7 +20,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Native Tool Calling',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '◐', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '◐',
     },
   },
@@ -29,7 +29,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Parallel Tool Calls',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '○',
     },
   },
@@ -38,7 +38,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'tool_choice',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '◐', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '◐', gemini_cli: '◐', codex_cli: '○',
     },
   },
@@ -47,7 +47,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Structured Output',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '◐', gemini_cli: '◐', codex_cli: '◐',
     },
   },
@@ -56,7 +56,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Constrained Decoding',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '◐',
     },
   },
@@ -65,7 +65,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Thinking / Reasoning',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '◐', nemotron: '◐', kimi: '◐',
+      qwen36: '●', mistral: '◐', nemotron: '◐', kimi: '◐',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -74,7 +74,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Interleaved Thinking',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -83,7 +83,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Streaming Tool Calls',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -92,7 +92,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Prompt Caching',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -101,7 +101,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'seed (reproducible)',
     providers: {
       openai: '●', claude: '○', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '●', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '●', nemotron: '○', kimi: '○',
       ollama: '●', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -110,7 +110,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Multimodal',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '◐', codex_cli: '◐',
     },
   },
@@ -119,7 +119,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'MCP Protocol',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '●',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -128,7 +128,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Code Execution',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '●', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '●', kimi: '●',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -137,7 +137,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Computer Use',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -146,7 +146,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Max Context ≥128K',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -154,7 +154,7 @@ export const FEATURES: FeatureDef[] = [
 
 export const PROVIDER_IDS = [
   'openai', 'claude', 'gemini', 'deepseek',
-  'qwen35', 'mistral', 'nemotron', 'kimi',
+  'qwen36', 'mistral', 'nemotron', 'kimi',
   'ollama', 'llamacpp', 'glm', 'gemini_cli', 'codex_cli',
 ] as const
 
@@ -163,7 +163,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   claude: 'Claude',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
-  qwen35: 'Qwen 3.5',
+  qwen36: 'Qwen 3.6',
   mistral: 'Mistral',
   nemotron: 'Nemotron',
   kimi: 'Kimi',
@@ -182,7 +182,7 @@ export const PROVIDER_CASCADE_TIER: Record<string, number> = {
 
 export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
   openai: 'direct', claude: 'direct', gemini: 'direct', deepseek: 'direct',
-  qwen35: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
+  qwen36: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
   ollama: 'direct', llamacpp: 'direct', glm: 'direct',
   gemini_cli: 'cli', codex_cli: 'cli',
 }
@@ -192,7 +192,7 @@ export type ProviderCategory = 'cloud' | 'cli' | 'local'
 
 export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
   openai: 'cloud', claude: 'cloud', gemini: 'cloud', deepseek: 'cloud',
-  qwen35: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
+  qwen36: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
   ollama: 'local', llamacpp: 'local', glm: 'cloud',
   gemini_cli: 'cli', codex_cli: 'cli',
 }
@@ -324,11 +324,10 @@ export interface HarnessModel {
 }
 
 export const HARNESS_MODELS: HarnessModel[] = [
-  { id: 'qwen3.5-397b-a17b', params: '17B/397B MoE',  compileRate: '100%' },
-  { id: 'qwen3.5-122b-a10b', params: '10B/122B MoE',  compileRate: '100%' },
-  { id: 'qwen3.5-27b',       params: '27B Dense',     compileRate: '100%' },
-  { id: 'qwen3.5-35b-a3b',   params: '3B/35B MoE',    compileRate: '100%' },
-  { id: 'qwen3-coder-next',  params: '3B/80B Coding', compileRate: '100%' },
+  { id: 'qwen3.6-plus',      params: 'Hosted, 1M ctx', compileRate: '100%' },
+  { id: 'qwen3.6-35b-a3b',   params: '3B/35B MoE',     compileRate: '100%' },
+  { id: 'qwen3.6-27b',       params: '27B Dense',      compileRate: '100%' },
+  { id: 'qwen3-coder-next',  params: '3B/80B Coding',  compileRate: '100%' },
 ]
 
 // ── MCPMark: MCP Agent Workflow Benchmark ──────────────────────
@@ -409,7 +408,7 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W02', provider: 'Codex CLI', capability: 'tools vs MCP', oasDeclares: 'supports_tools=false', actualBehavior: 'inline tool calling은 없으나 runtime_mcp_tools=true로 MCP 네이티브 지원', impact: 'medium' },
   { id: 'W03', provider: 'GLM', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: 'auto만 지원. Any/Tool/None은 Auto로 coerce → 사용자 의도 무시 (Fake Fallback)', impact: 'medium' },
   { id: 'W04', provider: 'GLM', capability: 'structured_output', oasDeclares: 'supports_structured_output=false', actualBehavior: 'JSON Schema 지정 가능하나 JSON Mode에 가까움, Constrained Decoding 불가', impact: 'low' },
-  { id: 'W05', provider: 'Ollama', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: '모델 의존적. Qwen3.5+Jinja에서는 tool_choice 정상 작동, 일반 모델은 Auto만', impact: 'medium' },
+  { id: 'W05', provider: 'Ollama', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: '모델 의존적. Qwen3.6+Jinja에서는 tool_choice 정상 작동, 일반 모델은 Auto만', impact: 'medium' },
   { id: 'W06', provider: 'Kimi CLI', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: 'Kimi API는 auto/forced/none 모두 지원. CLI --print 모드에서 req.tools 무시', impact: 'medium' },
   { id: 'W07', provider: 'Kimi CLI', capability: 'usage tokens', oasDeclares: 'emits_usage_tokens=false (strip)', actualBehavior: 'CLI subprocess에서 usage 정보 미포함, 정확한 선언', impact: 'correct' },
   { id: 'W08', provider: 'Gemini CLI', capability: 'usage tokens', oasDeclares: 'emits_usage_tokens=false (strip)', actualBehavior: 'CLI subprocess 특성상 usage 불안정, 정확한 선언', impact: 'correct' },
@@ -420,6 +419,7 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W13', provider: 'Gemini CLI', capability: 'infinite thinking', oasDeclares: '—', actualBehavior: 'Gemini 2.5 Flash에서 thinking loop 무한 루프 발생 (GitHub #2025), 복잡 프롬프트 시 hang', impact: 'high' },
   { id: 'W14', provider: 'DeepSeek', capability: 'V3.2 FC', oasDeclares: '—', actualBehavior: 'V3.1 Strict FC (Beta) 지원, R1은 vLLM 경로만 tool calling, V3.2 Speciale은 FC 미지원', impact: 'medium' },
   { id: 'W15', provider: 'Qwen', capability: 'tool format', oasDeclares: '—', actualBehavior: 'Hermes-style tool format 사용, 1M context (3.6 Plus), Hybrid Thinking Mode', impact: 'low' },
+  { id: 'W16', provider: 'Nemotron', capability: 'thinking vs FC', oasDeclares: '—', actualBehavior: 'thinking ON 시 tool calling 미지원, thinking OFF 필요 시에만 FC 활성화 (§2.5)', impact: 'medium' },
 ]
 
 // ── Anti-patterns ───────────────────────────────────────────────
@@ -524,17 +524,20 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'deepseek',
     models: [
-      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning' },
-      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14' },
-      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28' },
+      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning, vLLM 경로만 tool calling 지원' },
+      { id: 'deepseek-v3.1', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'Strict FC (Beta), tool_choice=required/none 가능' },
+      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14, Prompt+Thinking, V3.2 Speciale은 FC 미지원' },
+      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3 기반, 기본 tool calling' },
     ],
   },
   {
-    providerId: 'qwen35',
+    providerId: 'qwen36',
     models: [
-      { id: 'qwen3-235b-a22b', context: '128K', tier: 'flagship', inputPrice: '$0.40', outputPrice: '$1.20', notes: 'MoE, Thinking' },
-      { id: 'qwen3-32b', context: '128K', tier: 'standard', inputPrice: '$0.12', outputPrice: '$0.36' },
-      { id: 'qwen3-8b', context: '128K', tier: 'fast', inputPrice: '$0.02', outputPrice: '$0.06' },
+      { id: 'qwen3.6-plus', context: '1M', tier: 'flagship', inputPrice: '$0.50', outputPrice: '$3.00', notes: '1M ctx, Hybrid Thinking Mode, Hermes tool format, GPQA 90.4' },
+      { id: 'qwen3.6-max-preview', context: '1M', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '1M ctx, Most capable, Hybrid Thinking' },
+      { id: 'qwen3-235b-a22b', context: '131K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'MoE 오픈웨이트, BFCL V4 #23, Hermes tool format' },
+      { id: 'qwen3.6-27b', context: '131K', tier: 'standard', inputPrice: '$0.161', outputPrice: '$0.965', notes: 'Open weight, GPQA Diamond 87.8' },
+      { id: 'qwen3.6-35b-a3b', context: '262K', tier: 'fast', inputPrice: '$0.06', outputPrice: '$0.36', notes: '3B/35B MoE, open weight, Hybrid Thinking' },
     ],
   },
   {
@@ -838,14 +841,14 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
 export type Applicability = 'full' | 'partial' | 'none' | 'na'
 
 export const APPLICABILITY_MATRIX: Record<RoadmapPhase, Record<string, Applicability>> = {
-  P0: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'partial',codex_cli:'partial' },
-  P1: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
-  P2: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'full',llamacpp:'na',glm:'na',nemotron:'na',kimi:'na',gemini_cli:'full',codex_cli:'full' },
-  P3: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'partial',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'full',kimi:'partial',gemini_cli:'na',codex_cli:'na' },
-  P4: { openai:'full',claude:'none',gemini:'full',deepseek:'partial',qwen35:'partial',mistral:'full',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'partial',kimi:'partial',gemini_cli:'none',codex_cli:'none' },
-  P5: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
-  P6: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'na',llamacpp:'na',glm:'na',nemotron:'full',kimi:'na',gemini_cli:'na',codex_cli:'na' },
-  P7: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P0: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'partial',codex_cli:'partial' },
+  P1: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P2: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen36:'na',mistral:'na',ollama:'full',llamacpp:'na',glm:'na',nemotron:'na',kimi:'na',gemini_cli:'full',codex_cli:'full' },
+  P3: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'partial',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'full',kimi:'partial',gemini_cli:'na',codex_cli:'na' },
+  P4: { openai:'full',claude:'none',gemini:'full',deepseek:'partial',qwen36:'partial',mistral:'full',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'partial',kimi:'partial',gemini_cli:'none',codex_cli:'none' },
+  P5: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P6: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen36:'na',mistral:'na',ollama:'na',llamacpp:'na',glm:'na',nemotron:'full',kimi:'na',gemini_cli:'na',codex_cli:'na' },
+  P7: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
 }
 
 export function applicabilitySymbol(a: Applicability): string {
@@ -1047,7 +1050,7 @@ const PROVIDER_TO_MATRIX_ID: Record<string, string> = {
   codex: 'codex_cli',
   codex_api: 'openai',
   codex_cli: 'codex_cli',
-  dashscope: 'qwen35',
+  dashscope: 'qwen36',
   gemini: 'gemini_cli',
   gemini_api: 'gemini',
   gemini_cli: 'gemini_cli',
@@ -1064,8 +1067,9 @@ const PROVIDER_TO_MATRIX_ID: Record<string, string> = {
   openai_chat: 'openai',
   openai_compat: 'openai',
   openai_ext: 'openai',
-  qwen: 'qwen35',
-  qwen35: 'qwen35',
+  qwen: 'qwen36',
+  qwen35: 'qwen36',
+  qwen36: 'qwen36',
   zai: 'glm',
   zhipu: 'glm',
 }
@@ -1087,7 +1091,7 @@ function inferMatrixId(key: string): string | null {
   if (key.includes('ollama')) return 'ollama'
   if (key.includes('kimi')) return 'kimi'
   if (key.includes('llama_cpp') || key.includes('llamacpp') || key === 'llama') return 'llamacpp'
-  if (key.includes('dashscope') || key.includes('qwen')) return 'qwen35'
+  if (key.includes('dashscope') || key.includes('qwen')) return 'qwen36'
   return null
 }
 

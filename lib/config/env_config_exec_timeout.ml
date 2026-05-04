@@ -79,8 +79,10 @@ let known_callers () =
 let known_default_sec = function
   | Shell -> Some 60.0
   | Fs -> Some 30.0
-  | Preflight | Repo_readiness | Gh_shared | Status_detail -> Some 10.0
-  | Sandbox | Turn_sandbox | Shell_probe -> Some 2.0
+  | Preflight | Repo_readiness | Gh_shared -> Some 10.0
+  | Status_detail -> Some 5.0
+  | Sandbox -> Some 10.0
+  | Turn_sandbox | Shell_probe -> Some 2.0
   | Pr_review | Turn_up -> Some 15.0
   (* #10594 site 1: bumped 15.0 → 20.0 because gh issue create + Slack
      POST + webhook fanout share this caller and the gh path can hit
@@ -91,7 +93,7 @@ let known_default_sec = function
   | Pr_review_post -> Some 30.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
-  | Git_meta -> Some 5.0
+  | Git_meta -> Some 10.0
   | Unknown _ -> None
 
 let upper_case s =

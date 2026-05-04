@@ -27,10 +27,10 @@ type caller =
   | Turn_up
   | Git_meta
       (** Local git metadata commands (e.g. [git remote get-url],
-          [git rev-parse]).  Default 5.0s — these are local disk
-          operations that should complete in <1s; a 5s ceiling
-          surfaces NFS hangs or repository corruption without
-          masking them. *)
+          [git rev-parse]).  Default 10.0s — local disk operations
+          that should complete in <1s; however, some sites invoke
+          [git remote] over network-origin remotes where DNS and TLS
+          add latency, so 10s provides a reasonable ceiling. *)
   | Shell_probe
       (** PATH availability probes (e.g. [command -v <name>]).
           Default 2.0s — pure OS lookup; longer timeouts mask

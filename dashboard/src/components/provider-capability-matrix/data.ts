@@ -20,7 +20,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Native Tool Calling',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '◐', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '◐',
     },
   },
@@ -29,7 +29,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Parallel Tool Calls',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '○',
     },
   },
@@ -38,7 +38,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'tool_choice',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '◐', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '◐', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '◐', gemini_cli: '◐', codex_cli: '○',
     },
   },
@@ -47,7 +47,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Structured Output',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '◐', gemini_cli: '◐', codex_cli: '◐',
     },
   },
@@ -56,7 +56,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Constrained Decoding',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '◐',
     },
   },
@@ -65,7 +65,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Thinking / Reasoning',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '◐', nemotron: '◐', kimi: '◐',
+      qwen36: '●', mistral: '◐', nemotron: '◐', kimi: '◐',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -74,7 +74,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Interleaved Thinking',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -83,7 +83,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Streaming Tool Calls',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '●', llamacpp: '●', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -92,7 +92,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Prompt Caching',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '●',
       ollama: '◐', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -101,7 +101,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'seed (reproducible)',
     providers: {
       openai: '●', claude: '○', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '●', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '●', nemotron: '○', kimi: '○',
       ollama: '●', llamacpp: '●', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -109,8 +109,8 @@ export const FEATURES: FeatureDef[] = [
     id: 'multimodal',
     label: 'Multimodal',
     providers: {
-      openai: '●', claude: '●', gemini: '●', deepseek: '◐',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      openai: '●', claude: '●', gemini: '●', deepseek: '○',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '◐', codex_cli: '◐',
     },
   },
@@ -119,7 +119,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'MCP Protocol',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '●',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -128,7 +128,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Code Execution',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '●', kimi: '●',
+      qwen36: '○', mistral: '○', nemotron: '●', kimi: '●',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '●',
     },
   },
@@ -137,7 +137,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Computer Use',
     providers: {
       openai: '○', claude: '●', gemini: '○', deepseek: '○',
-      qwen35: '○', mistral: '○', nemotron: '○', kimi: '○',
+      qwen36: '○', mistral: '○', nemotron: '○', kimi: '○',
       ollama: '○', llamacpp: '○', glm: '○', gemini_cli: '○', codex_cli: '○',
     },
   },
@@ -146,7 +146,7 @@ export const FEATURES: FeatureDef[] = [
     label: 'Max Context ≥128K',
     providers: {
       openai: '●', claude: '●', gemini: '●', deepseek: '●',
-      qwen35: '●', mistral: '●', nemotron: '●', kimi: '●',
+      qwen36: '●', mistral: '●', nemotron: '●', kimi: '●',
       ollama: '◐', llamacpp: '◐', glm: '●', gemini_cli: '●', codex_cli: '●',
     },
   },
@@ -154,7 +154,7 @@ export const FEATURES: FeatureDef[] = [
 
 export const PROVIDER_IDS = [
   'openai', 'claude', 'gemini', 'deepseek',
-  'qwen35', 'mistral', 'nemotron', 'kimi',
+  'qwen36', 'mistral', 'nemotron', 'kimi',
   'ollama', 'llamacpp', 'glm', 'gemini_cli', 'codex_cli',
 ] as const
 
@@ -163,7 +163,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   claude: 'Claude',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
-  qwen35: 'Qwen 3.5',
+  qwen36: 'Qwen 3.6',
   mistral: 'Mistral',
   nemotron: 'Nemotron',
   kimi: 'Kimi',
@@ -182,7 +182,7 @@ export const PROVIDER_CASCADE_TIER: Record<string, number> = {
 
 export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
   openai: 'direct', claude: 'direct', gemini: 'direct', deepseek: 'direct',
-  qwen35: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
+  qwen36: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
   ollama: 'direct', llamacpp: 'direct', glm: 'direct',
   gemini_cli: 'cli', codex_cli: 'cli',
 }
@@ -192,7 +192,7 @@ export type ProviderCategory = 'cloud' | 'cli' | 'local'
 
 export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
   openai: 'cloud', claude: 'cloud', gemini: 'cloud', deepseek: 'cloud',
-  qwen35: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
+  qwen36: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
   ollama: 'local', llamacpp: 'local', glm: 'cloud',
   gemini_cli: 'cli', codex_cli: 'cli',
 }
@@ -259,39 +259,37 @@ export interface BfclV4Category {
 }
 
 export const BFCL_V4_CATEGORIES: BfclV4Category[] = [
-  { id: 'simple',      label: 'Simple Function Calling',   description: '단일 함수 호출',                   weight: '기본' },
-  { id: 'parallel',    label: 'Parallel Function Calling', description: '다중 동시 함수 호출',               weight: '기본' },
-  { id: 'multi-select', label: 'Multiple Function Selection', description: '여러 옵션 중 정확한 도구 선택',   weight: '기본' },
-  { id: 'relevance',   label: 'Relevance Detection',       description: '함수를 호출하지 말아야 할 때 판별', weight: '10% (Irrelevance)' },
-  { id: 'multi-turn',  label: 'Multi-turn Interactions',   description: '맥락 유지 지속 대화',               weight: '30%' },
-  { id: 'agentic',     label: 'Agentic (Holistic)',        description: '전체 에이전트 평가',                 weight: '40%' },
+  { id: 'agentic',       label: 'Agentic (Holistic)',         description: 'Web Search + Memory 전체 에이전트 평가',  weight: '3개 서브카테고리' },
+  { id: 'multi-turn',    label: 'Multi-turn Interactions',    description: 'Multi turn + Non-live (AST) + Live (AST)', weight: '3개 서브카테고리' },
+  { id: 'single-turn',   label: 'Single Turn',                description: 'Simple + Multiple + Parallel + Multi-Parallel', weight: '4개 서브카테고리' },
+  { id: 'hallucination', label: 'Hallucination Measurement',  description: '오류 탐지: Miss Func / Miss Param / Long Context', weight: '6개 서브카테고리' },
+  { id: 'format',        label: 'Format Sensitivity',         description: 'FC vs Prompt 모드 간 격차 측정 (Prompt 전용)', weight: 'Prompt 전용' },
 ]
-
-type CategoryLevel = 'high' | 'mid' | 'low'
 
 export interface BfclModelCategoryBreakdown {
   model: string
   overall: string
-  simple: CategoryLevel
-  parallel: CategoryLevel
-  multiTurn: CategoryLevel
-  agentic: CategoryLevel
+  singleTurn: string
+  multiTurn: string
+  agentic: string
+  hallucination: string
+  format: string
 }
 
-// Category-level breakdown estimated from V4 overall + V3 historical category patterns.
-// BFCL V4 does not publish per-category scores per model publicly.
+// Per-category scores from BFCL V4 leaderboard (gorilla.cs.berkeley.edu, 2026-04-12).
+// Overall = unweighted average of all sub-categories.
 export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
-  { model: 'Claude Opus 4.5',  overall: '77.47%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'Claude Sonnet 4.5',overall: '73.24%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'high' },
-  { model: 'GLM-4.6',          overall: '72.38%', simple: 'high', parallel: 'high', multiTurn: 'high', agentic: 'mid'  },
-  { model: 'Claude Haiku 4.5', overall: '68.70%', simple: 'high', parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Kimi K2',          overall: '59.06%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'DeepSeek V3.2',    overall: '56.73%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'Gemini 2.5 Flash', overall: '56.24%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'mid'  },
-  { model: 'GPT-5.2',          overall: '55.87%', simple: 'mid',  parallel: 'mid',  multiTurn: 'mid',  agentic: 'high' },
-  { model: 'GPT-4.1',          overall: '53.96%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
-  { model: 'Qwen3-235B',       overall: '52.15%', simple: 'mid',  parallel: 'mid',  multiTurn: 'low',  agentic: 'mid'  },
-  { model: 'Mistral Large',    overall: '38.37%', simple: 'mid',  parallel: 'low',  multiTurn: 'low',  agentic: 'low'  },
+  { model: 'Claude Opus 4.5',   overall: '77.47%', singleTurn: '88.58', multiTurn: '73.76', agentic: '84.50', hallucination: '68.38', format: '79.79' },
+  { model: 'Claude Sonnet 4.5', overall: '73.24%', singleTurn: '88.65', multiTurn: '64.95', agentic: '81.00', hallucination: '61.37', format: '81.13' },
+  { model: 'GLM-4.6',           overall: '72.38%', singleTurn: '87.56', multiTurn: '55.70', agentic: '77.50', hallucination: '68.00', format: '80.90' },
+  { model: 'Claude Haiku 4.5',  overall: '68.70%', singleTurn: '86.50', multiTurn: '54.41', agentic: '83.50', hallucination: '53.62', format: '78.68' },
+  { model: 'Kimi K2',           overall: '59.06%', singleTurn: '77.89', multiTurn: '42.27', agentic: '66.50', hallucination: '53.68', format: '67.78' },
+  { model: 'DeepSeek V3.2',     overall: '56.73%', singleTurn: '73.56', multiTurn: '38.33', agentic: '66.50', hallucination: '45.57', format: '64.36' },
+  { model: 'Gemini 2.5 Flash',  overall: '56.24%', singleTurn: '76.16', multiTurn: '42.11', agentic: '58.00', hallucination: '42.12', format: '70.69' },
+  { model: 'GPT-5.2',           overall: '55.87%', singleTurn: '70.26', multiTurn: '42.19', agentic: '69.00', hallucination: '38.51', format: '71.63' },
+  { model: 'GPT-4.1',           overall: '53.96%', singleTurn: '70.72', multiTurn: '37.81', agentic: '60.50', hallucination: '42.26', format: '70.66' },
+  { model: 'Qwen3-235B',        overall: '52.15%', singleTurn: '69.81', multiTurn: '35.67', agentic: '55.00', hallucination: '44.12', format: '68.48' },
+  { model: 'Mistral Large',     overall: '38.37%', singleTurn: '84.65', multiTurn: '24.95', agentic: '28.00', hallucination: '14.12', format: '81.87' },
 ]
 
 export function categoryLevelClass(level: CategoryLevel): string {
@@ -310,6 +308,13 @@ export function categoryLevelLabel(level: CategoryLevel): string {
   }
 }
 
+export function scoreColor(score: string): string {
+  const v = parseFloat(score)
+  if (v >= 75) return 'text-[var(--color-status-ok)]'
+  if (v >= 50) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--bad-light)]'
+}
+
 // ── Function Calling Harness Case Study ──────────────────────────
 
 export interface HarnessModel {
@@ -319,11 +324,30 @@ export interface HarnessModel {
 }
 
 export const HARNESS_MODELS: HarnessModel[] = [
-  { id: 'qwen3.5-397b-a17b', params: '17B/397B MoE',  compileRate: '100%' },
-  { id: 'qwen3.5-122b-a10b', params: '10B/122B MoE',  compileRate: '100%' },
-  { id: 'qwen3.5-27b',       params: '27B Dense',     compileRate: '100%' },
-  { id: 'qwen3.5-35b-a3b',   params: '3B/35B MoE',    compileRate: '100%' },
-  { id: 'qwen3-coder-next',  params: '3B/80B Coding', compileRate: '100%' },
+  { id: 'qwen3.6-plus',      params: 'Hosted, 1M ctx', compileRate: '100%' },
+  { id: 'qwen3.6-35b-a3b',   params: '3B/35B MoE',     compileRate: '100%' },
+  { id: 'qwen3.6-27b',       params: '27B Dense',      compileRate: '100%' },
+  { id: 'qwen3-coder-next',  params: '3B/80B Coding',  compileRate: '100%' },
+]
+
+// ── MCPMark: MCP Agent Workflow Benchmark ──────────────────────
+// Source: external_research.md §1.2.3, verified 2026-04-30.
+// MCPMark measures pass@1 on MCP-based agent workflows (not schema compliance).
+// BFCL 1위(Claude Opus 4.5) ≠ MCPMark 1위(GPT-5) — benchmark dependency warning.
+
+export interface McpMarkEntry {
+  model: string
+  passAt1: string
+  avgAgentTime: string
+  costPerRun: string
+  note: string
+}
+
+export const MCPMARK_ENTRIES: McpMarkEntry[] = [
+  { model: 'GPT-5',          passAt1: '52.6%', avgAgentTime: '478.21s', costPerRun: '$127.46', note: 'BFCL 7위이나 MCPMark 1위. 에이전트 워크플로우 강점' },
+  { model: 'Claude Opus 4.1', passAt1: '29.9%', avgAgentTime: '361.81s', costPerRun: '고가',     note: 'BFCL 2위. pass@1은 GPT-5에 0.57×' },
+  { model: 'Claude Sonnet 4', passAt1: '28.1%', avgAgentTime: '218.27s', costPerRun: '$252.41',  note: '가장 빠른 에이전트 완주, 비용은 GPT-5의 2×' },
+  { model: 'Qwen 3-Coder',   passAt1: '24.8%', avgAgentTime: '274.29s', costPerRun: '$36.46',   note: '최저 비용 ($36/런). BFCL 미참여' },
 ]
 
 // ── OAS Provider Capabilities (sec02 Table 1) ──────────────────
@@ -381,10 +405,10 @@ export interface WiringGap {
 
 export const WIRING_GAPS: WiringGap[] = [
   { id: 'W01', provider: 'Gemini CLI', capability: 'tools', oasDeclares: 'supports_tools=false', actualBehavior: '빌트인 도구 + MCP + cross-tool context 지원, OAS가 원천 차단', impact: 'high' },
-  { id: 'W02', provider: 'Codex CLI', capability: 'tools vs MCP', oasDeclares: 'supports_tools=false', actualBehavior: 'inline tool calling은 없으나 runtime_mcp_tools=true로 MCP 네이티브 지원', impact: 'high' },
+  { id: 'W02', provider: 'Codex CLI', capability: 'tools vs MCP', oasDeclares: 'supports_tools=false', actualBehavior: 'inline tool calling은 없으나 runtime_mcp_tools=true로 MCP 네이티브 지원', impact: 'medium' },
   { id: 'W03', provider: 'GLM', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: 'auto만 지원. Any/Tool/None은 Auto로 coerce → 사용자 의도 무시 (Fake Fallback)', impact: 'medium' },
   { id: 'W04', provider: 'GLM', capability: 'structured_output', oasDeclares: 'supports_structured_output=false', actualBehavior: 'JSON Schema 지정 가능하나 JSON Mode에 가까움, Constrained Decoding 불가', impact: 'low' },
-  { id: 'W05', provider: 'Ollama', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: '모델 의존적. Qwen3.5+Jinja에서는 tool_choice 정상 작동, 일반 모델은 Auto만', impact: 'medium' },
+  { id: 'W05', provider: 'Ollama', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: '모델 의존적. Qwen3.6+Jinja에서는 tool_choice 정상 작동, 일반 모델은 Auto만', impact: 'medium' },
   { id: 'W06', provider: 'Kimi CLI', capability: 'tool_choice', oasDeclares: 'supports_tool_choice=false', actualBehavior: 'Kimi API는 auto/forced/none 모두 지원. CLI --print 모드에서 req.tools 무시', impact: 'medium' },
   { id: 'W07', provider: 'Kimi CLI', capability: 'usage tokens', oasDeclares: 'emits_usage_tokens=false (strip)', actualBehavior: 'CLI subprocess에서 usage 정보 미포함, 정확한 선언', impact: 'correct' },
   { id: 'W08', provider: 'Gemini CLI', capability: 'usage tokens', oasDeclares: 'emits_usage_tokens=false (strip)', actualBehavior: 'CLI subprocess 특성상 usage 불안정, 정확한 선언', impact: 'correct' },
@@ -392,6 +416,14 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W10', provider: 'Anthropic Claude', capability: 'tools', oasDeclares: 'supports_tools=true', actualBehavior: 'tool_use/tool_result 블록 구조, 공식 문서와 일치', impact: 'correct' },
   { id: 'W11', provider: 'Anthropic Claude', capability: 'extended thinking', oasDeclares: 'supports_extended_thinking=true', actualBehavior: 'budget_tokens + Interleaved Thinking (Claude 4+), 정확한 선언', impact: 'correct' },
   { id: 'W12', provider: 'Ollama', capability: 'is_ollama flag', oasDeclares: 'is_ollama=true', actualBehavior: 'tool_calls를 raw JSON 객체로 직렬화, 정확한 선언', impact: 'correct' },
+  { id: 'W13', provider: 'Gemini CLI', capability: 'infinite thinking', oasDeclares: '—', actualBehavior: 'Gemini 2.5 Flash에서 thinking loop 무한 루프 발생 (GitHub #2025), 복잡 프롬프트 시 hang', impact: 'high' },
+  { id: 'W14', provider: 'DeepSeek', capability: 'V3.2 FC', oasDeclares: '—', actualBehavior: 'V3.1 Strict FC (Beta) 지원, R1은 vLLM 경로만 tool calling, V3.2 Speciale은 FC 미지원', impact: 'medium' },
+  { id: 'W15', provider: 'Qwen', capability: 'tool format', oasDeclares: '—', actualBehavior: 'Hermes-style tool format 사용, 1M context (3.6 Plus), Hybrid Thinking Mode', impact: 'low' },
+  { id: 'W16', provider: 'Nemotron', capability: 'thinking vs FC', oasDeclares: '—', actualBehavior: 'thinking ON 시 tool calling 미지원, thinking OFF 필요 시에만 FC 활성화 (§2.5)', impact: 'medium' },
+  { id: 'W17', provider: 'Kimi', capability: 'JSON Schema validation', oasDeclares: '—', actualBehavior: 'minimum, maximum, minLength, maxLength 검증 키워드 일부 거부 → tool 호출 실패 사례 보고 (§4.1.6)', impact: 'medium' },
+  { id: 'W18', provider: 'Ollama', capability: 'streaming tool calls', oasDeclares: '—', actualBehavior: 'OpenAI compat 엔드포인트(/v1/chat/completions)에서 streaming 시 tool calls 누락 버그, native /api/chat 권장 (§4.1.7)', impact: 'high' },
+  { id: 'W19', provider: 'Ollama', capability: 'num_ctx default', oasDeclares: '—', actualBehavior: 'num_ctx 기본값 4096으로 대형 시스템 프롬프트+다수 툴 정의가 무시 트렁케이션 (§4.1.7)', impact: 'high' },
+  { id: 'W20', provider: 'Codex CLI', capability: 'sandbox bypass CVE', oasDeclares: '—', actualBehavior: 'CVE-2025-59532 샌드박스 우회 취약점, 0.39.0에서 패치. 컨테이너 격리 한계 (§4.1.10)', impact: 'medium' },
 ]
 
 // ── Anti-patterns ───────────────────────────────────────────────
@@ -408,45 +440,46 @@ export interface AntiPattern {
   location: string
   risk: RiskLevel
   source: AntiPatternSource
+  improvement: string
 }
 
 export const ANTI_PATTERNS: AntiPattern[] = [
   // Silent Failure (S01-S10)
-  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas' },
-  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas' },
-  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas' },
-  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas' },
-  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas' },
-  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas' },
-  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas' },
-  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas' },
-  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas' },
-  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas' },
+  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
+  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
+  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas', improvement: '`thinking_control_format` capability 필드 추가' },
+  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas', improvement: 'fallback 시 debug 로그 기록' },
+  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas', improvement: 'usage 누락의 구조적 특성 문서화' },
+  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: '주석-코드 동기화' },
+  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas', improvement: 'capability override 설정 노출' },
+  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas', improvement: '모델 discovery 동적 연동' },
+  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas', improvement: '모델별 동적 기본값' },
+  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas', improvement: 'contract relaxation 명시화' },
   // Fake Fallback (F01-F04)
-  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas' },
-  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas' },
-  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas' },
-  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas' },
+  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas', improvement: 'pipeline-level contract 검증 강화' },
+  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas', improvement: '`Provider_config.validate`에서 사전 에러' },
+  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas', improvement: 'CLI Provider 실제 능력 탐지 개선' },
+  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: 'per-model override 허용' },
   // String Matching (M01-M06)
-  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas' },
-  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas' },
-  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas' },
-  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas' },
-  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas' },
-  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas' },
+  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas', improvement: 'prefix 길이 기반 자동 정렬 테스트' },
+  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas', improvement: 'capability 필드 기반 결정론적 분기' },
+  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: 'Ollama `/api/show` 연동(가용 시)' },
+  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: '구조화된 에러 코드 사용' },
+  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: 'retryable 에러 코드 체계 도입' },
+  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas', improvement: 'alias 충돌 테스트 자동화' },
   // Hardcoding (H01-H12)
-  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas' },
-  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas' },
-  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas' },
-  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas' },
-  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas' },
-  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas' },
-  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas' },
-  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas' },
-  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas' },
-  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas' },
-  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas' },
-  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas' },
+  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas', improvement: '모델 메타데이터 동적 조회' },
+  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas', improvement: '모델별 설정 외부화' },
+  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas', improvement: 'effort-budget 매핑 테이블화' },
+  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas', improvement: '설정 가능한 파라미터로 전환' },
+  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas', improvement: '토큰 기반 게이트로 개선' },
+  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas', improvement: '환경 변수 문서화 및 검증' },
+  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas', improvement: '모델별 기본값 설정' },
+  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
+  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
+  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas', improvement: '토크나이저 연동(가용 시)' },
+  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas', improvement: 'pricing API 동적 연동' },
+  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: '동적 capability discovery 연구' },
 ]
 
 // ── Provider Model Catalog ──────────────────────────────────────
@@ -479,9 +512,10 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'claude',
     models: [
-      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Thinking' },
-      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Thinking' },
+      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Extended+Interleaved Thinking' },
+      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Adaptive Thinking' },
       { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00', notes: 'BFCL V4 #6' },
+      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
     ],
   },
   {
@@ -495,17 +529,20 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'deepseek',
     models: [
-      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning' },
-      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14' },
-      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28' },
+      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning, vLLM 경로만 tool calling 지원' },
+      { id: 'deepseek-v3.1', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'Strict FC (Beta), tool_choice=required/none 가능' },
+      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14, Prompt+Thinking, V3.2 Speciale은 FC 미지원' },
+      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3.1 hybrid: Non-Think+Think 통합 모드' },
     ],
   },
   {
-    providerId: 'qwen35',
+    providerId: 'qwen36',
     models: [
-      { id: 'qwen3-235b-a22b', context: '128K', tier: 'flagship', inputPrice: '$0.40', outputPrice: '$1.20', notes: 'MoE, Thinking' },
-      { id: 'qwen3-32b', context: '128K', tier: 'standard', inputPrice: '$0.12', outputPrice: '$0.36' },
-      { id: 'qwen3-8b', context: '128K', tier: 'fast', inputPrice: '$0.02', outputPrice: '$0.06' },
+      { id: 'qwen3.6-plus', context: '1M', tier: 'flagship', inputPrice: '$0.50', outputPrice: '$3.00', notes: '1M ctx, Hybrid Thinking Mode, Hermes tool format, GPQA 90.4' },
+      { id: 'qwen3.6-max-preview', context: '1M', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '1M ctx, Most capable, Hybrid Thinking' },
+      { id: 'qwen3-235b-a22b', context: '131K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'MoE 오픈웨이트, BFCL V4 #23, Hermes tool format' },
+      { id: 'qwen3.6-27b', context: '131K', tier: 'standard', inputPrice: '$0.161', outputPrice: '$0.965', notes: 'Open weight, GPQA Diamond 87.8' },
+      { id: 'qwen3.6-35b-a3b', context: '262K', tier: 'fast', inputPrice: '$0.06', outputPrice: '$0.36', notes: '3B/35B MoE, open weight, Hybrid Thinking' },
     ],
   },
   {
@@ -520,14 +557,22 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     providerId: 'glm',
     models: [
       { id: 'glm-4.6', context: '128K', tier: 'flagship', inputPrice: '$1.00', outputPrice: '$0.20', notes: 'BFCL V4 #4, FC+thinking' },
+      { id: 'glm-4.6v', context: '128K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '최초 VLM 네이티브 FC, 106B+9B Flash, MIT' },
       { id: 'glm-5-code', context: '128K', tier: 'coding', inputPrice: '$1.20', outputPrice: '$0.30', notes: 'Coding Plan 전용' },
       { id: 'glm-4.5-air', context: '128K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: 'Coding Plan 경량' },
     ],
   },
   {
+    providerId: 'nemotron',
+    models: [
+      { id: 'nemotron-4-340b', context: '4K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'NVIDIA NIM, thinking OFF 필요 시 tool calling' },
+    ],
+  },
+  {
     providerId: 'kimi',
     models: [
-      { id: 'kimi-k2-instruct', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트' },
+      { id: 'kimi-k2.6', context: '256K', tier: 'flagship', inputPrice: '—', outputPrice: '—', notes: 'MoE 1T/32B, SWE-Bench Pro 58.6% > GPT-5.4(57.7%), Context Caching' },
+      { id: 'kimi-k2-instruct', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: 'BFCL V4 #11, MoE 오픈웨이트, OpenAI 완전 호환' },
       { id: 'kimi-k2-thinking', context: '256K', tier: 'standard', inputPrice: '—', outputPrice: '—', notes: '장기 사고' },
       { id: 'kimi-k2-turbo-preview', context: '256K', tier: 'fast', inputPrice: '—', outputPrice: '—', notes: '60-100 tok/s' },
       { id: 'moonshot-v1-128k', context: '128K', tier: 'legacy', inputPrice: '—', outputPrice: '—' },
@@ -536,13 +581,20 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'ollama',
     models: [
-      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+      { id: 'llama3.3:70b', context: '128K', tier: 'flagship', notes: 'Tool calling 지원' },
+      { id: 'qwen3:32b', context: '128K', tier: 'standard', notes: 'Tool + thinking 지원' },
+      { id: 'gemma3:27b', context: '128K', tier: 'standard', notes: 'Tool 지원' },
+      { id: 'gemma4:27b', context: '128K', tier: 'standard', notes: 'Apache 2.0, 멀티모달(T/I/A), BFCL v3 76.9%' },
+      { id: 'mistral-nemo:12b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },
+      { id: 'functionary:v3.2', context: '128K', tier: 'coding', notes: 'FC 특화, Hermes 포맷' },
+      { id: 'hermes3:8b', context: '128K', tier: 'fast', notes: 'Tool calling 지원' },
+      { id: 'deepseek-r1:70b', context: '128K', tier: 'standard', notes: 'Tool 실험적 지원' },
     ],
   },
   {
     providerId: 'llamacpp',
     models: [
-      { id: '(local models)', context: 'varies', tier: 'standard', notes: 'Self-hosted' },
+      { id: '(local GGUF)', context: 'varies', tier: 'standard', notes: 'Native + Generic tool format, --chat-template-file 오버라이드' },
     ],
   },
 ]
@@ -563,7 +615,7 @@ export function modelTierStyle(tier: ProviderModel['tier']): string {
 export interface CliTransportInfo {
   providerId: string
   binary: string
-  loc: number
+  contextWindow: string
   promptMode: string
   streamFormat: string
   argvThreshold: string
@@ -571,26 +623,56 @@ export interface CliTransportInfo {
 }
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
-  { providerId: 'claude', binary: 'claude', loc: 1282, promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', loc: 949, promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답' },
-  { providerId: 'codex_cli', binary: 'codex', loc: 1340, promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: '5-model 내부 rotation' },
-  { providerId: 'kimi', binary: 'kimi-for-coding', loc: 693, promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: '단일 모델 기본 (kimi-for-coding)' },
+  { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답. Gemini 2.5 Flash infinite thinking bug (#2025)' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
 ]
 
-// ── GLM Coding Plan Mapping ───────────────────────────────────
-// Claude Code internal env vars → GLM model mapping. Source: supplement research.
+// ── GLM Model Mapping ─────────────────────────────────────────
+// OAS GLM provider model list. Source: sec01 provider table.
+// GLM-5-Code and GLM-4.5-Air are NOT confirmed in reference docs — marked as unverified.
 
 export const GLM_CODING_PLAN_MAP: Array<{ envVar: string; glmModel: string; note: string }> = [
-  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'GLM-4.7', note: '최고 성능 코딩' },
-  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'GLM-4.7', note: '표준 코딩' },
-  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'GLM-4.5-Air', note: '빠른/경량 코딩' },
+  { envVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL', glmModel: 'glm-4.7', note: 'BFCL V4 강자 (200K)' },
+  { envVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL', glmModel: 'glm-5-turbo', note: '표준 코딩 (200K)' },
+  { envVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', glmModel: 'glm-5.1', note: '빠른 응답 (200K)' },
 ]
 
 export const GLM_WIRING_GAPS: Array<{ area: string; oasCurrent: string; official: string; gap: string }> = [
-  { area: 'Coding 전용 모델', oasCurrent: 'glm-5.1, glm-5, glm-5-turbo (auto 목록)', official: 'GLM-5-Code (별도 모델군)', gap: 'Coding 전용 모델 미식별' },
-  { area: '모델 에일리어스', oasCurrent: 'auto, flash, turbo, vision, air, ocr', official: 'GLM-4.7, GLM-4.5-Air, GLM-5-Code', gap: 'Coding-specific alias 부재' },
-  { area: 'Context ceiling', oasCurrent: '200K (General과 동일)', official: '128K (GLM-5-Code)', gap: 'Context 과다 선언' },
+  { area: 'Tool Choice', oasCurrent: 'supports_tool_choice=false', official: 'auto만 지원 (none/any/강제 불가)', gap: 'Coerce-to-auto fake fallback' },
+  { area: 'Structured Output', oasCurrent: 'supports_structured_output=false', official: 'JSON Schema 지정 가능 (JSON Mode)', gap: 'JSON Mode ≠ Constrained Decoding' },
+  { area: 'Context', oasCurrent: '200K (sec01 기준)', official: '200K (sec01 기준)', gap: '검증된 gap 없음' },
 ]
+
+// ── Claude Code Architecture ────────────────────────────────────
+// Source: external_research.md §1.3.3, §2.3.2 (verified 2026-04-30)
+
+export interface ExtensionMechanism {
+  name: string
+  since: string
+  cost: string
+  description: string
+}
+
+export const CLAUDE_CODE_EXTENSIONS: ExtensionMechanism[] = [
+  { name: 'MCP Servers', since: '2024.11', cost: 'high', description: '외부 서버 연동, 도구/리소스/프롬프트 제공' },
+  { name: 'Subagents', since: '2025.07', cost: 'medium', description: '독립 에이전트 스폰, 병렬 작업' },
+  { name: 'Hooks', since: '2025.09', cost: 'zero', description: 'PreToolUse/PostToolUse/Stop/Notification 이벤트' },
+  { name: 'Plugins/Skills', since: '2025.10', cost: 'low', description: 'SKILL.md + YAML frontmatter, 슬래시 명령' },
+  { name: 'Agent Teams', since: '2026.02', cost: 'medium', description: '멀티 에이전트 협업, TaskList 공유' },
+]
+
+export const CLAUDE_CODE_STATS = {
+  tools: 54,
+  unconditionalTools: 19,
+  conditionalTools: 35,
+  approvalRate: '93%',
+  compactionThreshold: '~75%',
+  contextWindow: '200K',
+  structuredOutput: 'Constrained Decoding (2025.11)',
+  thinkingModes: ['Extended (budget_tokens)', 'Interleaved (Claude 4+)', 'Adaptive (Sonnet 4.6/Opus 4.6)'],
+}
 
 // ── Cascade Traces ────────────────────────────────────────────
 // OAS cascade routing trace scenarios. Source: sec03 cascade flow analysis.
@@ -767,14 +849,14 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
 export type Applicability = 'full' | 'partial' | 'none' | 'na'
 
 export const APPLICABILITY_MATRIX: Record<RoadmapPhase, Record<string, Applicability>> = {
-  P0: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'partial',codex_cli:'partial' },
-  P1: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
-  P2: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'full',llamacpp:'na',glm:'na',nemotron:'na',kimi:'na',gemini_cli:'full',codex_cli:'full' },
-  P3: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'partial',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'full',kimi:'partial',gemini_cli:'na',codex_cli:'na' },
-  P4: { openai:'full',claude:'none',gemini:'full',deepseek:'partial',qwen35:'partial',mistral:'full',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'partial',kimi:'partial',gemini_cli:'none',codex_cli:'none' },
-  P5: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
-  P6: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen35:'na',mistral:'na',ollama:'na',llamacpp:'na',glm:'na',nemotron:'full',kimi:'na',gemini_cli:'na',codex_cli:'na' },
-  P7: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen35:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P0: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'partial',codex_cli:'partial' },
+  P1: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P2: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen36:'na',mistral:'na',ollama:'full',llamacpp:'na',glm:'na',nemotron:'na',kimi:'na',gemini_cli:'full',codex_cli:'full' },
+  P3: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'partial',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'full',kimi:'partial',gemini_cli:'na',codex_cli:'na' },
+  P4: { openai:'full',claude:'none',gemini:'full',deepseek:'partial',qwen36:'partial',mistral:'full',ollama:'full',llamacpp:'full',glm:'partial',nemotron:'partial',kimi:'partial',gemini_cli:'none',codex_cli:'none' },
+  P5: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
+  P6: { openai:'na',claude:'na',gemini:'na',deepseek:'na',qwen36:'na',mistral:'na',ollama:'na',llamacpp:'na',glm:'na',nemotron:'full',kimi:'na',gemini_cli:'na',codex_cli:'na' },
+  P7: { openai:'full',claude:'full',gemini:'full',deepseek:'full',qwen36:'full',mistral:'full',ollama:'full',llamacpp:'full',glm:'full',nemotron:'full',kimi:'full',gemini_cli:'full',codex_cli:'full' },
 }
 
 export function applicabilitySymbol(a: Applicability): string {
@@ -976,7 +1058,7 @@ const PROVIDER_TO_MATRIX_ID: Record<string, string> = {
   codex: 'codex_cli',
   codex_api: 'openai',
   codex_cli: 'codex_cli',
-  dashscope: 'qwen35',
+  dashscope: 'qwen36',
   gemini: 'gemini_cli',
   gemini_api: 'gemini',
   gemini_cli: 'gemini_cli',
@@ -993,8 +1075,9 @@ const PROVIDER_TO_MATRIX_ID: Record<string, string> = {
   openai_chat: 'openai',
   openai_compat: 'openai',
   openai_ext: 'openai',
-  qwen: 'qwen35',
-  qwen35: 'qwen35',
+  qwen: 'qwen36',
+  qwen35: 'qwen36',
+  qwen36: 'qwen36',
   zai: 'glm',
   zhipu: 'glm',
 }
@@ -1016,7 +1099,7 @@ function inferMatrixId(key: string): string | null {
   if (key.includes('ollama')) return 'ollama'
   if (key.includes('kimi')) return 'kimi'
   if (key.includes('llama_cpp') || key.includes('llamacpp') || key === 'llama') return 'llamacpp'
-  if (key.includes('dashscope') || key.includes('qwen')) return 'qwen35'
+  if (key.includes('dashscope') || key.includes('qwen')) return 'qwen36'
   return null
 }
 

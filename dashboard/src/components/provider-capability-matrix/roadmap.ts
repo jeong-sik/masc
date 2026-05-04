@@ -14,15 +14,18 @@ import {
   applicabilitySymbol,
   applicabilityCellClass,
   phaseColor,
+  type RoadmapPhase,
 } from './data'
 
 function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
+  const isIndependent = item.deps.length === 0
   return html`
     <div class="pm-card ${phaseColor(item.id)}">
       <div class="pm-card-head">
         <div class="flex items-center gap-2">
           <span class="t-label font-bold mono">${item.id}</span>
           <span class="t-label">${item.area}</span>
+          ${isIndependent ? html`<span class="chip sm is-ghost">병렬</span>` : null}
         </div>
         <span class="t-micro mono t-dim">${item.timeline}</span>
       </div>
@@ -51,15 +54,52 @@ function PhaseCard({ item }: { item: typeof ROADMAP_ITEMS[number] }) {
   `
 }
 
+function computeDependencyTiers(): RoadmapPhase[][] {
+  const itemMap = new Map(ROADMAP_ITEMS.map(r => [r.id, r]))
+  const tierOf = new Map<RoadmapPhase, number>()
+
+  function getTier(id: RoadmapPhase): number {
+    if (tierOf.has(id)) return tierOf.get(id)!
+    const item = itemMap.get(id)!
+    if (item.deps.length === 0) {
+      tierOf.set(id, 0)
+      return 0
+    }
+    const tier = Math.max(...item.deps.map(d => getTier(d))) + 1
+    tierOf.set(id, tier)
+    return tier
+  }
+
+  ROADMAP_ITEMS.forEach(r => getTier(r.id))
+
+  const maxTier = Math.max(0, ...tierOf.values())
+  const tiers: RoadmapPhase[][] = Array.from({ length: maxTier + 1 }, () => [])
+  for (const [id, tier] of tierOf) { const t = tiers[tier]; if (t) t.push(id) }
+  return tiers
+}
+
+const TIER_LABELS = ['독립', '확장', '통합', '종합']
+
 function DependencyGraph() {
-  const phases = ROADMAP_ITEMS.map(r => r.id)
+  const tiers = computeDependencyTiers()
+
   return html`
-    <div class="flex items-center gap-1 t-micro mono flex-wrap">
-      ${phases.map((p, i) => html`
-        <span key=${p} class="inline-flex items-center gap-0.5">
-          ${i > 0 ? html`<span class="t-dim px-0.5">→</span>` : null}
-          <span class="chip sm ${phaseColor(p)}">${p}</span>
-        </span>
+    <div class="flex flex-col gap-2">
+      ${tiers.map((tier, ti) => html`
+        <div key=${ti} class="flex items-center gap-2">
+          <span class="t-micro mono t-dim w-[36px] text-right">${TIER_LABELS[ti] ?? `T${ti}`}</span>
+          <div class="flex gap-1 flex-wrap">
+            ${tier.map(p => {
+              const item = ROADMAP_ITEMS.find(r => r.id === p)!
+              return html`
+                <span key=${p} class="chip sm ${phaseColor(p)}" title=${item.goal}>
+                  ${p} <span class="t-micro opacity-70">${item.area}</span>
+                </span>
+              `
+            })}
+          </div>
+          ${ti < tiers.length - 1 ? html`<span class="t-dim t-micro px-1">↓</span>` : null}
+        </div>
       `)}
     </div>
   `
@@ -72,6 +112,15 @@ function parsePercentRatio(value: string): number {
 
 function formatFte(value: number): string {
   return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}인`
+}
+
+function heatClass(pct: string): string {
+  const n = Number.parseFloat(pct.replace('%', ''))
+  if (n >= 100) return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] font-semibold'
+  if (n >= 80)  return 'bg-[var(--ok-5)] text-[var(--color-fg-default)]'
+  if (n >= 50)  return 'bg-[var(--warn-5)] text-[var(--color-fg-default)]'
+  if (n > 0)    return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+  return 'text-[var(--color-fg-muted)]'
 }
 
 function Timeline() {
@@ -138,7 +187,7 @@ function ResourceTable() {
               <td class="pm-td pm-td--right-border t-micro t-meta">${row.scope}</td>
               <td class="pm-td pm-td--right-border pm-td--center pm-td--mono">${row.headcount}인</td>
               ${row.pct.map((p, j) => html`
-                <td key=${j} class="pm-td pm-td--right-border pm-td--center pm-td--mono t-micro t-dim">${p}</td>
+                <td key=${j} class="pm-td pm-td--right-border pm-td--center pm-td--mono t-micro ${heatClass(p)}">${p}</td>
               `)}
             </tr>
           `)}
@@ -218,7 +267,7 @@ export function Roadmap() {
               </tr>
             </thead>
             <tbody>
-              ${ROADMAP_ITEMS.map((item, i) => html`
+              ${ROADMAP_ITEMS.map(item => html`
                 <tr key=${item.id} class="pm-row-alt">
                   <td class="pm-td pm-td--sticky pm-td--mono font-bold">${item.id}</td>
                   ${PROVIDER_IDS.map(pid => {

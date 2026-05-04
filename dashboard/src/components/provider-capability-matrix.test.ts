@@ -86,4 +86,11 @@ describe('ProviderCapabilityMatrix', () => {
     const oasCount = ANTI_PATTERNS.filter(ap => ap.source === 'oas').length
     expect(oasCount).toBe(32)
   })
+
+  it('all anti-patterns have improvement directions', () => {
+    for (const ap of ANTI_PATTERNS) {
+      expect(ap.improvement).toBeDefined()
+      expect(ap.improvement.length).toBeGreaterThan(0)
+    }
+  })
 })

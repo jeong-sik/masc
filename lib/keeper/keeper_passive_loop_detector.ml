@@ -27,6 +27,10 @@ let threshold () =
 type keeper_state = {
   mutable streak : int;
   mutable detected_latched : bool;
+  (* Task-138: Unix timestamp of the most recent productive turn
+     (execution/completion class). 0.0 until the keeper has produced
+     anything in this process. *)
+  mutable last_productive_ts : float;
 }
 
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
@@ -40,15 +44,28 @@ let get_or_create keeper_name =
   match Hashtbl.find_opt state keeper_name with
   | Some s -> s
   | None ->
-      let s = { streak = 0; detected_latched = false } in
+      let s = { streak = 0; detected_latched = false;
+                last_productive_ts = 0.0 } in
       Hashtbl.replace state keeper_name s;
       s
 
-let update_streak_gauge _keeper_name _value = ()
-(* Gauge metric for streak tracking is not emitted in v1.  Prometheus
-   counters (metric_keeper_passive_loop_detected_total) cover the
-   detection events; a streak gauge can be added in a follow-up PR
-   alongside the dashboard visualization. *)
+(* Task-138: streak gauge — pairs with the counter so dashboards see
+   the climb before the latch fires (counter only triggers once per
+   episode at threshold). *)
+let update_streak_gauge keeper_name value =
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_consecutive_idle
+    ~labels:[("keeper", keeper_name)]
+    (float_of_int value)
+
+(* Task-138: timestamp of the most recent productive turn.  Operators
+   plot [time() - keeper_last_productive_ts > N] as a single PromQL
+   alert per keeper. *)
+let update_last_productive_gauge keeper_name ts =
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_last_productive_ts
+    ~labels:[("keeper", keeper_name)]
+    ts
 
 (** [record_turn ~keeper_name ~progress_class] updates the passive streak
     counter for [keeper_name] based on the [tool_progress_class] of the
@@ -80,7 +97,14 @@ let record_turn ~keeper_name ~progress_class =
         if s.streak > 0 then
           update_streak_gauge keeper_name 0;
         s.streak <- 0;
-        s.detected_latched <- false)
+        s.detected_latched <- false;
+        (* Task-138: record productive turn timestamp + gauge.
+           Both internal field and external metric stay in sync so a
+           later [last_productive_ts] read returns the same value the
+           dashboard sees. *)
+        let now = Unix.time () in
+        s.last_productive_ts <- now;
+        update_last_productive_gauge keeper_name now)
 
 let current_streak ~keeper_name =
   with_lock (fun () ->
@@ -109,7 +133,11 @@ let nudge_message ~keeper_name =
 let reset ~keeper_name =
   with_lock (fun () ->
     Hashtbl.remove state keeper_name;
-    update_streak_gauge keeper_name 0)
+    update_streak_gauge keeper_name 0;
+    (* Task-138: also zero the productive-ts gauge so a recycled keeper
+       slot does not appear "alive but never produced" with the
+       previous keeper's timestamp. *)
+    update_last_productive_gauge keeper_name 0.0)
 
 let reset_all_for_test () =
   with_lock (fun () -> Hashtbl.clear state)

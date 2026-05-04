@@ -906,6 +906,13 @@ let metric_cascade_server_error_skip_total =
    calls for N consecutive turns.  Labels: keeper. *)
 let metric_keeper_passive_loop_detected_total =
   "masc_keeper_passive_loop_detected_total"
+
+(* Task-138: Minimum proactive cadence — observability gauges that pair
+   with the [keeper_passive_loop_detector] streak counter so operators
+   can see "alive but unproductive" keepers in Grafana before the
+   detection latch fires.  Labels: keeper. *)
+let metric_keeper_consecutive_idle = "masc_keeper_consecutive_idle"
+let metric_keeper_last_productive_ts = "masc_keeper_last_productive_ts"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
@@ -1468,6 +1475,16 @@ let init () =
     "#12799 Total passive-loop detections: keeper issued only read-only tool \
      calls for N consecutive turns. Labeled by keeper."
     Counter;
+  add metric_keeper_consecutive_idle
+    "Task-138 Current consecutive-idle streak (passive-only turns) per \
+     keeper.  Resets to 0 on the next execution/completion turn.  Labeled \
+     by keeper."
+    Gauge;
+  add metric_keeper_last_productive_ts
+    "Task-138 Unix timestamp of the most recent productive turn \
+     (execution/completion class) per keeper.  0 until the keeper has \
+     produced anything.  Labeled by keeper."
+    Gauge;
   add metric_keeper_tool_alias_canonicalizations
     "Total observed LLM-facing tool names canonicalized to keeper internal \
      tool names. Labeled by alias_kind, public_tool, and canonical_tool."

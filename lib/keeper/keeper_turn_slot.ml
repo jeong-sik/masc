@@ -82,10 +82,14 @@ let snapshot_holders ~label ~now =
    so they can stay responsive without consuming the full global pool.
    Default 3 = a conservative parallelism level for shared remote providers.
    Lower to 1 for single-slot local servers. For 8-slot servers,
-   MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4 is a reasonable range. *)
+   MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4 is a reasonable range.
+   The 16 cap accommodates fleets of 14+ keepers running on a single
+   workstation with abundant CPU and provider headroom (operator
+   judgement); below 16 is a safety net against runaway provider spend
+   during config typos, not a hard architectural ceiling. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:8
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:16
 ;;
 
 let () =

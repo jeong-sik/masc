@@ -1270,15 +1270,19 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                                      false
                                  | Error _ ->
                                      (* Unknown acquisition error (not a
-                                        Semaphore_wait_timeout); abort retry
-                                        conservatively.  Logging the type would
-                                        require access to a polymorphic printer
-                                        that does not exist here; callers that
-                                        introduce new variants should wire one in. *)
+                                        Semaphore_wait_timeout).  Abort the
+                                        cascade retry conservatively to avoid
+                                        running without a valid slot.
+                                        To investigate: check logs for
+                                        preceding slot_yield lines for
+                                        keeper=%s, and review any new error
+                                        variants introduced to
+                                        yield_and_reacquire_keeper_turn_slot. *)
                                      Log.Keeper.warn
                                        "%s: slot_yield: unexpected autonomous slot \
                                         acquisition error; aborting degraded retry \
-                                        to %s"
+                                        to %s (check slot_yield log lines for \
+                                        this keeper)"
                                        meta.name next_execution_cascade_name;
                                      false)
                           in

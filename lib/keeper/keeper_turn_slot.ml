@@ -522,6 +522,7 @@ let yield_and_reacquire_keeper_turn_slot ~keeper_name ~channel state =
     (* Reactive turns or turns not holding the autonomous slot: nothing to yield. *)
     Ok 0
   else begin
+    (* channel_label is only needed once we confirm there is work to do. *)
     let channel_label = Keeper_world_observation.channel_to_string channel in
     let t0 = Time_compat.now () in
     (* 1. Release the shared turn semaphore first (outer gate). *)

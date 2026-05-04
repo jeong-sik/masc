@@ -155,6 +155,7 @@ let test_nudge_message_none_after_reset () =
   check bool "nudge cleared after execution turn" true (Option.is_none after_reset)
 
 let test_nudge_message_none_for_unknown_keeper () =
+  Eio_main.run @@ fun _env ->
   setup ();
   let msg = PLD.nudge_message ~keeper_name:"unknown-keeper-xyz" in
   check bool "nudge is None for unknown keeper" true (Option.is_none msg)

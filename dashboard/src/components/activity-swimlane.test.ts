@@ -28,7 +28,7 @@ describe("spanStyle", () => {
     expect(spanStyle("autonomy")).toEqual({ bg: "var(--cyan)", text: "var(--panel-dark)" })
   })
   it("returns style for presence", () => {
-    expect(spanStyle("presence")).toEqual({ bg: "rgba(148, 163, 184, 0.25)", text: "var(--frost-100)" })
+    expect(spanStyle("presence")).toEqual({ bg: "var(--color-bg-hover)", text: "var(--frost-100)" })
   })
   it("returns default for unknown kind", () => {
     expect(spanStyle("unknown")).toEqual({ bg: "var(--color-fg-muted)", text: "var(--panel-dark)" })

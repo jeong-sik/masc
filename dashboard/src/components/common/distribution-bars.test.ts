@@ -17,13 +17,13 @@ describe('paletteFor', () => {
   it('returns warn palette', () => {
     const p = paletteFor('warn')
     expect(p.fill).toBe('var(--color-status-warn)')
-    expect(p.chipBg).toContain('250,204,21')
+    expect(p.chipBg).toBe('var(--warn-soft)')
   })
 
   it('returns bad palette', () => {
     const p = paletteFor('bad')
     expect(p.fill).toBe('var(--color-status-err)')
-    expect(p.chipBg).toContain('248,113,113')
+    expect(p.chipBg).toBe('var(--bad-10)')
   })
 
   it('returns muted palette', () => {

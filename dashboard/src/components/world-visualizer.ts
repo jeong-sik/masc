@@ -341,20 +341,20 @@ export function WorldVisualizer() {
         style="width: 100%; height: ${CANVAS_H}px; display: block;"
       />
       <div class="flex gap-4 mt-2 text-3xs text-[var(--color-fg-muted)]">
-        <span>
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-status-ok);margin-right:4px;vertical-align:middle;opacity:0.5"></span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-2 h-2 rounded-full bg-[var(--color-status-ok)] opacity-50"></span>
           Stigmergy ring = activity intensity
         </span>
-        <span>
-          <span style="display:inline-block;width:16px;height:2px;background:var(--color-status-ok);margin-right:4px;vertical-align:middle"></span>
-          Solid = within K=6 sight
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-4 h-0.5 bg-[var(--color-status-ok)]"></span>
+          Solid = within K=${K_LOCAL_SIGHT} sight
         </span>
-        <span>
-          <span style="display:inline-block;width:16px;height:2px;background:var(--color-fg-muted);margin-right:4px;vertical-align:middle;opacity:0.4;border-top:1px dashed var(--color-fg-muted)"></span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-4 h-0 border-t border-dashed border-[var(--color-fg-muted)] opacity-40"></span>
           Dashed = beyond sight
         </span>
-        <span>
-          <span style="display:inline-block;width:4px;height:12px;background:var(--color-status-ok);margin-right:4px;vertical-align:middle;opacity:0.7"></span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-1 h-3 bg-[var(--color-status-ok)] opacity-70"></span>
           Bar = convergence
         </span>
       </div>

@@ -46,7 +46,7 @@ export function Bar(props: BarProps): JSX.Element {
           height: '100%',
           width: `${pct()}%`,
           background: FILL_COLOR[kind()],
-          transition: props.noTransition === true ? undefined : 'width 500ms',
+          transition: props.noTransition === true ? undefined : `width var(--t-slow)`,
         }}
       />
     </div>

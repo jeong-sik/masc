@@ -95,7 +95,7 @@ export function Spark(props: SparkProps): VNode {
     display: 'inline-flex',
     alignItems: 'flex-end' as const,
     gap: '1px',
-    height: '16px',
+    height: 'var(--sp-4)',
   }
 
   const label = props.ariaHidden === true
@@ -117,7 +117,7 @@ export function Spark(props: SparkProps): VNode {
       // independently of the host's fixed 16px container.
       height: `${v}%`,
       background: fg,
-      borderRadius: '1px',
+      borderRadius: 'var(--r-00)',
       boxShadow: shadow,
     }
     return html`<i aria-hidden="true" style=${barStyle}></i>`

@@ -132,14 +132,14 @@ interface SizeStyle {
 // with the 28px geometry inferred from the xs(18)→sm(20)→default(24)→
 // lg(28) +2px progression that primitives.html demos).
 const SIZE_STYLE: Record<BtnSize, SizeStyle> = {
-  xs: { height: '18px', padding: '0 6px', fontSize: '9px', letterSpacing: '0.06em' },
-  sm: { height: '20px', padding: '0 8px', fontSize: '10px' },
-  default: { height: '24px', padding: '0 10px', fontSize: '11px' },
-  lg: { height: '28px', padding: '0 14px', fontSize: '12px' },
+  xs: { height: 'var(--ctrl-h-xs)', padding: '0 6px', fontSize: 'var(--fs-9)', letterSpacing: '0.06em' },
+  sm: { height: 'var(--ctrl-h-sm)', padding: '0 8px', fontSize: 'var(--fs-10)' },
+  default: { height: 'var(--ctrl-h)', padding: '0 10px', fontSize: 'var(--fs-11)' },
+  lg: { height: 'var(--ctrl-h-lg)', padding: '0 14px', fontSize: 'var(--fs-12)' },
 }
 
 const TRANSITION =
-  'background 120ms ease, color 120ms ease, border-color 120ms ease'
+  `background var(--motion-swap) var(--ease), color var(--motion-swap) var(--ease), border-color var(--motion-swap) var(--ease)`
 
 /** Pure: resolve the variant default. Exported for tests so the variant
  *  defaulting rule stays observable without a DOM mount. */
@@ -181,7 +181,7 @@ export function Btn(props: BtnProps): VNode {
     color,
     background,
     border: `1px solid ${borderColor}`,
-    borderRadius: '3px',
+    borderRadius: 'var(--r-1)',
     cursor: props.disabled ? 'not-allowed' : 'pointer',
     opacity: props.disabled ? 0.5 : 1,
     transition: TRANSITION,

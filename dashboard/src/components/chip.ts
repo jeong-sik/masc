@@ -121,9 +121,9 @@ interface SizeStyle {
 }
 
 const SIZE_STYLE: Record<ChipSize, SizeStyle> = {
-  sm: { height: '14px', padding: '0 5px', fontSize: '9px' },
-  default: { height: '18px', padding: '0 7px', fontSize: '10px' },
-  lg: { height: '22px', padding: '0 9px', fontSize: '11px' },
+  sm: { height: '14px', padding: '0 5px', fontSize: 'var(--fs-9)' },
+  default: { height: '18px', padding: '0 7px', fontSize: 'var(--fs-10)' },
+  lg: { height: '22px', padding: '0 9px', fontSize: 'var(--fs-11)' },
 }
 
 

@@ -208,15 +208,25 @@ module Http_client = struct
     | Llm_provider.Http_client.ProviderFailure { kind; message } ->
         Llm_provider.Http_client.provider_failure_to_string ~kind ~message
     | Llm_provider.Http_client.HttpError { code; body } -> (
+        let truncate_body b =
+          let max_len =
+            Llm_provider.Constants.Truncation.max_error_body_length
+          in
+          if String.length b <= max_len then b
+          else String.sub b 0 max_len ^ "…"
+        in
         try
           let json = Yojson.Safe.from_string body in
           match Yojson.Safe.Util.member "error" json with
           | `Assoc fields -> (
               match List.assoc_opt "message" fields with
               | Some (`String msg) -> msg
-              | _ -> Printf.sprintf "HTTP %d" code)
-          | _ -> Printf.sprintf "HTTP %d" code
-        with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+              | _ ->
+                Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body))
+          | _ ->
+            Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body)
+        with Yojson.Json_error _ ->
+          Printf.sprintf "HTTP %d (body: %s)" code (truncate_body body))
 end
 
 module Metrics = struct

@@ -997,6 +997,8 @@ let metric_keeper_usage_anomaly_reason =
   "masc_keeper_usage_anomaly_reason_total"
 let metric_keeper_config_env_parse_failures =
   "masc_keeper_config_env_parse_failures_total"
+let metric_keeper_post_turn_wirein_failures =
+  "masc_keeper_post_turn_wirein_failures_total"
 
 (** {1 Built-in Metrics} *)
 
@@ -1765,6 +1767,8 @@ let init () =
     "Keeper usage anomaly reason. Labels: keeper, reason." Counter;
   add metric_keeper_config_env_parse_failures
     "Config env var parse failures (non-integer values). Labels: var." Counter;
+  add metric_keeper_post_turn_wirein_failures
+    "Post-turn wire-in failures (autonomous, tool_emission_drain, multimodal, resilience). Labels: keeper, phase." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

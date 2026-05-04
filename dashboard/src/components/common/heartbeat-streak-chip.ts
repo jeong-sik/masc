@@ -36,7 +36,7 @@ const STATE_TONE: Record<HeartbeatState, string> = {
 /** Pure: render a streak as narrator-friendly text. Exposed so the
     same label can appear in tooltips, aria-labels, and future log
     exports without each caller re-deriving the grammar. */
-export function formatStreakLabel(streak: HeartbeatStreak | null): string {
+function formatStreakLabel(streak: HeartbeatStreak | null): string {
   if (streak === null) return 'Heartbeat: no data yet'
   const unit = streak.samples === 1 ? 'check' : 'checks'
   return `${STATE_LABEL[streak.state]} for ${streak.samples} ${unit}`

@@ -52,7 +52,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 /** Pure: classes for the outer wrapper per variant. Exposed so callers
     that want to group several secondary commands in a shared container
     can align their own styling with the primitive's tone. */
-export function copyableWrapperClasses(variant: CopyableVariant): string {
+function copyableWrapperClasses(variant: CopyableVariant): string {
   switch (variant) {
     case 'primary':
       // Accented border, stronger bg, tighter padding to read like a
@@ -67,7 +67,7 @@ export function copyableWrapperClasses(variant: CopyableVariant): string {
 /** Pure: classes for the label chip per variant. Primary gets the accent
     text + slightly bolder weight so the label stops being a silent chip
     at the left edge and starts leading the reader's eye into the command. */
-export function copyableLabelClasses(variant: CopyableVariant): string {
+function copyableLabelClasses(variant: CopyableVariant): string {
   return variant === 'primary'
     ? 'shrink-0 text-3xs font-semibold uppercase tracking-4 text-[var(--color-accent-fg)]'
     : 'shrink-0 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]'

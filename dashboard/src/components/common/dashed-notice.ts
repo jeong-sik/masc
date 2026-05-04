@@ -22,7 +22,7 @@ type DashedNoticeBorderTone = 'card' | 'subtle'
 
 /** Pure: Tailwind size tokens. Exposed so callers in a hot render path
     (e.g. a repeated fsm-hub sub-panel) can pre-build the string once. */
-export function dashedNoticeClasses(
+function dashedNoticeClasses(
   size: DashedNoticeSize = 'sm',
   border: DashedNoticeBorderTone = 'card',
   extra?: string,

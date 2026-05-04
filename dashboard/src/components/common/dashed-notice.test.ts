@@ -2,56 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { DashedNotice, dashedNoticeClasses } from './dashed-notice'
-
-describe('dashedNoticeClasses (pure)', () => {
-  it('default is sm + card (the most common pre-change variant)', () => {
-    const cls = dashedNoticeClasses()
-    expect(cls).toBe(dashedNoticeClasses('sm', 'card'))
-  })
-
-  it('always includes base invariants (dashed border, center text, text-dim)', () => {
-    // Regression guard: drifting any of these tokens breaks visual
-    // consistency across the 9 call sites the primitive unifies.
-    const cls = dashedNoticeClasses()
-    expect(cls).toContain('border-dashed')
-    expect(cls).toContain('text-center')
-    expect(cls).toContain('text-[var(--color-fg-disabled)]')
-  })
-
-  it('sm size: 10px text + rounded-[var(--r-1)] + tight padding (matches fsm-hub timeline panels)', () => {
-    const cls = dashedNoticeClasses('sm')
-    expect(cls).toContain('text-3xs')
-    expect(cls).toContain('rounded-[var(--r-1)]')
-    expect(cls).toContain('px-4')
-    expect(cls).toContain('py-2')
-  })
-
-  it('md size: 12px text + rounded-[var(--r-1)] + generous padding', () => {
-    const cls = dashedNoticeClasses('md')
-    expect(cls).toContain('text-xs')
-    expect(cls).toContain('rounded-[var(--r-1)]')
-    expect(cls).toContain('px-4')
-    expect(cls).toContain('py-6')
-  })
-
-  it('card border tone uses --card-border', () => {
-    expect(dashedNoticeClasses('sm', 'card')).toContain('border-[var(--color-border-default)]')
-  })
-
-  it('subtle border tone uses --white-8 (dimmer)', () => {
-    expect(dashedNoticeClasses('sm', 'subtle')).toContain('border-[var(--color-border-default)]')
-  })
-
-  it('extra class is appended (caller composition)', () => {
-    expect(dashedNoticeClasses('sm', 'card', 'mt-3')).toContain('mt-3')
-  })
-
-  it('empty/undefined extra class leaves no trailing whitespace', () => {
-    expect(dashedNoticeClasses('sm', 'card', '')).not.toMatch(/\s$/)
-    expect(dashedNoticeClasses('sm', 'card', undefined)).not.toMatch(/\s$/)
-  })
-})
+import { DashedNotice } from './dashed-notice'
 
 describe('DashedNotice component', () => {
   let container: HTMLElement

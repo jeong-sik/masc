@@ -213,7 +213,7 @@ let () =
         test_nudge_message_none_after_reset;
       test_case "None for unknown keeper" `Quick
         test_nudge_message_none_for_unknown_keeper;
-      test_case "nudge text is non-empty" `Quick
+      test_case "nudge text contains streak count" `Quick
         test_nudge_message_contains_streak_count;
     ];
   ]

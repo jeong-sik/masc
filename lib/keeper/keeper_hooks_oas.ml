@@ -1035,7 +1035,7 @@ let make_hooks
              match loop_alert, work_text with
              | Some _, Some _ -> "passive_loop_nudge + work_discovery"
              | Some _, None -> "passive_loop_nudge"
-             | None, _ -> "work_discovery nudge"
+             | None, _ -> "work_discovery"
            in
            Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
              (!meta_ref).name source (String.length text);

@@ -1032,9 +1032,10 @@ let make_hooks
            Agent_sdk.Hooks.Continue
          | Some text ->
            let source =
-             match loop_alert with
-             | Some _ -> "passive_loop_nudge"
-             | None -> "work_discovery nudge"
+             match loop_alert, work_text with
+             | Some _, Some _ -> "passive_loop_nudge + work_discovery"
+             | Some _, None -> "passive_loop_nudge"
+             | None, _ -> "work_discovery nudge"
            in
            Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
              (!meta_ref).name source (String.length text);

@@ -170,8 +170,11 @@ let test_nudge_message_contains_streak_count () =
   match msg with
   | None -> fail "expected Some nudge at threshold"
   | Some text ->
-    check bool "nudge mentions streak count" true
-      (String.length text > 0)
+    (* The nudge message must include the streak count (5) so the keeper
+       knows how many passive turns have accumulated. *)
+    check bool "nudge text contains streak count '5'" true
+      (let re = Re.compile (Re.str "5") in
+       Re.execp re text)
 
 let () =
   run "keeper_passive_loop_detector" [

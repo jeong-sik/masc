@@ -14,7 +14,7 @@ describe('connectorCardBorderClass (pure)', () => {
 
   it('stale → amber 4px (intermittent / degraded)', () => {
     expect(connectorCardBorderClass('stale')).toBe(
-      'border-l-4 border-l-amber-500',
+      'border-l-4 border-l-[var(--color-warn)]',
     )
   })
 

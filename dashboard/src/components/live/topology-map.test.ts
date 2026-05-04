@@ -23,15 +23,12 @@ function makeKeeper(partial: Partial<Keeper> = {}): Keeper {
 // ─── topologyNodeColor ────────────────────────────────────────────────────────
 
 describe('topologyNodeColor', () => {
-  it('returns dim color for offline agent', () => {
-    const color = topologyNodeColor('agent', 'offline')
-    expect(color).toContain('rgba')
-    expect(color).toContain('0.45')
+  it('returns disabled color for offline agent', () => {
+    expect(topologyNodeColor('agent', 'offline')).toBe('var(--color-fg-disabled)')
   })
 
-  it('returns dim color for inactive agent', () => {
-    const color = topologyNodeColor('agent', 'inactive')
-    expect(color).toContain('rgba')
+  it('returns disabled color for inactive agent', () => {
+    expect(topologyNodeColor('agent', 'inactive')).toBe('var(--color-fg-disabled)')
   })
 
   it('returns cyan for active agent', () => {
@@ -42,9 +39,8 @@ describe('topologyNodeColor', () => {
     expect(topologyNodeColor('agent', 'busy')).toBe('var(--cyan)')
   })
 
-  it('returns muted cyan for idle agent', () => {
-    const color = topologyNodeColor('agent', 'idle')
-    expect(color).toContain('rgba(71, 184, 255')
+  it('returns info border for idle agent', () => {
+    expect(topologyNodeColor('agent', 'idle')).toBe('var(--info-border)')
   })
 
   it('returns green for active keeper', () => {
@@ -55,14 +51,12 @@ describe('topologyNodeColor', () => {
     expect(topologyNodeColor('task', 'awaiting_verification')).toBe('var(--color-status-warn)')
   })
 
-  it('returns muted green for done task', () => {
-    const color = topologyNodeColor('task', 'done')
-    expect(color).toContain('rgba(74, 222, 128')
+  it('returns ok border for done task', () => {
+    expect(topologyNodeColor('task', 'done')).toBe('var(--ok-border)')
   })
 
-  it('returns yellow for in_progress task', () => {
-    const color = topologyNodeColor('task', 'in_progress')
-    expect(color).toContain('rgba(251, 191, 36')
+  it('returns warn fg for in_progress task', () => {
+    expect(topologyNodeColor('task', 'in_progress')).toBe('var(--warn-fg)')
   })
 })
 

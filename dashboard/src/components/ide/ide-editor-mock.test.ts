@@ -12,7 +12,7 @@ describe('IdeEditorMock', () => {
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('에디터 (code document store + RFC 0019 ownership mock)')
-    expect(container.textContent).toContain('runtime/cascade/router.ts')
+    expect(container.textContent).toContain('package.json')
     expect(container.textContent).toContain('typescript')
     expect(container.textContent).toContain('23 lines · ownership · 3 keepers')
     expect(container.textContent).toContain('nick0cave')

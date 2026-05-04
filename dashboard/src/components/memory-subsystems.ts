@@ -51,9 +51,9 @@ export const ARCHITECTURE_FLOW = `graph LR
     G1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
-    classDef store fill:#1e293b,stroke:#334155,color:var(--frost-100)
-    classDef action fill:#0f766e,stroke:#14b8a6,color:var(--frost-100)
-    classDef ui fill:#7c2d12,stroke:#f97316,color:var(--frost-100)
+    classDef store fill:#1e293b,stroke:#334155,color:#e2e8f0
+    classDef action fill:#0f766e,stroke:#14b8a6,color:#e2e8f0
+    classDef ui fill:#7c2d12,stroke:#f97316,color:#e2e8f0
     class F1,G1 store
     class M1,M3,H1,H2,T2 action
     class UI ui`

@@ -37,7 +37,7 @@ function ArrowConnector() {
 export function CascadeTrace() {
   return html`
     <div class="flex flex-col gap-4">
-      <div class="flex items-center gap-4 text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
+      <div class="flex items-center gap-4 t-caption px-1">
         <span>OAS Cascade = Provider 순차 시도 + Cooldown 게이트</span>
         <span class="text-[var(--color-border-default)]">|</span>
         <span class="flex items-center gap-1">
@@ -54,15 +54,15 @@ export function CascadeTrace() {
       ${CASCADE_TRACES.map(trace => {
         const totalMs = trace.steps.reduce((s, st) => s + st.ms, 0)
         return html`
-        <div key=${trace.id} class="border border-[var(--color-border-default)] rounded overflow-hidden">
-          <div class="flex items-center justify-between px-3 py-1.5 bg-[var(--white-4)] border-b border-[var(--color-border-default)]">
+        <div key=${trace.id} class="pm-card">
+          <div class="pm-card-head">
             <div class="flex items-center gap-2">
-              <span class="text-xs font-medium text-[var(--color-fg-primary)]">${trace.label}</span>
-              <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-mono font-bold ${cascadeTierStyle(trace.tier)}">
+              <span class="t-label">${trace.label}</span>
+              <span class="chip sm ${cascadeTierStyle(trace.tier)}">
                 ${cascadeTierLabel(trace.tier)}
               </span>
             </div>
-            <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(totalMs)} total</span>
+            <span class="t-caption">${formatMs(totalMs)} total</span>
           </div>
           <div class="flex items-stretch px-2 py-2">
             ${trace.steps.map((step, i) => {
@@ -83,12 +83,12 @@ export function CascadeTrace() {
 function StepBlock({ step }: { step: typeof CASCADE_TRACES[number]['steps'][number] }) {
   return html`
     <div class="flex-1 flex flex-col items-center gap-1 min-w-[100px]">
-      <span class="text-[10px] font-medium text-[var(--color-fg-secondary)]">${step.provider}</span>
-      <span class="inline-block rounded border px-2.5 py-0.5 text-[10px] font-mono font-bold ${cascadeStepColor(step.status)}">
+      <span class="t-caption t-dim">${step.provider}</span>
+      <span class="chip sm ${cascadeStepColor(step.status)}">
         ${stepStatusLabel(step.status)}
       </span>
-      <span class="text-[10px] font-mono text-[var(--color-fg-muted)]">${formatMs(step.ms)}</span>
-      <span class="text-[9px] text-[var(--color-fg-disabled)] max-w-[100px] truncate" title=${step.reason}>${step.reason}</span>
+      <span class="t-caption">${formatMs(step.ms)}</span>
+      <span class="t-micro max-w-[100px] truncate" title=${step.reason}>${step.reason}</span>
     </div>
   `
 }

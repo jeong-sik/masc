@@ -81,9 +81,9 @@ function statusToHeartbeatSample(status: LiveStatus | null): HeartbeatState {
 
 function providerCategoryBadge(cat: string): string {
   switch (cat) {
-    case 'cloud': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    case 'cli':   return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-    case 'local': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+    case 'cloud': return 'chip sm is-ok'
+    case 'cli':   return 'chip sm is-warn'
+    case 'local': return 'chip sm is-ghost'
     default:      return ''
   }
 }
@@ -140,33 +140,33 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
         <${StatTile} label="CLI Wrapper" value=${cliCount} hint="usage: strip" />
       </div>
 
-      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-        <table class="w-full text-xs border-collapse">
-          <thead>
-            <tr class="bg-[var(--white-4)]">
-              <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)] px-2 py-1.5 text-left font-medium text-[var(--color-fg-secondary)] min-w-[140px]">
+      <div class="pm-scroll">
+        <table class="pm-table">
+          <thead class="pm-thead">
+            <tr>
+              <th class="pm-th pm-th--sticky min-w-[140px]">
                 기능
               </th>
               ${PROVIDER_IDS.map(pid => {
                 const dot = liveStatusDot(pid, liveProviders)
                 const cat = PROVIDER_CATEGORY[pid] ?? 'cloud'
                 return html`
-                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1.5 py-1.5 text-center font-medium text-[var(--color-fg-secondary)] min-w-[60px]">
+                  <th key=${pid} class="pm-th pm-th--center min-w-[60px]">
                     <div class="flex flex-col items-center gap-0.5">
                       ${dot ? html`<${StatusDot} size="xs" class=${liveStatusDotClass(dot)} />` : null}
                       <span>${PROVIDER_LABELS[pid] ?? pid}</span>
-                      <span class="inline-block rounded px-1 py-px text-[7px] font-mono font-bold ${providerCategoryBadge(cat)}">${providerCategoryLabel(cat)}</span>
+                      <span class="${providerCategoryBadge(cat)}">${providerCategoryLabel(cat)}</span>
                     </div>
                   </th>
                 `
               })}
             </tr>
-            <tr class="bg-[var(--white-4)]">
-              <th class="sticky left-0 z-10 bg-[var(--shell-rail-bg)] border-b border-r border-[var(--color-border-default)]"></th>
+            <tr>
+              <th class="pm-th pm-th--sticky"></th>
               ${PROVIDER_IDS.map(pid => {
                 const dot = liveStatusDot(pid, liveProviders)
                 return html`
-                  <th key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5">
+                  <th key=${pid} class="pm-th pm-th--center">
                     <${ProviderHeartbeatCell} providerId=${pid} status=${dot} />
                   </th>
                 `
@@ -177,23 +177,24 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
           ${FEATURE_CATEGORIES.map(cat => {
             const catFeatures = cat.featureIds.map(id => featById.get(id)).filter(Boolean)
             return html`
-              <tr key=${`cat-${cat.id}`} class="bg-[var(--white-4)]">
-                <td class="sticky left-0 z-10 bg-[var(--white-4)] border-r border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] font-semibold text-[var(--color-fg-muted)] uppercase tracking-wider" colSpan=${PROVIDER_IDS.length + 1}>
+              <tr key=${`cat-${cat.id}`} class="pm-cat-row">
+                <td class="pm-th--sticky" colSpan=${PROVIDER_IDS.length + 1}>
                   ${cat.label}
                 </td>
               </tr>
               ${catFeatures.map((feat, j) => {
                 if (!feat) return null
+                const rowClass = j % 2 !== 0 ? 'pm-row--alt' : ''
                 return html`
-                  <tr key=${feat.id} class="${j % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-                    <td class="sticky left-0 z-10 ${j % 2 === 0 ? 'bg-[var(--shell-rail-bg)]' : 'bg-[var(--white-2)]'} border-r border-b border-[var(--color-border-default)] px-2 py-1 pl-4 font-medium text-[var(--color-fg-primary)]">
+                  <tr key=${feat.id} class="${rowClass}">
+                    <td class="pm-td pm-td--sticky pm-td--indent">
                       ${feat.label}
                     </td>
                     ${PROVIDER_IDS.map(pid => {
                       const v = feat.providers[pid] ?? '—'
                       return html`
-                        <td key=${pid} class="border-b border-[var(--color-border-default)] px-1 py-0.5 text-center">
-                          <span class="inline-block w-full rounded px-1 py-0.5 text-[10px] font-mono font-bold ${supportCellClass(v)}">
+                        <td key=${pid} class="pm-td pm-td--center">
+                          <span class="pm-cell-badge ${supportCellClass(v)}">
                             ${v}
                           </span>
                         </td>
@@ -213,17 +214,17 @@ export function FeatureMatrix({ liveProviders }: { liveProviders: DashboardRunti
 
 export function MatrixLegend() {
   return html`
-    <div class="flex items-center gap-4 text-[10px] font-mono text-[var(--color-fg-muted)] px-1 flex-wrap">
-      <span class="flex items-center gap-1"><span class="inline-block w-4 h-3 rounded bg-[var(--ok-10)] text-center text-[var(--color-status-ok)]">●</span> 네이티브</span>
-      <span class="flex items-center gap-1"><span class="inline-block w-4 h-3 rounded bg-[var(--warn-10)] text-center text-[var(--color-status-warn)]">◐</span> 부분 지원</span>
-      <span class="flex items-center gap-1"><span class="inline-block w-4 h-3 rounded bg-[var(--bad-10)] text-center text-[var(--bad-light)]">○</span> 미지원</span>
+    <div class="flex items-center gap-4 t-caption px-1 flex-wrap">
+      <span class="flex items-center gap-1"><span class="chip sm is-ok">●</span> 네이티브</span>
+      <span class="flex items-center gap-1"><span class="chip sm is-warn">◐</span> 부분 지원</span>
+      <span class="flex items-center gap-1"><span class="chip sm is-err">○</span> 미지원</span>
       <span class="text-[var(--color-border-default)]">|</span>
       <span class="flex items-center gap-1"><${StatusDot} size="xs" class="bg-[var(--color-status-ok)]" /> 런타임 활성</span>
       <span class="flex items-center gap-1"><${StatusDot} size="xs" class="bg-[var(--color-status-err)]" /> 런타임 오류</span>
       <span class="text-[var(--color-border-default)]">|</span>
-      <span class="flex items-center gap-1"><span class="inline-block rounded px-1 py-px text-[7px] font-bold ${providerCategoryBadge('cloud')}">Cloud</span> API 직접</span>
-      <span class="flex items-center gap-1"><span class="inline-block rounded px-1 py-px text-[7px] font-bold ${providerCategoryBadge('cli')}">CLI</span> Subprocess</span>
-      <span class="flex items-center gap-1"><span class="inline-block rounded px-1 py-px text-[7px] font-bold ${providerCategoryBadge('local')}">Local</span> Self-hosted</span>
+      <span class="flex items-center gap-1"><span class="${providerCategoryBadge('cloud')}">Cloud</span> API 직접</span>
+      <span class="flex items-center gap-1"><span class="${providerCategoryBadge('cli')}">CLI</span> Subprocess</span>
+      <span class="flex items-center gap-1"><span class="${providerCategoryBadge('local')}">Local</span> Self-hosted</span>
     </div>
   `
 }

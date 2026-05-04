@@ -31,37 +31,37 @@ export function WiringGaps() {
         <${StatTile} label="정확" value=${correct.length} variant="gold" hint=${`${WIRING_GAPS.length} 중`} />
       </div>
 
-      <div class="flex items-center gap-2 flex-wrap text-[10px] font-mono text-[var(--color-fg-muted)] px-1">
+      <div class="flex items-center gap-2 flex-wrap t-micro mono t-dim px-1">
         ${providerCounts.map(([prov, cnt]) => html`
           <span key=${prov} class="inline-flex items-center gap-1">
-            <span class="font-medium text-[var(--color-fg-secondary)]">${prov}</span>
-            <span class="text-[var(--color-fg-disabled)]">${cnt}건</span>
+            <span class="font-semibold t-meta">${prov}</span>
+            <span class="t-dim">${cnt}건</span>
           </span>
         `)}
       </div>
 
-      <div class="overflow-x-auto rounded border border-[var(--color-border-default)]">
-        <table class="w-full text-xs border-collapse">
-          <thead>
-            <tr class="bg-[var(--white-4)]">
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">ID</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">프로바이더</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">기능</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">OAS 선언</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">실제 동작</th>
-              <th class="border-b border-[var(--color-border-default)] px-3 py-1.5 text-left font-medium text-[var(--color-fg-secondary)]">영향도</th>
+      <div class="pm-scroll">
+        <table class="pm-table">
+          <thead class="pm-thead">
+            <tr>
+              <th class="pm-th">ID</th>
+              <th class="pm-th">프로바이더</th>
+              <th class="pm-th">기능</th>
+              <th class="pm-th">OAS 선언</th>
+              <th class="pm-th">실제 동작</th>
+              <th class="pm-th">영향도</th>
             </tr>
           </thead>
           <tbody>
             ${gaps.map((gap, i) => {
               return html`
-                <tr key=${gap.id} class="${i % 2 === 0 ? '' : 'bg-[var(--white-2)]'}">
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.id}</td>
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-medium text-[var(--color-fg-primary)]">${gap.provider}</td>
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.capability}</td>
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 font-mono text-[var(--color-fg-muted)]">${gap.oasDeclares}</td>
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2 text-[var(--color-fg-secondary)]">${gap.actualBehavior}</td>
-                  <td class="border-b border-[var(--color-border-default)] px-3 py-2">
+                <tr key=${gap.id} class="pm-row-alt">
+                  <td class="pm-td pm-td--mono t-dim">${gap.id}</td>
+                  <td class="pm-td font-semibold">${gap.provider}</td>
+                  <td class="pm-td t-meta">${gap.capability}</td>
+                  <td class="pm-td pm-td--mono t-dim">${gap.oasDeclares}</td>
+                  <td class="pm-td t-meta">${gap.actualBehavior}</td>
+                  <td class="pm-td">
                     <${StatusChip} tone=${impactTone(gap.impact)}>${gap.impact.toUpperCase()}<//>
                   </td>
                 </tr>

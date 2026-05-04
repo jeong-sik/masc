@@ -466,6 +466,8 @@ let metric_keeper_cleanup_tracking_failures =
   "masc_keeper_cleanup_tracking_failures_total"
 let metric_keeper_dispatch_event_failures =
   "masc_keeper_dispatch_event_failures_total"
+let metric_keeper_directive_failures =
+  "masc_keeper_directive_failures_total"
 let metric_keeper_tool_call_duration =
   "masc_keeper_tool_call_duration_seconds"
 let metric_keeper_write_meta_failures =
@@ -1639,6 +1641,9 @@ let init () =
     "Total keeper state machine dispatch_event failures in supervisor. \
      Labeled by event type."
     Counter;
+  add metric_keeper_directive_failures
+    "Total gRPC directive routing failures — target agent not in registry \
+     or directive malformed (labels: keeper, site)" Counter;
   add metric_keeper_session_cleanup_failures
     "Total session directory cleanup failures during keeper teardown."
     Counter;

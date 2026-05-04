@@ -110,6 +110,9 @@ let set_keeper_paused_state ~agent_name paused =
     ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "pause_resume_not_in_registry")]
+        ();
       Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
     (fun entry ->
        let updated_meta =
@@ -139,6 +142,9 @@ let wakeup_keeper_by_agent_name ~agent_name =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "wakeup_not_in_registry")]
+        ();
       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
@@ -147,6 +153,9 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "claim_not_in_registry")]
+        ();
       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
     (fun entry ->
        let updated_meta =
@@ -306,6 +315,9 @@ let run_grpc_heartbeat_fiber
   =
   match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
   | None, _ | _, None ->
+    Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
+      ~labels:[("keeper", agent_name); ("site", "grpc_no_eio_context")]
+      ();
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
   | Some grpc_sw, Some env ->
@@ -383,6 +395,9 @@ let start_keeper_grpc_heartbeat
       ~interval_sec:interval
       ~clock:ctx.clock
   | Masc_grpc_transport.Grpc, None ->
+    Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
+      ~labels:[("keeper", m.name); ("site", "grpc_no_client")]
+      ();
     Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
     None
   | _ -> None

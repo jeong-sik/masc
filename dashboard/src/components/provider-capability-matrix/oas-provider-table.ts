@@ -6,15 +6,17 @@ import { formatTokens } from '../../lib/format-number'
 import {
   OAS_PROVIDER_CAPS,
   CAP_BOOLEAN_FIELDS,
+  PROVIDER_COLOR_KEY,
 } from './data'
 
 const MAX_CONTEXT = Math.max(1, ...OAS_PROVIDER_CAPS.map(p => p.maxContext))
 
-function ProviderContextBar({ maxContext }: { maxContext: number }) {
+function ProviderContextBar({ maxContext, colorKey }: { maxContext: number; colorKey: string }) {
   const pct = (maxContext / MAX_CONTEXT) * 100
+  const color = `var(--color-p-${colorKey}, var(--color-accent-fg))`
   return html`
     <div class="w-full h-1 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
-      <div class="h-full rounded-[var(--r-0)]" style="width: ${pct.toFixed(1)}%; background: var(--color-accent-fg); opacity: 0.6"></div>
+      <div class="h-full rounded-[var(--r-0)]" style="width: ${pct.toFixed(1)}%; background: ${color}; opacity: 0.6"></div>
     </div>
   `
 }
@@ -87,7 +89,7 @@ export function OasProviderTable() {
                   <td class="pm-td pm-td--right-border">
                     <div class="flex flex-col gap-0.5">
                       <span class="pm-td--mono text-right">${formatTokens(prov.maxContext)}</span>
-                      <${ProviderContextBar} maxContext=${prov.maxContext} />
+                      <${ProviderContextBar} maxContext=${prov.maxContext} colorKey=${PROVIDER_COLOR_KEY[prov.id] || 'anthropic'} />
                     </div>
                   </td>
                   <td class="pm-td pm-td--right-border pm-td--mono pm-td--right">${formatTokens(prov.maxOutput)}</td>

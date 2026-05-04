@@ -54,9 +54,19 @@
   --k-11-glow: 161 140 200;
   --k-12-glow: 184 132 179;
   --p-anthropic: #c9a88a;  /* warm sand */
-  --p-moonshot: #8a98c9;  /* cool indigo */
+  --p-kimi: #8a98c9;  /* cool indigo */
   --p-openai: #6b9e8e;  /* muted teal */
   --p-xai: #a896a0;  /* mauve */
+  --p-gemini: #7b8fb0;  /* slate blue */
+  --p-deepseek: #6aaa8a;  /* seafoam */
+  --p-qwen: #c99060;  /* warm amber */
+  --p-mistral: #7a8ec0;  /* periwinkle */
+  --p-nemotron: #7aaa6b;  /* sage green */
+  --p-ollama: #8a8a7a;  /* driftwood */
+  --p-llamacpp: #9a9a8a;  /* warm stone */
+  --p-glm: #9a7aaa;  /* muted plum */
+  --p-gemini-cli: #7b8fb0;  /* slate blue (cli) */
+  --p-codex-cli: #6b9e8e;  /* muted teal (cli) */
   --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --fs-9: 9px;
@@ -264,12 +274,32 @@
   --k-12-ring: 0 0 0 1px rgb(184 132 179 / .45), 0 0 8px rgb(184 132 179 / .35);
   --p-anthropic-soft: rgb(201 168 138 / .10);
   --p-anthropic-border: rgb(201 168 138 / .30);
-  --p-moonshot-soft: rgb(138 152 201 / .10);
-  --p-moonshot-border: rgb(138 152 201 / .30);
+  --p-kimi-soft: rgb(138 152 201 / .10);
+  --p-kimi-border: rgb(138 152 201 / .30);
   --p-openai-soft: rgb(107 158 142 / .10);
   --p-openai-border: rgb(107 158 142 / .30);
   --p-xai-soft: rgb(168 150 160 / .10);
   --p-xai-border: rgb(168 150 160 / .30);
+  --p-gemini-soft: rgb(123 143 176 / .10);
+  --p-gemini-border: rgb(123 143 176 / .30);
+  --p-deepseek-soft: rgb(106 170 138 / .10);
+  --p-deepseek-border: rgb(106 170 138 / .30);
+  --p-qwen-soft: rgb(201 144 96 / .10);
+  --p-qwen-border: rgb(201 144 96 / .30);
+  --p-mistral-soft: rgb(122 142 192 / .10);
+  --p-mistral-border: rgb(122 142 192 / .30);
+  --p-nemotron-soft: rgb(122 170 107 / .10);
+  --p-nemotron-border: rgb(122 170 107 / .30);
+  --p-ollama-soft: rgb(138 138 122 / .10);
+  --p-ollama-border: rgb(138 138 122 / .30);
+  --p-llamacpp-soft: rgb(154 154 138 / .10);
+  --p-llamacpp-border: rgb(154 154 138 / .30);
+  --p-glm-soft: rgb(154 122 170 / .10);
+  --p-glm-border: rgb(154 122 170 / .30);
+  --p-gemini-cli-soft: rgb(123 143 176 / .10);
+  --p-gemini-cli-border: rgb(123 143 176 / .30);
+  --p-codex-cli-soft: rgb(107 158 142 / .10);
+  --p-codex-cli-border: rgb(107 158 142 / .30);
   --color-bg-page: var(--bg-0);
   --color-bg-surface: var(--bg-1);
   --color-bg-panel-alt: var(--bg-2);

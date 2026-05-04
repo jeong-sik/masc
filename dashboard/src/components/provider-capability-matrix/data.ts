@@ -178,7 +178,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
 
 // Cascade tier in default OAS routing order (1 = primary).
 export const PROVIDER_CASCADE_TIER: Record<string, number> = {
-  anthropic: 1, openai: 2, moonshot: 3, google: 4,
+  anthropic: 1, openai: 2, kimi: 3, google: 4,
   deepseek: 5, xai: 6, ollama: 7,
 }
 
@@ -197,6 +197,18 @@ export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
   qwen36: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
   ollama: 'local', llamacpp: 'local', glm: 'cloud',
   gemini_cli: 'cli', codex_cli: 'cli',
+}
+
+// CSS token name for provider-specific color. Maps to --color-p-{key}.
+export const PROVIDER_COLOR_KEY: Record<string, string> = {
+  // Feature matrix providers (PROVIDER_IDS)
+  openai: 'openai', claude: 'anthropic', gemini: 'gemini', deepseek: 'deepseek',
+  qwen36: 'qwen', mistral: 'mistral', nemotron: 'nemotron', kimi: 'kimi',
+  ollama: 'ollama', llamacpp: 'llamacpp', glm: 'glm',
+  gemini_cli: 'gemini-cli', codex_cli: 'codex-cli',
+  // OAS provider IDs (OAS_PROVIDER_CAPS.id → color key)
+  anthropic: 'anthropic', 'openai-chat': 'openai', 'openai-ext': 'openai',
+  dashscope: 'qwen', 'claude-code': 'anthropic', 'kimi-cli': 'kimi',
 }
 
 // Feature grouping by functional category. Source: sec01 §1.3 Table.

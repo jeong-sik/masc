@@ -38,8 +38,8 @@
      SPEC selectors). Triplets decompose the corresponding hex semantic
      color (--accent / --ok / --warn / --bad / --purple) so callers
      compose the alpha at use site:
-       box-shadow: 0 0 8px rgb(var(--ok-glow) / 0.35)
-       background: rgb(var(--err-glow) / 0.08)
+       box-shadow: 0 0 8px rgb(var(--ok-glow) / .35)
+       background: rgb(var(--err-glow) / .08)
      SPEC source: dashboard/design-system/source_styles/tokens.css §
      "Status glow triplets". The live shell previously decomposed the
      retired bright-blue palette; this bridge follows the generated
@@ -53,42 +53,42 @@
   --brass-glow: var(--color-brass-glow);
 
   /* Semantic - Accent (Brass) */
-  --accent-soft: rgb(var(--brass-glow) / 0.16);
-  --accent-6: rgb(var(--brass-glow) / 0.06);
-  --accent-8: rgb(var(--brass-glow) / 0.08);
-  --accent-10: rgb(var(--brass-glow) / 0.10);
-  --accent-12: rgb(var(--brass-glow) / 0.12);
-  --accent-20: rgb(var(--brass-glow) / 0.20);
-  --accent-30: rgb(var(--brass-glow) / 0.30);
+  --accent-soft: rgb(var(--brass-glow) / .16);
+  --accent-6: rgb(var(--brass-glow) / .06);
+  --accent-8: rgb(var(--brass-glow) / .08);
+  --accent-10: rgb(var(--brass-glow) / .10);
+  --accent-12: rgb(var(--brass-glow) / .12);
+  --accent-20: rgb(var(--brass-glow) / .20);
+  --accent-30: rgb(var(--brass-glow) / .30);
   /* Off-alpha accent tokens absorbed from Phase B inline-rgba sweep.
      Same brass hue, opacity buckets that were already spread across
      components. Naming follows the --accent-N (N = opacity %) convention.
      Note: --accent-18 was previously pruned as unused; this PR reintroduces
      it with 5 active callsites. */
-  --accent-15: rgb(var(--brass-glow) / 0.15);
-  --accent-18: rgb(var(--brass-glow) / 0.18);
-  --accent-36: rgb(var(--brass-glow) / 0.36);
+  --accent-15: rgb(var(--brass-glow) / .15);
+  --accent-18: rgb(var(--brass-glow) / .18);
+  --accent-36: rgb(var(--brass-glow) / .36);
   /* --accent-45 reserved for focus-ring strength (high-contrast keyboard
      focus halo). Distinct semantic from -30 so the role is grep-able. */
-  --accent-45: rgb(var(--brass-glow) / 0.45);
-  --accent-5: rgb(var(--brass-glow) / 0.05);
-  --accent-25: rgb(var(--brass-glow) / 0.25);
-  --accent-35: rgb(var(--brass-glow) / 0.35);
-  --accent-40: rgb(var(--brass-glow) / 0.40);
-  --accent-50: rgb(var(--brass-glow) / 0.50);
-  --accent-60: rgb(var(--brass-glow) / 0.60);
+  --accent-45: rgb(var(--brass-glow) / .45);
+  --accent-5: rgb(var(--brass-glow) / .05);
+  --accent-25: rgb(var(--brass-glow) / .25);
+  --accent-35: rgb(var(--brass-glow) / .35);
+  --accent-40: rgb(var(--brass-glow) / .40);
+  --accent-50: rgb(var(--brass-glow) / .50);
+  --accent-60: rgb(var(--brass-glow) / .60);
 
   /* Semantic - Success (Green) */
-  --ok-soft: rgb(var(--ok-glow) / 0.15);
-  --ok-10: rgb(var(--ok-glow) / 0.10);
-  --ok-20: rgb(var(--ok-glow) / 0.20);
-  --ok-35: rgb(var(--ok-glow) / 0.35);
+  --ok-soft: rgb(var(--ok-glow) / .15);
+  --ok-10: rgb(var(--ok-glow) / .10);
+  --ok-20: rgb(var(--ok-glow) / .20);
+  --ok-35: rgb(var(--ok-glow) / .35);
 
   /* Semantic - Warning (Yellow) */
   /* --warn-bright lifted to source.ts (Iter 2c-10); FSM Compacting tint */
-  --warn-soft: rgb(var(--warn-glow) / 0.15);
-  --warn-10: rgb(var(--warn-glow) / 0.10);
-  --warn-20: rgb(var(--warn-glow) / 0.20);
+  --warn-soft: rgb(var(--warn-glow) / .15);
+  --warn-10: rgb(var(--warn-glow) / .10);
+  --warn-20: rgb(var(--warn-glow) / .20);
 
   /* Vote button Reddit-pattern colors lifted to source.ts (Iter 2c-9).
      Reddit upvote = #ff4500 remains canonical; see source.ts. */
@@ -103,13 +103,13 @@
 
   /* Semantic - Critical (Red) */
   /* --bad-light lifted to source.ts (Iter 2c-10); softer red for toasts */
-  --bad-soft: rgb(var(--err-glow) / 0.15);
+  --bad-soft: rgb(var(--err-glow) / .15);
   --err-soft: var(--bad-soft);
-  --bad-6: rgb(var(--err-glow) / 0.06);
-  --bad-10: rgb(var(--err-glow) / 0.10);
-  --bad-20: rgb(var(--err-glow) / 0.20);
-  --bad-30: rgb(var(--err-glow) / 0.30);
-  --bad-50: rgb(var(--err-glow) / 0.50);
+  --bad-6: rgb(var(--err-glow) / .06);
+  --bad-10: rgb(var(--err-glow) / .10);
+  --bad-20: rgb(var(--err-glow) / .20);
+  --bad-30: rgb(var(--err-glow) / .30);
+  --bad-50: rgb(var(--err-glow) / .50);
 
   /* Semantic - Critical Sister (Rose). Pink-red distinct from --bad
      (which leans toward warm red); used for "this provider failed"
@@ -122,9 +122,9 @@
 
   /* Extended warn off-alpha — covers densely-stacked warning chips
      where -10/-20 buckets felt either too pale or too saturated. */
-  --warn-8: rgb(var(--warn-glow) / 0.08);
-  --warn-14: rgb(var(--warn-glow) / 0.14);
-  --warn-24: rgb(var(--warn-glow) / 0.24);
+  --warn-8: rgb(var(--warn-glow) / .08);
+  --warn-14: rgb(var(--warn-glow) / .14);
+  --warn-24: rgb(var(--warn-glow) / .24);
 
   /* Semantic - Emerald. Brighter green than --ok (4ade80); used for
      "all healthy" diff badges in the config resolution panel where
@@ -204,12 +204,12 @@
   --gold-15: rgba(255, 215, 0, 0.15);
 
   /* Family extensions */
-  --ok-6: rgb(var(--ok-glow) / 0.06);
+  --ok-6: rgb(var(--ok-glow) / .06);
   --emerald-30: rgba(34, 197, 94, 0.30);
   --purple-24: rgba(167, 139, 250, 0.24);
   --slate-gray-14: rgba(148, 163, 184, 0.14);
   --slate-gray-16: rgba(148, 163, 184, 0.16);
-  --accent-22: rgb(var(--brass-glow) / 0.22);
+  --accent-22: rgb(var(--brass-glow) / .22);
 
   /* Semantic - Paused (Plum). Introduced for the 12-keeper-state spec
      in the Anyang Sleepers design system. On dark theme a lightened
@@ -416,7 +416,7 @@
   --color-accent-fg-dim: var(--brass-3);
   --color-accent-soft: var(--brass-soft);
   --color-accent-glow: var(--accent-glow);
-      /* rgb triplet form for use with rgb(var(--color-accent-glow) / 0.12)
+      /* rgb triplet form for use with rgb(var(--color-accent-glow) / .12)
          alpha math.  Previously aliased --accent (hex), but had zero
          callers; safe to repurpose as a triplet for SPEC primitives. */
 

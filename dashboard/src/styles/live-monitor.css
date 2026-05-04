@@ -15,7 +15,7 @@
 @utility pulse-selected {
   border-color: var(--color-accent-fg);
   background: var(--color-bg-elevated);
-  box-shadow: 0 0 8px rgb(var(--color-accent-glow) / 0.3);
+  box-shadow: 0 0 8px rgb(var(--color-accent-glow) / .3);
 }
 
 @utility activity-item {

@@ -65,7 +65,7 @@
 
 @utility activity-dot--live-pulse {
   background: var(--color-agent-working);
-  box-shadow: 0 0 4px rgb(var(--ok-glow) / 0.8);
+  box-shadow: 0 0 4px rgb(var(--ok-glow) / .8);
   animation: pulse 1.5s var(--ease-inout) infinite;
 }
 

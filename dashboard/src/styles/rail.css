@@ -78,7 +78,7 @@
 .tool-chip.is-last {
   border-color: var(--brass-1);
   color: var(--brass-1);
-  background: rgb(var(--brass-glow) / 0.08);
+  background: rgb(var(--brass-glow) / .08);
 }
 .tool-count {
   font-size: var(--fs-9); color: var(--color-fg-muted);
@@ -87,7 +87,7 @@
 }
 .tool-chip.is-last .tool-count {
   color: var(--brass-1);
-  background: rgb(var(--brass-glow) / 0.15);
+  background: rgb(var(--brass-glow) / .15);
 }
 
 /* Tool Timeline (inspector tab) */
@@ -123,7 +123,7 @@
   width: 7px; height: 7px; border-radius: var(--radius-circle);
   top: 50%; transform: translate(-50%, -50%);
   cursor: pointer;
-  border: 1px solid rgb(0 0 0 / 0.3);
+  border: 1px solid rgb(0 0 0 / .3);
   transition: transform var(--t-fast);
 }
 .tl-dot:hover { transform: translate(-50%, -50%) scale(1.6); z-index: 2; }

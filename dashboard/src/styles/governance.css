@@ -4,8 +4,8 @@
 /* ═══ Governance ═══ */
 
 button.governance-row.selected {
-  border-color: rgb(var(--info-glow) / 0.5);
-  background: rgb(var(--brass-glow) / 0.14);
+  border-color: rgb(var(--info-glow) / .5);
+  background: rgb(var(--brass-glow) / .14);
 }
 
 /* ── Responsive ── */
@@ -25,7 +25,7 @@ button.governance-row.selected {
   background:
     linear-gradient(
       135deg,
-      rgb(var(--color-accent-glow) / 0.03) 0%,
+      rgb(var(--color-accent-glow) / .03) 0%,
       var(--color-bg-page) 100%
     );
   box-shadow:

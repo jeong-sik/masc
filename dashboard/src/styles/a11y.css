@@ -23,14 +23,14 @@
   outline: none;
   box-shadow:
     0 0 0 1px var(--color-accent-brass),
-    0 0 0 3px rgb(var(--brass-glow) / 0.25);
+    0 0 0 3px rgb(var(--brass-glow) / .25);
 }
 
 .focusable.is-err:focus-visible {
   outline: none;
   box-shadow:
     0 0 0 1px var(--color-status-err),
-    0 0 0 3px rgb(var(--color-status-err-glow) / 0.3);
+    0 0 0 3px rgb(var(--color-status-err-glow) / .3);
 }
 
 /* Screen-reader only utility — visually hidden but accessible to assistive tech. */

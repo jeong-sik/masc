@@ -19,7 +19,7 @@ body {
   line-height: var(--lh-body);
   background-color: var(--color-bg-page);
   background-image:
-    radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / 0.05), transparent 20%);
+    radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / .05), transparent 20%);
   background-attachment: fixed;
   position: relative;
 }

@@ -199,7 +199,7 @@ tbody tr:hover {
 #app > div > header {
   border-color: var(--color-border-default);
   padding-block: 6px;
-  box-shadow: inset 0 -1px 0 rgb(var(--brass-glow) / 0.08);
+  box-shadow: inset 0 -1px 0 rgb(var(--brass-glow) / .08);
 }
 
 #app > div > div.flex-1 {
@@ -211,7 +211,7 @@ tbody tr:hover {
 #main-content {
   border-color: var(--color-border-default);
   border-radius: var(--r-1);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.015);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .015);
 }
 
 #main-content > div {

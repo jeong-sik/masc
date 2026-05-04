@@ -21,8 +21,8 @@ export function nodeColor(kind: string, status: string): string {
     case 'task': return 'var(--color-status-warn)'
     case 'decision': return 'var(--purple)'
     case 'operation': return 'var(--color-status-ok)'
-    case 'debate': return 'var(--color-orange-400)'
-    case 'post': return 'var(--color-pink-400)'
+    case 'debate': return 'var(--color-amber-bright)'
+    case 'post': return 'var(--color-rose-light)'
     default: return 'var(--color-fg-muted)'
   }
 }
@@ -254,7 +254,7 @@ export function GraphView({ data }: GraphViewProps) {
         { label: '작업', color: 'var(--color-status-warn)' },
         { label: '결정', color: 'var(--purple)' },
         { label: '작전', color: 'var(--color-status-ok)' },
-        { label: '게시글', color: 'var(--color-pink-400)' },
+        { label: '게시글', color: 'var(--color-rose-light)' },
       ].map(({ label, color }) => html`
         <div class="flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]" key=${label}>
           <span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${color}"></span>

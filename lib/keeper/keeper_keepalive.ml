@@ -92,6 +92,10 @@ let persist_directive_meta_update
       entry.name
       updated_meta
   | Error msg ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_write_meta_failures
+      ~labels:[("keeper", entry.name); ("site", "directive_persist")]
+      ();
     Log.Keeper.warn
       "directive meta persist failed for %s: %s"
       entry.name
@@ -106,6 +110,9 @@ let set_keeper_paused_state ~agent_name paused =
     ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "pause_resume_not_in_registry")]
+        ();
       Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
     (fun entry ->
        let updated_meta =
@@ -135,6 +142,9 @@ let wakeup_keeper_by_agent_name ~agent_name =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "wakeup_not_in_registry")]
+        ();
       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
@@ -143,6 +153,9 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_keeper_directive_failures
+        ~labels:[("keeper", agent_name); ("site", "claim_not_in_registry")]
+        ();
       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
     (fun entry ->
        let updated_meta =
@@ -234,14 +247,19 @@ let run_grpc_heartbeat_stream
          send (make_grpc_heartbeat_ping ~agent_name ~session_id);
          match recv () with
          | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
-         | Error err -> Log.Keeper.warn "gRPC heartbeat recv: %s" err
+         | Error err ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_heartbeat_failures
+             ~labels:[("keeper", agent_name); ("site", "grpc_recv")]
+             ();
+           Log.Keeper.warn "gRPC heartbeat recv: %s" err
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file
        | exn ->
          Prometheus.inc_counter
            Prometheus.metric_keeper_heartbeat_failures
-           ~labels:[("keeper", agent_name)]
+           ~labels:[("keeper", agent_name); ("site", "grpc_tick")]
            ();
          Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
       if not (Atomic.get stop || Atomic.get close_ref)
@@ -263,8 +281,8 @@ let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
       Env_config.KeeperGrpc.max_reconnect_attempts
   | `Error exn ->
     Prometheus.inc_counter
-      "masc_keeper_grpc_stream_failures"
-      ~labels:[("keeper", agent_name)]
+      Prometheus.metric_keeper_heartbeat_failures
+      ~labels:[("keeper", agent_name); ("site", "grpc_stream")]
       ();
     Log.Keeper.warn
       "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
@@ -297,6 +315,9 @@ let run_grpc_heartbeat_fiber
   =
   match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
   | None, _ | _, None ->
+    Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
+      ~labels:[("keeper", agent_name); ("site", "grpc_no_eio_context")]
+      ();
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
   | Some grpc_sw, Some env ->
@@ -308,10 +329,14 @@ let run_grpc_heartbeat_fiber
         then ()
         else if attempts >= max_reconnect_attempts
         then
-          Log.Keeper.error
+          (Prometheus.inc_counter
+             Prometheus.metric_keeper_heartbeat_failures
+             ~labels:[("keeper", agent_name); ("site", "grpc_reconnect_exhausted")]
+             ();
+           Log.Keeper.error
             "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
             max_reconnect_attempts
-            agent_name
+            agent_name)
         else (
           let send, recv, close_stream =
             Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
@@ -370,6 +395,9 @@ let start_keeper_grpc_heartbeat
       ~interval_sec:interval
       ~clock:ctx.clock
   | Masc_grpc_transport.Grpc, None ->
+    Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
+      ~labels:[("keeper", m.name); ("site", "grpc_no_client")]
+      ();
     Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
     None
   | _ -> None
@@ -470,6 +498,10 @@ let dispatch_fiber_started ~base_path keeper_name =
   match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
   | Ok _ -> ()
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_dispatch_event_failures
+        ~labels:[("keeper", keeper_name); ("site", "fiber_started_rejected")]
+        ();
       Log.Keeper.warn
         "keeper %s: Fiber_started rejected during launch: %s"
         keeper_name
@@ -531,6 +563,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
   =
   match repair_identity_drift_for_keepalive ~ctx m with
   | None ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_heartbeat_failures
+        ~labels:[("keeper", m.name); ("phase", "identity_drift_unrepairable")]
+        ();
       Log.Keeper.error
         "start_keepalive skipped %s: identity drift could not be repaired"
         m.name
@@ -615,8 +651,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         | Eio.Cancel.Cancelled _ -> ()
         | e ->
           Prometheus.inc_counter
-            "masc_keeper_cleanup_tracking_failures"
-            ~labels:[("keeper", live_meta.name)]
+            Prometheus.metric_keeper_cleanup_tracking_failures
+            ~labels:[("keeper", live_meta.name); ("site", "heartbeat_finally")]
             ();
           Log.Keeper.warn
             "%s: cleanup_tracking in heartbeat finally raised: %s"
@@ -647,6 +683,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             if Atomic.get stop then
               record_stopped "manual stop"
             else begin
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_heartbeat_failures
+                ~labels:[("keeper", live_meta.name); ("phase", "loop_crash")]
+                ();
               Log.Keeper.error
                 "heartbeat loop for %s crashed: %s"
                 live_meta.name

@@ -24,16 +24,11 @@ val supervise_keepalive :
 
 val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
-(** Fork a stale-turn watchdog fiber for the given keeper.
-
-    Two detection modes:
-    - Idle stall: [last_turn_ts] older than 300s while [Running].
-    - Failure loop: [consecutive_noop_count >= 3] — catches keepers in
-      LLM timeout loops where [last_turn_ts] stays fresh.
-
-    On detection, sets [fiber_stop] and emits a stale broadcast. The
-    supervisor's [sweep_and_recover] picks up the stopped fiber and
-    restarts with exponential backoff. *)
+(** Fork a stale-turn watchdog fiber for the given keeper.  This is a
+    re-export of {!Keeper_stale_watchdog.fork_stale_watchdog}; see
+    that module's docstring for the authoritative description of the
+    three detection modes ([Idle_turn] / [In_turn_hung] /
+    [Noop_failure_loop]) and per-class Prometheus counter. *)
 
 (** {1 Sweep and Recovery} *)
 

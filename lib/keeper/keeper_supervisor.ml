@@ -137,11 +137,11 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
        Log.Keeper.warn
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
-         (Keeper_state_machine.transition_error_to_string err));
-  Prometheus.inc_counter
-    Prometheus.metric_keeper_supervisor_cleanup_failures
-    ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
-  ();
+         (Keeper_state_machine.transition_error_to_string err);
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_supervisor_cleanup_failures
+         ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
+         ());
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -1354,8 +1354,13 @@ let should_attempt_liveness_recovery ~now
   else if entry.conditions.zombie_timeout_reached then false
   else
     let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
-    let dead_since = Option.value ~default:0.0 entry.dead_since_ts in
-    dead_since > 0.0 && now -. dead_since >= min_dead_sec
+    (* Pattern-match dead_since_ts directly: collapsing None -> 0.0 via
+       Option.value created a strict-`>` guard that rejected legitimate
+       at:0.0 fixtures (the synthetic epoch used in tests like
+       liveness_recovery_2 — see #12826). *)
+    match entry.dead_since_ts with
+    | None -> false
+    | Some dead_since -> now -. dead_since >= min_dead_sec
 
 let liveness_recovery_scan (ctx : _ context) =
   if not Env_config.KeeperSupervisor.liveness_recovery_enabled then ()

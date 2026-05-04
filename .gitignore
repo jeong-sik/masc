@@ -140,6 +140,7 @@ tmp_edit/
 data/economy/
 data/harness-pre-compact/
 data/verdicts/
+data/bench/
 memory/
 
 # End of .gitignore

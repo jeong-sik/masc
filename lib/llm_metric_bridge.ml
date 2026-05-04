@@ -55,6 +55,22 @@ let emit_capability_drop ~model_id ~field =
     ~labels:[("model", model_id); ("field", field)]
     ()
 
+(** Canonical metric name for the unified fallback counter (§7.3.2 Zero
+    Silent Failure). Per-class counters (capability_drops,
+    cross_cascade_fallback) remain for drill-down; this is the single
+    numerator across all classes for the dashboard panel. *)
+let fallback_triggered_metric = Prometheus.metric_fallback_triggered
+
+(** Emit a fallback observation to the unified counter.
+    [kind]   one of: cross_cascade | cascade_empty | capability_drop
+                   | cli_unsupported | provider_error_fallback | …
+    [detail] free-form drill-down (rejection_reason, target provider,
+             dropped field, …). Cardinality bounded by callers. *)
+let emit_fallback_triggered ~kind ~detail =
+  Prometheus.inc_counter fallback_triggered_metric
+    ~labels:[("kind", kind); ("detail", detail)]
+    ()
+
 (** Per-HTTP-request latency histogram.  Distinct from
     [masc_llm_inference_duration_seconds] (turn-scope, populated by the
     keeper AfterTurn hook): this metric is per provider HTTP call, so

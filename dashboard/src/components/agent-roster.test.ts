@@ -55,7 +55,7 @@ describe('runtimeBadgeClass', () => {
   })
 
   it('returns purple classes for paused', () => {
-    expect(runtimeBadgeClass('paused')).toContain('purple-')
+    expect(runtimeBadgeClass('paused')).toContain('var(--purple-12)')
   })
 
   it('returns dim classes for unknown band', () => {
@@ -77,11 +77,11 @@ describe('stageBadgeClass', () => {
   })
 
   it('returns purple classes for handoff', () => {
-    expect(stageBadgeClass('handoff')).toContain('purple-')
+    expect(stageBadgeClass('handoff')).toContain('var(--purple-12)')
   })
 
   it('returns purple classes for compacting', () => {
-    expect(stageBadgeClass('compacting')).toContain('purple-')
+    expect(stageBadgeClass('compacting')).toContain('var(--purple-12)')
   })
 
   it('returns bad classes for failing', () => {

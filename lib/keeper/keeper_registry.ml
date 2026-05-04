@@ -323,7 +323,11 @@ let register_with_state ~base_path name meta
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
-       Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
+       Prometheus.inc_counter
+        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        ~labels:[("keeper", name); ("event", "register_overwrite_running")]
+        ();
+      Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
    | _ -> ());
   let entry = {
@@ -439,6 +443,10 @@ let () =
       update_meta ~base_path:config.base_path meta.name meta)
 
 let mark_dead ~base_path name ~at =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_lifecycle_transitions
+    ~labels:[("keeper", name); ("from_phase", "direct"); ("to_phase", "Dead")]
+    ();
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
     if entry.phase <> Dead then begin
@@ -505,6 +513,10 @@ let broadcast_composite_changed ~name ~ts_unix =
          inside broadcast_impl — exceptions thrown out of
          Sse.broadcast itself bypass that counter.  Logging here
          makes the exception visible at the call site. *)
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        ~labels:[("keeper", name); ("event", "broadcast_composite_failed")]
+        ();
       Log.Keeper.warn
         "registry: broadcast_composite_changed name=%s failed: %s"
         name (Printexc.to_string exn)
@@ -1072,7 +1084,11 @@ let restore_tool_usage ~base_path name =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
+           Prometheus.inc_counter
+          Prometheus.metric_keeper_checkpoint_failures
+          ~labels:[("keeper", name); ("site", "restore_tool_usage")]
+          ();
+       Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 

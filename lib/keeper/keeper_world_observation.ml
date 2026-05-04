@@ -832,10 +832,15 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
          meta.name ts post_id (fst base_cursor)
          (Option.value ~default:"" (snd base_cursor))
      | None ->
-       if final_events <> [] then
+       if final_events <> [] then begin
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_observation_query_failures
+           ~labels:[("operation", "cursor_stale")]
+           ();
          Log.Keeper.warn
            "board cursor not updated for %s despite %d events processed"
-           meta.name (List.length final_events));
+           meta.name (List.length final_events)
+       end);
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1229,6 +1234,10 @@ let keeper_cycle_decision
                    tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_observation_query_failures
+                  ~labels:[("operation", "empty_run_reasons")]
+                  ();
                 Log.Keeper.warn
                   "unreachable: should_run=true but run_reasons is empty";
                 Skip { reasons = (No_signal, []) }

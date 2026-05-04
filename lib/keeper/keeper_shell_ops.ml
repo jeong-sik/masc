@@ -1248,6 +1248,10 @@ let handle_keeper_shell
                   restore. Route through the appropriate structured \
                   keeper tool or post on the board for operator approval."
            in
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_shell_ops_failures
+             ~labels:[("keeper", meta.name)]
+             ();
            Log.Keeper.warn
              "keeper_shell op=gh R2 blocked: %s (keeper=%s)"
              canonical_cmd_str meta.name;

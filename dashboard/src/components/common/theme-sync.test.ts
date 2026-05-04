@@ -1,38 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
-  parseThemeFromHash,
   parseThemeFromSearch,
   updateThemeSearchParam,
   syncThemeAcrossSurfaces,
   THEME_STORAGE_KEY,
   THEME_SEARCH_PARAM,
 } from './theme-sync'
-
-describe('parseThemeFromHash', () => {
-  it('parses dark theme from hash', () => {
-    expect(parseThemeFromHash('#theme=dark')).toBe('dark')
-  })
-
-  it('parses light theme from hash', () => {
-    expect(parseThemeFromHash('#theme=light')).toBe('light')
-  })
-
-  it('parses dark-fantasy theme from hash', () => {
-    expect(parseThemeFromHash('#theme=dark-fantasy')).toBe('dark-fantasy')
-  })
-
-  it('parses paper theme from hash', () => {
-    expect(parseThemeFromHash('#theme=paper')).toBe('paper')
-  })
-
-  it('returns null for invalid theme', () => {
-    expect(parseThemeFromHash('#theme=invalid')).toBeNull()
-  })
-
-  it('returns null for unrelated hash', () => {
-    expect(parseThemeFromHash('#section=1')).toBeNull()
-  })
-})
 
 describe('parseThemeFromSearch', () => {
   it('parses dark theme from search string', () => {

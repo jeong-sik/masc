@@ -23,11 +23,11 @@ function makeKeeper(partial: Partial<Keeper> = {}): Keeper {
 // ─── topologyNodeColor ────────────────────────────────────────────────────────
 
 describe('topologyNodeColor', () => {
-  it('returns disabled color for offline agent', () => {
+  it('returns dim color for offline agent', () => {
     expect(topologyNodeColor('agent', 'offline')).toBe('var(--color-fg-disabled)')
   })
 
-  it('returns disabled color for inactive agent', () => {
+  it('returns dim color for inactive agent', () => {
     expect(topologyNodeColor('agent', 'inactive')).toBe('var(--color-fg-disabled)')
   })
 
@@ -39,7 +39,7 @@ describe('topologyNodeColor', () => {
     expect(topologyNodeColor('agent', 'busy')).toBe('var(--cyan)')
   })
 
-  it('returns info border for idle agent', () => {
+  it('returns muted cyan for idle agent', () => {
     expect(topologyNodeColor('agent', 'idle')).toBe('var(--info-border)')
   })
 
@@ -51,11 +51,11 @@ describe('topologyNodeColor', () => {
     expect(topologyNodeColor('task', 'awaiting_verification')).toBe('var(--color-status-warn)')
   })
 
-  it('returns ok border for done task', () => {
+  it('returns muted green for done task', () => {
     expect(topologyNodeColor('task', 'done')).toBe('var(--ok-border)')
   })
 
-  it('returns warn fg for in_progress task', () => {
+  it('returns yellow for in_progress task', () => {
     expect(topologyNodeColor('task', 'in_progress')).toBe('var(--warn-fg)')
   })
 })

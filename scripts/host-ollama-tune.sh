@@ -33,23 +33,38 @@ set -euo pipefail
 
 KEEP_ALIVE_TARGET="${OLLAMA_KEEP_ALIVE_TARGET:--1}"
 NUM_PARALLEL_TARGET="${OLLAMA_NUM_PARALLEL_TARGET:-1}"
+# KV cache quantization saves ~50% (q8_0) or ~75% (q4_0) of context-cache RAM.
+# Required for 70GB BF16 models to fit under 80GB RAM ceiling with 256K ctx.
+# Requires FLASH_ATTENTION=1; falls back to f16 silently when unsupported.
+FLASH_ATTENTION_TARGET="${OLLAMA_FLASH_ATTENTION_TARGET:-1}"
+KV_CACHE_TYPE_TARGET="${OLLAMA_KV_CACHE_TYPE_TARGET:-q8_0}"
 
 usage() {
   sed -n '1,32p' "$0"
 }
 
 show_current() {
-  local ka np
+  local ka np fa kv
   ka="$(launchctl getenv OLLAMA_KEEP_ALIVE 2>/dev/null || true)"
   np="$(launchctl getenv OLLAMA_NUM_PARALLEL 2>/dev/null || true)"
-  printf 'OLLAMA_KEEP_ALIVE   current=%-6s target=%s\n' "${ka:-<unset>}" "$KEEP_ALIVE_TARGET"
-  printf 'OLLAMA_NUM_PARALLEL current=%-6s target=%s\n' "${np:-<unset>}" "$NUM_PARALLEL_TARGET"
+  fa="$(launchctl getenv OLLAMA_FLASH_ATTENTION 2>/dev/null || true)"
+  kv="$(launchctl getenv OLLAMA_KV_CACHE_TYPE 2>/dev/null || true)"
+  printf 'OLLAMA_KEEP_ALIVE       current=%-6s target=%s\n' "${ka:-<unset>}" "$KEEP_ALIVE_TARGET"
+  printf 'OLLAMA_NUM_PARALLEL     current=%-6s target=%s\n' "${np:-<unset>}" "$NUM_PARALLEL_TARGET"
+  printf 'OLLAMA_FLASH_ATTENTION  current=%-6s target=%s\n' "${fa:-<unset>}" "$FLASH_ATTENTION_TARGET"
+  printf 'OLLAMA_KV_CACHE_TYPE    current=%-6s target=%s\n' "${kv:-<unset>}" "$KV_CACHE_TYPE_TARGET"
 }
 
 apply() {
-  echo "Setting launchctl env (OLLAMA_KEEP_ALIVE=$KEEP_ALIVE_TARGET, OLLAMA_NUM_PARALLEL=$NUM_PARALLEL_TARGET)..."
+  echo "Setting launchctl env:"
+  echo "  OLLAMA_KEEP_ALIVE=$KEEP_ALIVE_TARGET"
+  echo "  OLLAMA_NUM_PARALLEL=$NUM_PARALLEL_TARGET"
+  echo "  OLLAMA_FLASH_ATTENTION=$FLASH_ATTENTION_TARGET"
+  echo "  OLLAMA_KV_CACHE_TYPE=$KV_CACHE_TYPE_TARGET"
   launchctl setenv OLLAMA_KEEP_ALIVE "$KEEP_ALIVE_TARGET"
   launchctl setenv OLLAMA_NUM_PARALLEL "$NUM_PARALLEL_TARGET"
+  launchctl setenv OLLAMA_FLASH_ATTENTION "$FLASH_ATTENTION_TARGET"
+  launchctl setenv OLLAMA_KV_CACHE_TYPE "$KV_CACHE_TYPE_TARGET"
 
   if pgrep -x Ollama >/dev/null 2>&1; then
     echo "Restarting Ollama.app to pick up new env..."
@@ -75,6 +90,8 @@ apply() {
   echo "macOS reboots, also add the following to ~/.zshenv:"
   echo "  export OLLAMA_KEEP_ALIVE=$KEEP_ALIVE_TARGET"
   echo "  export OLLAMA_NUM_PARALLEL=$NUM_PARALLEL_TARGET"
+  echo "  export OLLAMA_FLASH_ATTENTION=$FLASH_ATTENTION_TARGET"
+  echo "  export OLLAMA_KV_CACHE_TYPE=$KV_CACHE_TYPE_TARGET"
 }
 
 case "${1:-}" in

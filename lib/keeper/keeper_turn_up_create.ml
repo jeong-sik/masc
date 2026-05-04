@@ -119,6 +119,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~allowed_paths
     with
     | Error err ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
+          ();
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
           p.name err;
         (false, err)
@@ -128,6 +132,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
         with
         | Error err ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_lifecycle_dispatch_rejections
+              ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
+              ();
             Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
               p.name err;
             (false, err)
@@ -137,6 +145,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             in
             let active_keepers = Keeper_registry.count_running () in
             if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
+              Prometheus.inc_counter
+                Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
+                ();
               Log.Keeper.warn
                 "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
                 active_keepers max_active_keepers p.name;
@@ -314,6 +326,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
               | Error err ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                    ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
+                    ();
                   Log.Keeper.error
                     "create_keeper failed: generated invalid trace_id for name=%s: %s"
                     p.name err;
@@ -523,6 +539,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       match init_save_result with
       | Error e ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_checkpoint_failures
+          ~labels:[("keeper", p.name); ("site", "create_initial_save")]
+          ();
         Log.Keeper.error
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
           p.name e;
@@ -546,6 +566,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          | Ok _ ->
              Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
          | Error err ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_dispatch_rejections
+               ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
+               ();
              Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
                agent_name (Types.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();

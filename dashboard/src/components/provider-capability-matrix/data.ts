@@ -6,6 +6,8 @@
 
 export type FeatureSupport = '●' | '◐' | '○' | '—'
 
+export type CategoryLevel = 'high' | 'mid' | 'low'
+
 export interface FeatureDef {
   id: string
   label: string
@@ -334,14 +336,13 @@ export function categoryLevelLabel(level: CategoryLevel): string {
   }
 }
 
-export function scoreBucket(score: string): string {
+export function scoreColor(score: string): string {
   const v = parseFloat(score)
-  if (v >= 75) return 'z4'
-  if (v >= 65) return 'z3'
-  if (v >= 55) return 'z2'
-  if (v >= 45) return 'z1'
-  return 'z0'
+  if (v >= 75) return 'text-[var(--color-status-ok)]'
+  if (v >= 50) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--bad-light)]'
 }
+
 
 // ── Function Calling Harness Case Study ──────────────────────────
 

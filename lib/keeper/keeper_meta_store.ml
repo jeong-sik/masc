@@ -28,6 +28,10 @@ let read_meta_file_path path : (keeper_meta option, string) result =
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_meta_read_failures
+           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
+           ();
          Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
          Error e))
 ;;
@@ -57,6 +61,10 @@ let persisted_keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_meta_read_failures
+      ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
+      ();
     Log.Keeper.warn "persisted_keeper_names: failed to list directory %s: %s" dir e;
     []
   | Ok files ->
@@ -102,6 +110,10 @@ let keepalive_keeper_names config =
          treat a corrupt meta file as if the keeper was deleted,
          hiding the operational issue. Now logs and excludes so the
          degraded state is operator-visible. *)
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_meta_read_failures
+        ~labels:[("keeper", name); ("site", "keepalive_read")]
+        ();
       Log.Keeper.warn
         "keepalive_keeper_names: meta read failed for %s, dropping from keepalive set: %s"
         name
@@ -128,6 +140,10 @@ let persistent_agent_names config =
          Error was silently collapsed into None. Operator can't
          distinguish "keeper intentionally not persistent" from
          "meta file is corrupt and we couldn't read it". *)
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_meta_read_failures
+        ~labels:[("keeper", name); ("site", "persistent_read")]
+        ();
       Log.Keeper.warn
         "persistent_agent_names: meta read failed for %s, treating as non-persistent: %s"
         name
@@ -213,6 +229,10 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
            (* Issue #8377: was [_ -> None] which silently treated a
               read/parse failure as "no change". Now logs so an
               operator can correlate stale UI with bad meta JSON. *)
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_meta_read_failures
+             ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
+             ();
            Log.Keeper.warn
              "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
              path
@@ -339,6 +359,10 @@ let write_meta_with_retry ?(max_retries = 3) config (m : keeper_meta)
          onto its version, and try again. *)
       (match read_meta_file_path path with
        | Ok (Some latest) ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_write_meta_failures
+           ~labels:[("keeper", m.name); ("phase", "cas_retry")]
+           ();
          Log.Keeper.warn
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d)"
            (n + 1)
@@ -377,6 +401,10 @@ let write_meta_with_merge
     | Error _ ->
       (match read_meta_file_path path with
        | Ok (Some latest) ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_write_meta_failures
+           ~labels:[("keeper", caller.name); ("phase", "cas_retry_merge")]
+           ();
          Log.Keeper.warn
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"
            (n + 1)

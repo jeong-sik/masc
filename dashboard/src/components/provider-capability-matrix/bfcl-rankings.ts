@@ -8,7 +8,7 @@ import {
   BFCL_MODEL_BREAKDOWN,
   HARNESS_MODELS,
   MCPMARK_ENTRIES,
-  scoreBucket,
+  scoreColor,
 } from './data'
 
 function V4CategoryTable() {
@@ -59,9 +59,7 @@ function ModelBreakdownTable() {
               <td class="pm-td font-semibold">${m.model}</td>
               <td class="pm-td pm-td--center pm-td--mono font-bold">${m.overall}</td>
               ${([m.singleTurn, m.multiTurn, m.agentic, m.hallucination, m.format] as const).map((score, j) => html`
-                <td key=${j} class="pm-td pm-td--center">
-	                  <span class="pm-cell-badge ${scoreBucket(score)}">${score}</span>
-	                </td>
+                <td key=${j} class="pm-td pm-td--center pm-td--mono ${scoreColor(score)}">${score}</td>
               `)}
             </tr>
           `)}
@@ -147,12 +145,10 @@ function McpMarkTable() {
               </tr>
             </thead>
             <tbody>
-              ${MCPMARK_ENTRIES.map((e) => html`
+              ${MCPMARK_ENTRIES.map((e, i) => html`
                 <tr key=${e.model} class="pm-row-alt">
                   <td class="pm-td pm-td--mono font-semibold">${e.model}</td>
-                  <td class="pm-td pm-td--center">
-                    <span class="pm-cell-badge ${scoreBucket(e.passAt1)}">${e.passAt1}</span>
-                  </td>
+                  <td class="pm-td pm-td--center pm-td--mono font-bold ${i === 0 ? 't-ok' : ''}">${e.passAt1}</td>
                   <td class="pm-td pm-td--right pm-td--mono">${e.avgAgentTime}</td>
                   <td class="pm-td pm-td--right pm-td--mono">${e.costPerRun}</td>
                   <td class="pm-td t-micro t-dim">${e.note}</td>
@@ -165,6 +161,7 @@ function McpMarkTable() {
     </div>
   `
 }
+
 
 export function BfclRankings() {
   return html`

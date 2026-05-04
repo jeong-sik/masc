@@ -53,7 +53,11 @@ let prune ~(session_dir : string) ~(keep : int) : int =
       (try Sys.remove path
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Keeper.warn "checkpoint cleanup failed for %s: %s"
-           path (Printexc.to_string exn)))
+           path (Printexc.to_string exn);
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_checkpoint_failures
+           ~labels:[("keeper", "aggregate"); ("operation", "cleanup")]
+           ()))
       to_remove;
     List.length to_remove
 
@@ -84,7 +88,11 @@ let save
     (* Auto-prune old checkpoints after each save *)
     ignore (prune ~session_dir ~keep:max_checkpoints_retained)
   | Error msg ->
-    Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg
+    Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg;
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_checkpoint_failures
+      ~labels:[("site", "save")]
+      ()
 
 (* ================================================================ *)
 (* Load Latest                                                        *)
@@ -124,6 +132,10 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
      | exn ->
        Log.Keeper.warn "malformed checkpoint ignored in %s: %s"
          path (Printexc.to_string exn);
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_checkpoint_failures
+         ~labels:[("keeper", "aggregate"); ("operation", "malformed_load")]
+         ();
        None)
 
 (* ================================================================ *)
@@ -186,9 +198,17 @@ let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : u
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
-                 path (Printexc.to_string exn))
+                 path (Printexc.to_string exn);
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_checkpoint_failures
+                 ~labels:[("site", "oas_cleanup")]
+                 ())
   | Error msg ->
-    Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg
+    Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg;
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_checkpoint_failures
+      ~labels:[("site", "oas_save")]
+      ()
 
 let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
     : string list * string list =
@@ -204,6 +224,10 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
         | exn ->
             Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
               path (Printexc.to_string exn);
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_checkpoint_failures
+              ~labels:[("site", "oas_delete")]
+              ();
             (deleted, snapshot_id :: missing))
       else
         (deleted, snapshot_id :: missing))
@@ -222,7 +246,11 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-             ckpt.session_id (Printexc.to_string exn));
+             ckpt.session_id (Printexc.to_string exn);
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_checkpoint_failures
+             ~labels:[("site", "oas_archive_fallback")]
+             ());
       Ok ()
     | Error msg -> Error msg
   in
@@ -239,7 +267,11 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn ->
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-                        ckpt.session_id (Printexc.to_string exn));
+                        ckpt.session_id (Printexc.to_string exn);
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_checkpoint_failures
+                        ~labels:[("site", "oas_archive_primary")]
+                        ());
                  Ok ()
              | Error err -> Error (Agent_sdk.Error.to_string err))
          | Error err -> Error (Agent_sdk.Error.to_string err))

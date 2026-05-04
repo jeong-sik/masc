@@ -1269,12 +1269,28 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
      did this restart use defaults instead of the OAS checkpoint?" *)
   (match oas_result with
    | Error (Parse_error detail) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_checkpoint_failures
+         ~labels:[("operation", "oas_parse")]
+         ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_checkpoint_failures
+         ~labels:[("operation", "oas_store")]
+         ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_checkpoint_failures
+         ~labels:[("operation", "oas_io")]
+         ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_checkpoint_failures
+         ~labels:[("operation", "oas_sdk")]
+         ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s OAS checkpoint not found, falling back to legacy loader" trace_id
@@ -1324,6 +1340,10 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
         (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
          | Ok () -> ()
          | Error detail ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_checkpoint_failures
+               ~labels:[("operation", "migration_save")]
+               ();
              Log.Keeper.error
                "keeper:%s checkpoint migration save failed: %s"
                trace_id detail)

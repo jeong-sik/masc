@@ -128,6 +128,10 @@ let start_drain_fiber ~sw ~clock =
       List.iter (fun ev ->
         (try write_event ev
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_crash_persistence_failures
+             ~labels:[("site", "crash_write")]
+             ();
            Log.Keeper.warn "crash persistence write failed for %s: %s"
              ev.name (Printexc.to_string exn))
       ) batch;
@@ -135,6 +139,10 @@ let start_drain_fiber ~sw ~clock =
       List.iter (fun ev ->
         (try write_sp_event ev
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_crash_persistence_failures
+             ~labels:[("site", "sp_write")]
+             ();
            Log.Keeper.warn "sp persistence write failed: %s"
              (Printexc.to_string exn))
       ) sp_batch

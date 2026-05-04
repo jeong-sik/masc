@@ -10,7 +10,7 @@
 
 import { html } from 'htm/preact'
 
-export interface ToolConfig {
+interface ToolConfig {
   icon: string
   label: string
   description: string

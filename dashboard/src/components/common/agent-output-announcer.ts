@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 
-export interface AgentOutput {
+interface AgentOutput {
   id: string
   type: 'code' | 'text' | 'table' | 'error'
   content: string

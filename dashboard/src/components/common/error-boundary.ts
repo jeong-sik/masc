@@ -14,7 +14,7 @@ interface ErrorBoundaryInfo {
 // retry. Adding `severity` keeps the existing default while letting callers
 // opt into the gentler recoverable framing, and the fatal default now also
 // carries an explicit reload button per spec.
-export type ErrorBoundarySeverity = 'recoverable' | 'fatal'
+type ErrorBoundarySeverity = 'recoverable' | 'fatal'
 
 interface Props {
   label?: string

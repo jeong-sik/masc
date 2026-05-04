@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { AgentPresence } from './agent-presence'
 
-export interface DelegationNode {
+interface DelegationNode {
   agentId: string
   task: string
   status: 'pending' | 'active' | 'completed' | 'failed'

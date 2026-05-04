@@ -12,7 +12,7 @@ import { useControllableState } from './use-controllable-state'
 
 type PageItem = number | 'ellipsis-start' | 'ellipsis-end'
 
-export interface PaginationProps {
+interface PaginationProps {
   page?: number
   defaultPage?: number
   totalPages: number

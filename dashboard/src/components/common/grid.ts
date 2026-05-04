@@ -5,12 +5,12 @@
 import { html } from 'htm/preact'
 import { useCallback, useRef, useState } from 'preact/hooks'
 
-export interface GridColumn {
+interface GridColumn {
   key: string
   header: string
 }
 
-export interface GridRow {
+interface GridRow {
   id: string
   [key: string]: string
 }

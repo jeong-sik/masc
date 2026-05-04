@@ -58,7 +58,7 @@ function extractGeneratedNicknamePrefix(name: string): string | null {
   return null
 }
 
-export function keeperNameFromAgentName(agentName: string | null | undefined): string | null {
+function keeperNameFromAgentName(agentName: string | null | undefined): string | null {
   const trimmed = trimmedOrNull(agentName)
   if (!trimmed) return null
 

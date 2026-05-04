@@ -254,9 +254,23 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-          <${StatTile} label="Progress" value=${progress === null ? 'n/a' : `${progress}%`} variant=${progress !== null && progress > 80 ? 'accent' : 'default'} />
-          <${StatTile} label="Status" value=${status.toUpperCase()} variant=${status === 'running' || status === 'active' ? 'accent' : 'default'} />
+          <${StatTile}
+            label="Progress"
+            value=${progress === null ? 'n/a' : `${progress}%`}
+            status=${progress !== null && progress > 80 ? 'ok' : progress !== null ? 'brass' : undefined}
+            delta=${progress !== null ? { direction: progress > 50 ? 'up' : 'flat', text: progress > 80 ? 'on track' : `${progress}%` } : undefined}
+          />
+          <${StatTile}
+            label="Status"
+            value=${status.toUpperCase()}
+            status=${status === 'running' || status === 'active' ? 'ok' : status === 'paused' ? 'warn' : 'brass'}
+          />
         </div>
+        ${progress !== null ? html`
+          <div class="bar ${progress > 80 ? 'is-ok' : progress > 50 ? '' : 'is-warn'}">
+            <span class="fill" style="width: ${progress}%"></span>
+          </div>
+        ` : null}
       </div>
     <//>
   `

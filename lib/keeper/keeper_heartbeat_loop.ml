@@ -708,8 +708,12 @@ let run_keepalive_unified_turn
         | Error (`Semaphore_wait_timeout wait_sec) ->
           (* Peers held the turn semaphore longer than the wait cap — not a
              keeper failure. Skip this cycle and let the next heartbeat retry
-             once a slot opens up. Meta is left untouched so failure counters
-             do not tick. *)
+             once a slot opens up. Failure counters intentionally NOT ticked
+             (this is starvation, not crash); but [last_blocker_class] IS
+             updated so the dashboard surfaces the stuck reason — without it
+             the keeper appears as [outcome=never_started, blocker_class=null]
+             and operators see "alive but invisible" (2026-05-05 fleet stuck
+             diagnosis evidence). *)
           record_semaphore_wait_observation
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
@@ -717,15 +721,26 @@ let run_keepalive_unified_turn
             ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
+          let blocker_text =
+            Printf.sprintf
+              "skipped: semaphore wait > %.0fs, peers holding slot \
+               (cascade=%s, autonomous_available=%d turn_available=%d)"
+              wait_sec meta_after_triage.cascade_name auto_avail turn_avail
+          in
           Log.Keeper.warn
-            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot, cascade=%s, autonomous_available=%d turn_available=%d)"
-            meta_after_triage.name wait_sec meta_after_triage.cascade_name
-            auto_avail turn_avail;
+            "%s: skipping turn (%s)"
+            meta_after_triage.name blocker_text;
           Prometheus.inc_counter
             Prometheus.metric_keeper_semaphore_wait_timeout
             ~labels:[("keeper", meta_after_triage.name); ("channel", (Keeper_world_observation.channel_to_string turn_decision.channel))]
             ();
-          meta_after_triage)
+          Keeper_types.map_runtime
+            (fun rt ->
+              { rt with
+                last_blocker = blocker_text;
+                last_blocker_class = Some Keeper_types.Autonomous_slot_wait_timeout;
+              })
+            meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
       else

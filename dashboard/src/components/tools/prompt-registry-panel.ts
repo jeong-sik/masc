@@ -48,7 +48,7 @@ function normalizeDraft(prompt: DashboardPromptItem | null): string {
 
 // Pure helper: filter by source + substring search (case-insensitive).
 // Exported for unit testing.
-export function filterPrompts(
+function filterPrompts(
   prompts: DashboardPromptItem[],
   source: PromptSourceFilter,
   query: string,

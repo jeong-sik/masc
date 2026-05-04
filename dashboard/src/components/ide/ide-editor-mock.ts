@@ -386,8 +386,8 @@ function diffBackground(kind: DiffTone): string {
 }
 
 function diffMarkerColor(kind: DiffTone): string {
-  if (kind === 'add') return 'var(--color-status-ok, var(--ok))'
-  if (kind === 'delete') return 'var(--color-status-danger, var(--danger))'
+  if (kind === 'add') return 'var(--color-status-ok)'
+  if (kind === 'delete') return 'var(--color-status-err)'
   return 'var(--color-fg-disabled)'
 }
 

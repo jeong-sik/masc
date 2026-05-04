@@ -16,6 +16,7 @@ import { Card } from '../common/card'
 import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
+import { formatNumber } from '../../lib/format-number'
 
 function ConfigCard({
   class: cx,
@@ -258,13 +259,6 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   `
 }
 
-function fmtNumber(value: number | null | undefined, digits = 1): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
-  return value.toLocaleString('ko-KR', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })
-}
 
 function fmtBoolean(value: boolean | null | undefined): string {
   if (value === true) return 'yes'
@@ -332,7 +326,7 @@ function fmtKeeperValue(value: number | null, fmt: 'int' | 'float' | 'duration')
   switch (fmt) {
     case 'int': return String(Math.round(value))
     case 'float': return value.toFixed(1)
-    case 'duration': return value >= 60 ? `${fmtNumber(value / 60, 1)}m` : `${fmtNumber(value, 0)}s`
+    case 'duration': return value >= 60 ? `${formatNumber(value / 60, 1)}m` : `${formatNumber(value, 0)}s`
   }
 }
 
@@ -415,7 +409,7 @@ function RuntimeProbePanel() {
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
-              <${StatusChip} tone="neutral" uppercase=${false}>${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${fmtNumber(state.value.data.cache_age_sec, 1)}s<//>
+              <${StatusChip} tone="neutral" uppercase=${false}>${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${formatNumber(state.value.data.cache_age_sec, 1)}s<//>
             `
           : null}
         <${Btn}
@@ -451,20 +445,20 @@ function RuntimeProbePanel() {
               <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
               <${RuntimeMetaRow}
                 label="first run load"
-                value=${`${fmtNumber(firstRun?.load_duration_ms, 1)} ms`}
+                value=${`${formatNumber(firstRun?.load_duration_ms, 1)} ms`}
               />
               <${RuntimeMetaRow}
                 label="prompt tok/s"
-                value=${`${fmtNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
+                value=${`${formatNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
               />
               <${RuntimeMetaRow}
                 label="generation tok/s"
-                value=${`${fmtNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
+                value=${`${formatNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
               />
               <${RuntimeMetaRow}
                 label="prompt eval delta"
                 value=${assessment?.prompt_eval_duration_reduction_ratio != null
-                  ? `${fmtNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
+                  ? `${formatNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
                   : '--'}
               />
               <${RuntimeMetaRow}

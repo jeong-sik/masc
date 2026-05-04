@@ -118,7 +118,7 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
               border: '1px solid',
               borderColor: isActive(layer.kind)
                 ? layer.mutuallyExclusive
-                  ? 'var(--color-status-warn, var(--warn))'
+                  ? 'var(--color-status-warn)'
                   : 'var(--color-accent-fg)'
                 : 'var(--color-border-default)',
               borderRadius: 'var(--r-1)',

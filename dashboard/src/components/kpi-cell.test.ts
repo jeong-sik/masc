@@ -203,4 +203,33 @@ describe('KpiCell component', () => {
     const el = mount({ label: 'CTX', value: '90k', progress: 95, kind: 'warn' })
     expect(el.innerHTML).toContain('var(--color-status-warn)')
   })
+
+  // ── spotlight prop ──
+
+  it('spotlight cell applies brass-accent border with glow', () => {
+    const el = mount({ label: 'GAPS', value: '3', spotlight: true, kind: 'err' })
+    const styleAttr = el.getAttribute('style') ?? ''
+    expect(styleAttr).toContain('border-color')
+    expect(styleAttr).toContain('0 0 0 2px')
+  })
+
+  it('spotlight cell shows diamond prefix in label', () => {
+    const el = mount({ label: 'GAPS', value: '3', spotlight: true })
+    const spans = el.querySelectorAll('span')
+    const labelText = Array.from(spans).find(s => s.textContent?.includes('◆'))
+    expect(labelText).toBeTruthy()
+    expect(labelText!.textContent).toContain('◆ GAPS')
+  })
+
+  it('spotlight cell aria-label includes (spotlight)', () => {
+    const el = mount({ label: 'GAPS', value: '3', spotlight: true })
+    expect(el.getAttribute('aria-label')).toContain('(spotlight)')
+  })
+
+  it('non-spotlight cell has no diamond prefix', () => {
+    const el = mount({ label: 'GAPS', value: '3' })
+    const spans = el.querySelectorAll('span')
+    const labelText = Array.from(spans).find(s => s.textContent?.includes('◆'))
+    expect(labelText).toBeFalsy()
+  })
 })

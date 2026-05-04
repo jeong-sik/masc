@@ -60,7 +60,7 @@ export function ExcusePatterns() {
   if (s.status === 'error') {
     return html`
       <${Card} title="Anti-Rationalization 핑계 패턴">
-        <div class="p-4 text-[var(--bad-light)]" role="alert">패턴 로드 실패: ${s.message}</div>
+        <div class="p-4 text-[var(--color-status-err)]" role="alert">패턴 로드 실패: ${s.message}</div>
       </Card>
     `
   }
@@ -80,7 +80,7 @@ export function ExcusePatterns() {
         <form onSubmit=${handleSave}>
           <textarea
             name="patterns"
-            class="w-full h-96 p-3 bg-[var(--bg-card)] border border-[var(--color-border-divider)] rounded-[var(--r-1)] font-mono text-sm mb-4 text-[var(--text-primary)]"
+            class="w-full h-96 p-3 bg-[var(--color-bg-elevated)] border border-[var(--color-border-divider)] rounded-[var(--r-1)] font-mono text-sm mb-4 text-[var(--color-fg-primary)]"
             spellcheck="false"
           >${jsonStr}</textarea>
           
@@ -93,7 +93,7 @@ export function ExcusePatterns() {
               ${saving.value ? '저장 중...' : '패턴 저장'}
             </button>
             ${saveMessage.value ? html`
-              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-ok)]'}">
+              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--color-status-err)]' : 'text-[var(--color-status-ok)]'}">
                 ${saveMessage.value}
               </span>
             ` : null}

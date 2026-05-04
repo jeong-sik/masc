@@ -21,6 +21,70 @@ const MODEL_CATALOG_GROUPS: ProviderModelGroup[] = PROVIDER_IDS.map(providerId =
   MODEL_GROUPS_BY_PROVIDER.get(providerId) ?? { providerId, models: [] },
 )
 
+const ALL_MODELS = PROVIDER_MODELS.flatMap(g => g.models)
+const TIER_COLORS: Record<string, string> = {
+  flagship: 'var(--color-status-ok)',
+  standard: 'var(--color-accent-fg)',
+  fast: 'var(--amber-bright)',
+  coding: 'var(--color-status-warn)',
+  legacy: 'var(--color-fg-muted)',
+}
+
+function parseContextKb(ctx: string): number {
+  const m = ctx.match(/^(\d+(?:\.\d+)?)(K|M)$/i)
+  if (!m || !m[1] || !m[2]) return 0
+  const n = parseFloat(m[1])
+  return m[2].toUpperCase() === 'M' ? n * 1000 : n
+}
+
+const MAX_CONTEXT_KB = Math.max(0, ...ALL_MODELS.map(m => parseContextKb(m.context)))
+
+function ContextWindowChart() {
+  const providers = PROVIDER_MODELS.filter(g => g.models.length > 0)
+  return html`
+    <div class="flex flex-col gap-1">
+      ${providers.map(g => {
+        const best = g.models.reduce((a, b) => parseContextKb(a.context) >= parseContextKb(b.context) ? a : b)
+        const kb = parseContextKb(best.context)
+        const pct = MAX_CONTEXT_KB > 0 ? (kb / MAX_CONTEXT_KB) * 100 : 0
+        const tierFill = TIER_COLORS[best.tier] ?? 'var(--color-fg-muted)'
+        return html`
+          <div class="flex items-center gap-2 py-0.5" key=${g.providerId}>
+            <span class="w-28 flex-shrink-0 text-2xs font-medium truncate" title=${PROVIDER_LABELS[g.providerId] ?? g.providerId}>${PROVIDER_LABELS[g.providerId] ?? g.providerId}</span>
+            <div class="flex-1 h-2 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] overflow-hidden">
+              <div class="h-full rounded-[var(--r-0)]" style="width: ${pct.toFixed(1)}%; background: ${tierFill}; opacity: 0.7"></div>
+            </div>
+            <span class="w-14 text-right text-2xs font-mono text-[var(--color-fg-muted)]">${best.context}</span>
+          </div>
+        `
+      })}
+    </div>
+  `
+}
+
+function TierDistStrip() {
+  const counts: Record<string, number> = {}
+  for (const m of ALL_MODELS) counts[m.tier] = (counts[m.tier] ?? 0) + 1
+  const total = ALL_MODELS.length
+  const tiers = (['flagship', 'standard', 'fast', 'coding', 'legacy'] as const).filter(t => (counts[t] ?? 0) > 0)
+
+  return html`
+    <div class="flex items-center gap-3 flex-wrap text-2xs">
+      <span class="font-mono font-medium">${total}</span>
+      <span class="text-[var(--color-fg-muted)]">models /</span>
+      <span class="font-mono font-medium">${PROVIDER_MODELS.length}</span>
+      <span class="text-[var(--color-fg-muted)]">providers</span>
+      <span class="mx-1 text-[var(--color-border-default)]">|</span>
+      ${tiers.map(t => html`
+        <span key=${t} class="flex items-center gap-1">
+          <span class="inline-block w-2 h-2 rounded-full" style="background: ${TIER_COLORS[t]}"></span>
+          ${tierLabel(t)} ${counts[t] ?? 0}
+        </span>
+      `)}
+    </div>
+  `
+}
+
 function tierLabel(tier: string): string {
   switch (tier) {
     case 'flagship': return 'Flagship'
@@ -241,11 +305,14 @@ export function ModelCatalog() {
     <div class="flex flex-col gap-4">
       <div class="t-micro mono t-dim px-1">
         <span>Provider별 공식 모델 카탈로그 + 가격 + Context 한계</span>
-        <span class="text-[var(--color-border-default)] mx-2">|</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-sm bg-[var(--ok-10)]"></span> Flagship</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-sm bg-[var(--white-4)]"></span> Standard</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-sm bg-[var(--warn-10)]"></span> Fast</span>
-        <span class="flex items-center gap-1"><span class="inline-block w-3 h-2 rounded-sm bg-[var(--bad-10)]"></span> Coding</span>
+      </div>
+
+      <${TierDistStrip} />
+
+      <div>
+        <h4 class="t-label font-semibold mb-2">Context Window 비교</h4>
+        <p class="t-micro t-dim mb-2">Provider별 최대 context window. 1M = 백만 토큰.</p>
+        <${ContextWindowChart} />
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

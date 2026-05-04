@@ -81,8 +81,8 @@ describe('horizonColor', () => {
     expect(horizonColor('long')).toBe('var(--indigo)')
   })
 
-  it('returns gray for unknown', () => {
-    expect(horizonColor('unknown')).toBe('#888')
+  it('returns muted for unknown', () => {
+    expect(horizonColor('unknown')).toBe('var(--color-fg-muted)')
   })
 })
 

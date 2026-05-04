@@ -54,9 +54,19 @@ type semantic =
   | `K_11_glow
   | `K_12_glow
   | `P_anthropic
-  | `P_moonshot
+  | `P_kimi
   | `P_openai
   | `P_xai
+  | `P_gemini
+  | `P_deepseek
+  | `P_qwen
+  | `P_mistral
+  | `P_nemotron
+  | `P_ollama
+  | `P_llamacpp
+  | `P_glm
+  | `P_gemini_cli
+  | `P_codex_cli
   | `Font_sans
   | `Font_mono
   | `Fs_9
@@ -263,12 +273,32 @@ type semantic =
   | `K_12_ring
   | `P_anthropic_soft
   | `P_anthropic_border
-  | `P_moonshot_soft
-  | `P_moonshot_border
+  | `P_kimi_soft
+  | `P_kimi_border
   | `P_openai_soft
   | `P_openai_border
   | `P_xai_soft
   | `P_xai_border
+  | `P_gemini_soft
+  | `P_gemini_border
+  | `P_deepseek_soft
+  | `P_deepseek_border
+  | `P_qwen_soft
+  | `P_qwen_border
+  | `P_mistral_soft
+  | `P_mistral_border
+  | `P_nemotron_soft
+  | `P_nemotron_border
+  | `P_ollama_soft
+  | `P_ollama_border
+  | `P_llamacpp_soft
+  | `P_llamacpp_border
+  | `P_glm_soft
+  | `P_glm_border
+  | `P_gemini_cli_soft
+  | `P_gemini_cli_border
+  | `P_codex_cli_soft
+  | `P_codex_cli_border
   | `Color_bg_page
   | `Color_bg_surface
   | `Color_bg_panel_alt
@@ -590,9 +620,19 @@ let name_of = function
   | `K_11_glow -> "k-11-glow"
   | `K_12_glow -> "k-12-glow"
   | `P_anthropic -> "p-anthropic"
-  | `P_moonshot -> "p-moonshot"
+  | `P_kimi -> "p-kimi"
   | `P_openai -> "p-openai"
   | `P_xai -> "p-xai"
+  | `P_gemini -> "p-gemini"
+  | `P_deepseek -> "p-deepseek"
+  | `P_qwen -> "p-qwen"
+  | `P_mistral -> "p-mistral"
+  | `P_nemotron -> "p-nemotron"
+  | `P_ollama -> "p-ollama"
+  | `P_llamacpp -> "p-llamacpp"
+  | `P_glm -> "p-glm"
+  | `P_gemini_cli -> "p-gemini-cli"
+  | `P_codex_cli -> "p-codex-cli"
   | `Font_sans -> "font-sans"
   | `Font_mono -> "font-mono"
   | `Fs_9 -> "fs-9"
@@ -799,12 +839,32 @@ let name_of = function
   | `K_12_ring -> "k-12-ring"
   | `P_anthropic_soft -> "p-anthropic-soft"
   | `P_anthropic_border -> "p-anthropic-border"
-  | `P_moonshot_soft -> "p-moonshot-soft"
-  | `P_moonshot_border -> "p-moonshot-border"
+  | `P_kimi_soft -> "p-kimi-soft"
+  | `P_kimi_border -> "p-kimi-border"
   | `P_openai_soft -> "p-openai-soft"
   | `P_openai_border -> "p-openai-border"
   | `P_xai_soft -> "p-xai-soft"
   | `P_xai_border -> "p-xai-border"
+  | `P_gemini_soft -> "p-gemini-soft"
+  | `P_gemini_border -> "p-gemini-border"
+  | `P_deepseek_soft -> "p-deepseek-soft"
+  | `P_deepseek_border -> "p-deepseek-border"
+  | `P_qwen_soft -> "p-qwen-soft"
+  | `P_qwen_border -> "p-qwen-border"
+  | `P_mistral_soft -> "p-mistral-soft"
+  | `P_mistral_border -> "p-mistral-border"
+  | `P_nemotron_soft -> "p-nemotron-soft"
+  | `P_nemotron_border -> "p-nemotron-border"
+  | `P_ollama_soft -> "p-ollama-soft"
+  | `P_ollama_border -> "p-ollama-border"
+  | `P_llamacpp_soft -> "p-llamacpp-soft"
+  | `P_llamacpp_border -> "p-llamacpp-border"
+  | `P_glm_soft -> "p-glm-soft"
+  | `P_glm_border -> "p-glm-border"
+  | `P_gemini_cli_soft -> "p-gemini-cli-soft"
+  | `P_gemini_cli_border -> "p-gemini-cli-border"
+  | `P_codex_cli_soft -> "p-codex-cli-soft"
+  | `P_codex_cli_border -> "p-codex-cli-border"
   | `Color_bg_page -> "color-bg-page"
   | `Color_bg_surface -> "color-bg-surface"
   | `Color_bg_panel_alt -> "color-bg-panel-alt"

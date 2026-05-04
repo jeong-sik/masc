@@ -93,7 +93,7 @@ export function IdeInterjectMock() {
             role="status"
             style=${{
               gridColumn: '2 / 4',
-              color: 'var(--color-status-warn, var(--warn))',
+              color: 'var(--color-status-warn)',
               fontSize: 'var(--fs-11)',
             }}
           >${snapshot.error}</span>`

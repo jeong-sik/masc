@@ -44,6 +44,51 @@ describe('StatTile', () => {
     const el = container.querySelector('div')
     expect(el?.classList.contains('text-[var(--color-warn-fg)]')).toBe(true)
   })
+
+  it('applies kpi-cell status class when status is provided', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'Latency', value: '42ms', status: 'crit' }), container)
+    const el = container.querySelector('div')
+    expect(el?.classList.contains('kpi-cell')).toBe(true)
+    expect(el?.classList.contains('is-crit')).toBe(true)
+  })
+
+  it('applies is-live class when live is true', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'RPS', value: '1.2k', status: 'ok', live: true }), container)
+    const el = container.querySelector('div')
+    expect(el?.classList.contains('is-live')).toBe(true)
+  })
+
+  it('renders delta with direction class', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'CPU', value: '67%', status: 'brass', delta: { direction: 'up', text: '+5%' } }), container)
+    expect(container.textContent).toContain('+5%')
+    const delta = container.querySelector('.kpi-delta')
+    expect(delta?.classList.contains('up')).toBe(true)
+  })
+
+  it('renders delta arrow when no text provided', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'Mem', value: '4.2G', status: 'ok', delta: { direction: 'down' } }), container)
+    expect(container.textContent).toContain('↓')
+  })
+
+  it('uses kpi-value class for status tiles', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'QPS', value: '999', status: 'warn' }), container)
+    const val = container.querySelector('.kpi-value')
+    expect(val?.textContent).toBe('999')
+  })
+
+  it('status overrides variant styling', () => {
+    const container = document.createElement('div')
+    render(h(StatTile, { label: 'A', value: '1', variant: 'gold', status: 'ok' }), container)
+    const el = container.querySelector('div')
+    expect(el?.classList.contains('kpi-cell')).toBe(true)
+    expect(el?.classList.contains('is-ok')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-brass-soft)]')).toBe(false)
+  })
 })
 
 describe('StatGrid', () => {

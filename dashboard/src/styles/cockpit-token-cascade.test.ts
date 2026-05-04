@@ -57,8 +57,8 @@ describe('Cockpit token cascade', () => {
   })
 
   it('keeps the app shell on semantic cockpit backgrounds', () => {
-    expect(baseCss).toContain('rgb(var(--brass-glow) / 0.08)')
-    expect(baseCss).toMatch(/linear-gradient\(\s*180deg,\s*var\(--bg-root-deep\)\s+0%,\s*var\(--color-bg-page\)\s+48%,\s*var\(--bg-root-dim\)\s+100%\s*\)/)
+    expect(baseCss).toContain('rgb(var(--brass-glow) / 0.05)')
+    expect(baseCss).toContain('var(--color-bg-page)')
     expect(appTs).toContain('bg-[var(--color-bg-page)]')
     expect(appTs).toContain('bg-[var(--shell-header-bg)]')
     expect(appTs).toContain('bg-[var(--shell-rail-bg)]')

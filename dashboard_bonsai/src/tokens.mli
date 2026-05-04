@@ -65,9 +65,19 @@ type semantic =
   | `K_11_glow
   | `K_12_glow
   | `P_anthropic
-  | `P_moonshot
+  | `P_kimi
   | `P_openai
   | `P_xai
+  | `P_gemini
+  | `P_deepseek
+  | `P_qwen
+  | `P_mistral
+  | `P_nemotron
+  | `P_ollama
+  | `P_llamacpp
+  | `P_glm
+  | `P_gemini_cli
+  | `P_codex_cli
   | `Font_sans
   | `Font_mono
   | `Fs_9
@@ -274,12 +284,32 @@ type semantic =
   | `K_12_ring
   | `P_anthropic_soft
   | `P_anthropic_border
-  | `P_moonshot_soft
-  | `P_moonshot_border
+  | `P_kimi_soft
+  | `P_kimi_border
   | `P_openai_soft
   | `P_openai_border
   | `P_xai_soft
   | `P_xai_border
+  | `P_gemini_soft
+  | `P_gemini_border
+  | `P_deepseek_soft
+  | `P_deepseek_border
+  | `P_qwen_soft
+  | `P_qwen_border
+  | `P_mistral_soft
+  | `P_mistral_border
+  | `P_nemotron_soft
+  | `P_nemotron_border
+  | `P_ollama_soft
+  | `P_ollama_border
+  | `P_llamacpp_soft
+  | `P_llamacpp_border
+  | `P_glm_soft
+  | `P_glm_border
+  | `P_gemini_cli_soft
+  | `P_gemini_cli_border
+  | `P_codex_cli_soft
+  | `P_codex_cli_border
   | `Color_bg_page
   | `Color_bg_surface
   | `Color_bg_panel_alt

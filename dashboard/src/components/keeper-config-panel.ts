@@ -15,7 +15,7 @@ import {
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
-import { formatTokens } from '../lib/format-number'
+import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -914,7 +914,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
           min=${0} max=${3600} step=${30} suffix="s" />
       ` : html`
-        <${ConfigRow} label="비율 게이트" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
+        <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
         <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
         <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
         <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
@@ -1091,7 +1091,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : html`
         <${BoolRow} label="자동" value=${c.handoff.auto} />
         </div>
-        <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
+        <${ConfigRow} label="임계값" value=${formatPct(c.handoff.threshold)} />
         <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
       `}
 
@@ -1149,7 +1149,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               `)}
           <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
           <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
-          <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
+          <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '비활성'} />
         `
       })() : null}
 

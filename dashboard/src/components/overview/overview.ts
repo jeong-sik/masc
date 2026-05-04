@@ -129,8 +129,8 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
                 <p class="text-xs font-semibold truncate">${'name' in a ? a.display : a.title}</p>
                 <p class="text-2xs text-[var(--color-fg-muted)] truncate">${'reason' in a ? a.reason : a.status}</p>
               </div>
-              <span class=${`text-2xs font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(a.severity)}`}>
-                ${a.severity}
+              <span class=${`chip sm shrink-0 ${a.severity === 'critical' ? 'is-err' : 'is-warn'}`}>
+                ${a.severity.toUpperCase()}
               </span>
             </li>
           `,
@@ -199,8 +199,14 @@ export function formatTargetRatio(counts: FunnelCounts): string {
   return `${counts.completed}/${counts.target} (${pct}%)`
 }
 
+function funnelSegStyle(pct: number): string {
+  return pct > 0 ? `width:${pct.toFixed(1)}%` : ''
+}
+
 function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const awaitingKind: KpiCellKind | undefined = counts.awaiting > 0 ? 'warn' : undefined
+  const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
+  const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
   return html`
     <${SectionCard} title="Today" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
       <${KpiStripIsland}
@@ -214,6 +220,14 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
           { variant: 'stacked', label: 'Target', value: formatTargetRatio(counts), testId: 'funnel-target' },
         ]}
       />
+      ${total > 0 ? html`
+        <div class="bar-seg mt-4" style="height:var(--sp-1)" data-testid="funnel-seg">
+          ${counts.inProgress > 0 ? html`<span class="seg-idle" style=${funnelSegStyle(segPct(counts.inProgress))}></span>` : null}
+          ${counts.awaiting > 0 ? html`<span class="seg-warn" style=${funnelSegStyle(segPct(counts.awaiting))}></span>` : null}
+          ${counts.completed > 0 ? html`<span class="seg-ok" style=${funnelSegStyle(segPct(counts.completed))}></span>` : null}
+          ${counts.created > 0 ? html`<span class="seg-idle" style=${funnelSegStyle(segPct(counts.created))}></span>` : null}
+        </div>
+      ` : null}
     <//>
   `
 }
@@ -254,9 +268,23 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-          <${StatTile} label="Progress" value=${progress === null ? 'n/a' : `${progress}%`} variant=${progress !== null && progress > 80 ? 'accent' : 'default'} />
-          <${StatTile} label="Status" value=${status.toUpperCase()} variant=${status === 'running' || status === 'active' ? 'accent' : 'default'} />
+          <${StatTile}
+            label="Progress"
+            value=${progress === null ? 'n/a' : `${progress}%`}
+            status=${progress !== null && progress > 80 ? 'ok' : progress !== null ? 'brass' : undefined}
+            delta=${progress !== null ? { direction: progress > 50 ? 'up' : 'flat', text: progress > 80 ? 'on track' : `${progress}%` } : undefined}
+          />
+          <${StatTile}
+            label="Status"
+            value=${status.toUpperCase()}
+            status=${status === 'running' || status === 'active' ? 'ok' : status === 'paused' ? 'warn' : 'brass'}
+          />
         </div>
+        ${progress !== null ? html`
+          <div class="bar ${progress > 80 ? 'is-ok' : progress > 50 ? '' : 'is-warn'}">
+            <span class="fill" style="width: ${progress}%"></span>
+          </div>
+        ` : null}
       </div>
     <//>
   `
@@ -264,19 +292,29 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
 
 // ─── Keeper Strip ────────────────────────────────────────────────────────────
 
-function keeperStatusToneClass(status?: string | null): string {
+function keeperPillClass(status?: string | null): string {
   switch ((status ?? '').toLowerCase()) {
     case 'active':
     case 'live':
-      return 'bg-[var(--color-status-ok)]'
+      return 'pill is-ok'
     case 'busy':
     case 'executing':
-      return 'bg-[var(--color-accent-fg)]'
+      return 'pill is-running'
     case 'offline':
     case 'dead':
-      return 'bg-[var(--color-status-err)]'
+      return 'pill is-err'
     default:
-      return 'bg-[var(--color-fg-muted)]'
+      return 'pill is-paused'
+  }
+}
+
+function keeperStatusLabel(status?: string | null): string {
+  switch ((status ?? '').toLowerCase()) {
+    case 'active': case 'live': return 'Active'
+    case 'busy': case 'executing': return 'Busy'
+    case 'offline': return 'Offline'
+    case 'dead': return 'Dead'
+    default: return status ?? 'Unknown'
   }
 }
 
@@ -317,13 +355,13 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
           ${activeKeepers.slice(1).map(
             k => html`
               <li key=${k.name} class="flex items-center gap-2">
-                <${StatusDot} class=${keeperStatusToneClass(k.status)} />
                 <div class="min-w-0">
                   <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
                   ${k.last_heartbeat !== undefined
                     ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
                     : null}
                 </div>
+                <span class="${keeperPillClass(k.status)} text-3xs shrink-0">${keeperStatusLabel(k.status)}</span>
               </li>
             `,
           )}

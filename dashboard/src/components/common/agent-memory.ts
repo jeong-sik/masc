@@ -5,6 +5,7 @@
 
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
+import { formatPct1 } from '../../lib/format-number'
 
 export interface MemoryEntry {
   id: string
@@ -91,7 +92,7 @@ export function AgentMemory({ entries, testId }: AgentMemoryProps) {
                         key=${item.id}
                         class="inline-block rounded-full bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]"
                         title=${item.similarity != null
-                          ? `유사도: ${(item.similarity * 100).toFixed(1)}%`
+                          ? `유사도: ${formatPct1(item.similarity)}`
                           : undefined}
                       >
                         ${item.content.slice(0, 20)}

@@ -98,7 +98,7 @@ export function KeeperBadge({
     fontSize: `${fontPx}px`,
     borderRadius: `${radius}px`,
     background: `var(--color-keeper-${slot})`,
-    color: 'var(--color-bg-0)',
+    color: 'var(--color-bg-page)',
     fontFamily: MONO_STACK,
     fontWeight: 700,
     letterSpacing: 0,
@@ -167,7 +167,7 @@ export function KeeperStack({
   const visible = ids.slice(0, cap)
   const overflow = ids.length - visible.length
   const sizePx = size === 'sm' ? 14 : size === 'lg' ? 24 : 18
-  const surface = 'var(--color-bg-1)'
+  const surface = 'var(--color-bg-surface)'
 
   const overflowChip = overflow > 0
     ? html`
@@ -180,8 +180,8 @@ export function KeeperStack({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'var(--color-bg-2)',
-            color: 'var(--color-text-body)',
+            background: 'var(--color-bg-panel-alt)',
+            color: 'var(--color-fg-primary)',
             border: `2px solid ${surface}`,
             borderRadius: '3px',
             fontFamily: MONO_STACK,

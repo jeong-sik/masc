@@ -40,6 +40,14 @@ const liveOverrideStyle: JSX.CSSProperties = {
     '0 0 0 1px var(--color-accent-brass), 0 0 12px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.18)',
 }
 
+const spotlightOverrideStyle: JSX.CSSProperties = {
+  'border-color': 'var(--color-accent-brass)',
+  'box-shadow':
+    '0 0 0 2px var(--color-accent-brass), 0 0 16px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.25)',
+  background:
+    'linear-gradient(135deg, var(--bg-panel) 0%, rgb(var(--color-keeper-3-glow, 195 146 89) / 0.06) 100%)',
+}
+
 export function KpiCell(props: KpiCellProps): JSX.Element {
   const stripCtx = useKpiStripContext()
 
@@ -51,9 +59,10 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
   const containerStyle = (): JSX.CSSProperties => {
     const v = variant()
     const isBare = bare()
+    const isSpotlight = props.spotlight === true
     return {
       ...(isBare ? {} : surfaceStyle),
-      ...(!isBare && props.live ? liveOverrideStyle : {}),
+      ...(!isBare && isSpotlight ? spotlightOverrideStyle : !isBare && props.live ? liveOverrideStyle : {}),
       display: 'flex',
       'flex-direction': v === 'compact' ? 'row' : 'column',
       'align-items': v === 'compact' ? 'baseline' : 'flex-start',
@@ -65,9 +74,11 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
             : '6px',
       padding: isBare
         ? '0'
-        : v === 'stacked'
-          ? '14px var(--spacing-card)'
-          : '10px var(--spacing-group)',
+        : isSpotlight
+          ? '16px var(--spacing-card)'
+          : v === 'stacked'
+            ? '14px var(--spacing-card)'
+            : '10px var(--spacing-group)',
       'font-family': MONO_STACK,
       'min-width': '0',
     }
@@ -105,11 +116,11 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
       role="listitem"
       id={props.id}
       data-testid={props.testId}
-      aria-label={kpiCellAriaLabel(props)}
+      aria-label={kpiCellAriaLabel(props) + (props.spotlight ? ' (spotlight)' : '')}
       style={containerStyle()}
     >
       <span aria-hidden="true" style={labelStyle}>
-        {props.label}
+        {props.spotlight ? `◆ ${props.label}` : props.label}
       </span>
       <span aria-hidden="true" style={valueStyle()}>
         {props.value}

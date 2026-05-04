@@ -51,6 +51,7 @@ import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { formatPct1 } from '../lib/format-number'
 
 interface CascadeData {
   config: CascadeConfigResponse | null
@@ -85,10 +86,6 @@ async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   })
 }
 
-export function fmtPct(value: number): string {
-  if (Number.isNaN(value)) return '--'
-  return `${(value * 100).toFixed(1)}%`
-}
 
 export function candidateTone(c: CascadeCandidate): string {
   if (c.in_cooldown) return 'bad'
@@ -472,7 +469,7 @@ function ProfileCard({
               <li class="flex items-start gap-2 py-1 border-b border-[var(--color-border-default)] last:border-b-0">
                 <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
                 <${StatusChip} tone=${candidateTone(c)}>
-                  ${c.in_cooldown ? 'cooldown' : fmtPct(c.success_rate)}
+                  ${c.in_cooldown ? 'cooldown' : formatPct1(c.success_rate)}
                 <//>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
@@ -780,7 +777,7 @@ function HealthTable({
                     ? html`<${StatusChip} tone=${providerStatusTone(status)} uppercase=${false}>${status}<//>`
                     : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
-                <${NumCell}>${fmtPct(p.success_rate)}</${NumCell}>
+                <${NumCell}>${formatPct1(p.success_rate)}</${NumCell}>
                 <${NumCell}>${p.consecutive_failures}</${NumCell}>
                 <${NumCell}>${p.events_in_window}</${NumCell}>
                 <${NumCell}>

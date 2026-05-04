@@ -178,7 +178,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
 
 // Cascade tier in default OAS routing order (1 = primary).
 export const PROVIDER_CASCADE_TIER: Record<string, number> = {
-  anthropic: 1, openai: 2, moonshot: 3, google: 4,
+  anthropic: 1, openai: 2, kimi: 3, google: 4,
   deepseek: 5, xai: 6, ollama: 7,
 }
 
@@ -197,6 +197,18 @@ export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
   qwen36: 'cloud', mistral: 'cloud', nemotron: 'cloud', kimi: 'cloud',
   ollama: 'local', llamacpp: 'local', glm: 'cloud',
   gemini_cli: 'cli', codex_cli: 'cli',
+}
+
+// CSS token name for provider-specific color. Maps to --color-p-{key}.
+export const PROVIDER_COLOR_KEY: Record<string, string> = {
+  // Feature matrix providers (PROVIDER_IDS)
+  openai: 'openai', claude: 'anthropic', gemini: 'gemini', deepseek: 'deepseek',
+  qwen36: 'qwen', mistral: 'mistral', nemotron: 'nemotron', kimi: 'kimi',
+  ollama: 'ollama', llamacpp: 'llamacpp', glm: 'glm',
+  gemini_cli: 'gemini-cli', codex_cli: 'codex-cli',
+  // OAS provider IDs (OAS_PROVIDER_CAPS.id → color key)
+  anthropic: 'anthropic', 'openai-chat': 'openai', 'openai-ext': 'openai',
+  dashscope: 'qwen', 'claude-code': 'anthropic', 'kimi-cli': 'kimi',
 }
 
 // Feature grouping by functional category. Source: sec01 §1.3 Table.
@@ -221,6 +233,30 @@ export function computeMatrixSummary() {
     }
   }
   return { native, partial, unsupported, total }
+}
+
+export interface CategoryCoverage {
+  id: string
+  label: string
+  native: number
+  total: number
+  pct: number
+}
+
+export function computeCategoryCoverage(): CategoryCoverage[] {
+  const featById = new Map(FEATURES.map(f => [f.id, f]))
+  return FEATURE_CATEGORIES.map(cat => {
+    let native = 0, total = 0
+    for (const fid of cat.featureIds) {
+      const feat = featById.get(fid)
+      if (!feat) continue
+      for (const pid of PROVIDER_IDS) {
+        if (feat.providers[pid] === '●') native++
+        total++
+      }
+    }
+    return { id: cat.id, label: cat.label, native, total, pct: total > 0 ? Math.round((native / total) * 100) : 0 }
+  })
 }
 
 // ── BFCL Benchmarks ─────────────────────────────────────────────
@@ -317,6 +353,16 @@ export function scoreColor(score: string): string {
   return 'text-[var(--bad-light)]'
 }
 
+export function scoreBucket(score: string): string {
+  const v = parseFloat(score)
+  if (v >= 75) return 'z4'
+  if (v >= 60) return 'z3'
+  if (v >= 55) return 'z2'
+  if (v >= 40) return 'z1'
+  return 'z0'
+}
+
+
 // ── Function Calling Harness Case Study ──────────────────────────
 
 export interface HarnessModel {
@@ -371,12 +417,12 @@ export interface OasProviderCap {
 }
 
 export const OAS_PROVIDER_CAPS: OasProviderCap[] = [
-  { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 200_000,  maxOutput: 8_192,  tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'anthropic',      label: 'Anthropic',      kind: 'Anthropic',      maxContext: 1_000_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'kimi',           label: 'Kimi',           kind: 'Kimi',           maxContext: 262_144,  maxOutput: 32_768, tools: true,  toolChoice: true,  reasoning: true,  vision: false, topK: false, usage: 'emit' },
-  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: false, vision: true,  topK: false, usage: 'emit' },
-  { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'openai-chat',    label: 'OpenAI Chat',    kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: false, vision: true,  topK: false, usage: 'emit' },
+  { id: 'openai-ext',     label: 'OpenAI Ext',     kind: 'OpenAI_compat',  maxContext: 1_050_000, maxOutput: 128_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'ollama',         label: 'Ollama',         kind: 'Ollama',         maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: false, reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
-  { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 128_000,  maxOutput: 16_384, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
+  { id: 'dashscope',      label: 'DashScope',      kind: 'DashScope',      maxContext: 1_000_000, maxOutput: 65_536, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'glm',            label: 'GLM',            kind: 'GLM',            maxContext: 200_000,  maxOutput: 40_960, tools: true,  toolChoice: false, reasoning: true,  vision: false, topK: false, usage: 'emit' },
   { id: 'gemini',         label: 'Gemini',         kind: 'Gemini',         maxContext: 1_000_000, maxOutput: 65_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
   { id: 'claude-code',    label: 'Claude Code',    kind: 'Claude_code',    maxContext: 1_000_000, maxOutput: 64_000, tools: true,  toolChoice: true,  reasoning: true,  vision: true,  topK: true,  usage: 'emit' },
@@ -443,45 +489,49 @@ export interface AntiPattern {
   risk: RiskLevel
   source: AntiPatternSource
   improvement: string
+  /** What breaks when this anti-pattern fires — from sec05 risk matrix */
+  impact?: string
+  /** When this anti-pattern is triggered — from sec05 risk matrix */
+  likelihood?: string
 }
 
 export const ANTI_PATTERNS: AntiPattern[] = [
   // Silent Failure (S01-S10)
-  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
-  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
-  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas', improvement: '`thinking_control_format` capability 필드 추가' },
-  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas', improvement: 'fallback 시 debug 로그 기록' },
-  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas', improvement: 'usage 누락의 구조적 특성 문서화' },
-  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: '주석-코드 동기화' },
-  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas', improvement: 'capability override 설정 노출' },
-  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas', improvement: '모델 discovery 동적 연동' },
-  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas', improvement: '모델별 동적 기본값' },
-  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas', improvement: 'contract relaxation 명시화' },
+  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환', impact: '단일 요청 파라미터 누락', likelihood: 'capability 불일치 모든 요청' },
+  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환', impact: '단일 요청 파라미터 누락', likelihood: 'capability 불일치 모든 요청' },
+  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas', improvement: '`thinking_control_format` capability 필드 추가', impact: 'Thinking 기능 비활성화', likelihood: 'non-DeepSeek reasoning 모델' },
+  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas', improvement: 'fallback 시 debug 로그 기록', impact: '잘못된 툴 호출 기록', likelihood: '툴 체인 복잡한 대화' },
+  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas', improvement: 'usage 누락의 구조적 특성 문서화', impact: 'Usage 데이터 누락', likelihood: '모든 CLI Provider 호출' },
+  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: '주석-코드 동기화', impact: 'min_p 의도치 않은 drop', likelihood: '모든 Ollama 호출' },
+  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas', improvement: 'capability override 설정 노출', impact: '400 오류 또는 잘못된 가정', likelihood: '알 수 없는 모델 사용 시' },
+  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas', improvement: '모델 discovery 동적 연동', impact: '출력 길이 제한', likelihood: '알 수 없는 모델 + max_tokens 미설정' },
+  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas', improvement: '모델별 동적 기본값', impact: 'Thinking depth 제한', likelihood: 'thinking 미설정 모든 요청' },
+  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas', improvement: 'contract relaxation 명시화', impact: '강제 툴 호출 의도 무시', likelihood: 'GLM + Required/None_ 요청' },
   // Fake Fallback (F01-F04)
-  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas', improvement: 'pipeline-level contract 검증 강화' },
-  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas', improvement: '`Provider_config.validate`에서 사전 에러' },
-  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas', improvement: 'CLI Provider 실제 능력 탐지 개선' },
-  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: 'per-model override 허용' },
+  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas', improvement: 'pipeline-level contract 검증 강화', impact: '계약 위반 미검출', likelihood: 'GLM + specific tool 요청' },
+  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas', improvement: '`Provider_config.validate`에서 사전 에러', impact: '설정 의도 미반영', likelihood: 'Codex + unsupported config' },
+  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas', improvement: 'CLI Provider 실제 능력 탐지 개선', impact: 'Tool 경로 우회', likelihood: 'Gemini CLI 사용 시' },
+  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: 'per-model override 허용', impact: 'Tool choice 제한', likelihood: 'Ollama + tool_choice 필요 시' },
   // String Matching (M01-M06)
-  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas', improvement: 'prefix 길이 기반 자동 정렬 테스트' },
-  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas', improvement: 'capability 필드 기반 결정론적 분기' },
-  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: 'Ollama `/api/show` 연동(가용 시)' },
-  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: '구조화된 에러 코드 사용' },
-  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: 'retryable 에러 코드 체계 도입' },
-  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas', improvement: 'alias 충돌 테스트 자동화' },
+  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas', improvement: 'prefix 길이 기반 자동 정렬 테스트', impact: '잘못된 capability 매칭', likelihood: '모델 추가/네이밍 변경 시' },
+  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas', improvement: 'capability 필드 기반 결정론적 분기', impact: 'Thinking 처리 불일치', likelihood: '새로운 reasoning 모델 추가 시' },
+  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: 'Ollama `/api/show` 연동(가용 시)', impact: '과소/과대 capability 선언', likelihood: 'Ollama 모델 변경 시' },
+  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: '구조화된 에러 코드 사용', impact: '잘못된 에러 분류', likelihood: 'Provider 메시지 변경 시' },
+  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: 'retryable 에러 코드 체계 도입', impact: '잘못된 에러 분류', likelihood: 'Provider 메시지 변경 시' },
+  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas', improvement: 'alias 충돌 테스트 자동화', impact: '잘못된 capability 반환', likelihood: '새 provider 추가 시' },
   // Hardcoding (H01-H12)
-  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas', improvement: '모델 메타데이터 동적 조회' },
-  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas', improvement: '모델별 설정 외부화' },
-  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas', improvement: 'effort-budget 매핑 테이블화' },
-  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas', improvement: '설정 가능한 파라미터로 전환' },
-  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas', improvement: '토큰 기반 게이트로 개선' },
-  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas', improvement: '환경 변수 문서화 및 검증' },
-  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas', improvement: '모델별 기본값 설정' },
-  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
-  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
-  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas', improvement: '토크나이저 연동(가용 시)' },
-  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas', improvement: 'pricing API 동적 연동' },
-  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: '동적 capability discovery 연구' },
+  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas', improvement: '모델 메타데이터 동적 조회', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas', improvement: '모델별 설정 외부화', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas', improvement: 'effort-budget 매핑 테이블화', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas', improvement: '설정 가능한 파라미터로 전환', impact: '부정확한 게이트', likelihood: 'cache 관련 요청 시' },
+  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas', improvement: '토큰 기반 게이트로 개선', impact: '부정확한 게이트', likelihood: 'cache 관련 요청 시' },
+  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas', improvement: '환경 변수 문서화 및 검증', impact: '의도와 다른 동작', likelihood: 'Ollama 기본 설정 사용 시' },
+  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas', improvement: '모델별 기본값 설정', impact: '의도와 다른 동작', likelihood: 'Ollama 기본 설정 사용 시' },
+  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화', impact: '플랫폼 호환성 이슈', likelihood: 'CLI 사용 + 큰 프롬프트 시' },
+  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화', impact: '플랫폼 호환성 이슈', likelihood: 'CLI 사용 + 큰 프롬프트 시' },
+  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas', improvement: '토크나이저 연동(가용 시)', impact: '부정확한 telemetry', likelihood: 'reasoning_tokens fallback 시' },
+  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas', improvement: 'pricing API 동적 연동', impact: '유지보수 부담', likelihood: '모델 업데이트/신규 출시 시' },
+  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: '동적 capability discovery 연구', impact: '유지보수 부담', likelihood: '모델 업데이트/신규 출시 시' },
 ]
 
 // ── Provider Model Catalog ──────────────────────────────────────
@@ -505,8 +555,11 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'openai',
     models: [
-      { id: 'gpt-4.1', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal' },
-      { id: 'gpt-4.1-mini', context: '1M', tier: 'standard', inputPrice: '$0.40', outputPrice: '$1.60' },
+      { id: 'gpt-5.5', context: '1.05M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$30.00', notes: '128K output, ≤270K standard rate' },
+      { id: 'gpt-5.4', context: '1.05M', tier: 'standard', inputPrice: '$2.50', outputPrice: '$15.00', notes: '128K output, ≤270K standard rate' },
+      { id: 'gpt-5.4-mini', context: '400K', tier: 'fast', inputPrice: '$0.75', outputPrice: '$4.50', notes: '128K output, Computer Use, Subagents' },
+      { id: 'gpt-4.1', context: '1M', tier: 'standard', inputPrice: '$2.00', outputPrice: '$8.00', notes: 'Multimodal, 1M context' },
+      { id: 'gpt-4.1-mini', context: '1M', tier: 'fast', inputPrice: '$0.40', outputPrice: '$1.60' },
       { id: 'gpt-4.1-nano', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
       { id: 'o4-mini', context: '200K', tier: 'standard', inputPrice: '$1.10', outputPrice: '$4.40', notes: 'Reasoning' },
     ],
@@ -514,27 +567,30 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
   {
     providerId: 'claude',
     models: [
-      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$15.00', outputPrice: '$75.00', notes: 'BFCL V4 #1, Extended+Interleaved Thinking' },
-      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'BFCL V4 #2, Adaptive Thinking' },
-      { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$0.80', outputPrice: '$4.00', notes: 'BFCL V4 #6' },
-      { id: 'claude-sonnet-4-6', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
+      { id: 'claude-opus-4-7', context: '1M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended+Interleaved Thinking, 1M context' },
+      { id: 'claude-opus-4-6', context: '1M', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended Thinking, 1M context' },
+      { id: 'claude-opus-4-5-20251101', context: '200K', tier: 'flagship', inputPrice: '$5.00', outputPrice: '$25.00', notes: 'Extended+Interleaved Thinking' },
+      { id: 'claude-sonnet-4-6', context: '1M', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking, 1M context' },
+      { id: 'claude-sonnet-4-5-20250929', context: '200K', tier: 'standard', inputPrice: '$3.00', outputPrice: '$15.00', notes: 'Adaptive Thinking' },
+      { id: 'claude-haiku-4-5-20251001', context: '200K', tier: 'fast', inputPrice: '$1.00', outputPrice: '$5.00' },
     ],
   },
   {
     providerId: 'gemini',
     models: [
-      { id: 'gemini-2.5-pro', context: '1M', tier: 'flagship', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking' },
-      { id: 'gemini-2.5-flash', context: '1M', tier: 'standard', inputPrice: '$0.15', outputPrice: '$0.60', notes: 'Thinking' },
+      { id: 'gemini-3.1-pro-preview', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$12.00', notes: 'Preview, ≤200K $2/$12, >200K $4/$18' },
+      { id: 'gemini-2.5-pro', context: '1M', tier: 'standard', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking, ≤200K $1.25/$10' },
+      { id: 'gemini-3.1-flash-preview', context: '1M', tier: 'standard', inputPrice: '$1.00', outputPrice: '$6.00', notes: 'Preview' },
+      { id: 'gemini-3.1-flash-lite-preview', context: '1M', tier: 'standard', inputPrice: '$0.25', outputPrice: '$1.50', notes: 'Preview, cost-efficient' },
+      { id: 'gemini-2.5-flash', context: '1M', tier: 'fast', inputPrice: '$0.30', outputPrice: '$2.50', notes: 'Thinking, batch $0.15/$1.25' },
       { id: 'gemini-2.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
     ],
   },
   {
     providerId: 'deepseek',
     models: [
-      { id: 'deepseek-r1', context: '128K', tier: 'flagship', inputPrice: '$0.55', outputPrice: '$2.19', notes: 'Reasoning, vLLM 경로만 tool calling 지원' },
-      { id: 'deepseek-v3.1', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'Strict FC (Beta), tool_choice=required/none 가능' },
-      { id: 'deepseek-v3.2-exp', context: '128K', tier: 'standard', inputPrice: '$0.27', outputPrice: '$1.10', notes: 'BFCL V4 #14, Prompt+Thinking, V3.2 Speciale은 FC 미지원' },
-      { id: 'deepseek-chat', context: '128K', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: 'V3.1 hybrid: Non-Think+Think 통합 모드' },
+      { id: 'deepseek-v4-pro', context: '1M', tier: 'flagship', inputPrice: '$0.435', outputPrice: '$0.87', notes: '75% 할인, 1M context, 384K max output' },
+      { id: 'deepseek-v4-flash', context: '1M', tier: 'fast', inputPrice: '$0.14', outputPrice: '$0.28', notes: '1M context, 384K max output' },
     ],
   },
   {
@@ -626,9 +682,9 @@ export interface CliTransportInfo {
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '--prompt', streamFormat: 'JSON chunks', argvThreshold: '—', notes: 'SSE-style chunked 응답. Gemini 2.5 Flash infinite thinking bug (#2025)' },
-  { providerId: 'codex_cli', binary: 'codex', contextWindow: '200K', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'GPT-5.2-Codex 기본, 내부 5-model rotation, Agents SDK 오케스트레이션' },
-  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '—', notes: 'Anthropic API 호환 포맷' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '-p', streamFormat: 'JSON (sync)', argvThreshold: '—', notes: '--output-format json, 동기식 단일 응답 (streaming 없음). Gemini 2.5 Flash infinite thinking bug (#2025)' },
+  { providerId: 'codex_cli', binary: 'codex', contextWindow: '1M', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '512KB', notes: 'default_prompt_argv_threshold=512KB, GPT-5.2-Codex 기본, 내부 5-model rotation' },
+  { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '32KB', notes: 'default_prompt_argv_threshold=32KB, Anthropic API 호환 포맷' },
 ]
 
 // ── GLM Model Mapping ─────────────────────────────────────────
@@ -703,7 +759,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 820, reason: 'rate-limit.soft' },
       { provider: 'OpenAI',    status: 'miss', ms: 540, reason: 'timeout' },
-      { provider: 'Moonshot',  status: 'hit',  ms: 420, reason: 'ok' },
+      { provider: 'Kimi',      status: 'hit',  ms: 420, reason: 'ok' },
     ],
   },
   {
@@ -713,7 +769,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'hit',     ms: 380, reason: 'ok' },
       { provider: 'OpenAI',    status: 'skipped',  ms: 0,   reason: 'skipped' },
-      { provider: 'Moonshot',  status: 'skipped',  ms: 0,   reason: 'skipped' },
+      { provider: 'Kimi',      status: 'skipped',  ms: 0,   reason: 'skipped' },
     ],
   },
   {
@@ -723,7 +779,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 1240, reason: 'rate-limit.hard' },
       { provider: 'OpenAI',    status: 'miss', ms: 980,  reason: 'server_error' },
-      { provider: 'Moonshot',  status: 'miss', ms: 650,  reason: 'auth_failure' },
+      { provider: 'Kimi',      status: 'miss', ms: 650,  reason: 'auth_failure' },
       { provider: 'Ollama',    status: 'miss', ms: 320,  reason: 'model_unloaded' },
     ],
   },
@@ -734,7 +790,7 @@ export const CASCADE_TRACES: CascadeTraceScenario[] = [
     steps: [
       { provider: 'Anthropic', status: 'miss', ms: 100, reason: 'cooldown (30s remaining)' },
       { provider: 'OpenAI',    status: 'hit',  ms: 460, reason: 'ok' },
-      { provider: 'Moonshot',  status: 'skipped', ms: 0, reason: 'skipped' },
+      { provider: 'Kimi',      status: 'skipped', ms: 0, reason: 'skipped' },
     ],
   },
 ]
@@ -872,10 +928,10 @@ export function applicabilitySymbol(a: Applicability): string {
 
 export function applicabilityCellClass(a: Applicability): string {
   switch (a) {
-    case 'full': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    case 'partial': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-    case 'none': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
-    case 'na': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+    case 'full': return 'z4'
+    case 'partial': return 'z2'
+    case 'none': return 'z0'
+    case 'na': return 'z0'
   }
 }
 
@@ -912,7 +968,7 @@ export const PHASE_TIMELINE: PhaseMilestone[] = [
   { week: '12–13', phase: 'Phase 4', work: 'P4-1: supports_seed, supports_seed_with_images', deliverable: '27필드 capability 레코드', deps: 'Phase 1–2' },
   { week: '13–14', phase: 'Phase 4', work: 'P4-2: temperature=0 한계 문서화, 이미지 seed 무효화', deliverable: '결정론 제한 경고 (warn_once)', deps: 'P4-1' },
   { week: '14–15', phase: 'Phase 4', work: 'P7-1: Usage tokens 복원 + Capability drift 감지', deliverable: 'Usage 추출, CapabilityDriftAlert', deps: 'Phase 1–3' },
-  { week: '15–16', phase: 'Phase 4', work: 'P7-2: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-1' },
+  { week: '15–16', phase: 'Phase 4', work: 'P7-3: Per-provider metrics, Grafana 대시보드', deliverable: '5개 메트릭 OTLP, 대시보드', deps: 'P7-2' },
 ]
 
 export const PHASE_COLORS: Record<string, string> = {
@@ -980,12 +1036,21 @@ export const SUCCESS_METRICS: SuccessMetric[] = [
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-export function supportCellClass(v: FeatureSupport): string {
+export function supportHeatBucket(v: FeatureSupport): string {
   switch (v) {
-    case '●': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    case '◐': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)]'
-    case '○': return 'bg-[var(--bad-10)] text-[var(--bad-light)]'
-    case '—': return 'bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+    case '●': return 'z4'
+    case '◐': return 'z2'
+    case '○': return 'z1'
+    case '—': return 'z0'
+  }
+}
+
+export function riskBucket(risk: RiskLevel): string {
+  switch (risk) {
+    case 'C': return 'z4'
+    case 'H': return 'z3'
+    case 'M': return 'z2'
+    case 'L': return 'z1'
   }
 }
 
@@ -1007,7 +1072,18 @@ export function riskLabel(risk: RiskLevel): string {
   }
 }
 
-export function impactTone(impact: 'high' | 'medium' | 'low' | 'correct'): 'bad' | 'warn' | 'neutral' | 'info' {
+export type WiringImpact = 'high' | 'medium' | 'low' | 'correct'
+
+export function impactBucket(impact: WiringImpact): string {
+  switch (impact) {
+    case 'high': return 'z4'
+    case 'medium': return 'z2'
+    case 'low': return 'z1'
+    case 'correct': return 'z0'
+  }
+}
+
+export function impactTone(impact: WiringImpact): 'bad' | 'warn' | 'neutral' | 'info' {
   switch (impact) {
     case 'high': return 'bad'
     case 'medium': return 'warn'

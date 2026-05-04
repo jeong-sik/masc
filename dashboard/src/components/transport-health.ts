@@ -16,8 +16,13 @@ import { TextInput } from './common/input'
 import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
 import { ActionButton } from './common/button'
+import { StatTile } from './common/stat-tile'
 
 export type StatusTone = 'ok' | 'warn' | 'bad'
+
+function toneToStatus(tone: StatusTone): 'ok' | 'warn' | 'crit' {
+  return tone === 'bad' ? 'crit' : tone
+}
 
 type PracticalCase = {
   id: string
@@ -441,6 +446,31 @@ export function TransportHealthPanel() {
           class="text-3xs"
           onClick=${() => void refreshTransportHealth()}
         >새로고침<//>
+      </div>
+
+      <div class="grid grid-cols-4 gap-3 max-[880px]:grid-cols-2">
+        <${StatTile}
+          label="SSE 세션"
+          value=${String(data.sse.sessions_total)}
+          status=${toneToStatus(sseStatus)}
+          delta=${sseStatus !== 'ok' ? { direction: sseStatus === 'bad' ? 'down' : 'flat', text: sseStatus === 'bad' ? '이상' : '주의' } : undefined}
+        />
+        <${StatTile}
+          label="큐 압력"
+          value=${data.summary.queue_pressure.toUpperCase()}
+          status=${toneToStatus(queuePressureTone(data.summary.queue_pressure))}
+        />
+        <${StatTile}
+          label="최근 메시지"
+          value=${formatMetricValue(data.summary.recent_messages)}
+          status="brass"
+        />
+        <${StatTile}
+          label="Live 에이전트"
+          value=${formatMetricValue(data.cluster.live_agents)}
+          status=${toneToStatus(clusterStatus)}
+          delta=${data.cluster.active_operations ? { direction: 'flat', text: `${formatMetricValue(data.cluster.active_operations)} ops` } : undefined}
+        />
       </div>
 
       <details class="group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>

@@ -130,7 +130,7 @@ export function IdeShell() {
         <span style=${{ color: 'var(--color-fg-secondary)' }}>코드 IDE</span>
         <span>·</span>
         <${IdePresenceStrip} />
-        <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
+        <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok)' }}>● mcp · connected</span>
       </header>
       <${IdeToolbar}
         activeView=${activeView}

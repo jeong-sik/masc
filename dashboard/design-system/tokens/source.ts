@@ -152,11 +152,21 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
     out.push(t(`k-${i}-glow`, rgbTriplet(hex), "raw", "color"));
   }
 
-  // Provider palette
+  // Provider palette — matches OAS_PROVIDER_CAPS providers
   out.push(t("p-anthropic", "#c9a88a", "raw", "color", "warm sand"));
-  out.push(t("p-moonshot", "#8a98c9", "raw", "color", "cool indigo"));
+  out.push(t("p-kimi", "#8a98c9", "raw", "color", "cool indigo"));
   out.push(t("p-openai", "#6b9e8e", "raw", "color", "muted teal"));
   out.push(t("p-xai", "#a896a0", "raw", "color", "mauve"));
+  out.push(t("p-gemini", "#7b8fb0", "raw", "color", "slate blue"));
+  out.push(t("p-deepseek", "#6aaa8a", "raw", "color", "seafoam"));
+  out.push(t("p-qwen", "#c99060", "raw", "color", "warm amber"));
+  out.push(t("p-mistral", "#7a8ec0", "raw", "color", "periwinkle"));
+  out.push(t("p-nemotron", "#7aaa6b", "raw", "color", "sage green"));
+  out.push(t("p-ollama", "#8a8a7a", "raw", "color", "driftwood"));
+  out.push(t("p-llamacpp", "#9a9a8a", "raw", "color", "warm stone"));
+  out.push(t("p-glm", "#9a7aaa", "raw", "color", "muted plum"));
+  out.push(t("p-gemini-cli", "#7b8fb0", "raw", "color", "slate blue (cli)"));
+  out.push(t("p-codex-cli", "#6b9e8e", "raw", "color", "muted teal (cli)"));
 
   // Type scale — tabular, compact
   out.push(t("font-sans",
@@ -485,12 +495,22 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
       { softAlpha: 0.10, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px" }));
   }
 
-  // Provider 2-slot
+  // Provider 2-slot — semantic soft/border variants
   for (const [name, hex] of [
     ["anthropic", "#c9a88a"],
-    ["moonshot", "#8a98c9"],
+    ["kimi", "#8a98c9"],
     ["openai", "#6b9e8e"],
     ["xai", "#a896a0"],
+    ["gemini", "#7b8fb0"],
+    ["deepseek", "#6aaa8a"],
+    ["qwen", "#c99060"],
+    ["mistral", "#7a8ec0"],
+    ["nemotron", "#7aaa6b"],
+    ["ollama", "#8a8a7a"],
+    ["llamacpp", "#9a9a8a"],
+    ["glm", "#9a7aaa"],
+    ["gemini-cli", "#7b8fb0"],
+    ["codex-cli", "#6b9e8e"],
   ] as const) {
     out.push(t(`p-${name}-soft`, `rgb(${rgbTriplet(hex)} / .10)`, "semantic", "color"));
     out.push(t(`p-${name}-border`, `rgb(${rgbTriplet(hex)} / .30)`, "semantic", "color"));

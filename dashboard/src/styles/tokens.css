@@ -407,7 +407,7 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 .dim { color: var(--fg-2); }
 
 /* Status dot — 6px solid, used in rows & KPI */
-.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; vertical-align: middle; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: var(--radius-circle); vertical-align: middle; }
 .dot-ok { background: var(--ok); }
 .dot-warn { background: var(--warn); }
 .dot-err { background: var(--err); }

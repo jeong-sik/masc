@@ -69,6 +69,7 @@ type semantic =
   | `Fs_20
   | `Fs_28
   | `Fs_36
+  | `Fs_56
   | `Lh_tight
   | `Lh_body
   | `Lh_loose
@@ -115,6 +116,7 @@ type semantic =
   | `Radius_md
   | `Radius_lg
   | `Radius_pill
+  | `Radius_circle
   | `Font_display
   | `Font_body
   | `Font_ui
@@ -359,9 +361,12 @@ type semantic =
   | `Shadow_glow
   | `Shadow_raised
   | `Shadow_ring
+  | `Shadow_cmd_palette
+  | `Shadow_drawer_left
   | `Focus_ring
   | `Focus_ring_err
   | `Hover_overlay
+  | `Hover_overlay_strong
   | `Active_overlay
   | `Pressed_scale
   | `Hover_lift
@@ -599,6 +604,7 @@ let name_of = function
   | `Fs_20 -> "fs-20"
   | `Fs_28 -> "fs-28"
   | `Fs_36 -> "fs-36"
+  | `Fs_56 -> "fs-56"
   | `Lh_tight -> "lh-tight"
   | `Lh_body -> "lh-body"
   | `Lh_loose -> "lh-loose"
@@ -645,6 +651,7 @@ let name_of = function
   | `Radius_md -> "radius-md"
   | `Radius_lg -> "radius-lg"
   | `Radius_pill -> "radius-pill"
+  | `Radius_circle -> "radius-circle"
   | `Font_display -> "font-display"
   | `Font_body -> "font-body"
   | `Font_ui -> "font-ui"
@@ -889,9 +896,12 @@ let name_of = function
   | `Shadow_glow -> "shadow-glow"
   | `Shadow_raised -> "shadow-raised"
   | `Shadow_ring -> "shadow-ring"
+  | `Shadow_cmd_palette -> "shadow-cmd-palette"
+  | `Shadow_drawer_left -> "shadow-drawer-left"
   | `Focus_ring -> "focus-ring"
   | `Focus_ring_err -> "focus-ring-err"
   | `Hover_overlay -> "hover-overlay"
+  | `Hover_overlay_strong -> "hover-overlay-strong"
   | `Active_overlay -> "active-overlay"
   | `Pressed_scale -> "pressed-scale"
   | `Hover_lift -> "hover-lift"

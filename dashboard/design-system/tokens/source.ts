@@ -166,7 +166,7 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
     `ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace`,
     "raw", "typography"));
 
-  for (const px of [9, 10, 11, 12, 13, 14, 16, 20, 28, 36]) {
+  for (const px of [9, 10, 11, 12, 13, 14, 16, 20, 28, 36, 56]) {
     out.push(t(`fs-${px}`, `${px}px`, "raw", "dimension"));
   }
 
@@ -223,6 +223,8 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("radius-md", "6px", "raw", "dimension"));
   out.push(t("radius-lg", "12px", "raw", "dimension"));
   out.push(t("radius-pill", "999px", "raw", "dimension"));
+  out.push(t("radius-circle", "50%", "raw", "dimension",
+    "circle idiom for square dots/avatars (10+ consumers)"));
 
   // Bonsai font stacks (cyberpunk + terminal collapse to mono)
   out.push(t("font-display",
@@ -614,6 +616,14 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("shadow-ring",   "inset 0 0 0 1px rgba(196, 162, 101, 0.25)", "role", "shadow",
     "bonsai-only 1px ring (distinct from --shadow-inset)"));
 
+  // Component-specific shadows (semantically named — distinct from
+  // shadow-1/2/3 elevation tiers because the values are tuned for
+  // a specific surface and don't follow the elev-N progression).
+  out.push(t("shadow-cmd-palette", "0 12px 40px rgb(0 0 0 / .6)", "role", "shadow",
+    "command palette modal — more diffuse than --shadow-3 (40px blur vs 32px)"));
+  out.push(t("shadow-drawer-left", "-8px 0 24px rgb(0 0 0 / .4)", "role", "shadow",
+    "right-anchored drawer — directional shadow casting toward main content"));
+
   // Focus / interaction overlays
   out.push(t("focus-ring",
     `0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25)`,
@@ -622,6 +632,8 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
     `0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3)`,
     "role", "shadow"));
   out.push(t("hover-overlay",  "rgb(255 255 255 / .03)", "role", "color"));
+  out.push(t("hover-overlay-strong", "rgb(255 255 255 / .05)", "role", "color",
+    "for tr:hover that must read brighter than the zebra row using --hover-overlay"));
   out.push(t("active-overlay", "rgb(0 0 0 / .25)",       "role", "color"));
 
   // Headless interaction tokens (v2 spec §4.2.1) — primitives bind

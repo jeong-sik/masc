@@ -208,7 +208,7 @@
   background: inherit;
 }
 .sl-status {
-  width: 6px; height: 6px; border-radius: 50%;
+  width: 6px; height: 6px; border-radius: var(--radius-circle);
   flex-shrink: 0; background: var(--idle);
 }
 .sl-status.dot-running { background: var(--ok); box-shadow: 0 0 4px var(--ok); }

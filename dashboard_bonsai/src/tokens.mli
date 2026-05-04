@@ -80,6 +80,7 @@ type semantic =
   | `Fs_20
   | `Fs_28
   | `Fs_36
+  | `Fs_56
   | `Lh_tight
   | `Lh_body
   | `Lh_loose
@@ -126,6 +127,7 @@ type semantic =
   | `Radius_md
   | `Radius_lg
   | `Radius_pill
+  | `Radius_circle
   | `Font_display
   | `Font_body
   | `Font_ui
@@ -370,9 +372,12 @@ type semantic =
   | `Shadow_glow
   | `Shadow_raised
   | `Shadow_ring
+  | `Shadow_cmd_palette
+  | `Shadow_drawer_left
   | `Focus_ring
   | `Focus_ring_err
   | `Hover_overlay
+  | `Hover_overlay_strong
   | `Active_overlay
   | `Pressed_scale
   | `Hover_lift

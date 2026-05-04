@@ -162,7 +162,7 @@
 }
 .pr-link:hover, .sb-link:hover { color: var(--brass-1); }
 .pr-state {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-circle);
   margin-right: 5px; vertical-align: middle;
 }
 .pr-state.open { background: var(--ok); }

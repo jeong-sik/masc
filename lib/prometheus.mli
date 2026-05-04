@@ -198,6 +198,7 @@ val metric_keeper_cleanup_tracking_failures : string
 val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
 val metric_keeper_meta_read_failures : string
+val metric_keeper_approval_queue_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_reconcile_failures : string

@@ -24,15 +24,20 @@ let int_of_env_default_with_deprecated
       Keeper_config.clamp_int v ~min_v ~max_v
 ;;
 
-(* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
-   + reactive). Default 12 = headroom for up to 12 keepers. *)
+(* Global turn slot cap across autonomous + reactive pools.
+
+   Sized for the observed 14-keeper fleet plus burst headroom. Operators
+   running larger fleets raise [MASC_KEEPER_AUTOBOOT_MAX] explicitly; the
+   only enforced floor is [min_v:1] (0 = deadlock). The previous [max_v:20]
+   cap was a typo-defence boilerplate, not an architectural ceiling, and
+   forced operator raise-cycles every time the fleet grew. Removed. *)
 let keeper_turn_throttle_limit =
   int_of_env_default_with_deprecated
     ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
     ~deprecated:"MASC_KEEPER_AUTOBOT_MAX"
-    ~default:12
+    ~default:32
     ~min_v:1
-    ~max_v:20
+    ~max_v:max_int
 ;;
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
@@ -76,20 +81,17 @@ let snapshot_holders ~label ~now =
       holder_table [])
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 
-(* Autonomous turn concurrency cap. Prevents thundering-herd when all
-   keepers fire scheduled turns simultaneously on a shared LLM server.
-   Reactive turns (explicit mentions, board events) use a separate gate
-   so they can stay responsive without consuming the full global pool.
-   Default 3 = a conservative parallelism level for shared remote providers.
-   Lower to 1 for single-slot local servers. For 8-slot servers,
-   MASC_KEEPER_AUTONOMOUS_CONCURRENCY=3-4 is a reasonable range.
-   The 16 cap accommodates fleets of 14+ keepers running on a single
-   workstation with abundant CPU and provider headroom (operator
-   judgement); below 16 is a safety net against runaway provider spend
-   during config typos, not a hard architectural ceiling. *)
+(* Autonomous turn concurrency. Reactive turns use a separate pool so
+   explicit mentions / board events stay responsive even when scheduled
+   turns saturate.
+
+   Provider rate limits (and any future cost cap) are enforced per-provider
+   downstream; this counter is only a coarse fairness gate between fibers.
+   The previous [max_v:16] ceiling was a typo-defence boilerplate, not an
+   architectural ceiling, and starved fleets >16 keepers. Removed. *)
 let autonomous_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:3 ~min_v:1 ~max_v:16
+    "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:16 ~min_v:1 ~max_v:max_int
 ;;
 
 let () =
@@ -102,7 +104,7 @@ let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
 let reactive_turn_limit =
   Keeper_config.int_of_env_default
-    "MASC_KEEPER_REACTIVE_CONCURRENCY" ~default:4 ~min_v:1 ~max_v:12
+    "MASC_KEEPER_REACTIVE_CONCURRENCY" ~default:16 ~min_v:1 ~max_v:max_int
 ;;
 
 let () =
@@ -214,16 +216,17 @@ let autonomous_waiter_position ~(ticket : int) : int option =
     observed in keeper decision logs — the sitting keeper waited past its
     own turn budget because peers held slots for the full outer wall-clock.
 
-    Default 60s = short enough that keepers fail fast and fall back to the
-    next heartbeat cycle (giving real slot holders time to release), long
-    enough that legitimate turn contention (3+ concurrent keepers on a
-    fast provider) does not mis-trigger.
+    Default 180s = enough headroom for a slow LLM turn ahead of a queued
+    keeper to finish without forcing a tail-of-queue timeout cascade. The
+    previous 60s default was tuned for a 3-keeper fleet and produced the
+    245-WARN/30min storm observed at the 14-keeper scale (memory:
+    feedback_keeper_starvation_capacity_vs_turn_duration_mismatch).
 
-    Env: [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Default 60. Range [5, 600]. *)
+    Env: [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Default 180. Min 5. *)
 let semaphore_wait_timeout_sec =
   Keeper_config.float_of_env_default
     "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
-    ~default:60.0 ~min_v:5.0 ~max_v:600.0
+    ~default:180.0 ~min_v:5.0 ~max_v:Float.max_float
 ;;
 
 (** Per-keeper record of the last autonomous turn completion timestamp.

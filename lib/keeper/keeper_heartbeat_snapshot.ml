@@ -120,11 +120,19 @@ let write_heartbeat_snapshot
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_heartbeat_failures
+             ~labels:[("keeper", meta_current.name); ("site", "history_load")]
+             ();
            Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
              meta_current.name (Printexc.to_string exn);
            []
        in
        if !parse_errors > 0 then
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_heartbeat_failures
+           ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
+           ();
          Log.Keeper.warn
            "write_heartbeat_snapshot: failed to parse %d message(s) from history logs for keeper=%s trace_id=%s path=%s"
            !parse_errors meta_current.name
@@ -303,6 +311,10 @@ let write_heartbeat_snapshot
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_heartbeat_failures
+           ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
+           ();
          Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
            meta_current.name (Printexc.to_string exn));
     let snapshot =
@@ -421,6 +433,10 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_heartbeat_failures
+         ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
+         ();
        Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"
          meta_current.name (Printexc.to_string exn))
 ;;

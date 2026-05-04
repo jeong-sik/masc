@@ -507,6 +507,8 @@ let metric_keeper_generation_lineage_failures =
   "masc_keeper_generation_lineage_failures_total"
 let metric_keeper_keepalive_signal_failures =
   "masc_keeper_keepalive_signal_failures_total"
+let metric_keeper_board_signal_no_wake_total =
+  "masc_keeper_board_signal_no_wake_total"
 let metric_keeper_meta_json_failures =
   "masc_keeper_meta_json_failures_total"
 let metric_keeper_tools_oas_failures =
@@ -1372,6 +1374,16 @@ let init () =
     Counter;
   add metric_keeper_keepalive_signal_failures
     "Total keeper keepalive signal failures (board capped/late-event rejected), labeled by keeper and site"
+    Counter;
+  add metric_keeper_board_signal_no_wake_total
+    "Total board signals (post_created/comment_added) that did not produce a \
+     wake decision for a running keeper. Increments per (keeper, kind) when \
+     [Keeper_world_observation.board_signal_wake_reason] returns [None] — i.e. \
+     no explicit_mention, scope feed disabled, and (for comments) no external \
+     reply after a self-comment. Operators alert on this counter when keepers \
+     should be reacting to a known board signal: a high rate identifies \
+     keepers whose [room_signal_prompt_enabled] / mention-target configuration \
+     drops legitimate signals. Labels: keeper, kind=post_created|comment_added."
     Counter;
   add metric_keeper_meta_json_failures
     "Total keeper meta JSON failures (seed parse/unknown keys), labeled by site"

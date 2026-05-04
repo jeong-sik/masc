@@ -8,6 +8,7 @@ type epoch_summary =
   ; end_date : string
   ; status : Chronicle_types.epoch_status
   ; file_path : string
+  ; conductivity : float
   }
 [@@deriving yojson, show]
 

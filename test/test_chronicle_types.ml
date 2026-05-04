@@ -136,6 +136,7 @@ let sample_summary () =
   ; CI.end_date = "2026-05-01"
   ; CI.status = CT.Active
   ; CI.file_path = "docs/chronicle/epoch-2026-Q1-types.md"
+    ; conductivity = 1.0
   }
 
 let test_empty_index () =

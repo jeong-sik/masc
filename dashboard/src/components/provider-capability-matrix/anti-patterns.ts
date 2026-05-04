@@ -75,7 +75,10 @@ export function AntiPatternList() {
                 <td class="pm-td t-meta">${ap.description}</td>
                 <td class="pm-td t-caption">${ap.location}</td>
                 <td class="pm-td pm-td--center">
-                  <span class="pm-cell-badge ${riskBucket(ap.risk)}">${riskLabel(ap.risk)}</span>
+                  <span class="pm-cell-badge ${riskBucket(ap.risk)}" title=${[
+                    ap.impact ? `영향: ${ap.impact}` : '',
+                    ap.likelihood ? `발생: ${ap.likelihood}` : '',
+                  ].filter(Boolean).join('\n') || riskLabel(ap.risk)}>${riskLabel(ap.risk)}</span>
                 </td>
                 <td class="pm-td">
                   <span class="chip sm ${sourceColor(ap.source)}">

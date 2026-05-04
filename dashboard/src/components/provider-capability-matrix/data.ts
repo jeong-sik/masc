@@ -469,45 +469,49 @@ export interface AntiPattern {
   risk: RiskLevel
   source: AntiPatternSource
   improvement: string
+  /** What breaks when this anti-pattern fires — from sec05 risk matrix */
+  impact?: string
+  /** When this anti-pattern is triggered — from sec05 risk matrix */
+  likelihood?: string
 }
 
 export const ANTI_PATTERNS: AntiPattern[] = [
   // Silent Failure (S01-S10)
-  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
-  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환' },
-  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas', improvement: '`thinking_control_format` capability 필드 추가' },
-  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas', improvement: 'fallback 시 debug 로그 기록' },
-  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas', improvement: 'usage 누락의 구조적 특성 문서화' },
-  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: '주석-코드 동기화' },
-  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas', improvement: 'capability override 설정 노출' },
-  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas', improvement: '모델 discovery 동적 연동' },
-  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas', improvement: '모델별 동적 기본값' },
-  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas', improvement: 'contract relaxation 명시화' },
+  { id: 'S01', category: 'silent-failure', description: '`top_k` capability drop 시 one-shot WARN, 상위 포착 불가', location: 'backend_openai.ml:207-208', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환', impact: '단일 요청 파라미터 누락', likelihood: 'capability 불일치 모든 요청' },
+  { id: 'S02', category: 'silent-failure', description: '`min_p` capability drop 시 동일 패턴', location: 'backend_openai.ml:214-215', risk: 'M', source: 'oas', improvement: 'WARN를 structured logging으로 전환', impact: '단일 요청 파라미터 누락', likelihood: 'capability 불일치 모든 요청' },
+  { id: 'S03', category: 'silent-failure', description: 'non-DeepSeek 모델의 `chat_template_kwargs` 무시', location: 'backend_openai.ml:234', risk: 'H', source: 'oas', improvement: '`thinking_control_format` capability 필드 추가', impact: 'Thinking 기능 비활성화', likelihood: 'non-DeepSeek reasoning 모델' },
+  { id: 'S04', category: 'silent-failure', description: 'ToolResult name lookup 실패 시 `tool_use_id`를 name으로 사용', location: 'backend_gemini.ml:62-64', risk: 'M', source: 'oas', improvement: 'fallback 시 debug 로그 기록', impact: '잘못된 툴 호출 기록', likelihood: '툴 체인 복잡한 대화' },
+  { id: 'S05', category: 'silent-failure', description: 'CLI wrapper usage stripping — usage 누락', location: 'capabilities.ml:273,286,300', risk: 'L', source: 'oas', improvement: 'usage 누락의 구조적 특성 문서화', impact: 'Usage 데이터 누락', likelihood: '모든 CLI Provider 호출' },
+  { id: 'S06', category: 'silent-failure', description: '`supports_min_p=false`와 주석 "both true" 불일치', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: '주석-코드 동기화', impact: 'min_p 의도치 않은 drop', likelihood: '모든 Ollama 호출' },
+  { id: 'S07', category: 'silent-failure', description: 'unknown model의 tool_choice를 `true`로 가정', location: 'backend_openai.ml:252-258', risk: 'M', source: 'oas', improvement: 'capability override 설정 노출', impact: '400 오류 또는 잘못된 가정', likelihood: '알 수 없는 모델 사용 시' },
+  { id: 'S08', category: 'silent-failure', description: '`max_tokens` 4096 fallback — 알 수 없는 모델 출력 제한', location: 'backend_openai.ml:173', risk: 'H', source: 'oas', improvement: '모델 discovery 동적 연동', impact: '출력 길이 제한', likelihood: '알 수 없는 모델 + max_tokens 미설정' },
+  { id: 'S09', category: 'silent-failure', description: '`thinkingBudget` 기본값 10000 하드코딩', location: 'backend_gemini.ml:189', risk: 'L', source: 'oas', improvement: '모델별 동적 기본값', impact: 'Thinking depth 제한', likelihood: 'thinking 미설정 모든 요청' },
+  { id: 'S10', category: 'silent-failure', description: 'GLM `Required`/`None_`를 `Auto`로 coerce', location: 'backend_openai.ml:60-66', risk: 'M', source: 'oas', improvement: 'contract relaxation 명시화', impact: '강제 툴 호출 의도 무시', likelihood: 'GLM + Required/None_ 요청' },
   // Fake Fallback (F01-F04)
-  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas', improvement: 'pipeline-level contract 검증 강화' },
-  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas', improvement: '`Provider_config.validate`에서 사전 에러' },
-  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas', improvement: 'CLI Provider 실제 능력 탐지 개선' },
-  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: 'per-model override 허용' },
+  { id: 'F01', category: 'fake-fallback', description: 'GLM tool_choice auto만 지원, 사용자 의도 무시', location: 'backend_glm.ml', risk: 'M', source: 'oas', improvement: 'pipeline-level contract 검증 강화', impact: '계약 위반 미검출', likelihood: 'GLM + specific tool 요청' },
+  { id: 'F02', category: 'fake-fallback', description: 'Codex unsupported config 필드 WARN 후 무시', location: 'transport_codex_cli.ml:628-639', risk: 'M', source: 'oas', improvement: '`Provider_config.validate`에서 사전 에러', impact: '설정 의도 미반영', likelihood: 'Codex + unsupported config' },
+  { id: 'F03', category: 'fake-fallback', description: 'Gemini CLI `supports_tools=false`', location: 'capabilities.ml:265-275', risk: 'L', source: 'oas', improvement: 'CLI Provider 실제 능력 탐지 개선', impact: 'Tool 경로 우회', likelihood: 'Gemini CLI 사용 시' },
+  { id: 'F04', category: 'fake-fallback', description: 'Ollama `supports_tool_choice=false`', location: 'capabilities.ml:179-185', risk: 'M', source: 'oas', improvement: 'per-model override 허용', impact: 'Tool choice 제한', likelihood: 'Ollama + tool_choice 필요 시' },
   // String Matching (M01-M06)
-  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas', improvement: 'prefix 길이 기반 자동 정렬 테스트' },
-  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas', improvement: 'capability 필드 기반 결정론적 분기' },
-  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: 'Ollama `/api/show` 연동(가용 시)' },
-  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: '구조화된 에러 코드 사용' },
-  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: 'retryable 에러 코드 체계 도입' },
-  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas', improvement: 'alias 충돌 테스트 자동화' },
+  { id: 'M01', category: 'string-match', description: '`for_model_id` prefix substring match, 순서 의존', location: 'capabilities.ml:308-586', risk: 'H', source: 'oas', improvement: 'prefix 길이 기반 자동 정렬 테스트', impact: '잘못된 capability 매칭', likelihood: '모델 추가/네이밍 변경 시' },
+  { id: 'M02', category: 'string-match', description: '`deepseek-v4` 문자열 매칭으로 thinking control 분기', location: 'backend_openai.ml:221', risk: 'H', source: 'oas', improvement: 'capability 필드 기반 결정론적 분기', impact: 'Thinking 처리 불일치', likelihood: '새로운 reasoning 모델 추가 시' },
+  { id: 'M03', category: 'string-match', description: 'Ollama 모델 capability 문자열 기반 추정 불가', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: 'Ollama `/api/show` 연동(가용 시)', impact: '과소/과대 capability 선언', likelihood: 'Ollama 모델 변경 시' },
+  { id: 'M04', category: 'string-match', description: '`contains_ci` Ollama 에러 메시지 문자열 파싱', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: '구조화된 에러 코드 사용', impact: '잘못된 에러 분류', likelihood: 'Provider 메시지 변경 시' },
+  { id: 'M05', category: 'string-match', description: '`accept_rejected_cascadable_markers` 패턴 매칭', location: 'oas_compat.ml', risk: 'H', source: 'oas', improvement: 'retryable 에러 코드 체계 도입', impact: '잘못된 에러 분류', likelihood: 'Provider 메시지 변경 시' },
+  { id: 'M06', category: 'string-match', description: 'Provider label case-insensitive match', location: 'capabilities.ml:594-608', risk: 'L', source: 'oas', improvement: 'alias 충돌 테스트 자동화', impact: '잘못된 capability 반환', likelihood: '새 provider 추가 시' },
   // Hardcoding (H01-H12)
-  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas', improvement: '모델 메타데이터 동적 조회' },
-  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas', improvement: '모델별 설정 외부화' },
-  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas', improvement: 'effort-budget 매핑 테이블화' },
-  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas', improvement: '설정 가능한 파라미터로 전환' },
-  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas', improvement: '토큰 기반 게이트로 개선' },
-  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas', improvement: '환경 변수 문서화 및 검증' },
-  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas', improvement: '모델별 기본값 설정' },
-  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
-  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화' },
-  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas', improvement: '토크나이저 연동(가용 시)' },
-  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas', improvement: 'pricing API 동적 연동' },
-  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: '동적 capability discovery 연구' },
+  { id: 'H01', category: 'hardcoding', description: '`max_tokens` fallback 4096', location: 'backend_openai.ml:173', risk: 'M', source: 'oas', improvement: '모델 메타데이터 동적 조회', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H02', category: 'hardcoding', description: '`thinkingBudget` 기본값 10000', location: 'backend_gemini.ml:189', risk: 'M', source: 'oas', improvement: '모델별 설정 외부화', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H03', category: 'hardcoding', description: '`reasoning_effort` "medium" 기본값', location: 'Provider_config.ml', risk: 'M', source: 'oas', improvement: 'effort-budget 매핑 테이블화', impact: '설정 유연성 저하', likelihood: '관련 기능 사용 시' },
+  { id: 'H04', category: 'hardcoding', description: 'cache_control watermark 0.9', location: 'pipeline.ml:858', risk: 'M', source: 'oas', improvement: '설정 가능한 파라미터로 전환', impact: '부정확한 게이트', likelihood: 'cache 관련 요청 시' },
+  { id: 'H05', category: 'hardcoding', description: 'prompt cache min chars 4096', location: 'Constants.Anthropic', risk: 'M', source: 'oas', improvement: '토큰 기반 게이트로 개선', impact: '부정확한 게이트', likelihood: 'cache 관련 요청 시' },
+  { id: 'H06', category: 'hardcoding', description: '`keep_alive` 기본값 "-1"', location: 'backend_ollama.ml:81', risk: 'L', source: 'oas', improvement: '환경 변수 문서화 및 검증', impact: '의도와 다른 동작', likelihood: 'Ollama 기본 설정 사용 시' },
+  { id: 'H07', category: 'hardcoding', description: '`think` 기본값 `false`', location: 'backend_ollama.ml:39-40', risk: 'L', source: 'oas', improvement: '모델별 기본값 설정', impact: '의도와 다른 동작', likelihood: 'Ollama 기본 설정 사용 시' },
+  { id: 'H08', category: 'hardcoding', description: 'prompt_argv_threshold 512KB', location: 'transport_codex_cli.ml:252', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화', impact: '플랫폼 호환성 이슈', likelihood: 'CLI 사용 + 큰 프롬프트 시' },
+  { id: 'H09', category: 'hardcoding', description: 'prompt_argv_threshold 32KB', location: 'transport_kimi_cli.ml:41', risk: 'M', source: 'oas', improvement: '플랫폼별 설정 외부화', impact: '플랫폼 호환성 이슈', likelihood: 'CLI 사용 + 큰 프롬프트 시' },
+  { id: 'H10', category: 'hardcoding', description: 'chars per token ≈ 4 추정', location: 'backend_openai_parse.ml:187', risk: 'L', source: 'oas', improvement: '토크나이저 연동(가용 시)', impact: '부정확한 telemetry', likelihood: 'reasoning_tokens fallback 시' },
+  { id: 'H11', category: 'hardcoding', description: 'Anthropic/OpenAI model pricing', location: 'provider.ml:512-516', risk: 'M', source: 'oas', improvement: 'pricing API 동적 연동', impact: '유지보수 부담', likelihood: '모델 업데이트/신규 출시 시' },
+  { id: 'H12', category: 'hardcoding', description: 'Static benchmark 기반 capability 테이블', location: 'capabilities.ml:308-586', risk: 'M', source: 'oas', improvement: '동적 capability discovery 연구', impact: '유지보수 부담', likelihood: '모델 업데이트/신규 출시 시' },
 ]
 
 // ── Provider Model Catalog ──────────────────────────────────────

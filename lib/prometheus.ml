@@ -1874,20 +1874,24 @@ let init () =
     "After-turn response model matched a known alias." Counter;
   add metric_pricing_catalog_miss
     "Pricing catalog lookups that missed. Labels: model." Counter;
-  add metric_cost_emit_zero_source
-    "Cost emission events with no identifiable source." Counter;
+  (* metric_cost_emit_zero_source registered in keeper_hooks_oas.ml with the
+     authoritative help text and `source` label description. Re-registering
+     here would be silently ignored (add is no-op when name exists) and risks
+     diverging help text across edits. *)
   add metric_cost_ledger_status
-    "Cost ledger status transitions. Labels: status." Counter;
-  add metric_keeper_turn_gate_rejected_terminal
-    "Turn gate rejected a terminal state keeper. Labels: keeper." Counter;
-  add metric_keeper_receipt_unmapped_disposition
-    "Execution receipt with unmapped disposition. Labels: keeper." Counter;
+    "Cost ledger status transitions per provider/status/reason combination. \
+     Labels: provider, status, reason." Counter;
+  (* metric_keeper_turn_gate_rejected_terminal registered in keeper_guards.ml
+     with help text and labels keeper, tool, reason, decision.
+     metric_keeper_receipt_unmapped_disposition registered in
+     keeper_execution_receipt.ml without labels (intentional). Avoid
+     re-registering here so the authoritative help/labels stay single-sourced. *)
   add metric_keeper_bash_network_upgrade
-    "Bash shell network upgrade events. Labels: keeper." Counter;
+    "Bash shell network upgrade events. Labels: keeper, detected_tool." Counter;
   add metric_keeper_bash_local_execution
-    "Bash shell local execution events. Labels: keeper." Counter;
+    "Bash shell local execution events. Labels: keeper, reason." Counter;
   add metric_keeper_docker_runtime_discarded
-    "Docker shell runtime output discarded. Labels: keeper." Counter;
+    "Docker shell runtime output discarded. Labels: keeper, reason." Counter;
   add metric_keeper_proactive_skip
     "Proactive turn skipped due to heartbeat snapshot conditions. Labels: keeper, reason." Counter;
   add metric_keeper_stay_silent_loop_detected

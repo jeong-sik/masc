@@ -42,6 +42,20 @@ let get_float ~default name =
   | Some v -> Safe_ops.float_of_string_with_default ~default v
   | None -> default
 
+(** Variants that floor at zero.  An operator who sets a negative
+    value (e.g. [MASC_KEEPER_ALERT_MAX_RETRIES=-5]) gets the default
+    rather than the literal — negative budgets/counts are
+    nonsensical for the call sites these feed
+    ({!Env_config_keeper}, alert thresholds, retry caps).  NaN is
+    treated as out-of-range for the float variant. *)
+let get_int_nonneg ~default name =
+  let parsed = get_int ~default name in
+  if parsed < 0 then default else parsed
+
+let get_float_nonneg ~default name =
+  let parsed = get_float ~default name in
+  if Float.is_nan parsed || parsed < 0.0 then default else parsed
+
 let get_bool ~default name =
   match raw_value_opt name with
   | Some v ->

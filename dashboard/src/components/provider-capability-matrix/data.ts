@@ -953,8 +953,8 @@ export const SOURCE_LABEL: Record<AntiPatternSource, string> = {
 
 export function sourceColor(src: AntiPatternSource): string {
   switch (src) {
-    case 'masc-mcp': return 'bg-[var(--info-10)] text-[var(--color-status-info)] border-[var(--info-20)]'
-    case 'oas': return 'bg-[var(--good-10)] text-[var(--color-status-ok)] border-[var(--good-20)]'
+    case 'masc-mcp': return 'bg-[var(--info-soft)] text-[var(--color-status-info)] border-[var(--info-border)]'
+    case 'oas': return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
     case 'unverified': return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
   }
 }

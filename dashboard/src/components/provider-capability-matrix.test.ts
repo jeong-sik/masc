@@ -78,7 +78,7 @@ describe('ProviderCapabilityMatrix', () => {
     expect(el.textContent).not.toContain('S01')
   })
 
-  it('all anti-patterns have source attribution with precise OAS locations', () => {
+  it('all anti-patterns have source attribution with file locations', () => {
     for (const ap of ANTI_PATTERNS) {
       expect(ap.source).toBeDefined()
       expect(ap.location).toMatch(/\.\w+(:[\d,-]+)?$/)

@@ -528,6 +528,14 @@ let metric_egress_audit_stale_orphan =
   "masc_egress_audit_stale_orphan_total"
 let metric_keeper_toml_invalid =
   "masc_keeper_toml_invalid_total"
+let metric_keeper_persona_drift_missing =
+  "masc_keeper_persona_drift_missing_total"
+let metric_keeper_room_init_failures =
+  "masc_keeper_room_init_failures_total"
+let metric_keeper_presence_sync_failures =
+  "masc_keeper_presence_sync_failures_total"
+let metric_keeper_self_preservation_universal =
+  "masc_keeper_self_preservation_universal_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1230,6 +1238,23 @@ let init () =
   add metric_keeper_toml_invalid
     "Total keeper TOML config parse failures falling back to persona. \
      Labeled by keeper and reason."
+    Counter;
+  add metric_keeper_persona_drift_missing
+    "Total keeper persona file missing at expected path (config drift). \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_room_init_failures
+    "Total supervisor room initialization failures during keeper bootstrap. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_presence_sync_failures
+    "Total supervisor presence sync failures after room init. \
+     Labeled by keeper."
+    Counter;
+  add metric_keeper_self_preservation_universal
+    "Total self-preservation UNIVERSAL suppression events where all \
+     keepers in a cohort are suppressed and auto-recovery is OFF. \
+     Labeled by cohort (dominant failure key)."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

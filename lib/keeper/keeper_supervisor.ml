@@ -330,6 +330,10 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   with
   | Ok _ -> ()
   | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_persona_drift_missing
+        ~labels:[("keeper", meta.name)]
+        ();
       Log.Keeper.error
         "[#10993][persona_drift] keeper=%s resolved=%s persona file missing at %s \
          — runtime falls through to logging-only RFC P3-a path; \
@@ -357,6 +361,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
        if not (Coord_utils.is_initialized ctx.config) then
          let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in ()
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_room_init_failures
+         ~labels:[("keeper", meta.name)]
+         ();
        Log.Keeper.error "supervisor room init failed: %s"
          (Printexc.to_string exn));
     let live_meta =
@@ -374,6 +382,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
              meta.name msg);
         synced
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_presence_sync_failures
+          ~labels:[("keeper", meta.name)]
+          ();
         Log.Keeper.error "supervisor presence sync failed: %s"
           (Printexc.to_string exn);
         meta
@@ -757,7 +769,11 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
               breaker working as designed = WARN.  Both lines carry
               [streak=N] so dashboards can show how close the next
               probe valve is. *)
-           if ratio >= 0.99 then
+           if ratio >= 0.99 then begin
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_self_preservation_universal
+               ~labels:[("cohort", dominant_key)]
+               ();
              Log.Keeper.error
                "self-preservation: UNIVERSAL suppression %d/%d \
                 (ratio=%.2f, cohort=%s, streak=%d) — auto-recovery is \
@@ -769,6 +785,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
                suppressed_count n_total ratio dominant_key
                sp_escape_state.consecutive_suppressions
                probe_after_n_suppressions
+           end
            else
              Log.Keeper.warn
                "self-preservation: suppressing %d/%d restarts \

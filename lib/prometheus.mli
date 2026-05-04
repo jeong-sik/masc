@@ -231,6 +231,10 @@ val metric_keeper_memory_write_failures : string
 val metric_keeper_write_meta_cycle_failures : string
 val metric_keeper_alert_persist_failures : string
 val metric_keeper_metrics_sse_failures : string
+val metric_keeper_dispatch_event_failures : string
+val metric_keeper_session_cleanup_failures : string
+val metric_keeper_chat_store_failures : string
+val metric_keeper_observation_query_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string

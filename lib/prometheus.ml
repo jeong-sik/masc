@@ -580,6 +580,14 @@ let metric_keeper_alert_persist_failures =
   "masc_keeper_alert_persist_failures_total"
 let metric_keeper_metrics_sse_failures =
   "masc_keeper_metrics_sse_failures_total"
+let metric_keeper_dispatch_event_failures =
+  "masc_keeper_dispatch_event_failures_total"
+let metric_keeper_session_cleanup_failures =
+  "masc_keeper_session_cleanup_failures_total"
+let metric_keeper_chat_store_failures =
+  "masc_keeper_chat_store_failures_total"
+let metric_keeper_observation_query_failures =
+  "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 
@@ -1385,6 +1393,20 @@ let init () =
   add metric_keeper_metrics_sse_failures
     "Total SSE broadcast failures during metrics compaction/handoff. \
      Labeled by kind."
+    Counter;
+  add metric_keeper_dispatch_event_failures
+    "Total keeper state machine dispatch_event failures in supervisor. \
+     Labeled by event type."
+    Counter;
+  add metric_keeper_session_cleanup_failures
+    "Total session directory cleanup failures during keeper teardown."
+    Counter;
+  add metric_keeper_chat_store_failures
+    "Total chat store append/load failures. Labeled by operation."
+    Counter;
+  add metric_keeper_observation_query_failures
+    "Total world observation query failures (backlog counts, active agents, \
+     board events). Labeled by operation."
     Counter;
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \

@@ -187,6 +187,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "fiber_terminated")]
+                    ();
                   Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              if resolve_done (`Crashed reason) then
@@ -198,12 +202,20 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 Keeper_state_machine.Stop_requested with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "stop_requested")]
+                    ();
                   Log.Keeper.warn "supervisor: Stop_requested dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              (match Keeper_registry.dispatch_event ~base_path meta.name
                 Keeper_state_machine.Drain_complete with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "drain_complete")]
+                    ();
                   Log.Keeper.warn "supervisor: Drain_complete dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              if resolve_done `Stopped then
@@ -234,6 +246,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
               | Ok _ -> ()
               | Error e ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_dispatch_event_failures
+                    ~labels:[("keeper", meta.name); ("event", "fiber_terminated")]
+                    ();
                   Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
                     (Keeper_state_machine.transition_error_to_string e));
              let ts = Time_compat.now () in
@@ -567,6 +583,10 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          | Ok (Some _meta) -> () (* paused, skip *)
          | Ok None -> ()
          | Error err ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_observation_query_failures
+               ~labels:[("operation", "reconcile_read_meta")]
+               ();
              Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err)
     names;
   Log.Keeper.debug "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"

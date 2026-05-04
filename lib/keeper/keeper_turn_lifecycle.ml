@@ -79,6 +79,9 @@ let handle_keeper_down ctx args : tool_result =
         if validate_name (Keeper_id.Trace_id.to_string m.runtime.trace_id) then (
           let dir = Filename.concat (session_base_dir ctx.config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_session_cleanup_failures
+              ();
             Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));
       let json = `Assoc [

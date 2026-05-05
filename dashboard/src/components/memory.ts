@@ -28,6 +28,7 @@ import {
   boardSortMode,
   boardHiddenCategories,
   boardAuthorFilter,
+  boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
   boardHasMore,
@@ -285,6 +286,25 @@ function SortBar() {
             </button>
           `
         })}
+        <button type="button"
+          class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+            ${boardExcludeAutomation.value
+              ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)]'
+              : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
+            }"
+          aria-pressed=${boardExcludeAutomation.value}
+          aria-label="자동화 게시글 숨김 토글"
+          title="자동화 게시글 숨김 — direct/system 만 표시"
+          onClick=${() => {
+            boardExcludeAutomation.value = !boardExcludeAutomation.value
+            visibleLimit.value = PAGE_SIZE
+            automationVisibleLimit.value = PAGE_SIZE
+            systemVisibleLimit.value = PAGE_SIZE
+            refreshBoard()
+          }}
+        >
+          ${boardExcludeAutomation.value ? '🤖 숨김' : '🤖 자동화 포함'}
+        </button>
         <${TextInput}
           type="text"
           placeholder="작성자"

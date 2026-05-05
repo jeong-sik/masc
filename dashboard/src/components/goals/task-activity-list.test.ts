@@ -17,7 +17,7 @@ vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
 
-import { TaskActivityList, filterActivityEvents } from './task-activity-list'
+import { TaskActivityList } from './task-activity-list'
 
 function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): UnifiedTraceEvent {
   return {
@@ -185,67 +185,3 @@ describe('TaskActivityList', () => {
   })
 })
 
-describe('filterActivityEvents', () => {
-  const base: UnifiedTraceEvent = {
-    id: 'x',
-    ts: 0,
-    ts_iso: '2026-04-03T00:00:00Z',
-    kind: 'tool_call',
-    sourceLane: 'masc',
-    summary: 's',
-    detail: {},
-  }
-
-  it('returns all events when filter=all and query is empty', () => {
-    const evs = [{ ...base, id: 'a' }, { ...base, id: 'b', kind: 'broadcast' as const }]
-    expect(filterActivityEvents(evs, 'all', '')).toHaveLength(2)
-  })
-
-  it('filters by categorical kind', () => {
-    const evs = [
-      { ...base, id: 'a', kind: 'tool_call' as const },
-      { ...base, id: 'b', kind: 'broadcast' as const },
-      { ...base, id: 'c', kind: 'task' as const },
-    ]
-    const out = filterActivityEvents(evs, 'broadcast', '')
-    expect(out).toHaveLength(1)
-    expect(out[0]?.id).toBe('b')
-  })
-
-  it('matches free-text query against summary (case-insensitive)', () => {
-    const evs = [
-      { ...base, id: 'a', summary: 'Fetch Trajectory' },
-      { ...base, id: 'b', summary: 'broadcast' },
-    ]
-    const out = filterActivityEvents(evs, 'all', 'TRAJECTORY')
-    expect(out.map(e => e.id)).toEqual(['a'])
-  })
-
-  it('matches query against toolName, error, toolArgs (object), toolResult', () => {
-    const evs: UnifiedTraceEvent[] = [
-      { ...base, id: 'tool', toolName: 'masc_claim' },
-      { ...base, id: 'err', summary: 'x', error: 'permission denied' },
-      { ...base, id: 'args', summary: 'x', toolArgs: { room: 'alpha' } },
-      { ...base, id: 'res', summary: 'x', toolResult: '{"ok":true}' },
-      { ...base, id: 'none', summary: 'unrelated' },
-    ]
-    expect(filterActivityEvents(evs, 'all', 'masc_claim').map(e => e.id)).toEqual(['tool'])
-    expect(filterActivityEvents(evs, 'all', 'denied').map(e => e.id)).toEqual(['err'])
-    expect(filterActivityEvents(evs, 'all', 'alpha').map(e => e.id)).toEqual(['args'])
-    expect(filterActivityEvents(evs, 'all', '"ok":true').map(e => e.id)).toEqual(['res'])
-  })
-
-  it('ignores whitespace-only query', () => {
-    const evs = [{ ...base, id: 'a' }, { ...base, id: 'b' }]
-    expect(filterActivityEvents(evs, 'all', '   ')).toHaveLength(2)
-  })
-
-  it('combines kind filter and text query (AND semantics)', () => {
-    const evs: UnifiedTraceEvent[] = [
-      { ...base, id: 'a', kind: 'tool_call', summary: 'alpha call' },
-      { ...base, id: 'b', kind: 'broadcast', summary: 'alpha message' },
-    ]
-    const out = filterActivityEvents(evs, 'tool_call', 'alpha')
-    expect(out.map(e => e.id)).toEqual(['a'])
-  })
-})

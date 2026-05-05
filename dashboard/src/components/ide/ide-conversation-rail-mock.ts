@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
+import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -149,6 +150,14 @@ export function IdeConversationRailMock() {
     knownCascadeKeys.current = bridgeCascadeEventsToTrace(cascadeEvents, knownCascadeKeys.current)
   }, [cascadeEvents])
 
+  // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
+  // keeper-trace event the first time it is observed. Dedup key is
+  // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
+  // KeeperDecision payload has no native id field.
+  const knownDecisionKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownDecisionKeys.current = bridgeDecisionsToTrace(decisions, knownDecisionKeys.current)
+  }, [decisions])
   const replayItems = replayRailItems(posts, decisions, cascadeEvents)
   const replayEvents = replayEventsForItems(replayItems)
   const visibleItemIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))

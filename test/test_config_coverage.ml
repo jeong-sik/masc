@@ -1,5 +1,3 @@
-module Types = Masc_domain
-
 (** Config Module Coverage Tests
 
     Tests for the schema registry helpers that remain after mode removal.

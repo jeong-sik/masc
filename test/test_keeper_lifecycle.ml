@@ -8,6 +8,7 @@ module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
+module KCB = Masc_mcp.Keeper_turn_cascade_budget
 
 let ctx_messages = KEC.messages_of_context
 let ctx_system_prompt = KEC.system_prompt_of_context
@@ -696,6 +697,101 @@ let test_apply_post_turn_lifecycle_rejects_executor_without_audit () =
       check bool "executor without audit store raises Invalid_argument" true
         raised)
 
+let test_post_turn_resilience_runtime_executor_pauses_handoff () =
+  let base_dir = temp_dir "keeper_lifecycle_resilience_runtime" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod base_dir 0o755 with _ -> ());
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_env "MASC_RESILIENCE" (Some "1") @@ fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let meta =
+        let base =
+          make_keeper_meta ~name:"keeper-resilience-runtime"
+            ~trace_id:"trace-resilience-runtime" ()
+        in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta failed: " ^ err));
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let checkpoint =
+        KEC.create ~system_prompt:"stable" ~max_tokens:4096
+        |> fun ctx -> KEC.append ctx (Agent_sdk.Types.user_msg "checkpoint")
+        |> KEC.sync_oas_context
+        |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
+      in
+      let handles = KCB.post_turn_resilience_handles ~config ~meta in
+      check bool "runtime audit store configured" true
+        (Option.is_some handles.resilience_audit_store);
+      check bool "runtime executor configured" true
+        (Option.is_some handles.resilience_strategy_executor);
+      Unix.chmod base_dir 0o555;
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle_with_resilience_handles
+          ~resilience_audit_store:handles.resilience_audit_store
+          ~resilience_strategy_executor:handles.resilience_strategy_executor
+          ~base_dir ~meta
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:(Some checkpoint)
+        |> handles.sync_lifecycle_meta
+      in
+      Unix.chmod base_dir 0o755;
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check bool "handoff failure recorded" true
+        (Option.is_some lifecycle.handoff_failure_reason);
+      check bool "paused meta folded back into lifecycle" true
+        lifecycle.updated_meta.paused;
+      (match KR.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+           check bool "registry meta paused" true entry.KR.meta.paused;
+           let failure_reason =
+             Option.map KR.failure_reason_to_string
+               entry.KR.last_failure_reason
+             |> Option.value ~default:""
+           in
+           check bool "registry failure reason tagged" true
+             (contains_substring failure_reason "resilience_handoff");
+           check bool "registry failure reason explains handoff" true
+             (contains_substring failure_reason "post-turn resilience handoff")
+       | None -> fail "expected registered keeper");
+      match handles.resilience_audit_store with
+      | None -> fail "expected audit store"
+      | Some store ->
+          let categories =
+            Shared_audit.Store.recent store ~n:2
+            |> List.map
+                 (fun (entry : Shared_audit.Envelope.t) -> entry.category)
+          in
+          check bool "attempt audit written" true
+            (List.mem "RecoveryAttempted" categories);
+          check bool "outcome audit written" true
+            (List.mem "RecoverySucceeded" categories))
+
 let test_rollover_aborts_on_save_failure () =
   let base_dir = temp_dir "keeper_lifecycle_rollover_abort" in
   Fun.protect
@@ -1182,15 +1278,17 @@ let test_migrate_session_history_logs_moves_internal_entries () =
         KCC.migrate_session_history_logs ~session_dir:session.session_dir
       in
       check int "moved internal lines" 1 stats.moved_lines;
-      check int "dropped prompt lines" 3 stats.dropped_lines;
+      check int "dropped prompt lines" 2 stats.dropped_lines;
       let main_history = Fs_compat.load_file history_path in
       let internal_history =
         Fs_compat.load_file internal_history_path
       in
       check bool "main history keeps real conversation" true
         (contains_substring main_history "real conversation");
-      check bool "main history excludes world state" false
-        (contains_substring main_history "Current World State");
+      check bool "main history drops sourced world state prompt" false
+        (contains_substring main_history {|"source":"world_state_prompt"|});
+      check bool "main history keeps summarized user entry" true
+        (contains_substring main_history "[Summary]");
       check bool "main history excludes internal assistant" false
         (contains_substring main_history "internal reply");
       check bool "internal history drops world state" false
@@ -2234,7 +2332,9 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc_mcp.Coord.default_config base_dir in
-      let labels = [ ("event", "compaction_started") ] in
+      let labels =
+        [ ("keeper", "missing-keeper"); ("event", "compaction_started") ]
+      in
       let before =
         Masc_mcp.Prometheus.get_metric_value
           Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
@@ -2275,10 +2375,12 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
           net = None;
         }
       in
-      let labels = [ ("event", "compaction_started") ] in
+      let labels =
+        [ ("keeper", "missing-keeper"); ("reason", "invalid_transition") ]
+      in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2288,11 +2390,12 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
-      check bool "keepalive rejection metric increments" true (after > before))
+      check bool "keepalive registry rejection metric increments" true
+        (after > before))
 
 let () =
   run "keeper_lifecycle"
@@ -2317,6 +2420,8 @@ let () =
             test_apply_post_turn_lifecycle_legacy_path_skips_executor;
           test_case "executor without audit store rejected" `Quick
             test_apply_post_turn_lifecycle_rejects_executor_without_audit;
+          test_case "runtime executor pauses handoff" `Quick
+            test_post_turn_resilience_runtime_executor_pauses_handoff;
           test_case "rollover aborts on save failure" `Quick
             test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick

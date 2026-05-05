@@ -315,6 +315,20 @@ let run_read_line cmd =
 
 let discover_repositories ~base_path =
   let toml_exists = repositories_toml_exists base_path in
+  (* Issue #13188 follow-up: [find <base_path>] echoes the search-path
+     prefix in every result, so when [base_path] is relative
+     (e.g. ["workspace"]) the path duplication that happens later
+     ([Filename.concat base_path repo_dir] when [repo_dir] still starts
+     with ["workspace/..."]) yields ["workspace/workspace/group/repo"].
+     That phantom path then poisons hidden-dir filtering and breaks
+     [git -C].  Resolve [base_path] to absolute before invoking [find]
+     so every downstream path is absolute and the prefix-prepending
+     branch never fires. *)
+  let abs_base_path =
+    if Filename.is_relative base_path then
+      Filename.concat (Sys.getcwd ()) base_path
+    else base_path
+  in
   let existing_paths =
     match load_all ~base_path with
     | Ok repos ->
@@ -324,14 +338,14 @@ let discover_repositories ~base_path =
               ((not toml_exists)
                && String.equal r.id "default"
                && String.equal (local_path ~base_path r) base_path))
-        |> List.map (fun (r : repository) -> local_path ~base_path r)
+        |> List.map (fun (r : repository) -> local_path ~base_path:abs_base_path r)
     | Error _ -> []
   in
   let git_dirs =
     try
       let cmd =
         Printf.sprintf "find %s -maxdepth 4 -name \".git\" -type d 2>/dev/null"
-          (Filename.quote base_path)
+          (Filename.quote abs_base_path)
       in
       let ic = Unix.open_process_in cmd in
       Fun.protect
@@ -347,13 +361,13 @@ let discover_repositories ~base_path =
     | Sys_error _ | Unix.Unix_error _ | Failure _ -> []
   in
   let has_hidden_segment_under_base path =
-    if String.equal path base_path then false
+    if String.equal path abs_base_path then false
     else
       let base_prefix =
-        if String.length base_path > 0
-           && Char.equal base_path.[String.length base_path - 1] '/'
-        then base_path
-        else base_path ^ "/"
+        if String.length abs_base_path > 0
+           && Char.equal abs_base_path.[String.length abs_base_path - 1] '/'
+        then abs_base_path
+        else abs_base_path ^ "/"
       in
       let prefix_len = String.length base_prefix in
       if
@@ -374,11 +388,7 @@ let discover_repositories ~base_path =
   let candidates =
     List.filter_map
       (fun git_dir ->
-        let repo_dir = Filename.dirname git_dir in
-        let abs_repo_dir =
-          if Filename.is_relative repo_dir then Filename.concat base_path repo_dir
-          else repo_dir
-        in
+        let abs_repo_dir = Filename.dirname git_dir in
         if has_hidden_segment_under_base abs_repo_dir then None
         else if List.exists (String.equal abs_repo_dir) existing_paths then None
         else

@@ -24,16 +24,44 @@ const FALLBACK_SEED: ReadonlyArray<FileTreeNode> = [
   { path: 'README.md', label: 'README.md', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
 ]
 
-async function fetchTree(depth = 3, keeper = ''): Promise<FileTreeNode[]> {
+// Decoded form of the X-Workspace-Source header. The empty string in the
+// playground / playgroundMissing / keeperUnknown variants represents the
+// keeper name the server attempted to resolve.
+export type WorkspaceSource =
+  | { kind: 'project' }
+  | { kind: 'playground'; keeper: string }
+  | { kind: 'playground_missing'; keeper: string }
+  | { kind: 'keeper_unknown'; keeper: string }
+
+export function parseWorkspaceSource(header: string | null): WorkspaceSource {
+  if (!header) return { kind: 'project' }
+  if (header === 'project') return { kind: 'project' }
+  const colon = header.indexOf(':')
+  if (colon === -1) return { kind: 'project' }
+  const tag = header.slice(0, colon)
+  const keeper = header.slice(colon + 1)
+  if (tag === 'playground') return { kind: 'playground', keeper }
+  if (tag === 'playground_missing') return { kind: 'playground_missing', keeper }
+  if (tag === 'keeper_unknown') return { kind: 'keeper_unknown', keeper }
+  return { kind: 'project' }
+}
+
+interface TreeFetchResult {
+  readonly nodes: FileTreeNode[]
+  readonly source: WorkspaceSource
+}
+
+async function fetchTree(depth = 3, keeper = ''): Promise<TreeFetchResult> {
   try {
     const params = new URLSearchParams({ depth: String(depth) })
     if (keeper) params.set('keeper', keeper)
     const res = await fetch(`/api/v1/workspace/tree?${params.toString()}`)
-    if (!res.ok) return [...FALLBACK_SEED]
+    const source = parseWorkspaceSource(res.headers.get('X-Workspace-Source'))
+    if (!res.ok) return { nodes: [...FALLBACK_SEED], source }
     const data = await res.json()
-    if (!Array.isArray(data) || data.length === 0) return [...FALLBACK_SEED]
-    return data as FileTreeNode[]
-  } catch { return [...FALLBACK_SEED] }
+    if (!Array.isArray(data) || data.length === 0) return { nodes: [...FALLBACK_SEED], source }
+    return { nodes: data as FileTreeNode[], source }
+  } catch { return { nodes: [...FALLBACK_SEED], source: { kind: 'project' } } }
 }
 
 export function IdeExplorer() {
@@ -46,9 +74,15 @@ export function IdeExplorer() {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
 
+  const [source, setSource] = useState<WorkspaceSource>({ kind: 'project' })
+
   useEffect(() => {
     let cancelled = false
-    fetchTree(3, keeperName).then(nodes => { if (!cancelled) store.seed(nodes) })
+    fetchTree(3, keeperName).then(({ nodes, source }) => {
+      if (cancelled) return
+      store.seed(nodes)
+      setSource(source)
+    })
     return () => { cancelled = true }
   }, [store, keeperName])
 
@@ -91,6 +125,7 @@ export function IdeExplorer() {
         <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
         <span>${fileCount} FILES</span>
       </header>
+      ${SourceHint(source)}
       <ul
         role="tree"
         aria-label="File tree"
@@ -102,6 +137,27 @@ export function IdeExplorer() {
         }))}
       </ul>
     </div>
+  `
+}
+
+function SourceHint(source: WorkspaceSource) {
+  if (source.kind === 'project' || source.kind === 'playground') return null
+  const message = source.kind === 'playground_missing'
+    ? `@${source.keeper} 의 playground 디렉토리가 아직 없어 프로젝트 트리로 fallback`
+    : `@${source.keeper} 키퍼 메타를 찾지 못해 프로젝트 트리로 fallback`
+  return html`
+    <div
+      role="status"
+      aria-live="polite"
+      style=${{
+        font: 'var(--type-body)',
+        fontSize: 'var(--fs-11)',
+        color: 'var(--color-fg-muted)',
+        background: 'var(--color-bg-muted)',
+        padding: 'var(--sp-1) var(--sp-2)',
+        borderRadius: 'var(--r-1)',
+      }}
+    >${message}</div>
   `
 }
 

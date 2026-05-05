@@ -85,8 +85,8 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'cognition', aliases: ['ep-card', 'episodes-cards'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ep-lrn', 'episodes-learnings'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ar-lst', 'ar-loops'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ar-fnd', 'ar-finding-card'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'finding' } }, coverage: 'partial' },
-  { mode: 'cognition', aliases: ['ar-flw', 'ar-flow'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'flow' } }, coverage: 'partial' },
+  { mode: 'cognition', aliases: ['ar-fnd', 'ar-finding-card'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'finding' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ar-flw', 'ar-flow'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'flow' } }, coverage: 'covered' },
 
   // IDE Plane.
   { mode: 'ide', aliases: ['edit', 'source'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'partial' },

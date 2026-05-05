@@ -11,7 +11,6 @@
 open Alcotest
 
 module Session = Masc_mcp.Session
-module Cancellation = Masc_mcp.Cancellation
 module Types = Types
 module Env_config = Env_config
 
@@ -82,78 +81,9 @@ let test_session_concurrent_register_unregister () =
 
 (** {1 Cancellation Token Stress Tests} *)
 
-let test_cancellation_token_race () =
-  Eio_main.run @@ fun _ ->
-  (* Initialize TokenStore *)
-  Cancellation.TokenStore.init ();
-
-  let created = Atomic.make 0 in
-  let cancelled = Atomic.make 0 in
-  let checked = Atomic.make 0 in
-
-  let worker i =
-    for j = 1 to iterations_per_agent / 10 do
-      let token_id = Printf.sprintf "token-%02d-%03d" i j in
-
-      (* Create token with explicit ID *)
-      Cancellation.TokenStore.create_with_id token_id;
-      Atomic.incr created;
-
-      (* Check multiple times concurrently *)
-      for _ = 1 to 5 do
-        ignore (Cancellation.TokenStore.is_cancelled token_id);
-        Atomic.incr checked
-      done;
-
-      (* Cancel *)
-      Cancellation.TokenStore.cancel token_id;
-      Atomic.incr cancelled;
-
-      (* Verify cancelled *)
-      check bool "token cancelled" true (Cancellation.TokenStore.is_cancelled token_id)
-    done
-  in
-
-  Eio.Fiber.all (List.init num_agents (fun i -> fun () -> worker i));
-
-  Printf.printf "Created: %d, Cancelled: %d, Checked: %d\n%!"
-    (Atomic.get created) (Atomic.get cancelled) (Atomic.get checked);
-
-  (* Cleanup *)
-  let removed = Cancellation.TokenStore.cleanup ~max_age:0.0 in
-  Printf.printf "Cleaned up %d tokens\n%!" removed
-
-let test_cancellation_cleanup_under_load () =
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Cancellation.TokenStore.init ();
-
-  (* Create many tokens *)
-  let num_tokens = 1000 in
-  for i = 1 to num_tokens do
-    Cancellation.TokenStore.create_with_id (Printf.sprintf "bulk-token-%04d" i)
-  done;
-
-  (* Concurrent cleanup and create *)
-  let creator () =
-    for i = 1 to 100 do
-      Cancellation.TokenStore.create_with_id (Printf.sprintf "new-token-%03d" i);
-      Eio.Time.sleep clock 0.001
-    done
-  in
-
-  let cleaner () =
-    for _ = 1 to 10 do
-      ignore (Cancellation.TokenStore.cleanup ~max_age:0.0);
-      Eio.Time.sleep clock 0.01
-    done
-  in
-
-  Eio.Fiber.all [creator; creator; cleaner; cleaner];
-
-  (* Final cleanup *)
-  let remaining = Cancellation.TokenStore.cleanup ~max_age:0.0 in
-  Printf.printf "Final cleanup removed %d tokens\n%!" remaining
+(* [test_cancellation_token_race] / [test_cancellation_cleanup_under_load]
+   removed 2026-05-05 — exercised the [Cancellation.TokenStore] surface
+   that was archived. See docs/audit-responses/2026-05-05-dashboard-heuristic.md §5.1. *)
 
 (** {1 Zombie Detection Under Load} *)
 
@@ -199,10 +129,6 @@ let () =
     "session_lock", [
       test_case "lock contention (20 agents)" `Slow test_session_lock_contention;
       test_case "register/unregister race" `Slow test_session_concurrent_register_unregister;
-    ];
-    "cancellation", [
-      test_case "token race condition" `Slow test_cancellation_token_race;
-      test_case "cleanup under load" `Slow test_cancellation_cleanup_under_load;
     ];
     "zombie", [
       test_case "concurrent detection" `Quick test_zombie_detection_concurrent;

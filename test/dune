@@ -27,7 +27,7 @@
 (tests
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
         test_attempt_state
-        test_sse test_cancellation test_graphql_api
+        test_sse test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
@@ -230,7 +230,7 @@
         )
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
-          test_sse test_cancellation test_graphql_api
+          test_sse test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
@@ -859,7 +859,7 @@
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
+        test_orchestrator_coverage
         test_web_dashboard_coverage test_auth_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
@@ -891,7 +891,7 @@
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
+        test_orchestrator_coverage
         test_web_dashboard_coverage test_auth_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage

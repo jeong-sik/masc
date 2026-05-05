@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Dashboard Labels unit tests *)
 
 module Lib = Masc_mcp

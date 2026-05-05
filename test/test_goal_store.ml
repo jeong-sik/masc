@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Goal_store.delete_goal — Issue #7690 regression.
 
     Bug: the previous implementation used [{ st with goals = ...; updated_at }]

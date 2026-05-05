@@ -510,7 +510,7 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
   Process_eio.init ~cwd_default:Eio.Path.(fs / report.base_path) ~proc_mgr
     ~clock;
   let sandbox_preflight_report =
-    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
   in
   let sandbox_preflight =
     sandbox_preflight_report

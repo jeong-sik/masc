@@ -50,6 +50,14 @@ describe('workspace API', () => {
     expect(mockFetch.mock.calls[0]![0]).toContain('keeper=sangsu')
   })
 
+  it('fetchWorkspaceTree appends repo_id param when provided', async () => {
+    stubFetch([], true, { 'X-Workspace-Source': 'repository:masc' })
+
+    const result = await fetchWorkspaceTree(1, { repoId: 'masc' })
+    expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=masc')
+    expect(result.source).toEqual({ kind: 'repository', repoId: 'masc' })
+  })
+
   it('fetchWorkspaceTree decodes X-Workspace-Source playground header', async () => {
     stubFetch([], true, { 'X-Workspace-Source': 'playground:alpha' })
 
@@ -76,6 +84,13 @@ describe('workspace API', () => {
 
     expect(mockFetch.mock.calls[0]![0]).toContain('/api/v1/workspace/file?path=')
     expect(mockFetch.mock.calls[0]![0]).toContain('lib%2Fmain.ml')
+  })
+
+  it('fetchWorkspaceFile appends repo_id param when provided', async () => {
+    stubFetch({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
+
+    await fetchWorkspaceFile('lib/main.ml', { repoId: 'oas' })
+    expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=oas')
   })
 
   it('fetchGitBlame returns blame blocks', async () => {
@@ -115,5 +130,12 @@ describe('workspace API', () => {
 
     await fetchGitDiff('a.ml', { baseRef: 'v0.19.0' })
     expect(mockFetch.mock.calls[0]![0]).toContain('base_ref=v0.19.0')
+  })
+
+  it('fetchGitDiff appends repo_id param when provided', async () => {
+    stubFetch({ unified: [] })
+
+    await fetchGitDiff('a.ml', { repoId: 'masc' })
+    expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=masc')
   })
 })

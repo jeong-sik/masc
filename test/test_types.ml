@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Types module *)
 
 module Types = Masc_domain

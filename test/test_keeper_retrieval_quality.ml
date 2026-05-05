@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** test_keeper_retrieval_quality — BM25 retrieval quality for keeper tool selection.
 
     Verifies that the BM25 tool index retrieves the correct tool for

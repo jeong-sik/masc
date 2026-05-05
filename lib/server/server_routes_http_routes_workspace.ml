@@ -36,20 +36,51 @@ let classify_keeper_query
       | Some _ -> (project_base, `PlaygroundMissing trimmed)
       | None -> (project_base, `KeeperUnknown trimmed)
 
+let classify_workspace_query
+    ~project_base
+    ~lookup_repository
+    ~lookup_playground
+    ~exists_dir
+    ~repo_param
+    ~keeper_param =
+  match repo_param with
+  | Some raw_repo when String.trim raw_repo <> "" ->
+    let repo_id = String.trim raw_repo in
+    (match lookup_repository repo_id with
+     | Some repo_path when exists_dir repo_path ->
+       (repo_path, `Repository repo_id)
+     | Some _ ->
+       (project_base, `RepositoryMissing repo_id)
+     | None ->
+       (project_base, `RepositoryUnknown repo_id))
+  | _ ->
+    classify_keeper_query
+      ~project_base
+      ~lookup_playground
+      ~exists_dir
+      keeper_param
+
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
   let config = state.Mcp_server.room_config in
+  let lookup_repository repo_id =
+    match Repo_store.find ~base_path:project_base repo_id with
+    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
+    | Error _ -> None
+  in
   let lookup_playground name =
     match Keeper_types.read_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
     | _ -> None
   in
   let exists_dir p = Sys.file_exists p && Sys.is_directory p in
-  classify_keeper_query
+  classify_workspace_query
     ~project_base
+    ~lookup_repository
     ~lookup_playground
     ~exists_dir
-    (Uri.get_query_param uri "keeper")
+    ~repo_param:(Uri.get_query_param uri "repo_id")
+    ~keeper_param:(Uri.get_query_param uri "keeper")
 
 let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]
@@ -73,6 +104,9 @@ let sanitize_header_value s =
 let source_header source =
   let v = match source with
     | `Project -> "project"
+    | `Repository repo_id -> "repository:" ^ sanitize_header_value repo_id
+    | `RepositoryMissing repo_id -> "repository_missing:" ^ sanitize_header_value repo_id
+    | `RepositoryUnknown repo_id -> "repository_unknown:" ^ sanitize_header_value repo_id
     | `Playground name -> "playground:" ^ sanitize_header_value name
     | `PlaygroundMissing name -> "playground_missing:" ^ sanitize_header_value name
     | `KeeperUnknown name -> "keeper_unknown:" ^ sanitize_header_value name
@@ -186,7 +220,7 @@ let git_run ~cwd args =
         ~actor:"system/workspace_api"
         ~raw_source
         ~summary:"workspace api git command"
-        ~timeout_sec:15.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Http_routes ())
         argv
     in
     match status with

@@ -43,6 +43,52 @@ type caller =
       (** PATH availability probes (e.g. [command -v <name>]).
           Default 2.0s — pure OS lookup; longer timeouts mask
           shell-startup misconfiguration rather than helping. *)
+  | Graphql
+      (** [Graphql_client.{request,query,mutate}] HTTP calls.
+          Default 10.0s — preserves the 8-10s literals previously
+          held by relation_materializer, dashboard_agent_relations,
+          dashboard_execution_helpers, and autoresearch_knowledge. *)
+  | Http
+      (** Outbound JSON POST probes via [http_post_json_text_with_status]
+          (e.g. tool_local_runtime_verify).  Default 15.0s, matching
+          the previous inline budget. *)
+  | Startup
+      (** Server bootstrap and room takeover read paths.
+          Default 30.0s — preserves the [server_bootstrap_loops]
+          docker preflight budget.  Note: the
+          [server_startup_takeover] [ps] probe was previously 1s —
+          it now uses [Shell_probe] (2s) instead of [Startup] so a
+          single env override does not move two unrelated budgets. *)
+  | Auto_responder
+      (** Auto-responder CLI spawn with stdin prompt.  Default 120.0s
+          — preserves the previous inline budget; under-budgeting
+          here would silently cut off legitimate model replies. *)
+  | Build_identity
+      (** Build identity git probe.  Default 5.0s. *)
+  | Voice
+      (** Voice bridge local playback subprocess.  Default 60.0s —
+          preserves the previous inline budget. *)
+  | Coord_identity
+      (** Coord tty identity probe.  Default 5.0s. *)
+  | Dashboard
+      (** Dashboard safe_autonomy short heartbeat probe.
+          Default 3.0s — matches the previous inline budget. *)
+  | Http_routes
+      (** Workspace API git command invoked via the HTTP routes layer.
+          Default 15.0s. *)
+  | Repo_manager_git
+      (** Repo-manager git operations (clone, fetch, push).
+          Default 300.0s — these operations run against remote origins
+          over the network; the previous inline budget was 300s to
+          tolerate slow connections and large repos. *)
+  | Task_sandbox_git
+      (** Task-sandbox worktree git operations (create, diff, cleanup).
+          Default 30.0s — these are local operations (no network) but
+          can be slow on large repos; the previous inline budget was 30s. *)
+  | Test
+      (** Test fixtures driving the exec runtime.
+          Default 30.0s — matches the [test_slow_command_promotes]
+          ceiling; faster fixtures may override per-caller. *)
   | Unknown of string
 
 (** [caller_key c] is the lowercase identifier embedded in env var
@@ -71,3 +117,12 @@ val global_default_sec : float
 (** [timeout_sec ~caller ()] resolves the subprocess timeout for
     [caller].  See module doc for lookup order. *)
 val timeout_sec : caller:caller -> unit -> float
+
+(** [timeout_sec_int ~caller ()] is [timeout_sec] rounded UP to the
+    nearest second.  Use at call sites whose downstream helper signs
+    [~timeout_sec:int] — e.g.
+    {!Tool_local_runtime_http.http_post_json_text_with_status} and
+    {!Worker_runtime_docker.run_process_with_timeout}.  Returns
+    [1] for non-positive or NaN budgets so the call always issues
+    a finite-bound subprocess. *)
+val timeout_sec_int : caller:caller -> unit -> int

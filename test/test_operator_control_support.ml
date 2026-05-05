@@ -1,5 +1,7 @@
 open Masc_mcp
 
+module Types = Masc_domain
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 

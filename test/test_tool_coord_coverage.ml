@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coverage tests for Tool_coord *)
 
 open Masc_mcp

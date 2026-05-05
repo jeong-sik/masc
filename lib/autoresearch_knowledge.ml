@@ -205,7 +205,7 @@ let sync_to_graphql (f : finding) : (bool, string) result =
     ("confidence", `String (confidence_to_string f.confidence));
     ("tags", `List (List.map (fun t -> `String t) f.tags));
   ] in
-  match Graphql_client.mutate ~timeout_sec:10.0 ~mutation ~variables () with
+  match Graphql_client.mutate ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~mutation ~variables () with
   | Ok _ -> Ok true
   | Error msg ->
     Log.Keeper.warn "Finding GraphQL sync failed (non-fatal): %s" msg;

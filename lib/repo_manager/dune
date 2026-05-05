@@ -13,6 +13,7 @@
    repo_sync)
  (wrapped false)
  (libraries
+   masc_mcp.config
    masc_mcp.masc_exec
    masc_mcp.masc_log
    digestif

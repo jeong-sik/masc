@@ -159,6 +159,8 @@ let model_entry_json ~path value =
           let model = ref None in
           let weight = ref None in
           let supports_tool_choice = ref None in
+          let secondary = ref None in
+          let secondary_supports_tool_choice = ref None in
           let rec loop = function
             | [] -> Ok ()
             | (key, field_value) :: rest -> (
@@ -191,9 +193,30 @@ let model_entry_json ~path value =
                         supports_tool_choice := Some value;
                         loop rest
                     | Error _ as err -> err)
+                | "secondary" -> (
+                    (* RFC-0027 PR-9 dual-track fallback. Same string-trim
+                       semantics as model: empty/whitespace rejected at
+                       parse time so an empty secondary cannot silently
+                       turn into an invalid provider scheme downstream. *)
+                    match trimmed_nonempty_string
+                            ~path:(path ^ ".secondary") field_value with
+                    | Ok value ->
+                        secondary := Some value;
+                        loop rest
+                    | Error _ as err -> err)
+                | "secondary_supports_tool_choice" -> (
+                    match bool_value
+                            ~path:(path ^ ".secondary_supports_tool_choice")
+                            field_value with
+                    | Ok value ->
+                        secondary_supports_tool_choice := Some value;
+                        loop rest
+                    | Error _ as err -> err)
                 | other ->
                     errorf
-                      "unknown field %S in %s; allowed fields are model, weight, supports_tool_choice"
+                      "unknown field %S in %s; allowed fields are model, \
+                       weight, supports_tool_choice, secondary, \
+                       secondary_supports_tool_choice"
                       other path)
           in
           match loop fields with
@@ -202,6 +225,17 @@ let model_entry_json ~path value =
               match !model with
               | None -> errorf "missing required field %s.model" path
               | Some model_value ->
+                  (* Reject orphan secondary_supports_tool_choice with no
+                     secondary declared — it's unambiguously a typo or
+                     copy-paste error and silent acceptance hides it. *)
+                  (match !secondary, !secondary_supports_tool_choice with
+                   | None, Some _ ->
+                       errorf
+                         "field %s.secondary_supports_tool_choice declared \
+                          without %s.secondary; remove the override or add \
+                          a secondary model"
+                         path path
+                   | _ ->
                   let fields = [ ("model", `String model_value) ] in
                   let fields =
                     match !weight with
@@ -214,7 +248,19 @@ let model_entry_json ~path value =
                         fields @ [ ("supports_tool_choice", `Bool value) ]
                     | None -> fields
                   in
-                  Ok (`Assoc fields)))
+                  let fields =
+                    match !secondary with
+                    | Some value -> fields @ [ ("secondary", `String value) ]
+                    | None -> fields
+                  in
+                  let fields =
+                    match !secondary_supports_tool_choice with
+                    | Some value ->
+                        fields @ [ ("secondary_supports_tool_choice",
+                                    `Bool value) ]
+                    | None -> fields
+                  in
+                  Ok (`Assoc fields))))
   | other ->
       errorf
         "expected %s to be a string or inline table model entry, found %s"

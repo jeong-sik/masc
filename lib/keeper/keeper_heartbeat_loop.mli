@@ -122,7 +122,7 @@ val cycle_continues_after_wake :
   Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
 
 val run_smart_heartbeat_gate :
-  base_path:string ->
+  config:Coord.config ->
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->
   wakeup:bool Atomic.t ->

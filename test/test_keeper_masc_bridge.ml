@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Test keeper masc_* tool bridge under preset/custom tool policy. *)
 
 module Coord = Masc_mcp.Coord

@@ -46,10 +46,7 @@ let rec rm_rf path =
     end else Sys.remove path
 
 let with_temp_dir prefix f =
-  let dir =
-    Unix.mkdtemp
-      (Filename.concat (Filename.get_temp_dir_name ()) (prefix ^ "XXXXXX"))
-  in
+  let dir = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let run_shell ?(env = []) ?(unset_env = []) ~cwd cmd =

@@ -1046,16 +1046,20 @@ let test_memory_search_decision_log_failure_is_observable () =
     Keeper_types.mkdir_p (Keeper_types.keeper_decision_log_path config keeper_name);
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let before =
-      Masc_mcp.Prometheus.metric_total
+      Masc_mcp.Prometheus.metric_value_or_zero
         Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        ~labels:[("keeper", keeper_name)]
+        ()
     in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
       ~name:"keeper_memory_search"
       ~input:(`Assoc [ ("query", `String "anything") ])
       () in
     let after =
-      Masc_mcp.Prometheus.metric_total
+      Masc_mcp.Prometheus.metric_value_or_zero
         Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        ~labels:[("keeper", keeper_name)]
+        ()
     in
     let json = Yojson.Safe.from_string result in
     let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in

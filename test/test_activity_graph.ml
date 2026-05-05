@@ -322,7 +322,7 @@ let test_emit_repairs_invalid_utf8_in_payload () =
            ());
       (* The repair should have been recorded at write time *)
       let stats = Safe_ops.persistence_utf8_repair_stats () in
-      check bool "repair triggered on emit" true (stats.repaired_reads >= 1);
+      check bool "repair triggered on emit" true (stats.repair_count >= 1);
       (* Reading back should succeed with valid UTF-8 in the payload field *)
       let events =
         Activity_graph.list_events config ~after_seq:0 ~limit:10 ()

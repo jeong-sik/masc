@@ -27,7 +27,8 @@ val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 (** {1 JSON Parsing} *)
 
 type utf8_repair_stats =
-  { repaired_reads : int
+  { repair_count : int
+  (** Total number of repair invocations (both read-path and write-path). *)
   ; repaired_bytes : int
   ; path_samples : string list
   }
@@ -38,8 +39,8 @@ val repair_utf8_text :
     observable persistence repair. Valid UTF-8 is returned unchanged. *)
 
 val persistence_utf8_repair_stats : unit -> utf8_repair_stats
-(** Process-local cumulative count of malformed UTF-8 repairs seen by
-    persistence read helpers. *)
+(** Process-local cumulative count of malformed UTF-8 repairs (read and
+    write paths combined). *)
 
 val reset_persistence_utf8_repair_stats_for_tests : unit -> unit
 (** Reset {!persistence_utf8_repair_stats}. Test-only. *)

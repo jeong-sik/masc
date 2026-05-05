@@ -60,13 +60,14 @@ let handle f handler =
   | exn -> handler exn
 
 type utf8_repair_stats =
-  { repaired_reads : int
+  { repair_count : int
+  (** Total number of repair invocations (both read-path and write-path). *)
   ; repaired_bytes : int
   ; path_samples : string list
   }
 
 let utf8_repair_mu = Stdlib.Mutex.create ()
-let utf8_repaired_reads = ref 0
+let utf8_repair_count = ref 0
 let utf8_repaired_bytes = ref 0
 let utf8_repair_path_samples = ref []
 let utf8_repair_path_sample_limit = 8
@@ -75,7 +76,7 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
   let surface = if String.trim surface = "" then "persistence" else surface in
   let path = match path with Some p when String.trim p <> "" -> p | _ -> "(unknown)" in
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->
-      incr utf8_repaired_reads;
+      incr utf8_repair_count;
       utf8_repaired_bytes := !utf8_repaired_bytes + invalid_bytes;
       if not (List.mem path !utf8_repair_path_samples) then
         utf8_repair_path_samples :=
@@ -86,14 +87,14 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
 
 let persistence_utf8_repair_stats () =
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->
-      { repaired_reads = !utf8_repaired_reads
+      { repair_count = !utf8_repair_count
       ; repaired_bytes = !utf8_repaired_bytes
       ; path_samples = List.rev !utf8_repair_path_samples
       })
 
 let reset_persistence_utf8_repair_stats_for_tests () =
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->
-      utf8_repaired_reads := 0;
+      utf8_repair_count := 0;
       utf8_repaired_bytes := 0;
       utf8_repair_path_samples := [])
 

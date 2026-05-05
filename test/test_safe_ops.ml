@@ -43,7 +43,7 @@ let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
     let msg = Yojson.Safe.Util.(json |> member "msg" |> to_string) in
     check string "invalid byte replaced" ("ok" ^ replacement ^ "bad") msg;
     let stats = persistence_utf8_repair_stats () in
-    check int "one repaired read" 1 stats.repaired_reads;
+    check int "one repaired read" 1 stats.repair_count;
     check int "one invalid byte" 1 stats.repaired_bytes
 
 let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
@@ -52,7 +52,7 @@ let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
   let result = parse_json_safe ~context:"utf8-malformed" ("{\xff:1}") in
   check bool "malformed json still rejected" true (Result.is_error result);
   let stats = persistence_utf8_repair_stats () in
-  check int "repair was observed" 1 stats.repaired_reads
+  check int "repair was observed" 1 stats.repair_count
 
 let test_read_file_safe_not_found () =
   let open Safe_ops in

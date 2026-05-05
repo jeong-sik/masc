@@ -209,7 +209,7 @@ let test_write_state_repairs_invalid_utf8_in_title () =
     { version = 1; updated_at = iso_now (); goals = [g] };
   (* The repair should have been recorded at write time *)
   let stats = Safe_ops.persistence_utf8_repair_stats () in
-  check bool "repair triggered on write" true (stats.repaired_reads >= 1);
+      check bool "repair triggered on write" true (stats.repair_count >= 1);
   (* Reading back should succeed and yield valid UTF-8 in the title *)
   let state = Goal_store.read_state config in
   match state.goals with

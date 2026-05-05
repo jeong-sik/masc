@@ -610,7 +610,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
                 ("coordination_root", `String config.base_path);
                 ("workspace_path", `String config.workspace_path);
                 ( "persistence_sanitized_count",
-                  `Int utf8_repair.repaired_reads );
+                  `Int utf8_repair.repair_count );
                 ( "persistence_sanitized_bytes",
                   `Int utf8_repair.repaired_bytes );
                 ( "persistence_sanitized_paths_sample",

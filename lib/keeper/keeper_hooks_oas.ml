@@ -368,9 +368,13 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
         Pricing catalog): operators/contributors need to add the entry.
         Keep the existing WARN so the gap is visible. *)
   let pricing_unresolved_alias () =
+    (* P1-6: use a distinct label value so monitoring dashboards can
+       distinguish unresolved-alias events from genuine catalog misses.
+       "(alias):<model>" in the model label maps to a different time series
+       than "<model>" so operators can filter each case independently. *)
     Prometheus.inc_counter
       Prometheus.metric_pricing_catalog_miss
-      ~labels:[("model", model)] ();
+      ~labels:[("model", "(alias):" ^ model)] ();
     Log.Keeper.info
       "pricing_unresolved_alias model=%s input_tokens=%d output_tokens=%d \
        — model label is an unresolved alias (auto / sentinel / empty); cost \

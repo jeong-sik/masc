@@ -99,11 +99,13 @@ let sanitize_event_traced (value : event) : event =
     || entity_ref_changed sanitized.actor value.actor
     || entity_ref_changed sanitized.subject value.subject
     || not (sanitized.payload == value.payload)
-    (* tags: List.map preserves length, so this guard is defensive but the
-       right idiom — explicitly handle length mismatch before exists2. *)
+    (* tags: List.map preserves length, so exists2 is safe here.  We still
+       handle the length-mismatch case explicitly (returns "changed") in
+       case sanitize_event is ever modified to filter items. *)
     || (let n = List.length value.tags in
-        List.length sanitized.tags <> n
-        || List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags)
+        if List.length sanitized.tags <> n then true
+        else
+          List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags)
   in
   if changed then begin
     let actor_str = match value.actor with
@@ -112,9 +114,9 @@ let sanitize_event_traced (value : event) : event =
     in
     Log.Misc.warn
       "[activity_graph] UTF-8 repaired at emit kind=%s actor=%s \
-       — upstream emitter sent invalid UTF-8; trace the caller that builds \
-       kind=%s payloads for actor=%s"
-      value.kind actor_str value.kind actor_str
+       — upstream emitter sent invalid UTF-8; trace the caller that \
+       constructs payloads for this (kind, actor) pair"
+      value.kind actor_str
   end;
   sanitized
 

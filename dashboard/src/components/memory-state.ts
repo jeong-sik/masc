@@ -19,6 +19,7 @@ import {
 } from '../store'
 import {
   votePost,
+  voteComment,
   fetchBoardPost,
   commentPost,
   createPost,
@@ -44,6 +45,7 @@ export {
   loadMoreBoardPosts,
 }
 export { votePost }
+export { voteComment }
 export { deleteBoardPost }
 export type { BoardComment, BoardPost, BoardSortMode }
 
@@ -286,6 +288,7 @@ export async function loadPostDetail(postId: string) {
     detailPost.value = {
       id: data.id,
       author: data.author,
+      author_identity: data.author_identity,
       title: data.title,
       body: data.body,
       content: data.content,
@@ -297,6 +300,7 @@ export async function loadPostDetail(postId: string) {
       created_at: data.created_at,
       updated_at: data.updated_at,
       post_kind: data.post_kind,
+      classification_reason: data.classification_reason,
       flair: data.flair,
       hearth: data.hearth,
       visibility: data.visibility,

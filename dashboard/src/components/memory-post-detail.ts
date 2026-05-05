@@ -34,9 +34,12 @@ import {
   visibilityBadgeColor,
   boardPostKind,
   votePost,
+  voteComment,
   refreshBoard,
 } from './memory-state'
 import type { BoardComment, BoardPost } from './memory-state'
+
+const MAX_INLINE_COMMENT_DEPTH = 5
 
 // ── Expiry chip (returns html, kept in UI layer) ───────────────────
 function expiryChip(post: BoardPost) {
@@ -62,6 +65,21 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
     }
   }
   return { roots, childrenMap }
+}
+
+export function countCommentDescendants(
+  commentId: string,
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>,
+  seen: ReadonlySet<string> = new Set(),
+): number {
+  if (seen.has(commentId)) return 0
+  const nextSeen = new Set(seen)
+  nextSeen.add(commentId)
+  const children = childrenMap.get(commentId) ?? []
+  return children.reduce(
+    (sum, child) => sum + 1 + countCommentDescendants(child.id, childrenMap, nextSeen),
+    0,
+  )
 }
 
 /**
@@ -121,36 +139,81 @@ function CommentItem({
   postId,
   depth = 0,
   childrenMap,
+  forceThreadExpanded = false,
 }: {
   comment: BoardComment
   postId: string
   depth?: number
   childrenMap: ReadonlyMap<string, readonly BoardComment[]>
+  forceThreadExpanded?: boolean
 }) {
   const contentChars = Array.from(comment.content ?? '')
   const needsTruncation = contentChars.length > 300
   const [expanded, setExpanded] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  const [deepExpanded, setDeepExpanded] = useState(false)
   const displayText = needsTruncation && !expanded
     ? `${contentChars.slice(0, 297).join('')}...`
     : comment.content
   const isReplying = replyingTo.value === comment.id
-  const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''
+  const visualDepth = Math.min(depth, MAX_INLINE_COMMENT_DEPTH)
+  const indentStyle = visualDepth > 0 ? { marginLeft: `${visualDepth * 16}px` } : undefined
   const replies = childrenMap.get(comment.id) ?? []
+  const replyCount = countCommentDescendants(comment.id, childrenMap)
+  const cappedByDepth = !forceThreadExpanded && !deepExpanded && depth >= MAX_INLINE_COMMENT_DEPTH && replies.length > 0
+  const showReplies = replies.length > 0 && !collapsed && !cappedByDepth
+  const childForceExpanded = forceThreadExpanded || deepExpanded
+  const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
 
+  const handleCommentVote = async (dir: 'up' | 'down') => {
+    try {
+      await voteComment(comment.id, dir)
+      await loadPostDetail(postId)
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] comment vote failed (comment=${comment.id}, dir=${dir})`, err instanceof Error ? err.message : err)
+      showToast('댓글 투표에 실패했습니다', 'error')
+    }
+  }
+
   return html`
-    <div class="${indent}">
+    <div style=${indentStyle}>
       <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
+          ${replies.length > 0 && !cappedByDepth ? html`
+            <button
+              type="button"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              aria-expanded=${!collapsed}
+              aria-label=${collapsed ? `답글 ${replyCount}개 펼치기` : `답글 ${replyCount}개 접기`}
+              onClick=${() => setCollapsed(!collapsed)}
+            >${collapsed ? '+' : '−'}</button>
+          ` : null}
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
           <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+          <div class="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              class="h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]"
+              aria-label="댓글 추천"
+              onClick=${() => handleCommentVote('up')}
+            >▲</button>
+            <span class="min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]">${score}</span>
+            <button
+              type="button"
+              class="h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]"
+              aria-label="댓글 비추천"
+              onClick=${() => handleCommentVote('down')}
+            >▼</button>
+          </div>
           <${ActionButton}
             variant="subtle"
             size="sm"
-            class="text-2xs hover:text-[var(--color-accent-fg)] bg-transparent border-0 ml-auto"
+            class="text-2xs hover:text-[var(--color-accent-fg)] bg-transparent border-0"
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}<//>
         </div>
@@ -188,10 +251,20 @@ function CommentItem({
             </div>
           </div>
         ` : null}
+        ${collapsed && replyCount > 0 ? html`
+          <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">답글 ${replyCount}개 접힘</div>
+        ` : null}
+        ${cappedByDepth ? html`
+          <button
+            type="button"
+            class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--accent-20)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+            onClick=${() => setDeepExpanded(true)}
+          >스레드 계속 펼치기 · 답글 ${replyCount}개</button>
+        ` : null}
       </div>
-      ${replies.length > 0 ? html`
+      ${showReplies ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} />`)}
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} forceThreadExpanded=${childForceExpanded} />`)}
         </div>
       ` : null}
     </div>

@@ -157,6 +157,10 @@ export interface BoardComment {
   author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
+  votes?: number
+  vote_balance?: number
+  votes_up?: number
+  votes_down?: number
 }
 
 // --- Keeper Metrics ---

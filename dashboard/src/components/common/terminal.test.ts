@@ -42,10 +42,31 @@ describe('Terminal', () => {
     expect(el?.getAttribute('aria-label')).toBe('에이전트 터미널')
   })
 
+  it('applies custom chrome props', () => {
+    const container = document.createElement('div')
+    render(h(Terminal, {
+      lines: [],
+      ariaLabel: 'Keeper shell terminal',
+      className: 'custom-terminal-shell',
+      emptyText: 'waiting for keeper shell output',
+    }), container)
+    const el = container.querySelector('[role="log"]')
+    expect(el?.getAttribute('aria-label')).toBe('Keeper shell terminal')
+    expect(el?.className).toBe('custom-terminal-shell')
+    expect(container.textContent).toContain('waiting for keeper shell output')
+  })
+
   it('applies testId', () => {
     const container = document.createElement('div')
     render(h(Terminal, { lines: [], testId: 'term-1' }), container)
     expect(container.querySelector('[data-testid="term-1"]')).not.toBeNull()
+  })
+
+  it('renders stream tone classes', () => {
+    const container = document.createElement('div')
+    render(h(Terminal, { lines: [{ text: 'stderr line', tone: 'err' }] }), container)
+    const line = container.querySelector('.term-line.is-err')
+    expect(line?.textContent).toContain('stderr line')
   })
 
   it('parses ANSI color codes', () => {

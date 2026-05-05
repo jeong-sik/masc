@@ -47,6 +47,7 @@ stylesheet
     font-size: 0.85rem;
     color: var(--color-fg-muted);
   }
+  .count_stale { color: var(--accent-blood); }
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -155,6 +156,12 @@ let empty_state : Node.t =
     ]
 ;;
 
+let count_attrs (status : Multimodal_types.fetch_status) =
+  match status with
+  | Fetch_stale _ -> [ Style.count; Style.count_stale ]
+  | Fetch_pending | Fetch_fresh -> [ Style.count ]
+;;
+
 let view_of_response
     ~(detail_panel : Node.t)
     ~(kind_filter : string option)
@@ -181,8 +188,13 @@ let view_of_response
         ~attrs:[ Style.header ]
         [ Node.h1 ~attrs:[ Style.title ] [ Node.text "Multimodal · gallery" ]
         ; Node.span
-            ~attrs:[ Style.count ]
-            [ Node.text (Printf.sprintf "%d artifacts" r.count) ]
+            ~attrs:(count_attrs r.fetch_status)
+            [ Node.text
+                (Printf.sprintf
+                   "%d artifacts · %s"
+                   r.count
+                   (Multimodal_types.fetch_status_label r.fetch_status))
+            ]
         ]
     ; (if List.is_empty r.artifacts then Node.none else filter_bar)
     ; (if List.is_empty r.artifacts then empty_state

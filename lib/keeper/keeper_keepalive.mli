@@ -144,6 +144,11 @@ val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float ->
 (** Test-only: clear all per-keeper completion timestamps. *)
 val reset_autonomous_completion_for_test : unit -> unit
 
+(** Test-only: inject a callback immediately after an acquire flag is set
+    and before the diagnostic holder row is recorded. *)
+val set_after_acquire_flag_hook_for_test :
+  (label:string -> keeper_name:string -> unit) option -> unit
+
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
     per keeper. Promoted to [Keeper_fiber_crash] at
     [oas_timeout_budget_strike_limit]; reset on any successful turn.

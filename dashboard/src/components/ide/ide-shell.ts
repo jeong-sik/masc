@@ -11,6 +11,7 @@ import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
+import { IdePersistencePanel } from './ide-persistence-panel'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -145,10 +146,12 @@ export function IdeShell() {
           class="ide-plane-conversation"
           style=${{
             display: 'grid',
-            gridTemplateRows: 'auto 1fr',
+            gridTemplateRows: 'auto auto 1fr',
             minHeight: 0,
+            overflow: 'auto',
           }}
         >
+          <${IdePersistencePanel} keeperName=${terminalKeeper} />
           <${InspectorKeeperBDI} />
           <${IdeConversationRailMock} />
         </div>

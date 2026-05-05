@@ -1192,6 +1192,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~estimated_input_tokens:
                         prompt_timeout_estimate_tokens
                       ~max_turns
+                      ~time_spent_in_turn_s:
+                        (timeout_sec -. remaining_turn_budget_s ())
                       ~remaining_turn_budget_s:(remaining_turn_budget_s ())
                       err
                   with
@@ -1249,12 +1251,55 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ~attempted_cascades:
                               (next_execution_cascade_name :: attempted_cascades))
                   | Degraded_retry_budget_exhausted degraded_retry ->
+                      (* #13120 review (P1, threads 2 & 4): record the
+                         rejection in [cascade_rotation_attempts] so
+                         downstream receipts show "rotation considered,
+                         budget exhausted".  Do NOT flip
+                         [degraded_retry_info] — that ref drives
+                         [degraded_retry_applied] / [degraded_retry_cascade],
+                         which [keeper_execution_receipt.operator_disposition]
+                         interprets as a successful fail-open rotation
+                         (`fail_open_next_cascade`).  Setting it here
+                         misclassified rejected retries as applied,
+                         skewing dashboards / metrics and suppressing
+                         pause/broadcast on provider-error paths.  The
+                         evidence trail is captured by
+                         [cascade_rotation_attempts] (with outcome
+                         label) regardless. *)
+                      record_cascade_rotation_attempt
+                        ~from_cascade:execution.cascade_name
+                        ~retry:degraded_retry
+                        ~outcome:"budget_exhausted"
+                        err;
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
                         meta.name execution_cascade_name
                         degraded_retry.next_cascade
                         degraded_retry.fallback_reason
                         (remaining_turn_budget_s ())
+                        (short_preview (Agent_sdk.Error.to_string err));
+                      mark_terminal_error err;
+                      Error err
+                  | Degraded_retry_slot_phase_exhausted degraded_retry ->
+                      (* #13120 review (P1, thread 3): same observability
+                         contract as the budget-exhausted branch above —
+                         the rejection is recorded in
+                         [cascade_rotation_attempts] (with a distinct
+                         "slot_phase_exhausted" outcome label), but
+                         [degraded_retry_info] is NOT flipped because
+                         no rotation was actually applied. *)
+                      record_cascade_rotation_attempt
+                        ~from_cascade:execution.cascade_name
+                        ~retry:degraded_retry
+                        ~outcome:"slot_phase_exhausted"
+                        err;
+                      Log.Keeper.warn
+                        "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but productive slot phase budget %.1fs is exhausted after %.1fs; ending this cycle to release the outer turn slot: %s"
+                        meta.name execution_cascade_name
+                        degraded_retry.next_cascade
+                        degraded_retry.fallback_reason
+                        degraded_retry_slot_phase_budget_sec
+                        (timeout_sec -. remaining_turn_budget_s ())
                         (short_preview (Agent_sdk.Error.to_string err));
                       mark_terminal_error err;
                       Error err

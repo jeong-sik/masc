@@ -5370,6 +5370,8 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
         retry.fallback_reason
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+      fail "expected productive slot phase budget to remain"
   | UT.Degraded_retry_budget_exhausted _ ->
       fail "expected retry budget to remain"
   | UT.No_degraded_retry -> fail "expected degraded retry"
@@ -5391,7 +5393,33 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
         retry.fallback_reason
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+      fail "expected exhausted retry budget, not slot phase budget"
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
+  | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+
+let test_degraded_retry_slot_phase_blocks_late_rotation () =
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
+      ~attempted_cascades:[ "underdog" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
+      ~remaining_turn_budget_s:1200.0
+      (oas_timeout_budget_error ())
+  with
+  | UT.Degraded_retry_slot_phase_exhausted retry ->
+      check string "retry cascade candidate" KC.local_recovery_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "oas_timeout_budget"
+        retry.fallback_reason
+  | UT.Degraded_retry_allowed _ ->
+      fail "expected degraded retry blocked after productive slot phase"
+  | UT.Degraded_retry_budget_exhausted _ ->
+      fail "expected slot phase exhaustion before retry budget exhaustion"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 
 (* Regression: GitHub #12675 / RFC #12887 — per-attempt retry budget cap.
@@ -5477,6 +5505,8 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
   | UT.Degraded_retry_budget_exhausted _ -> ()
   | UT.Degraded_retry_allowed _ ->
       fail "expected retry aborted due to per-attempt cap exceeded"
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+      fail "expected retry budget exhaustion without slot phase input"
   | UT.No_degraded_retry -> fail "expected degraded retry"
 
 let test_pure_local_labels_detection () =
@@ -7415,6 +7445,8 @@ let () =
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick
             test_degraded_retry_budget_gate_blocks_exhausted_budget;
+          test_case "degraded retry is blocked after productive slot phase (#12888)" `Quick
+            test_degraded_retry_slot_phase_blocks_late_rotation;
           test_case "per-attempt retry budget with near-zero remaining (#12675)" `Quick
             test_per_attempt_retry_budget_with_near_zero_remaining;
           test_case "per-attempt retry budget capped by healthy remaining" `Quick

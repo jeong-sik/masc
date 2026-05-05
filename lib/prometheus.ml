@@ -950,6 +950,17 @@ let metric_keeper_lifecycle_callback_failures =
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
 let metric_keeper_supervisor_cleanup_failures =
   "masc_keeper_supervisor_cleanup_failures_total"
+(* Increments each time [Keeper_turn_slot.force_release_holder_for] frees
+   a slot held by a zombie fiber (typically because the fiber is stuck
+   inside an LLM subprocess that did not honour cancellation). Without
+   this path the slot stays held until process restart, starving the
+   fleet behind the [reactive_turn_semaphore]. Labels: keeper, label
+   ([turn] / [autonomous] / [reactive]). A positive rate means the
+   force-release path is the only thing draining stuck slots, which is
+   itself a signal that the upstream subprocess kill-on-cancel is
+   incomplete and worth investigating. *)
+let metric_keeper_slot_force_released =
+  "masc_keeper_slot_force_released_total"
 let metric_keeper_stale_watchdog_tick_failures =
   "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
@@ -1598,6 +1609,11 @@ let init () =
   add metric_keeper_supervisor_cleanup_failures
     "Total supervisor finally-cleanup failures suppressed to avoid \
      Fun.Finally_raised. Labeled by keeper."
+    Counter;
+  add metric_keeper_slot_force_released
+    "Total turn-slot semaphores force-released because the holding fiber \
+     did not return after the supervisor declared the keeper crashed. \
+     Labels: keeper, label (turn|autonomous|reactive)."
     Counter;
   add metric_keeper_stale_watchdog_tick_failures
     "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."

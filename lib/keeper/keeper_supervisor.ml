@@ -1208,6 +1208,28 @@ let sweep_and_recover (ctx : _ context) =
       Prometheus.metric_keeper_supervisor_cleanup_failures
       ~labels:[("keeper", entry.name); ("site", "force_watchdog_crash")]
       ();
+    (* 2026-05-05 fleet-stuck cycle: when a keeper fiber is stuck inside
+       an LLM subprocess that does not honour [Eio.Cancel.Cancelled],
+       the natural [Fun.protect] release in [with_keeper_turn_slot]
+       never runs and its [reactive_turn_semaphore] permit is leaked.
+       Production observation: 16 keepers held [reactive_slot] for
+       18-25 minutes each, [reactive_available=0], every other keeper
+       skipped its turn after the 180s [acquire_bounded] timeout, and
+       the idle-turn watchdog killed them. Force-releasing here is the
+       only path that drains the semaphore short of a process restart.
+       Bounded over-release is documented in
+       [Keeper_turn_slot.force_release_holder_for]. *)
+    (match Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name with
+     | [] -> ()
+     | released ->
+       let summary =
+         released
+         |> List.map (fun (label, age) -> Printf.sprintf "%s/%.0fs" label age)
+         |> String.concat ","
+       in
+       Log.Keeper.error
+         "%s: force-released stale slots after watchdog crash: %s"
+         entry.name summary);
     if Keeper_registry.try_resolve_done entry (`Crashed msg) then begin
       ignore
         (Keeper_registry.dispatch_event_and_log

@@ -121,6 +121,24 @@ val wait_for_autonomous_queue_head_for_test :
     at time [now].  0.0 = no yield needed. *)
 val fairness_delay_sec_at : now:float -> keeper_name:string -> float
 
+(** Force-release every slot recorded for [keeper_name] in the holder
+    table. Returns the [(label, age_sec)] pairs that were released so the
+    caller can stamp the diagnosis. Empty list means nothing was held.
+
+    Intended caller: the supervisor's [force_unresolved_watchdog_crash]
+    path, which fires when a keeper fiber is declared crashed but did
+    not return through the natural [Fun.protect] release. Without this,
+    the slot is leaked until process restart (fleet starvation behind
+    [reactive_turn_semaphore]).
+
+    Side effects: [Eio.Semaphore.release] on each held semaphore plus
+    [Prometheus.metric_keeper_slot_force_released]. A late-returning
+    fiber may double-release; Eio counting semaphores tolerate this
+    bounded over-release.
+
+    See [keeper_turn_slot.ml] doc for full design rationale. *)
+val force_release_holder_for : keeper_name:string -> (string * float) list
+
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]). *)
 val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
 

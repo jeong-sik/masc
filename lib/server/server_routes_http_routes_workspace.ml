@@ -58,15 +58,24 @@ let json_response ~status req reqd json =
   Http.Response.json ~status ~request:req
     (Yojson.Safe.to_string json) reqd
 
+(* Strip CR/LF and other control characters from a value before placing
+   it into an HTTP response header. RFC 7230 §3.2.4 prohibits CR/LF in
+   field-value, and an unsanitized name with "\r\nSet-Cookie: ..." would
+   let an attacker inject arbitrary headers via the keeper query param. *)
+let sanitize_header_value s =
+  String.map (fun c ->
+    let code = Char.code c in
+    if code < 0x20 || code = 0x7f then '_' else c) s
+
 (* Encode the workspace source tag as a single header value so the
    frontend can render hints ("Playground 없음 — 프로젝트로 fallback")
    without parsing the JSON body. *)
 let source_header source =
   let v = match source with
     | `Project -> "project"
-    | `Playground name -> "playground:" ^ name
-    | `PlaygroundMissing name -> "playground_missing:" ^ name
-    | `KeeperUnknown name -> "keeper_unknown:" ^ name
+    | `Playground name -> "playground:" ^ sanitize_header_value name
+    | `PlaygroundMissing name -> "playground_missing:" ^ sanitize_header_value name
+    | `KeeperUnknown name -> "keeper_unknown:" ^ sanitize_header_value name
   in
   [("X-Workspace-Source", v)]
 
@@ -90,6 +99,44 @@ let safe_path base requested =
   else
     let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
     if String.starts_with ~prefix:base full then full else base
+
+(* Strip [base] (and the following separator) from [safe]. Handles
+   [base = "/"], trailing slash on [base], and [safe = base] (returns "").
+   Assumes [safe_path] has already enforced the prefix invariant. *)
+let rel_under base safe =
+  if safe = base then ""
+  else
+    let base_norm =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    let bn = String.length base_norm in
+    if String.length safe >= bn && String.starts_with ~prefix:base_norm safe
+    then String.sub safe bn (String.length safe - bn)
+    else safe
+
+(* Reject anything that could be parsed by git as an option (leading
+   "-") or that contains separators outside the conservative ref/SHA +
+   revision-syntax charset. Defense against `?base_ref=-L1,9999` style
+   injection even on git versions that lack [--end-of-options].
+
+   Charset rationale:
+   - alphanumerics + [._/-]: ordinary ref/branch/tag names
+   - [~^@]: revision-syntax suffix operators (HEAD~1, HEAD^, @{u})
+   - [+]: valid in branch names per [git check-ref-format]
+   - [{}]: needed for [@{upstream}] / [HEAD@{1}] expressions
+   Excluded: [: ! ? * \ space NUL] — separators with shell or git
+   pathspec semantics that callers should not need in [base_ref]. *)
+let valid_git_ref s =
+  let n = String.length s in
+  n > 0 && n <= 256 && s.[0] <> '-'
+  && String.for_all (fun c ->
+       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+       || (c >= '0' && c <= '9')
+       || c = '/' || c = '.' || c = '_' || c = '-'
+       || c = '~' || c = '^' || c = '@' || c = '+'
+       || c = '{' || c = '}')
+       s
 
 (* --- Recursive file tree --- *)
 
@@ -153,6 +200,16 @@ let git_run_lines ~cwd args =
   | Some out ->
     String.split_on_char '\n' out
     |> List.filter (fun l -> l <> "")
+
+(* Surface git failure to the caller instead of collapsing to []. Lets
+   route handlers distinguish "command errored / invalid ref" from
+   "command succeeded with no output". *)
+let git_run_lines_or_error ~cwd args =
+  match git_run ~cwd args with
+  | None -> Error "git command failed"
+  | Some out ->
+    Ok (String.split_on_char '\n' out
+        |> List.filter (fun l -> l <> ""))
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
 
@@ -349,12 +406,21 @@ let add_routes router =
              else if not (Sys.file_exists safe) then
                json_response ~status:`Not_found request reqd (json_error "File not found")
              else
-               match git_run_lines ~cwd:base ["blame"; "--porcelain"; file_path] with
+               let rel = rel_under base safe in
+               (* Blame keeps the original silent-empty contract: a file
+                  that exists in the working tree but is not yet tracked
+                  in HEAD (newly added, .gitignore'd, etc.) is a valid
+                  caller scenario, and surfacing git's non-zero exit as
+                  4xx would break it. The end-of-options separator still
+                  blocks `-L1,9999`-style argv injection. *)
+               match git_run_lines ~cwd:base
+                       ["blame"; "--porcelain"; "--"; rel]
+               with
                | [] ->
                  json_response_with_source ~status:`OK ~source request reqd (`List [])
                | lines ->
                  let entries = parse_blame_porcelain lines in
-                 let grouped = group_blame_entries file_path entries in
+                 let grouped = group_blame_entries rel entries in
                  json_response_with_source ~status:`OK ~source request reqd (`List grouped))
          request reqd)
 
@@ -376,15 +442,25 @@ let add_routes router =
                | Some r -> r
                | None -> "HEAD"
              in
+             if not (valid_git_ref base_ref) then
+               json_response ~status:`Bad_request request reqd
+                 (json_error "Invalid base_ref")
+             else
              let safe = safe_path base file_path in
              if safe = base then
                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
              else
-               match git_run_lines ~cwd:base ["diff"; base_ref; "--"; file_path] with
-               | [] ->
+               let rel = rel_under base safe in
+               match git_run_lines_or_error ~cwd:base
+                       ["diff"; base_ref; "--"; rel]
+               with
+               | Error _ ->
+                 json_response ~status:`Bad_request request reqd
+                   (json_error "git diff failed")
+               | Ok [] ->
                  json_response_with_source ~status:`OK ~source request reqd
                    (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
-               | diff_lines ->
+               | Ok diff_lines ->
                  let unified = parse_unified_diff diff_lines in
                  let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
                  json_response_with_source ~status:`OK ~source request reqd json)

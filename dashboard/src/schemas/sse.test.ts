@@ -114,6 +114,7 @@ describe('SSEMessageSchema', () => {
   it('accepts typed board reaction metadata at the SSE boundary', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'reaction_changed',
+      event_type: 'reaction.changed',
       target_type: 'comment',
       target_id: 'comment-1',
       user_id: 'dashboard-reviewer',
@@ -121,6 +122,20 @@ describe('SSEMessageSchema', () => {
       reacted: true,
     })
     expect(r.success).toBe(true)
+  })
+
+  it('accepts Phase 1 board SSE legacy types with canonical event_type aliases', () => {
+    for (const event of [
+      { type: 'post_created', event_type: 'post.created', post_id: 'post-1', author: 'writer' },
+      { type: 'comment_added', event_type: 'comment.created', post_id: 'post-1', comment_id: 'comment-1' },
+      { type: 'post_voted', event_type: 'vote.changed', target_type: 'post', post_id: 'post-1', voter: 'reader', direction: 'up' },
+      { type: 'comment_voted', event_type: 'vote.changed', target_type: 'comment', comment_id: 'comment-1', voter: 'reader', direction: 'down' },
+      { type: 'reaction_changed', event_type: 'reaction.changed', target_type: 'post', target_id: 'post-1', user_id: 'reader', emoji: '🔥', reacted: true },
+    ]) {
+      const result = SSEMessageSchema.safeParse(event)
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.event_type).toBe(event.event_type)
+    }
   })
 
   it('rejects malformed board reaction metadata at the SSE boundary', () => {

@@ -266,6 +266,71 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check bool) "comment reaction selected" true
     (json_member_bool comment_summary "has_reacted")
 
+let test_board_detail_route_embeds_reaction_summaries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"reaction-author"
+        ~content:"detail route reactable post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
+        ~content:"detail route reactable comment" ()
+    with
+    | Ok comment -> comment
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+       ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let status, body =
+    Server_routes_http_runtime.board_post_detail_json
+      ~voter:(Some "reactor") ~response_format:"flat" ~post_id
+  in
+  Alcotest.(check string) "detail status" "ok"
+    (match status with `OK -> "ok" | _ -> "other");
+  let json = Yojson.Safe.from_string body in
+  let post_summary =
+    match json_member_list json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected flat post reaction summary"
+  in
+  Alcotest.(check string) "flat post reaction emoji" "🚀"
+    (json_member_string post_summary "emoji");
+  Alcotest.(check bool) "flat post reaction selected" true
+    (json_member_bool post_summary "has_reacted");
+  let comment_json =
+    match json_member_list json "comments" with
+    | comment :: _ -> comment
+    | [] -> Alcotest.fail "expected flat detail comment"
+  in
+  let comment_summary =
+    match json_member_list comment_json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected flat comment reaction summary"
+  in
+  Alcotest.(check string) "flat comment reaction emoji" "👏"
+    (json_member_string comment_summary "emoji");
+  Alcotest.(check bool) "flat comment reaction selected" true
+    (json_member_bool comment_summary "has_reacted")
+
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
     make_args
@@ -917,6 +982,8 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
+          Alcotest.test_case "board detail route embeds reaction summaries"
+            `Quick test_board_detail_route_embeds_reaction_summaries;
           Alcotest.test_case "inline board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "inline board post author accepts matching alias"

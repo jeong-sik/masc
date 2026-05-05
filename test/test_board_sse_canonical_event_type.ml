@@ -50,15 +50,30 @@ let test_vote_changed_aliases () =
     (string_field "target_type" comment_vote)
 
 let test_reaction_changed_alias () =
-  check_event_type "reaction_changed" "reaction.changed"
-    (Board_dispatch.Reaction_changed
-       {
-         target_type = Board.Reaction_post;
-         target_id = "post-1";
-         user_id = "reader";
-         emoji = "👍";
-         reacted = true;
-       })
+  let json =
+    Boot.board_sse_event_params
+      (Board_dispatch.Reaction_changed
+         {
+           target_type = Board.Reaction_post;
+           target_id = "post-1";
+           user_id = "reader";
+           emoji = "👍";
+           reacted = true;
+         })
+  in
+  Alcotest.(check string) "reaction_changed legacy type is preserved"
+    "reaction_changed" (string_field "type" json);
+  Alcotest.(check string) "reaction.changed canonical event_type"
+    "reaction.changed" (string_field "event_type" json);
+  Alcotest.(check string) "reaction target_type" "post"
+    (string_field "target_type" json);
+  Alcotest.(check string) "reaction target_id" "post-1"
+    (string_field "target_id" json);
+  Alcotest.(check string) "reaction user_id" "reader"
+    (string_field "user_id" json);
+  Alcotest.(check string) "reaction emoji" "👍" (string_field "emoji" json);
+  Alcotest.(check bool) "reaction reacted" true
+    (json |> U.member "reacted" |> U.to_bool)
 
 let () =
   Alcotest.run "board_sse_canonical_event_type"

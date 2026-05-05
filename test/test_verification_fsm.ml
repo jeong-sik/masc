@@ -54,10 +54,10 @@ let with_temp_config ~fsm_enabled f =
 let add_strict_task config =
   let existing_ids =
     Coord.read_backlog config
-    |> fun backlog -> List.map (fun (t : Types.task) -> t.id) backlog.tasks
+    |> fun backlog -> List.map (fun (t : Masc_domain.task) -> t.id) backlog.tasks
   in
   let title = Printf.sprintf "strict task %d" (List.length existing_ids + 1) in
-  let contract : Types.task_contract = {
+  let contract : Masc_domain.task_contract = {
     strict = true;
     completion_contract = ["tests pass"];
     required_tools = [];
@@ -71,7 +71,7 @@ let add_strict_task config =
   let backlog = Coord.read_backlog config in
   match
     List.find_opt
-      (fun (t : Types.task) -> not (List.mem t.id existing_ids))
+      (fun (t : Masc_domain.task) -> not (List.mem t.id existing_ids))
       backlog.tasks
   with
   | Some t -> t.id
@@ -79,9 +79,9 @@ let add_strict_task config =
 
 let claim_and_start config agent_name task_id =
   let _ = Coord.transition_task_r config ~agent_name ~task_id
-    ~action:Types.Claim () in
+    ~action:Masc_domain.Claim () in
   let _ = Coord.transition_task_r config ~agent_name ~task_id
-    ~action:Types.Start () in
+    ~action:Masc_domain.Start () in
   ()
 
 let create_pending_request config ~task_id ~worker ~request_id =
@@ -100,19 +100,19 @@ let submit_protocol_or_fail config task ~assignee ~verification_id ~evidence_ref
 
 let get_task config task_id =
   let backlog = Coord.read_backlog config in
-  List.find_opt (fun (t : Types.task) -> t.id = task_id) backlog.tasks
+  List.find_opt (fun (t : Masc_domain.task) -> t.id = task_id) backlog.tasks
 
 let status_string config task_id =
   match get_task config task_id with
   | None -> "not_found"
-  | Some t -> Types.string_of_task_status t.task_status
+  | Some t -> Masc_domain.string_of_task_status t.task_status
 
 let verification_id_of_task config task_id =
   match get_task config task_id with
   | None -> Alcotest.fail "task not found"
-  | Some (t : Types.task) ->
+  | Some (t : Masc_domain.task) ->
     (match t.task_status with
-     | Types.AwaitingVerification { verification_id; _ } -> verification_id
+     | Masc_domain.AwaitingVerification { verification_id; _ } -> verification_id
      | _ -> Alcotest.fail "task is not awaiting verification")
 
 let expect_claim_next_claimed result ~task_id ~released_task_id =
@@ -163,8 +163,8 @@ let test_submit_for_verification_moves_to_awaiting () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Submit_for_verification () with
-    | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+            ~task_id ~action:Masc_domain.Submit_for_verification () with
+    | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
@@ -175,19 +175,19 @@ let test_submit_for_verification_sets_timeout_deadline () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Submit_for_verification () with
-    | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+            ~task_id ~action:Masc_domain.Submit_for_verification () with
+    | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       match get_task config task_id with
       | Some { task_status =
-                 Types.AwaitingVerification { submitted_at; deadline = Some deadline; _ };
+                 Masc_domain.AwaitingVerification { submitted_at; deadline = Some deadline; _ };
                _ } ->
-        let submitted_ts = Types.parse_iso8601 submitted_at in
-        let deadline_ts = Types.parse_iso8601 deadline in
+        let submitted_ts = Masc_domain.parse_iso8601 submitted_at in
+        let deadline_ts = Masc_domain.parse_iso8601 deadline in
         Alcotest.(check (float 0.0)) "deadline offset"
           86400.0
           (deadline_ts -. submitted_ts)
-      | Some { task_status = Types.AwaitingVerification { deadline = None; _ }; _ } ->
+      | Some { task_status = Masc_domain.AwaitingVerification { deadline = None; _ }; _ } ->
         Alcotest.fail "awaiting verification deadline missing"
       | Some _ -> Alcotest.fail "task is not awaiting verification"
       | None -> Alcotest.fail "task not found"
@@ -197,10 +197,10 @@ let test_submit_for_verification_from_claimed_moves_to_awaiting () =
     let task_id = add_strict_task config in
     ignore
       (Coord.transition_task_r config ~agent_name:"worker"
-         ~task_id ~action:Types.Claim ());
+         ~task_id ~action:Masc_domain.Claim ());
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Submit_for_verification () with
-    | Error e -> Alcotest.fail ("submit from claimed failed: " ^ Types.show_masc_error e)
+            ~task_id ~action:Masc_domain.Submit_for_verification () with
+    | Error e -> Alcotest.fail ("submit from claimed failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
@@ -212,7 +212,7 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
     let prepare_called = ref false in
     let result =
       Coord.transition_task_r config ~agent_name:"worker"
-        ~task_id ~action:Types.Submit_for_verification
+        ~task_id ~action:Masc_domain.Submit_for_verification
         ~prepare_verification_request:
           (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
              prepare_called := true;
@@ -225,7 +225,7 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
       Alcotest.(check bool) "prepare called" true !prepare_called;
       Alcotest.(check string) "status remains in_progress" "in_progress"
         (status_string config task_id);
-      let msg = Types.show_masc_error e in
+      let msg = Masc_domain.show_masc_error e in
       Alcotest.(check bool) "error mentions verification request" true
         (Astring.String.is_infix
            ~affix:"verification request creation failed"
@@ -330,10 +330,10 @@ let test_approve_by_other_agent_moves_to_done () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Coord.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Types.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification () in
     match Coord.transition_task_r config ~agent_name:"verifier"
-            ~task_id ~action:Types.Approve_verification () with
-    | Error e -> Alcotest.fail ("approve failed: " ^ Types.show_masc_error e)
+            ~task_id ~action:Masc_domain.Approve_verification () with
+    | Error e -> Alcotest.fail ("approve failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "done"
         (status_string config task_id))
@@ -343,10 +343,10 @@ let test_reject_by_other_agent_moves_to_in_progress () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Coord.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Types.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification () in
     match Coord.transition_task_r config ~agent_name:"verifier"
-            ~task_id ~action:Types.Reject_verification ~reason:"test reject" () with
-    | Error e -> Alcotest.fail ("reject failed: " ^ Types.show_masc_error e)
+            ~task_id ~action:Masc_domain.Reject_verification ~reason:"test reject" () with
+    | Error e -> Alcotest.fail ("reject failed: " ^ Masc_domain.show_masc_error e)
     | Ok _ ->
       Alcotest.(check string) "status" "in_progress"
         (status_string config task_id))
@@ -360,11 +360,11 @@ let test_approve_prepare_failure_keeps_task_awaiting () =
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Submit_for_verification
+         ~action:Masc_domain.Submit_for_verification
          ()
      with
      | Ok _ -> ()
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
     let verification_id = verification_id_of_task config task_id in
     let req =
       create_pending_request
@@ -379,7 +379,7 @@ let test_approve_prepare_failure_keeps_task_awaiting () =
         config
         ~agent_name:"verifier"
         ~task_id
-        ~action:Types.Approve_verification
+        ~action:Masc_domain.Approve_verification
         ~prepare_verification_verdict:
           (fun ~task:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
              prepare_called := true;
@@ -392,7 +392,7 @@ let test_approve_prepare_failure_keeps_task_awaiting () =
       Alcotest.(check bool) "prepare called" true !prepare_called;
       Alcotest.(check string) "status remains awaiting_verification"
         "awaiting_verification" (status_string config task_id);
-      let msg = Types.show_masc_error e in
+      let msg = Masc_domain.show_masc_error e in
       Alcotest.(check bool) "error mentions verdict persistence" true
         (Astring.String.is_infix
            ~affix:"verification verdict persistence failed"
@@ -412,11 +412,11 @@ let test_reject_prepare_failure_keeps_task_awaiting () =
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Submit_for_verification
+         ~action:Masc_domain.Submit_for_verification
          ()
      with
      | Ok _ -> ()
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
     let verification_id = verification_id_of_task config task_id in
     let req =
       create_pending_request
@@ -431,7 +431,7 @@ let test_reject_prepare_failure_keeps_task_awaiting () =
         config
         ~agent_name:"verifier"
         ~task_id
-        ~action:Types.Reject_verification
+        ~action:Masc_domain.Reject_verification
         ~reason:"missing evidence"
         ~prepare_verification_verdict:
           (fun ~task:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
@@ -445,7 +445,7 @@ let test_reject_prepare_failure_keeps_task_awaiting () =
       Alcotest.(check bool) "prepare called" true !prepare_called;
       Alcotest.(check string) "status remains awaiting_verification"
         "awaiting_verification" (status_string config task_id);
-      let msg = Types.show_masc_error e in
+      let msg = Masc_domain.show_masc_error e in
       Alcotest.(check bool) "error mentions verdict persistence" true
         (Astring.String.is_infix
            ~affix:"verification verdict persistence failed"
@@ -462,9 +462,9 @@ let test_claim_next_skips_pending_verification_tasks () =
     let task_2 = add_strict_task config in
     claim_and_start config "worker" task_1;
     (match Coord.transition_task_r config ~agent_name:"worker"
-             ~task_id:task_1 ~action:Types.Submit_for_verification () with
+             ~task_id:task_1 ~action:Masc_domain.Submit_for_verification () with
      | Ok _ -> ()
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
     ignore
       (create_pending_request config ~task_id:task_1 ~worker:"worker"
          ~request_id:"vrf-pending-claim-next");
@@ -481,18 +481,18 @@ let test_claim_next_skips_rejected_verification_tasks () =
     let task_2 = add_strict_task config in
     claim_and_start config "worker" task_1;
     (match Coord.transition_task_r config ~agent_name:"worker"
-             ~task_id:task_1 ~action:Types.Submit_for_verification () with
+             ~task_id:task_1 ~action:Masc_domain.Submit_for_verification () with
      | Ok _ -> ()
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
     let req =
       create_pending_request config ~task_id:task_1 ~worker:"worker"
         ~request_id:"vrf-rejected-claim-next"
     in
     (match Coord.transition_task_r config ~agent_name:"verifier"
-             ~task_id:task_1 ~action:Types.Reject_verification
+             ~task_id:task_1 ~action:Masc_domain.Reject_verification
              ~reason:"CI checks failed at plan commit and PR head" () with
      | Ok _ -> ()
-     | Error e -> Alcotest.fail ("reject failed: " ^ Types.show_masc_error e));
+     | Error e -> Alcotest.fail ("reject failed: " ^ Masc_domain.show_masc_error e));
     (match Verification.submit_verdict ~base_path:config.Coord.base_path
              ~req_id:req.id ~verifier:"verifier"
              ~verdict:(Verification.Fail "CI checks failed at plan commit and PR head") with
@@ -530,12 +530,12 @@ let test_self_approval_blocked () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Coord.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Types.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification () in
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Approve_verification () with
+            ~task_id ~action:Masc_domain.Approve_verification () with
     | Ok _ -> Alcotest.fail "self-approval should be blocked"
     | Error e ->
-      let msg = Types.show_masc_error e in
+      let msg = Masc_domain.show_masc_error e in
       Alcotest.(check bool) "error mentions self-approval" true
         (Astring.String.is_infix ~affix:"Self-approval" msg))
 
@@ -544,9 +544,9 @@ let test_self_rejection_blocked () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     let _ = Coord.transition_task_r config ~agent_name:"worker"
-      ~task_id ~action:Types.Submit_for_verification () in
+      ~task_id ~action:Masc_domain.Submit_for_verification () in
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Reject_verification () with
+            ~task_id ~action:Masc_domain.Reject_verification () with
     | Ok _ -> Alcotest.fail "self-rejection should be blocked"
     | Error _ -> ())
 
@@ -613,10 +613,10 @@ let test_fsm_disabled_submit_fails () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     match Coord.transition_task_r config ~agent_name:"worker"
-            ~task_id ~action:Types.Submit_for_verification () with
+            ~task_id ~action:Masc_domain.Submit_for_verification () with
     | Ok _ -> Alcotest.fail "submit should fail when FSM disabled"
     | Error e ->
-      let msg = Types.show_masc_error e in
+      let msg = Masc_domain.show_masc_error e in
       Alcotest.(check bool) "error mentions FSM disabled" true
         (Astring.String.is_infix ~affix:"not enabled" msg))
 
@@ -629,15 +629,15 @@ let test_fsm_disabled_submit_fails () =
 let force_deadline_past config task_id =
   let backlog = Coord.read_backlog config in
   let past_iso =
-    Types.iso8601_of_unix_seconds (Time_compat.now () -. 3600.0)
+    Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 3600.0)
   in
   let new_tasks =
-    List.map (fun (t : Types.task) ->
+    List.map (fun (t : Masc_domain.task) ->
       if t.id <> task_id then t
       else match t.task_status with
-        | Types.AwaitingVerification fields ->
+        | Masc_domain.AwaitingVerification fields ->
           { t with task_status =
-              Types.AwaitingVerification { fields with deadline = Some past_iso } }
+              Masc_domain.AwaitingVerification { fields with deadline = Some past_iso } }
         | _ -> t)
       backlog.tasks
   in
@@ -648,8 +648,8 @@ let test_check_timeouts_transitions_awaiting_to_cancelled () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     (match Coord.transition_task_r config ~agent_name:"worker"
-             ~task_id ~action:Types.Submit_for_verification () with
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+             ~task_id ~action:Masc_domain.Submit_for_verification () with
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
      | Ok _ -> ());
     Alcotest.(check string) "pre-check status" "awaiting_verification"
       (status_string config task_id);
@@ -658,7 +658,7 @@ let test_check_timeouts_transitions_awaiting_to_cancelled () =
     Alcotest.(check string) "post-check status" "cancelled"
       (status_string config task_id);
     match get_task config task_id with
-    | Some { task_status = Types.Cancelled { cancelled_by; reason; _ }; _ } ->
+    | Some { task_status = Masc_domain.Cancelled { cancelled_by; reason; _ }; _ } ->
       Alcotest.(check string) "cancelled_by system" "system" cancelled_by;
       let reason_str = Option.value reason ~default:"" in
       Alcotest.(check bool)
@@ -671,8 +671,8 @@ let test_check_timeouts_idempotent_after_cancel () =
     let task_id = add_strict_task config in
     claim_and_start config "worker" task_id;
     (match Coord.transition_task_r config ~agent_name:"worker"
-             ~task_id ~action:Types.Submit_for_verification () with
-     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+             ~task_id ~action:Masc_domain.Submit_for_verification () with
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
      | Ok _ -> ());
     force_deadline_past config task_id;
     Verification_protocol.check_timeouts ~config;

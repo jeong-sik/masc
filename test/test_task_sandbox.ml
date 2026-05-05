@@ -217,12 +217,12 @@ let setup_named_repo_with_file ~base_path ~repo_name ~file_path =
   run_cmd (Printf.sprintf "git -C %s push origin main" (Filename.quote repo));
   repo
 
-let task ?worktree ?(files = []) ~id ~title ~description () : Types.task =
+let task ?worktree ?(files = []) ~id ~title ~description () : Masc_domain.task =
   {
     id;
     title;
     description;
-    task_status = Types.Todo;
+    task_status = Masc_domain.Todo;
     priority = 3;
     files;
     created_at = "2026-05-01T00:00:00Z";
@@ -239,7 +239,7 @@ let task ?worktree ?(files = []) ~id ~title ~description () : Types.task =
 let write_tasks config tasks =
   let backlog = Coord.read_backlog config in
   Coord.write_backlog config
-    { Types.tasks = tasks; last_updated = Types.now_iso (); version = backlog.version + 1 }
+    { Masc_domain.tasks = tasks; last_updated = Masc_domain.now_iso (); version = backlog.version + 1 }
 
 let test_full_lifecycle () =
   let base = make_temp_dir () in
@@ -380,7 +380,7 @@ let test_create_infers_repo_from_task_file_evidence () =
           seed_playground_clone ~base_path:dir ~agent_name:"router-agent"
             ~source_repo:masc_repo
         in
-        let stale_worktree : Types.worktree_info =
+        let stale_worktree : Masc_domain.worktree_info =
           {
             branch = "router-agent/task-route";
             path = ".worktrees/router-agent-task-route";
@@ -407,7 +407,7 @@ let test_create_infers_repo_from_task_file_evidence () =
               Coord.read_backlog config
               |> fun backlog ->
               List.find
-                (fun (t : Types.task) -> String.equal t.id "task-route")
+                (fun (t : Masc_domain.task) -> String.equal t.id "task-route")
                 backlog.tasks
             in
             (match persisted.worktree with

@@ -1,9 +1,7 @@
 module Types = Masc_domain
+open Types
 
 (** Tests for Types module *)
-
-module Types = Masc_domain
-open Types
 
 let test_agent_status_roundtrip () =
   let statuses = [Active; Busy; Listening; Inactive] in
@@ -537,7 +535,7 @@ let () =
          declared valid for any reachable status appears in the
          published [task_fsm_transitions] list. *)
       Alcotest.test_case "every valid action appears in transitions" `Quick (fun () ->
-        let reachable_statuses : Types.task_status list = [
+        let reachable_statuses : Masc_domain.task_status list = [
           Todo;
           Claimed { assignee = "a"; claimed_at = "" };
           InProgress { assignee = "a"; started_at = "" };
@@ -1170,7 +1168,7 @@ let () =
          (witness exhaustive over [task_status]) or the assertion. *)
       Alcotest.test_case "Todo is the only claim pool candidate" `Quick (fun () ->
         let module S = Coord_task_schedule in
-        let dummy_task ts : Types.task =
+        let dummy_task ts : Masc_domain.task =
           { id = "t-1"; title = "x"; description = ""; goal_id = None;
             files = []; created_at = "2026-04-19T00:00:00Z";
             task_status = ts; priority = 5;
@@ -1181,25 +1179,25 @@ let () =
             do_not_reclaim_reason = None; }
         in
         Alcotest.(check bool) "Todo -> claim pool" true
-          (S.task_is_claim_pool_candidate (dummy_task Types.Todo));
+          (S.task_is_claim_pool_candidate (dummy_task Masc_domain.Todo));
         Alcotest.(check bool) "Claimed -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
-             (dummy_task (Types.Claimed { assignee = "a"; claimed_at = "t" })));
+             (dummy_task (Masc_domain.Claimed { assignee = "a"; claimed_at = "t" })));
         Alcotest.(check bool) "InProgress -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
-             (dummy_task (Types.InProgress { assignee = "a"; started_at = "t" })));
+             (dummy_task (Masc_domain.InProgress { assignee = "a"; started_at = "t" })));
         Alcotest.(check bool)
           "AwaitingVerification -> NOT claim pool (regression #8659)" false
           (S.task_is_claim_pool_candidate
-             (dummy_task (Types.AwaitingVerification {
+             (dummy_task (Masc_domain.AwaitingVerification {
                 assignee = "a"; submitted_at = "t"; verification_id = "v";
                 deadline = None })));
         Alcotest.(check bool) "Done -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
-             (dummy_task (Types.Done { assignee = "a"; completed_at = "t"; notes = None })));
+             (dummy_task (Masc_domain.Done { assignee = "a"; completed_at = "t"; notes = None })));
         Alcotest.(check bool) "Cancelled -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
-             (dummy_task (Types.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }))));
+             (dummy_task (Masc_domain.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }))));
     ];
     "publish_phase_lifecycle_ssot", [
       (* Issue #8572: phase-bearing publish_lifecycle calls used to pass

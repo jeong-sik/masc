@@ -232,7 +232,7 @@ let test_shard_tools_parse () =
     List.concat_map (fun sn ->
       match Tool_shard.get_shard sn with
       | Some shard ->
-        List.map (fun (t : Types.tool_schema) -> t.name) shard.tools
+        List.map (fun (t : Masc_domain.tool_schema) -> t.name) shard.tools
       | None -> []
     ) shard_names
   in

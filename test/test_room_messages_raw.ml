@@ -26,7 +26,7 @@ let test_get_messages_raw_limit_and_order () =
     let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 2" in
     let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 3" in
     let msgs = Coord.get_messages_raw config ~since_seq:0 ~limit:2 in
-    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
     Alcotest.(check int) "limit respected" 2 (List.length msgs);
     Alcotest.(check (list string)) "newest messages first"
       ["Message 3"; "Message 2"] contents
@@ -44,7 +44,7 @@ let test_get_messages_raw_since_seq_stops_early () =
       | _ -> Alcotest.fail "expected at least two messages in baseline"
     in
     let msgs = Coord.get_messages_raw config ~since_seq:cutoff_seq ~limit:10 in
-    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
     Alcotest.(check (list string)) "only newer than since_seq"
       ["Message 3"] contents
   )
@@ -59,7 +59,7 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
       ()
     done;
     let msgs = Coord.get_messages_raw config ~since_seq:5 ~limit:3 in
-    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
     Alcotest.(check (list string)) "large history keeps newest 3"
       [ "Message 20"; "Message 19"; "Message 18" ] contents
   )

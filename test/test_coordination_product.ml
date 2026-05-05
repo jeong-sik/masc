@@ -7,16 +7,16 @@ module CP = Coordination_product
 module CPS = Coordination_product_snapshot
 
 let done_status =
-  Types.Done
+  Masc_domain.Done
     { assignee = "worker"; completed_at = "2026-04-24T00:00:00Z"; notes = Some "ok" }
 ;;
 
 let claimed_status =
-  Types.Claimed { assignee = "worker"; claimed_at = "2026-04-24T00:00:00Z" }
+  Masc_domain.Claimed { assignee = "worker"; claimed_at = "2026-04-24T00:00:00Z" }
 ;;
 
 let cancelled_status =
-  Types.Cancelled
+  Masc_domain.Cancelled
     { cancelled_by = "operator"
     ; cancelled_at = "2026-04-24T00:00:00Z"
     ; reason = Some "superseded"
@@ -27,7 +27,7 @@ let ids ?goal_id ?(task_ids = []) ?(post_ids = []) ?agent_name () : CP.ids =
   { goal_id; task_ids; post_ids; agent_name }
 ;;
 
-let task ?goal_id ?(task_status = Types.Todo) ~id ~title () : Types.task =
+let task ?goal_id ?(task_status = Masc_domain.Todo) ~id ~title () : Masc_domain.task =
   { id
   ; title
   ; description = ""
@@ -143,7 +143,7 @@ let test_task_axis_projection () =
   Alcotest.(check string)
     "todo"
     "todo"
-    (CP.task_phase_to_string (CP.task_phase_of_status Types.Todo));
+    (CP.task_phase_to_string (CP.task_phase_of_status Masc_domain.Todo));
   Alcotest.(check string)
     "done"
     "done"
@@ -174,7 +174,7 @@ let test_visible_claim_queue_is_deterministic () =
   in
   let tasks =
     List.map
-      (fun (task : Types.task) ->
+      (fun (task : Masc_domain.task) ->
          if String.equal task.id "later"
          then { task with priority = 2; created_at = "2026-04-24T02:00:00Z" }
          else if String.equal task.id "earlier"
@@ -195,13 +195,13 @@ let test_duplicate_active_claim_violation () =
         ~id:"task-dup"
         ~title:"First owner"
         ~task_status:
-          (Types.Claimed { assignee = "worker-a"; claimed_at = "2026-04-24T00:00:00Z" })
+          (Masc_domain.Claimed { assignee = "worker-a"; claimed_at = "2026-04-24T00:00:00Z" })
         ()
     ; task
         ~id:"task-dup"
         ~title:"Second owner"
         ~task_status:
-          (Types.InProgress { assignee = "worker-b"; started_at = "2026-04-24T00:01:00Z" })
+          (Masc_domain.InProgress { assignee = "worker-b"; started_at = "2026-04-24T00:01:00Z" })
         ()
     ; task ~id:"task-open" ~title:"Open" ()
     ]

@@ -47,7 +47,7 @@ let raw_schema_by_name name =
     @ Tool_shard.coding_tools
   in
   all
-  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in

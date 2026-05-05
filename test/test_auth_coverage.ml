@@ -164,99 +164,99 @@ let test_permission_for_tool_init () =
 
 let test_permission_for_tool_reset () =
   match Auth.permission_for_tool "masc_reset" with
-  | Some Types.CanReset -> ()
+  | Some Masc_domain.CanReset -> ()
   | _ -> fail "expected CanReset"
 
 let test_permission_for_tool_join () =
   match Auth.permission_for_tool "masc_join" with
-  | Some Types.CanJoin -> ()
+  | Some Masc_domain.CanJoin -> ()
   | _ -> fail "expected CanJoin"
 
 let test_permission_for_tool_leave () =
   match Auth.permission_for_tool "masc_leave" with
-  | Some Types.CanLeave -> ()
+  | Some Masc_domain.CanLeave -> ()
   | _ -> fail "expected CanLeave"
 
 let test_permission_for_tool_status () =
   match Auth.permission_for_tool "masc_status" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_runtime_verify () =
   (* Tool schema was pruned but the permission map still maps the name
      to CanReadState. Keep the legacy permission contract. *)
   match Auth.permission_for_tool "masc_runtime_verify" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_who () =
   match Auth.permission_for_tool "masc_who" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_tasks () =
   match Auth.permission_for_tool "masc_tasks" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_add_task () =
   match Auth.permission_for_tool "masc_add_task" with
-  | Some Types.CanAddTask -> ()
+  | Some Masc_domain.CanAddTask -> ()
   | _ -> fail "expected CanAddTask"
 
 let test_permission_for_tool_claim () =
   match Auth.permission_for_tool "masc_claim_next" with
-  | Some Types.CanClaimTask -> ()
+  | Some Masc_domain.CanClaimTask -> ()
   | _ -> fail "expected CanClaimTask"
 
 let test_permission_for_tool_claim_next () =
   match Auth.permission_for_tool "masc_claim_next" with
-  | Some Types.CanClaimTask -> ()
+  | Some Masc_domain.CanClaimTask -> ()
   | _ -> fail "expected CanClaimTask"
 
 let test_permission_for_tool_broadcast () =
   match Auth.permission_for_tool "masc_broadcast" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_webrtc_offer () =
   match Auth.permission_for_tool "masc_webrtc_offer" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_webrtc_answer () =
   match Auth.permission_for_tool "masc_webrtc_answer" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_channel_gate () =
   match Auth.permission_for_tool "channel_gate" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_board_list () =
   match Auth.permission_for_tool "masc_board_list" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_board_post () =
   match Auth.permission_for_tool "masc_board_post" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_board_delete () =
   match Auth.permission_for_tool "masc_board_delete" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_worktree_create () =
   match Auth.permission_for_tool "masc_worktree_create" with
-  | Some Types.CanCreateWorktree -> ()
+  | Some Masc_domain.CanCreateWorktree -> ()
   | _ -> fail "expected CanCreateWorktree"
 
 let test_permission_for_tool_worktree_remove () =
   match Auth.permission_for_tool "masc_worktree_remove" with
-  | Some Types.CanRemoveWorktree -> ()
+  | Some Masc_domain.CanRemoveWorktree -> ()
   | _ -> fail "expected CanRemoveWorktree"
 
 let test_permission_for_tool_interrupt () =
@@ -274,8 +274,8 @@ let test_same_origin_browser_request_rejects_missing_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected Unauthorized when Origin header is missing"
-  | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
-  | Error e -> fail (Printf.sprintf "expected Unauthorized, got %s" (Types.masc_error_to_string e))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "expected Unauthorized, got %s" (Masc_domain.masc_error_to_string e))
 
 let test_same_origin_browser_request_allows_matching_origin () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -289,7 +289,7 @@ let test_same_origin_browser_request_allows_matching_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_browser_request_rejects_cross_origin () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -303,8 +303,8 @@ let test_same_origin_browser_request_rejects_cross_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected cross-origin browser request to be rejected"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_https_tunnel_same_host () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -318,7 +318,7 @@ let test_same_origin_https_tunnel_same_host () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_loopback_alias_same_port () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -332,7 +332,7 @@ let test_same_origin_allows_loopback_alias_same_port () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_allowlisted_dashboard_dev_origin () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -346,7 +346,7 @@ let test_same_origin_allows_allowlisted_dashboard_dev_origin () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -360,8 +360,8 @@ let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected non-allowlisted loopback cross-port request to be rejected"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_rejects_different_explicit_port_on_public_host () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -375,8 +375,8 @@ let test_same_origin_rejects_different_explicit_port_on_public_host () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> fail "expected different-port public host request to be rejected"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_explicit_default_port_https () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -390,7 +390,7 @@ let test_same_origin_allows_explicit_default_port_https () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_explicit_default_port_http () =
   let module Server_auth = Masc_mcp.Server_auth in
@@ -404,7 +404,7 @@ let test_same_origin_allows_explicit_default_port_http () =
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 (* ============================================================
    HTTP auth extraction regressions
@@ -448,9 +448,9 @@ let test_observer_sse_auth_accepts_query_token_fallback () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let request =
         Httpun.Request.create `GET
@@ -469,9 +469,9 @@ let test_presence_sse_auth_accepts_query_token_fallback () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let request =
         Httpun.Request.create `GET
@@ -490,9 +490,9 @@ let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let request =
         Httpun.Request.create `GET
@@ -520,9 +520,9 @@ let test_verify_mcp_auth_accepts_valid_bearer () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (tok, _cred) -> tok
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let auth_value = String.concat " " [ "Bearer"; raw_token ] in
       let headers = Httpun.Headers.of_list [ ("authorization", auth_value) ] in
@@ -579,107 +579,107 @@ let test_permission_for_tool_auth_status () =
 
 let test_permission_for_tool_stats () =
   match Auth.permission_for_tool "masc_tool_stats" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_admin_snapshot () =
   match Auth.permission_for_tool "masc_tool_admin_snapshot" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_admin_update () =
   match Auth.permission_for_tool "masc_tool_admin_update" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_help () =
   match Auth.permission_for_tool "masc_tool_help" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_list () =
   match Auth.permission_for_tool "masc_tool_list" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_grant () =
   match Auth.permission_for_tool "masc_tool_grant" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_revoke () =
   match Auth.permission_for_tool "masc_tool_revoke" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_operator_snapshot () =
   match Auth.permission_for_tool "masc_operator_snapshot" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_operator_digest () =
   match Auth.permission_for_tool "masc_operator_digest" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_surface_audit () =
   match Auth.permission_for_tool "masc_surface_audit" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_operator_action () =
   match Auth.permission_for_tool "masc_operator_action" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_operator_confirm () =
   match Auth.permission_for_tool "masc_operator_confirm" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_autoresearch_status () =
   match Auth.permission_for_tool "masc_autoresearch_status" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_autoresearch_start () =
   match Auth.permission_for_tool "masc_autoresearch_start" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_autoresearch_record_finding () =
   match Auth.permission_for_tool "masc_autoresearch_record_finding" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_autoresearch_search_findings () =
   match Auth.permission_for_tool "masc_autoresearch_search_findings" with
-  | Some Types.CanReadState -> ()
+  | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_autoresearch_cycle () =
   match Auth.permission_for_tool "masc_autoresearch_cycle" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_autoresearch_inject () =
   match Auth.permission_for_tool "masc_autoresearch_inject" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_autoresearch_stop () =
   match Auth.permission_for_tool "masc_autoresearch_stop" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
-  | Some Types.CanBroadcast -> ()
+  | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
 let test_permission_for_tool_set_param () =
   match Auth.permission_for_tool "masc_set_param" with
-  | Some Types.CanAdmin -> ()
+  | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
 (* keeper policy auth tests removed — policy tools no longer registered in Auth *)
@@ -752,7 +752,7 @@ let test_custom_dev_origin_allows_loopback_cross_port () =
     let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
     match SA.ensure_same_origin_browser_request request with
     | Ok () -> ()
-    | Error e -> fail (Types.masc_error_to_string e))
+    | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_public_read_cors_allows_matching_origin () =
   let module SA = Masc_mcp.Server_auth in
@@ -857,9 +857,9 @@ let test_resolve_agent_name_prefers_token_for_generated_actor () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let headers =
         Httpun.Headers.of_list
@@ -873,7 +873,7 @@ let test_resolve_agent_name_prefers_token_for_generated_actor () =
       | Ok (Some agent_name) ->
           check string "token subject wins for generated actor" "stable-admin" agent_name
       | Ok None -> fail "expected resolved agent name"
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_preserves_explicit_stable_actor () =
   let module SA = Masc_mcp.Server_auth in
@@ -883,9 +883,9 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let headers =
         Httpun.Headers.of_list
@@ -899,7 +899,7 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
       | Ok (Some agent_name) ->
           check string "token owner canonicalized" "stable-admin" agent_name
       | Ok None -> fail "expected token-bound actor"
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
   let module SA = Masc_mcp.Server_auth in
@@ -909,9 +909,9 @@ let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let headers =
         Httpun.Headers.of_list
@@ -977,8 +977,8 @@ let test_resolve_agent_name_rejects_invalid_token () =
         SA.resolve_agent_name_for_auth
           ~base_path:dir request ~token:(Some invalid_token)
       with
-      | Error (Types.Auth (Types.Auth_error.InvalidToken _)) -> ()
-      | Error e -> failf "expected InvalidToken, got %s" (Types.masc_error_to_string e)
+      | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+      | Error e -> failf "expected InvalidToken, got %s" (Masc_domain.masc_error_to_string e)
       | Ok _ -> fail "expected invalid token failure")
 
 let test_authorize_read_request_canonicalizes_token_owner () =
@@ -989,9 +989,9 @@ let test_authorize_read_request_canonicalizes_token_owner () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let headers =
         Httpun.Headers.of_list
@@ -1005,7 +1005,7 @@ let test_authorize_read_request_canonicalizes_token_owner () =
       in
       match SA.authorize_read_request ~base_path:dir request with
       | Ok () -> ()
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_authorize_tool_request_canonicalizes_token_owner () =
   let module SA = Masc_mcp.Server_auth in
@@ -1015,9 +1015,9 @@ let test_authorize_tool_request_canonicalizes_token_owner () =
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
-        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
         | Ok (token, _cred) -> token
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let headers =
         Httpun.Headers.of_list
@@ -1034,7 +1034,7 @@ let test_authorize_tool_request_canonicalizes_token_owner () =
           ~base_path:dir ~tool_name:"masc_operator_action" request
       with
       | Ok () -> ()
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_uses_internal_keeper_header () =
   let module SA = Masc_mcp.Server_auth in
@@ -1057,7 +1057,7 @@ let test_resolve_agent_name_uses_internal_keeper_header () =
           check string "internal keeper resolves canonical agent"
             "keeper-sangsu-agent" agent_name
       | Ok None -> fail "expected resolved internal keeper agent"
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_rejects_internal_keeper_without_name () =
   let module SA = Masc_mcp.Server_auth in
@@ -1073,10 +1073,10 @@ let test_resolve_agent_name_rejects_internal_keeper_without_name () =
       let request = Httpun.Request.create ~headers `POST "/mcp" in
       match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
       | Ok _ -> fail "expected missing keeper name header to be rejected"
-      | Error (Types.Auth (Types.Auth_error.Unauthorized msg)) ->
+      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) ->
           check bool "mentions keeper header" true
             (Astring.String.is_infix ~affix:"x-masc-keeper-name" msg)
-      | Error e -> fail (Types.masc_error_to_string e))
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 (* ============================================================
    Test Runners

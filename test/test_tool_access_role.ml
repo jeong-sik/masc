@@ -24,14 +24,14 @@ open Masc_mcp
     For unmapped tools (None), the policy allows them (All-based),
     matching the non-strict fail-open path. Strict mode is an
     authorization-level overlay tested separately. *)
-let old_allows (role : Types.agent_role) (tool_name : string) : bool =
+let old_allows (role : Masc_domain.agent_role) (tool_name : string) : bool =
   match Auth.permission_for_tool tool_name with
   | None -> true  (* Policy level: fail-open for unmapped tools *)
-  | Some perm -> Types.has_permission role perm
+  | Some perm -> Masc_domain.has_permission role perm
 
 let testable_permission =
   testable
-    (Fmt.of_to_string Types.show_permission)
+    (Fmt.of_to_string Masc_domain.show_permission)
     (fun a b -> a = b)
 
 (* ================================================================ *)
@@ -138,33 +138,33 @@ let test_permissions_promoted_to_metadata_ssot () =
        ~base_path:"/tmp/masc-permission-metadata-ssot" ());
   let expectations =
     [
-      ("masc_status", Types.CanReadState);
-      ("masc_add_task", Types.CanAddTask);
-      ("masc_board_list", Types.CanReadState);
+      ("masc_status", Masc_domain.CanReadState);
+      ("masc_add_task", Masc_domain.CanAddTask);
+      ("masc_board_list", Masc_domain.CanReadState);
       (* CP purge: masc_operator_action, masc_unit_list and other command-plane
          tool metadata expectations removed with deletion of lib/command_plane/. *)
-      ("masc_worktree_create", Types.CanCreateWorktree);
-      ("masc_autoresearch_record_finding", Types.CanAdmin);
-      ("masc_autoresearch_search_findings", Types.CanReadState);
-      ("masc_autoresearch_status", Types.CanReadState);
-      ("masc_agent_card", Types.CanReadState);
-      ("masc_heartbeat", Types.CanBroadcast);
-      ("masc_config", Types.CanReadState);
-      ("masc_team_memory_read", Types.CanReadState);
-      ("masc_team_memory_search", Types.CanReadState);
-      ("masc_team_memory_write", Types.CanBroadcast);
-      ("masc_tool_list", Types.CanReadState);
-      ("masc_tool_admin_snapshot", Types.CanAdmin);
-      ("masc_runtime_verify", Types.CanReadState);
-      ("masc_persona_list", Types.CanReadState);
-      ("masc_persona_schema", Types.CanReadState);
-      ("masc_persona_generate", Types.CanBroadcast);
-      ("masc_persona_save", Types.CanBroadcast);
-      ("masc_keeper_reset", Types.CanBroadcast);
-      ("masc_join", Types.CanJoin);
-      ("masc_broadcast", Types.CanBroadcast);
-      ("masc_portal_send", Types.CanSendPortal);
-      ("channel_gate", Types.CanBroadcast);
+      ("masc_worktree_create", Masc_domain.CanCreateWorktree);
+      ("masc_autoresearch_record_finding", Masc_domain.CanAdmin);
+      ("masc_autoresearch_search_findings", Masc_domain.CanReadState);
+      ("masc_autoresearch_status", Masc_domain.CanReadState);
+      ("masc_agent_card", Masc_domain.CanReadState);
+      ("masc_heartbeat", Masc_domain.CanBroadcast);
+      ("masc_config", Masc_domain.CanReadState);
+      ("masc_team_memory_read", Masc_domain.CanReadState);
+      ("masc_team_memory_search", Masc_domain.CanReadState);
+      ("masc_team_memory_write", Masc_domain.CanBroadcast);
+      ("masc_tool_list", Masc_domain.CanReadState);
+      ("masc_tool_admin_snapshot", Masc_domain.CanAdmin);
+      ("masc_runtime_verify", Masc_domain.CanReadState);
+      ("masc_persona_list", Masc_domain.CanReadState);
+      ("masc_persona_schema", Masc_domain.CanReadState);
+      ("masc_persona_generate", Masc_domain.CanBroadcast);
+      ("masc_persona_save", Masc_domain.CanBroadcast);
+      ("masc_keeper_reset", Masc_domain.CanBroadcast);
+      ("masc_join", Masc_domain.CanJoin);
+      ("masc_broadcast", Masc_domain.CanBroadcast);
+      ("masc_portal_send", Masc_domain.CanSendPortal);
+      ("channel_gate", Masc_domain.CanBroadcast);
     ]
   in
   List.iter

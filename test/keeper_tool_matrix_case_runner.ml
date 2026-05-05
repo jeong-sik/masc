@@ -27,7 +27,7 @@ let emit_result ~base_path name = function
 
 let find_schema name =
   Cases.all_keeper_tool_schemas ()
-  |> List.find_opt (fun (schema : Types.tool_schema) ->
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
          String.equal schema.name name)
 
 let () =

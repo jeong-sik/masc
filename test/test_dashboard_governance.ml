@@ -24,7 +24,7 @@ let cleanup_dir dir =
   rm dir
 
 let iso8601_of_unix ts =
-  Types.iso8601_of_unix_seconds ts
+  Masc_domain.iso8601_of_unix_seconds ts
 
 let write_legacy_judgment ~base_path json =
   let masc = Filename.concat base_path Common.masc_dirname in

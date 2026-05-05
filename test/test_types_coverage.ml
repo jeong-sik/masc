@@ -16,92 +16,92 @@ module Types = Masc_domain
    ============================================================ *)
 
 let test_agent_id_of_string () =
-  let id = Types.Agent_id.of_string "claude-1" in
-  let s = Types.Agent_id.to_string id in
+  let id = Masc_domain.Agent_id.of_string "claude-1" in
+  let s = Masc_domain.Agent_id.to_string id in
   check string "roundtrip" "claude-1" s
 
 let test_agent_id_equal_same () =
-  let id1 = Types.Agent_id.of_string "agent-x" in
-  let id2 = Types.Agent_id.of_string "agent-x" in
-  check bool "equal" true (Types.Agent_id.equal id1 id2)
+  let id1 = Masc_domain.Agent_id.of_string "agent-x" in
+  let id2 = Masc_domain.Agent_id.of_string "agent-x" in
+  check bool "equal" true (Masc_domain.Agent_id.equal id1 id2)
 
 let test_agent_id_equal_diff () =
-  let id1 = Types.Agent_id.of_string "agent-x" in
-  let id2 = Types.Agent_id.of_string "agent-y" in
-  check bool "not equal" false (Types.Agent_id.equal id1 id2)
+  let id1 = Masc_domain.Agent_id.of_string "agent-x" in
+  let id2 = Masc_domain.Agent_id.of_string "agent-y" in
+  check bool "not equal" false (Masc_domain.Agent_id.equal id1 id2)
 
 let test_agent_id_to_yojson () =
-  let id = Types.Agent_id.of_string "test-agent" in
-  let json = Types.Agent_id.to_yojson id in
+  let id = Masc_domain.Agent_id.of_string "test-agent" in
+  let json = Masc_domain.Agent_id.to_yojson id in
   match json with
   | `String s -> check string "to json" "test-agent" s
   | _ -> fail "expected String"
 
 let test_agent_id_of_yojson_ok () =
   let json = `String "my-agent" in
-  match Types.Agent_id.of_yojson json with
-  | Ok id -> check string "from json" "my-agent" (Types.Agent_id.to_string id)
+  match Masc_domain.Agent_id.of_yojson json with
+  | Ok id -> check string "from json" "my-agent" (Masc_domain.Agent_id.to_string id)
   | Error _ -> fail "expected Ok"
 
 let test_agent_id_of_yojson_err () =
   let json = `Int 123 in
-  match Types.Agent_id.of_yojson json with
+  match Masc_domain.Agent_id.of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_agent_id_empty () =
-  let id = Types.Agent_id.of_string "" in
-  check string "empty" "" (Types.Agent_id.to_string id)
+  let id = Masc_domain.Agent_id.of_string "" in
+  check string "empty" "" (Masc_domain.Agent_id.to_string id)
 
 let test_agent_id_special_chars () =
-  let id = Types.Agent_id.of_string "agent@domain:123" in
-  check string "special chars" "agent@domain:123" (Types.Agent_id.to_string id)
+  let id = Masc_domain.Agent_id.of_string "agent@domain:123" in
+  check string "special chars" "agent@domain:123" (Masc_domain.Agent_id.to_string id)
 
 (* ============================================================
    Task_id Tests
    ============================================================ *)
 
 let test_task_id_of_string () =
-  let id = Types.Task_id.of_string "task-001" in
-  let s = Types.Task_id.to_string id in
+  let id = Masc_domain.Task_id.of_string "task-001" in
+  let s = Masc_domain.Task_id.to_string id in
   check string "roundtrip" "task-001" s
 
 let test_task_id_equal_same () =
-  let id1 = Types.Task_id.of_string "task-x" in
-  let id2 = Types.Task_id.of_string "task-x" in
-  check bool "equal" true (Types.Task_id.equal id1 id2)
+  let id1 = Masc_domain.Task_id.of_string "task-x" in
+  let id2 = Masc_domain.Task_id.of_string "task-x" in
+  check bool "equal" true (Masc_domain.Task_id.equal id1 id2)
 
 let test_task_id_equal_diff () =
-  let id1 = Types.Task_id.of_string "task-x" in
-  let id2 = Types.Task_id.of_string "task-y" in
-  check bool "not equal" false (Types.Task_id.equal id1 id2)
+  let id1 = Masc_domain.Task_id.of_string "task-x" in
+  let id2 = Masc_domain.Task_id.of_string "task-y" in
+  check bool "not equal" false (Masc_domain.Task_id.equal id1 id2)
 
 let test_task_id_generate () =
-  let id = Types.Task_id.generate () in
-  let s = Types.Task_id.to_string id in
+  let id = Masc_domain.Task_id.generate () in
+  let s = Masc_domain.Task_id.to_string id in
   check bool "starts with task-" true (String.sub s 0 5 = "task-")
 
 let test_task_id_generate_unique () =
-  let id1 = Types.Task_id.generate () in
-  let id2 = Types.Task_id.generate () in
-  check bool "unique" false (Types.Task_id.equal id1 id2)
+  let id1 = Masc_domain.Task_id.generate () in
+  let id2 = Masc_domain.Task_id.generate () in
+  check bool "unique" false (Masc_domain.Task_id.equal id1 id2)
 
 let test_task_id_to_yojson () =
-  let id = Types.Task_id.of_string "task-123" in
-  let json = Types.Task_id.to_yojson id in
+  let id = Masc_domain.Task_id.of_string "task-123" in
+  let json = Masc_domain.Task_id.to_yojson id in
   match json with
   | `String s -> check string "to json" "task-123" s
   | _ -> fail "expected String"
 
 let test_task_id_of_yojson_ok () =
   let json = `String "my-task" in
-  match Types.Task_id.of_yojson json with
-  | Ok id -> check string "from json" "my-task" (Types.Task_id.to_string id)
+  match Masc_domain.Task_id.of_yojson json with
+  | Ok id -> check string "from json" "my-task" (Masc_domain.Task_id.to_string id)
   | Error _ -> fail "expected Ok"
 
 let test_task_id_of_yojson_err () =
   let json = `Bool true in
-  match Types.Task_id.of_yojson json with
+  match Masc_domain.Task_id.of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -110,7 +110,7 @@ let test_task_id_of_yojson_err () =
    ============================================================ *)
 
 let test_now_iso_format () =
-  let ts = Types.now_iso () in
+  let ts = Masc_domain.now_iso () in
   (* Should be like 2024-01-15T12:30:45Z *)
   check bool "length" true (String.length ts = 20);
   check bool "ends with Z" true (String.get ts 19 = 'Z');
@@ -118,19 +118,19 @@ let test_now_iso_format () =
 
 let test_parse_iso8601_valid () =
   let ts = "2024-01-15T12:30:45Z" in
-  let parsed = Types.parse_iso8601 ts in
+  let parsed = Masc_domain.parse_iso8601 ts in
   check bool "is float" true (parsed > 0.0)
 
 let test_parse_iso8601_invalid () =
   let ts = "not-a-date" in
   let default = 123.0 in
-  let parsed = Types.parse_iso8601 ~default_time:default ts in
+  let parsed = Masc_domain.parse_iso8601 ~default_time:default ts in
   check (float 0.001) "uses default" default parsed
 
 let test_parse_iso8601_empty () =
   let ts = "" in
   let default = 999.0 in
-  let parsed = Types.parse_iso8601 ~default_time:default ts in
+  let parsed = Masc_domain.parse_iso8601 ~default_time:default ts in
   check (float 0.001) "uses default" default parsed
 
 (* ============================================================
@@ -138,19 +138,19 @@ let test_parse_iso8601_empty () =
    ============================================================ *)
 
 let test_show_agent_status_active () =
-  let s = Types.show_agent_status Types.Active in
+  let s = Masc_domain.show_agent_status Masc_domain.Active in
   check bool "active" true (String.length s > 0)
 
 let test_show_agent_status_busy () =
-  let s = Types.show_agent_status Types.Busy in
+  let s = Masc_domain.show_agent_status Masc_domain.Busy in
   check bool "busy" true (String.length s > 0)
 
 let test_show_agent_status_listening () =
-  let s = Types.show_agent_status Types.Listening in
+  let s = Masc_domain.show_agent_status Masc_domain.Listening in
   check bool "listening" true (String.length s > 0)
 
 let test_show_agent_status_inactive () =
-  let s = Types.show_agent_status Types.Inactive in
+  let s = Masc_domain.show_agent_status Masc_domain.Inactive in
   check bool "inactive" true (String.length s > 0)
 
 (* ============================================================
@@ -158,43 +158,43 @@ let test_show_agent_status_inactive () =
    ============================================================ *)
 
 let test_agent_status_to_string_active () =
-  check string "active" "active" (Types.agent_status_to_string Types.Active)
+  check string "active" "active" (Masc_domain.agent_status_to_string Masc_domain.Active)
 
 let test_agent_status_to_string_busy () =
-  check string "busy" "busy" (Types.agent_status_to_string Types.Busy)
+  check string "busy" "busy" (Masc_domain.agent_status_to_string Masc_domain.Busy)
 
 let test_agent_status_to_string_listening () =
-  check string "listening" "listening" (Types.agent_status_to_string Types.Listening)
+  check string "listening" "listening" (Masc_domain.agent_status_to_string Masc_domain.Listening)
 
 let test_agent_status_to_string_inactive () =
-  check string "inactive" "inactive" (Types.agent_status_to_string Types.Inactive)
+  check string "inactive" "inactive" (Masc_domain.agent_status_to_string Masc_domain.Inactive)
 
 (* ============================================================
    agent_status_of_string_opt Tests
    ============================================================ *)
 
 let test_agent_status_of_string_opt_active () =
-  match Types.agent_status_of_string_opt "active" with
-  | Some s -> check bool "is Active" true (s = Types.Active)
+  match Masc_domain.agent_status_of_string_opt "active" with
+  | Some s -> check bool "is Active" true (s = Masc_domain.Active)
   | None -> fail "expected Some"
 
 let test_agent_status_of_string_opt_busy () =
-  match Types.agent_status_of_string_opt "busy" with
-  | Some s -> check bool "is Busy" true (s = Types.Busy)
+  match Masc_domain.agent_status_of_string_opt "busy" with
+  | Some s -> check bool "is Busy" true (s = Masc_domain.Busy)
   | None -> fail "expected Some"
 
 let test_agent_status_of_string_opt_listening () =
-  match Types.agent_status_of_string_opt "listening" with
-  | Some s -> check bool "is Listening" true (s = Types.Listening)
+  match Masc_domain.agent_status_of_string_opt "listening" with
+  | Some s -> check bool "is Listening" true (s = Masc_domain.Listening)
   | None -> fail "expected Some"
 
 let test_agent_status_of_string_opt_inactive () =
-  match Types.agent_status_of_string_opt "inactive" with
-  | Some s -> check bool "is Inactive" true (s = Types.Inactive)
+  match Masc_domain.agent_status_of_string_opt "inactive" with
+  | Some s -> check bool "is Inactive" true (s = Masc_domain.Inactive)
   | None -> fail "expected Some"
 
 let test_agent_status_of_string_opt_unknown () =
-  match Types.agent_status_of_string_opt "unknown-status" with
+  match Masc_domain.agent_status_of_string_opt "unknown-status" with
   | None -> ()
   | Some _ -> fail "expected None"
 
@@ -203,12 +203,12 @@ let test_agent_status_of_string_opt_unknown () =
    ============================================================ *)
 
 let test_agent_status_to_yojson_active () =
-  match Types.agent_status_to_yojson Types.Active with
+  match Masc_domain.agent_status_to_yojson Masc_domain.Active with
   | `String s -> check string "active json" "active" s
   | _ -> fail "expected String"
 
 let test_agent_status_to_yojson_busy () =
-  match Types.agent_status_to_yojson Types.Busy with
+  match Masc_domain.agent_status_to_yojson Masc_domain.Busy with
   | `String s -> check string "busy json" "busy" s
   | _ -> fail "expected String"
 
@@ -217,22 +217,22 @@ let test_agent_status_to_yojson_busy () =
    ============================================================ *)
 
 let test_agent_status_of_yojson_active () =
-  match Types.agent_status_of_yojson (`String "active") with
-  | Ok s -> check bool "is Active" true (s = Types.Active)
+  match Masc_domain.agent_status_of_yojson (`String "active") with
+  | Ok s -> check bool "is Active" true (s = Masc_domain.Active)
   | Error e -> fail e
 
 let test_agent_status_of_yojson_busy () =
-  match Types.agent_status_of_yojson (`String "busy") with
-  | Ok s -> check bool "is Busy" true (s = Types.Busy)
+  match Masc_domain.agent_status_of_yojson (`String "busy") with
+  | Ok s -> check bool "is Busy" true (s = Masc_domain.Busy)
   | Error e -> fail e
 
 let test_agent_status_of_yojson_unknown () =
-  match Types.agent_status_of_yojson (`String "invalid") with
+  match Masc_domain.agent_status_of_yojson (`String "invalid") with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_agent_status_of_yojson_wrong_type () =
-  match Types.agent_status_of_yojson (`Int 123) with
+  match Masc_domain.agent_status_of_yojson (`Int 123) with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -241,30 +241,30 @@ let test_agent_status_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_task_status_to_string_todo () =
-  check string "todo" "todo" (Types.task_status_to_string Types.Todo)
+  check string "todo" "todo" (Masc_domain.task_status_to_string Masc_domain.Todo)
 
 let test_task_status_to_string_claimed () =
-  let status = Types.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
-  check string "claimed" "claimed" (Types.task_status_to_string status)
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
+  check string "claimed" "claimed" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_in_progress () =
-  let status = Types.InProgress { assignee = "claude"; started_at = "2024-01-01" } in
-  check string "in_progress" "in_progress" (Types.task_status_to_string status)
+  let status = Masc_domain.InProgress { assignee = "claude"; started_at = "2024-01-01" } in
+  check string "in_progress" "in_progress" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_done () =
-  let status = Types.Done { assignee = "claude"; completed_at = "2024-01-01"; notes = None } in
-  check string "done" "done" (Types.task_status_to_string status)
+  let status = Masc_domain.Done { assignee = "claude"; completed_at = "2024-01-01"; notes = None } in
+  check string "done" "done" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_cancelled () =
-  let status = Types.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01"; reason = None } in
-  check string "cancelled" "cancelled" (Types.task_status_to_string status)
+  let status = Masc_domain.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01"; reason = None } in
+  check string "cancelled" "cancelled" (Masc_domain.task_status_to_string status)
 
 (* ============================================================
    task_status_to_yojson Tests
    ============================================================ *)
 
 let test_task_status_to_yojson_todo () =
-  let json = Types.task_status_to_yojson Types.Todo in
+  let json = Masc_domain.task_status_to_yojson Masc_domain.Todo in
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "status" fields with
@@ -273,8 +273,8 @@ let test_task_status_to_yojson_todo () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_claimed () =
-  let status = Types.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
-  let json = Types.task_status_to_yojson status in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
+  let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
     check bool "has status" true (List.mem_assoc "status" fields);
@@ -283,16 +283,16 @@ let test_task_status_to_yojson_claimed () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_in_progress () =
-  let status = Types.InProgress { assignee = "gemini"; started_at = "2024-01-01T12:00:00Z" } in
-  let json = Types.task_status_to_yojson status in
+  let status = Masc_domain.InProgress { assignee = "gemini"; started_at = "2024-01-01T12:00:00Z" } in
+  let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
     check bool "has started_at" true (List.mem_assoc "started_at" fields)
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_done_with_notes () =
-  let status = Types.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
-  let json = Types.task_status_to_yojson status in
+  let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
+  let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
     check bool "has completed_at" true (List.mem_assoc "completed_at" fields);
@@ -300,8 +300,8 @@ let test_task_status_to_yojson_done_with_notes () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_done_no_notes () =
-  let status = Types.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = None } in
-  let json = Types.task_status_to_yojson status in
+  let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = None } in
+  let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "notes" fields with
@@ -310,8 +310,8 @@ let test_task_status_to_yojson_done_no_notes () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_cancelled_with_reason () =
-  let status = Types.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01"; reason = Some "No longer needed" } in
-  let json = Types.task_status_to_yojson status in
+  let status = Masc_domain.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01"; reason = Some "No longer needed" } in
+  let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
     check bool "has cancelled_by" true (List.mem_assoc "cancelled_by" fields);
@@ -324,8 +324,8 @@ let test_task_status_to_yojson_cancelled_with_reason () =
 
 let test_task_status_of_yojson_todo () =
   let json = `Assoc [("status", `String "todo")] in
-  match Types.task_status_of_yojson json with
-  | Ok Types.Todo -> ()
+  match Masc_domain.task_status_of_yojson json with
+  | Ok Masc_domain.Todo -> ()
   | Ok _ -> fail "expected Todo"
   | Error e -> fail e
 
@@ -335,8 +335,8 @@ let test_task_status_of_yojson_claimed () =
     ("assignee", `String "claude");
     ("claimed_at", `String "2024-01-01")
   ] in
-  match Types.task_status_of_yojson json with
-  | Ok (Types.Claimed { assignee; _ }) -> check string "assignee" "claude" assignee
+  match Masc_domain.task_status_of_yojson json with
+  | Ok (Masc_domain.Claimed { assignee; _ }) -> check string "assignee" "claude" assignee
   | Ok _ -> fail "expected Claimed"
   | Error e -> fail e
 
@@ -346,8 +346,8 @@ let test_task_status_of_yojson_in_progress () =
     ("assignee", `String "gemini");
     ("started_at", `String "2024-01-01")
   ] in
-  match Types.task_status_of_yojson json with
-  | Ok (Types.InProgress { assignee; _ }) -> check string "assignee" "gemini" assignee
+  match Masc_domain.task_status_of_yojson json with
+  | Ok (Masc_domain.InProgress { assignee; _ }) -> check string "assignee" "gemini" assignee
   | Ok _ -> fail "expected InProgress"
   | Error e -> fail e
 
@@ -358,8 +358,8 @@ let test_task_status_of_yojson_done () =
     ("completed_at", `String "2024-01-01");
     ("notes", `String "Done!")
   ] in
-  match Types.task_status_of_yojson json with
-  | Ok (Types.Done { notes; _ }) -> check bool "has notes" true (notes = Some "Done!")
+  match Masc_domain.task_status_of_yojson json with
+  | Ok (Masc_domain.Done { notes; _ }) -> check bool "has notes" true (notes = Some "Done!")
   | Ok _ -> fail "expected Done"
   | Error e -> fail e
 
@@ -370,14 +370,14 @@ let test_task_status_of_yojson_cancelled () =
     ("cancelled_at", `String "2024-01-01");
     ("reason", `Null)
   ] in
-  match Types.task_status_of_yojson json with
-  | Ok (Types.Cancelled { reason; _ }) -> check bool "no reason" true (reason = None)
+  match Masc_domain.task_status_of_yojson json with
+  | Ok (Masc_domain.Cancelled { reason; _ }) -> check bool "no reason" true (reason = None)
   | Ok _ -> fail "expected Cancelled"
   | Error e -> fail e
 
 let test_task_status_of_yojson_unknown () =
   let json = `Assoc [("status", `String "invalid_status")] in
-  match Types.task_status_of_yojson json with
+  match Masc_domain.task_status_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -386,13 +386,13 @@ let test_task_status_of_yojson_unknown () =
    ============================================================ *)
 
 let test_worktree_info_to_yojson () =
-  let wt : Types.worktree_info = {
+  let wt : Masc_domain.worktree_info = {
     branch = "feature-x";
     path = ".worktrees/feature-x";
     git_root = "/home/user/project";
     repo_name = "project";
   } in
-  let json = Types.worktree_info_to_yojson wt in
+  let json = Masc_domain.worktree_info_to_yojson wt in
   match json with
   | `Assoc fields ->
     check bool "has branch" true (List.mem_assoc "branch" fields);
@@ -412,13 +412,13 @@ let test_worktree_info_of_yojson () =
     ("git_root", `String "/repo");
     ("repo_name", `String "repo");
   ] in
-  match Types.worktree_info_of_yojson json with
+  match Masc_domain.worktree_info_of_yojson json with
   | Ok wt -> check string "branch" "main" wt.branch
   | Error e -> fail e
 
 let test_worktree_info_of_yojson_missing_field () =
   let json = `Assoc [("branch", `String "main")] in
-  match Types.worktree_info_of_yojson json with
+  match Masc_domain.worktree_info_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -427,12 +427,12 @@ let test_worktree_info_of_yojson_missing_field () =
    ============================================================ *)
 
 let test_show_task_status_todo () =
-  let s = Types.show_task_status Types.Todo in
+  let s = Masc_domain.show_task_status Masc_domain.Todo in
   check bool "non-empty" true (String.length s > 0)
 
 let test_show_task_status_claimed () =
-  let status = Types.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
-  let s = Types.show_task_status status in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
+  let s = Masc_domain.show_task_status status in
   check bool "contains assignee" true
     (try let _ = Str.search_forward (Str.regexp "claude") s 0 in true
      with Not_found -> false)
@@ -443,7 +443,7 @@ let test_show_task_status_claimed () =
 
 let test_string_of_agent_status () =
   (* string_of_agent_status is alias for agent_status_to_string *)
-  check string "alias works" "active" (Types.string_of_agent_status Types.Active)
+  check string "alias works" "active" (Masc_domain.string_of_agent_status Masc_domain.Active)
 
 (* ============================================================
    string_of_task_status Tests
@@ -451,75 +451,75 @@ let test_string_of_agent_status () =
 
 let test_string_of_task_status () =
   (* string_of_task_status is alias for task_status_to_string *)
-  check string "alias works" "todo" (Types.string_of_task_status Types.Todo)
+  check string "alias works" "todo" (Masc_domain.string_of_task_status Masc_domain.Todo)
 
 (* ============================================================
    tempo_mode Tests
    ============================================================ *)
 
 let test_tempo_mode_to_string_normal () =
-  check string "normal" "normal" (Types.tempo_mode_to_string Types.Normal)
+  check string "normal" "normal" (Masc_domain.tempo_mode_to_string Masc_domain.Normal)
 
 let test_tempo_mode_to_string_slow () =
-  check string "slow" "slow" (Types.tempo_mode_to_string Types.Slow)
+  check string "slow" "slow" (Masc_domain.tempo_mode_to_string Masc_domain.Slow)
 
 let test_tempo_mode_to_string_fast () =
-  check string "fast" "fast" (Types.tempo_mode_to_string Types.Fast)
+  check string "fast" "fast" (Masc_domain.tempo_mode_to_string Masc_domain.Fast)
 
 let test_tempo_mode_to_string_paused () =
-  check string "paused" "paused" (Types.tempo_mode_to_string Types.Paused)
+  check string "paused" "paused" (Masc_domain.tempo_mode_to_string Masc_domain.Paused)
 
 let test_string_of_tempo_mode () =
   (* Alias for tempo_mode_to_string *)
-  check string "alias" "normal" (Types.string_of_tempo_mode Types.Normal)
+  check string "alias" "normal" (Masc_domain.string_of_tempo_mode Masc_domain.Normal)
 
 let test_tempo_mode_of_string_normal () =
-  match Types.tempo_mode_of_string "normal" with
-  | Ok Types.Normal -> ()
+  match Masc_domain.tempo_mode_of_string "normal" with
+  | Ok Masc_domain.Normal -> ()
   | _ -> fail "expected Ok Normal"
 
 let test_tempo_mode_of_string_slow () =
-  match Types.tempo_mode_of_string "slow" with
-  | Ok Types.Slow -> ()
+  match Masc_domain.tempo_mode_of_string "slow" with
+  | Ok Masc_domain.Slow -> ()
   | _ -> fail "expected Ok Slow"
 
 let test_tempo_mode_of_string_fast () =
-  match Types.tempo_mode_of_string "fast" with
-  | Ok Types.Fast -> ()
+  match Masc_domain.tempo_mode_of_string "fast" with
+  | Ok Masc_domain.Fast -> ()
   | _ -> fail "expected Ok Fast"
 
 let test_tempo_mode_of_string_paused () =
-  match Types.tempo_mode_of_string "paused" with
-  | Ok Types.Paused -> ()
+  match Masc_domain.tempo_mode_of_string "paused" with
+  | Ok Masc_domain.Paused -> ()
   | _ -> fail "expected Ok Paused"
 
 let test_tempo_mode_of_string_unknown () =
-  match Types.tempo_mode_of_string "invalid" with
+  match Masc_domain.tempo_mode_of_string "invalid" with
   | Error e -> check bool "has error msg" true (String.length e > 0)
   | Ok _ -> fail "expected Error"
 
 let test_tempo_mode_to_yojson_normal () =
-  match Types.tempo_mode_to_yojson Types.Normal with
+  match Masc_domain.tempo_mode_to_yojson Masc_domain.Normal with
   | `String "normal" -> ()
   | _ -> fail "expected String normal"
 
 let test_tempo_mode_to_yojson_paused () =
-  match Types.tempo_mode_to_yojson Types.Paused with
+  match Masc_domain.tempo_mode_to_yojson Masc_domain.Paused with
   | `String "paused" -> ()
   | _ -> fail "expected String paused"
 
 let test_tempo_mode_of_yojson_ok () =
-  match Types.tempo_mode_of_yojson (`String "slow") with
-  | Ok Types.Slow -> ()
+  match Masc_domain.tempo_mode_of_yojson (`String "slow") with
+  | Ok Masc_domain.Slow -> ()
   | _ -> fail "expected Ok Slow"
 
 let test_tempo_mode_of_yojson_unknown () =
-  match Types.tempo_mode_of_yojson (`String "xyz") with
+  match Masc_domain.tempo_mode_of_yojson (`String "xyz") with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_tempo_mode_of_yojson_wrong_type () =
-  match Types.tempo_mode_of_yojson (`Int 42) with
+  match Masc_domain.tempo_mode_of_yojson (`Int 42) with
   | Error e -> check bool "has error" true (String.length e > 0)
   | Ok _ -> fail "expected Error"
 
@@ -528,8 +528,8 @@ let test_tempo_mode_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_backlog_to_yojson_empty () =
-  let b : Types.backlog = { tasks = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
-  let json = Types.backlog_to_yojson b in
+  let b : Masc_domain.backlog = { tasks = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
+  let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->
     check bool "has tasks" true (List.mem_assoc "tasks" fields);
@@ -538,12 +538,12 @@ let test_backlog_to_yojson_empty () =
   | _ -> fail "expected Assoc"
 
 let test_backlog_to_yojson_with_tasks () =
-  let task : Types.task = {
+  let task : Masc_domain.task = {
     id = "t1";
     title = "Test task";
     description = "Test description";
     goal_id = None;
-    task_status = Types.Todo;
+    task_status = Masc_domain.Todo;
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
@@ -552,8 +552,8 @@ let test_backlog_to_yojson_with_tasks () =
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
-  let b : Types.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
-  let json = Types.backlog_to_yojson b in
+  let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
+  let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "tasks" fields with
@@ -570,7 +570,7 @@ let test_backlog_of_yojson_ok () =
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 3);
   ] in
-  match Types.backlog_of_yojson json with
+  match Masc_domain.backlog_of_yojson json with
   | Ok b ->
     check int "tasks empty" 0 (List.length b.tasks);
     check int "version" 3 b.version
@@ -591,13 +591,13 @@ let test_backlog_of_yojson_with_task () =
     ("last_updated", `String "2024-01-15T12:00:00Z");
     ("version", `Int 1);
   ] in
-  match Types.backlog_of_yojson json with
+  match Masc_domain.backlog_of_yojson json with
   | Ok b -> check int "has 1 task" 1 (List.length b.tasks)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_backlog_of_yojson_error () =
   let json = `String "not an object" in
-  match Types.backlog_of_yojson json with
+  match Masc_domain.backlog_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -606,72 +606,72 @@ let test_backlog_of_yojson_error () =
    ============================================================ *)
 
 let test_a2a_task_status_to_string_pending () =
-  check string "pending" "pending" (Types.a2a_task_status_to_string Types.A2APending)
+  check string "pending" "pending" (Masc_domain.a2a_task_status_to_string Masc_domain.A2APending)
 
 let test_a2a_task_status_to_string_running () =
-  check string "running" "running" (Types.a2a_task_status_to_string Types.A2ARunning)
+  check string "running" "running" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ARunning)
 
 let test_a2a_task_status_to_string_completed () =
-  check string "completed" "completed" (Types.a2a_task_status_to_string Types.A2ACompleted)
+  check string "completed" "completed" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ACompleted)
 
 let test_a2a_task_status_to_string_failed () =
-  check string "failed" "failed" (Types.a2a_task_status_to_string Types.A2AFailed)
+  check string "failed" "failed" (Masc_domain.a2a_task_status_to_string Masc_domain.A2AFailed)
 
 let test_a2a_task_status_to_string_canceled () =
-  check string "canceled" "canceled" (Types.a2a_task_status_to_string Types.A2ACanceled)
+  check string "canceled" "canceled" (Masc_domain.a2a_task_status_to_string Masc_domain.A2ACanceled)
 
 let test_a2a_task_status_of_string_pending () =
-  match Types.a2a_task_status_of_string "pending" with
-  | Ok Types.A2APending -> ()
+  match Masc_domain.a2a_task_status_of_string "pending" with
+  | Ok Masc_domain.A2APending -> ()
   | _ -> fail "expected Ok A2APending"
 
 let test_a2a_task_status_of_string_running () =
-  match Types.a2a_task_status_of_string "running" with
-  | Ok Types.A2ARunning -> ()
+  match Masc_domain.a2a_task_status_of_string "running" with
+  | Ok Masc_domain.A2ARunning -> ()
   | _ -> fail "expected Ok A2ARunning"
 
 let test_a2a_task_status_of_string_completed () =
-  match Types.a2a_task_status_of_string "completed" with
-  | Ok Types.A2ACompleted -> ()
+  match Masc_domain.a2a_task_status_of_string "completed" with
+  | Ok Masc_domain.A2ACompleted -> ()
   | _ -> fail "expected Ok A2ACompleted"
 
 let test_a2a_task_status_of_string_failed () =
-  match Types.a2a_task_status_of_string "failed" with
-  | Ok Types.A2AFailed -> ()
+  match Masc_domain.a2a_task_status_of_string "failed" with
+  | Ok Masc_domain.A2AFailed -> ()
   | _ -> fail "expected Ok A2AFailed"
 
 let test_a2a_task_status_of_string_canceled () =
-  match Types.a2a_task_status_of_string "canceled" with
-  | Ok Types.A2ACanceled -> ()
+  match Masc_domain.a2a_task_status_of_string "canceled" with
+  | Ok Masc_domain.A2ACanceled -> ()
   | _ -> fail "expected Ok A2ACanceled"
 
 let test_a2a_task_status_of_string_unknown () =
-  match Types.a2a_task_status_of_string "invalid" with
+  match Masc_domain.a2a_task_status_of_string "invalid" with
   | Error e -> check bool "has error msg" true (String.length e > 0)
   | Ok _ -> fail "expected Error"
 
 let test_a2a_task_status_to_yojson_pending () =
-  match Types.a2a_task_status_to_yojson Types.A2APending with
+  match Masc_domain.a2a_task_status_to_yojson Masc_domain.A2APending with
   | `String "pending" -> ()
   | _ -> fail "expected String pending"
 
 let test_a2a_task_status_to_yojson_completed () =
-  match Types.a2a_task_status_to_yojson Types.A2ACompleted with
+  match Masc_domain.a2a_task_status_to_yojson Masc_domain.A2ACompleted with
   | `String "completed" -> ()
   | _ -> fail "expected String completed"
 
 let test_a2a_task_status_of_yojson_ok () =
-  match Types.a2a_task_status_of_yojson (`String "running") with
-  | Ok Types.A2ARunning -> ()
+  match Masc_domain.a2a_task_status_of_yojson (`String "running") with
+  | Ok Masc_domain.A2ARunning -> ()
   | _ -> fail "expected Ok A2ARunning"
 
 let test_a2a_task_status_of_yojson_unknown () =
-  match Types.a2a_task_status_of_yojson (`String "xyz") with
+  match Masc_domain.a2a_task_status_of_yojson (`String "xyz") with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_a2a_task_status_of_yojson_wrong_type () =
-  match Types.a2a_task_status_of_yojson (`Int 42) with
+  match Masc_domain.a2a_task_status_of_yojson (`Int 42) with
   | Error e -> check bool "has error" true (String.length e > 0)
   | Ok _ -> fail "expected Error"
 
@@ -680,38 +680,38 @@ let test_a2a_task_status_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_portal_state_to_string_open () =
-  check string "open" "open" (Types.portal_state_to_string Types.PortalOpen)
+  check string "open" "open" (Masc_domain.portal_state_to_string Masc_domain.PortalOpen)
 
 let test_portal_state_to_string_closed () =
-  check string "closed" "closed" (Types.portal_state_to_string Types.PortalClosed)
+  check string "closed" "closed" (Masc_domain.portal_state_to_string Masc_domain.PortalClosed)
 
 let test_portal_state_of_string_open () =
-  match Types.portal_state_of_string "open" with
-  | Ok Types.PortalOpen -> ()
+  match Masc_domain.portal_state_of_string "open" with
+  | Ok Masc_domain.PortalOpen -> ()
   | _ -> fail "expected Ok PortalOpen"
 
 let test_portal_state_of_string_closed () =
-  match Types.portal_state_of_string "closed" with
-  | Ok Types.PortalClosed -> ()
+  match Masc_domain.portal_state_of_string "closed" with
+  | Ok Masc_domain.PortalClosed -> ()
   | _ -> fail "expected Ok PortalClosed"
 
 let test_portal_state_of_string_unknown () =
-  match Types.portal_state_of_string "invalid" with
+  match Masc_domain.portal_state_of_string "invalid" with
   | Error e -> check bool "has error" true (String.length e > 0)
   | Ok _ -> fail "expected Error"
 
 let test_portal_state_to_yojson () =
-  match Types.portal_state_to_yojson Types.PortalOpen with
+  match Masc_domain.portal_state_to_yojson Masc_domain.PortalOpen with
   | `String "open" -> ()
   | _ -> fail "expected String open"
 
 let test_portal_state_of_yojson_ok () =
-  match Types.portal_state_of_yojson (`String "closed") with
-  | Ok Types.PortalClosed -> ()
+  match Masc_domain.portal_state_of_yojson (`String "closed") with
+  | Ok Masc_domain.PortalClosed -> ()
   | _ -> fail "expected Ok PortalClosed"
 
 let test_portal_state_of_yojson_wrong_type () =
-  match Types.portal_state_of_yojson (`Int 1) with
+  match Masc_domain.portal_state_of_yojson (`Int 1) with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -720,34 +720,34 @@ let test_portal_state_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_masc_error_not_initialized () =
-  let s = Types.masc_error_to_string (Types.System Types.System_error.NotInitialized) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized) in
   check bool "contains not initialized" true (String.length s > 0)
 
 let test_masc_error_already_initialized () =
-  let s = Types.masc_error_to_string (Types.System Types.System_error.AlreadyInitialized) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.AlreadyInitialized) in
   check bool "contains already" true (String.length s > 0)
 
 let test_masc_error_agent_not_found () =
-  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.NotFound "claude")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "claude")) in
   check bool "contains claude" true
     (try let _ = Str.search_forward (Str.regexp "claude") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_not_found () =
-  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.NotFound "task-1")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.NotFound "task-1")) in
   check bool "contains task-1" true
     (try let _ = Str.search_forward (Str.regexp "task-1") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_already_claimed () =
-  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" })) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" })) in
   check bool "contains owner guidance" true
     (try let _ = Str.search_forward (Str.regexp "currently owned by agent") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_rate_limit () =
-  let s = Types.masc_error_to_string
-    (Types.RateLimitExceeded { limit = 100; current = 101; wait_seconds = 5; category = Types.GeneralLimit }) in
+  let s = Masc_domain.masc_error_to_string
+    (Masc_domain.RateLimitExceeded { limit = 100; current = 101; wait_seconds = 5; category = Masc_domain.GeneralLimit }) in
   check bool "contains limit" true (String.length s > 0)
 
 (* ============================================================
@@ -755,38 +755,38 @@ let test_masc_error_rate_limit () =
    ============================================================ *)
 
 let test_agent_role_to_string_worker () =
-  check string "worker" "worker" (Types.agent_role_to_string Types.Worker)
+  check string "worker" "worker" (Masc_domain.agent_role_to_string Masc_domain.Worker)
 
 let test_agent_role_to_string_admin () =
-  check string "admin" "admin" (Types.agent_role_to_string Types.Admin)
+  check string "admin" "admin" (Masc_domain.agent_role_to_string Masc_domain.Admin)
 
 let test_agent_role_of_string_worker () =
-  match Types.agent_role_of_string "worker" with
-  | Ok Types.Worker -> ()
+  match Masc_domain.agent_role_of_string "worker" with
+  | Ok Masc_domain.Worker -> ()
   | _ -> fail "expected Ok Worker"
 
 let test_agent_role_of_string_admin () =
-  match Types.agent_role_of_string "admin" with
-  | Ok Types.Admin -> ()
+  match Masc_domain.agent_role_of_string "admin" with
+  | Ok Masc_domain.Admin -> ()
   | _ -> fail "expected Ok Admin"
 
 let test_agent_role_of_string_unknown () =
-  match Types.agent_role_of_string "superuser" with
+  match Masc_domain.agent_role_of_string "superuser" with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
 let test_agent_role_to_yojson () =
-  match Types.agent_role_to_yojson Types.Worker with
+  match Masc_domain.agent_role_to_yojson Masc_domain.Worker with
   | `String "worker" -> ()
   | _ -> fail "expected String worker"
 
 let test_agent_role_of_yojson_ok () =
-  match Types.agent_role_of_yojson (`String "admin") with
-  | Ok Types.Admin -> ()
+  match Masc_domain.agent_role_of_yojson (`String "admin") with
+  | Ok Masc_domain.Admin -> ()
   | _ -> fail "expected Ok Admin"
 
 let test_agent_role_of_yojson_wrong_type () =
-  match Types.agent_role_of_yojson (`Int 1) with
+  match Masc_domain.agent_role_of_yojson (`Int 1) with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -795,16 +795,16 @@ let test_agent_role_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_agent_credential_to_yojson () =
-  let cred : Types.agent_credential = {
+  let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
     agent_name = "claude";
     token = "abc123";
-    role = Types.Worker;
+    role = Masc_domain.Worker;
     created_at = "2024-01-15T12:00:00Z";
     expires_at = None;
   } in
-  let json = Types.agent_credential_to_yojson cred in
+  let json = Masc_domain.agent_credential_to_yojson cred in
   match json with
   | `Assoc fields ->
     check bool "has agent_name" true (List.mem_assoc "agent_name" fields);
@@ -813,16 +813,16 @@ let test_agent_credential_to_yojson () =
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_to_yojson_with_expiry () =
-  let cred : Types.agent_credential = {
+  let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
     agent_name = "claude";
     token = "abc123";
-    role = Types.Admin;
+    role = Masc_domain.Admin;
     created_at = "2024-01-15T12:00:00Z";
     expires_at = Some "2024-01-16T12:00:00Z";
   } in
-  let json = Types.agent_credential_to_yojson cred in
+  let json = Masc_domain.agent_credential_to_yojson cred in
   match json with
   | `Assoc fields -> check bool "has expires_at" true (List.mem_assoc "expires_at" fields)
   | _ -> fail "expected Assoc"
@@ -834,15 +834,15 @@ let test_agent_credential_of_yojson_ok () =
     ("admin", `Bool false);
     ("created_at", `String "2024-01-15T12:00:00Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check string "agent_name" "gemini" cred.agent_name;
-    check bool "admin=false maps to worker" true (cred.role = Types.Worker)
+    check bool "admin=false maps to worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_error () =
   let json = `String "not an object" in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -860,9 +860,9 @@ let test_agent_credential_of_yojson_role_string_admin () =
     ("role", `String "admin");
     ("created_at", `String "2026-04-23T12:50:47Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
-    check bool "role:\"admin\" parses to Admin" true (cred.role = Types.Admin)
+    check bool "role:\"admin\" parses to Admin" true (cred.role = Masc_domain.Admin)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_role_string_worker () =
@@ -872,9 +872,9 @@ let test_agent_credential_of_yojson_role_string_worker () =
     ("role", `String "worker");
     ("created_at", `String "2026-04-23T08:07:00Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
-    check bool "role:\"worker\" parses to Worker" true (cred.role = Types.Worker)
+    check bool "role:\"worker\" parses to Worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_role_string_wins_over_admin_bool () =
@@ -887,9 +887,9 @@ let test_agent_credential_of_yojson_role_string_wins_over_admin_bool () =
     ("admin", `Bool false);
     ("created_at", `String "2026-04-23T00:00:00Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
-    check bool "role string wins" true (cred.role = Types.Admin)
+    check bool "role string wins" true (cred.role = Masc_domain.Admin)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_admin_bool_legacy () =
@@ -900,9 +900,9 @@ let test_agent_credential_of_yojson_admin_bool_legacy () =
     ("admin", `Bool true);
     ("created_at", `String "2026-04-24T01:00:11Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
-    check bool "admin:true legacy parses to Admin" true (cred.role = Types.Admin)
+    check bool "admin:true legacy parses to Admin" true (cred.role = Masc_domain.Admin)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_unknown_role_fails_closed () =
@@ -913,23 +913,23 @@ let test_agent_credential_of_yojson_unknown_role_fails_closed () =
     ("role", `String "root");
     ("created_at", `String "2026-04-23T00:00:00Z");
   ] in
-  match Types.agent_credential_of_yojson json with
+  match Masc_domain.agent_credential_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error for unknown role"
 
 let test_agent_credential_to_yojson_emits_role_and_admin () =
   (* Writer emits both fields during the transition so downstream readers
      in either vintage see a consistent role. *)
-  let cred : Types.agent_credential = {
+  let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
     agent_name = "dual";
     token = "t";
-    role = Types.Admin;
+    role = Masc_domain.Admin;
     created_at = "2026-04-23T00:00:00Z";
     expires_at = None;
   } in
-  match Types.agent_credential_to_yojson cred with
+  match Masc_domain.agent_credential_to_yojson cred with
   | `Assoc fields ->
     check bool "has role" true (List.mem_assoc "role" fields);
     check bool "has admin" true (List.mem_assoc "admin" fields);
@@ -944,8 +944,8 @@ let test_agent_credential_to_yojson_emits_role_and_admin () =
    ============================================================ *)
 
 let test_auth_config_to_yojson () =
-  let config = Types.default_auth_config in
-  let json = Types.auth_config_to_yojson config in
+  let config = Masc_domain.default_auth_config in
+  let json = Masc_domain.auth_config_to_yojson config in
   match json with
   | `Assoc fields ->
     check bool "has enabled" true (List.mem_assoc "enabled" fields);
@@ -959,7 +959,7 @@ let test_auth_config_of_yojson_ok () =
     ("require_token", `Bool false);
     ("token_expiry_hours", `Int 48);
   ] in
-  match Types.auth_config_of_yojson json with
+  match Masc_domain.auth_config_of_yojson json with
   | Ok config ->
     check bool "enabled" true config.enabled;
     check int "expiry" 48 config.token_expiry_hours
@@ -967,7 +967,7 @@ let test_auth_config_of_yojson_ok () =
 
 let test_auth_config_of_yojson_error () =
   let json = `Int 42 in
-  match Types.auth_config_of_yojson json with
+  match Masc_domain.auth_config_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -976,31 +976,31 @@ let test_auth_config_of_yojson_error () =
    ============================================================ *)
 
 let test_permissions_for_role_worker () =
-  let perms = Types.permissions_for_role Types.Worker in
-  check bool "has CanReadState" true (List.mem Types.CanReadState perms);
-  check bool "has CanClaimTask" true (List.mem Types.CanClaimTask perms);
-  check bool "has CanBroadcast" true (List.mem Types.CanBroadcast perms)
+  let perms = Masc_domain.permissions_for_role Masc_domain.Worker in
+  check bool "has CanReadState" true (List.mem Masc_domain.CanReadState perms);
+  check bool "has CanClaimTask" true (List.mem Masc_domain.CanClaimTask perms);
+  check bool "has CanBroadcast" true (List.mem Masc_domain.CanBroadcast perms)
 
 let test_permissions_for_role_admin () =
-  let perms = Types.permissions_for_role Types.Admin in
-  check bool "has CanInit" true (List.mem Types.CanInit perms);
-  check bool "has CanReset" true (List.mem Types.CanReset perms)
+  let perms = Masc_domain.permissions_for_role Masc_domain.Admin in
+  check bool "has CanInit" true (List.mem Masc_domain.CanInit perms);
+  check bool "has CanReset" true (List.mem Masc_domain.CanReset perms)
 
 let test_has_permission_worker () =
-  check bool "worker can read" true (Types.has_permission Types.Worker Types.CanReadState);
-  check bool "worker can broadcast" true (Types.has_permission Types.Worker Types.CanBroadcast);
-  check bool "worker cannot reset" false (Types.has_permission Types.Worker Types.CanReset)
+  check bool "worker can read" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
+  check bool "worker can broadcast" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanBroadcast);
+  check bool "worker cannot reset" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReset)
 
 let test_has_permission_admin () =
-  check bool "admin can init" true (Types.has_permission Types.Admin Types.CanInit);
-  check bool "admin can admin" true (Types.has_permission Types.Admin Types.CanAdmin)
+  check bool "admin can init" true (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanInit);
+  check bool "admin can admin" true (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanAdmin)
 
 (* ============================================================
    rate_limit role integration Tests
    ============================================================ *)
 
 let test_multiplier_for_role () =
-  let config : Types.rate_limit_config = {
+  let config : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
@@ -1009,11 +1009,11 @@ let test_multiplier_for_role () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check (float 0.01) "worker mult" 1.0 (Types.multiplier_for_role config Types.Worker);
-  check (float 0.01) "admin mult" 2.0 (Types.multiplier_for_role config Types.Admin)
+  check (float 0.01) "worker mult" 1.0 (Masc_domain.multiplier_for_role config Masc_domain.Worker);
+  check (float 0.01) "admin mult" 2.0 (Masc_domain.multiplier_for_role config Masc_domain.Admin)
 
 let test_effective_limit () =
-  let config : Types.rate_limit_config = {
+  let config : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
@@ -1022,15 +1022,15 @@ let test_effective_limit () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check int "worker general" 60 (Types.effective_limit config ~role:Types.Worker ~category:Types.GeneralLimit);
-  check int "admin general" 120 (Types.effective_limit config ~role:Types.Admin ~category:Types.GeneralLimit)
+  check int "worker general" 60 (Masc_domain.effective_limit config ~role:Masc_domain.Worker ~category:Masc_domain.GeneralLimit);
+  check int "admin general" 120 (Masc_domain.effective_limit config ~role:Masc_domain.Admin ~category:Masc_domain.GeneralLimit)
 
 (* ============================================================
    limit_for_category Tests
    ============================================================ *)
 
 let test_limit_for_category_general () =
-  let config : Types.rate_limit_config = {
+  let config : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
@@ -1039,10 +1039,10 @@ let test_limit_for_category_general () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check int "general" 60 (Types.limit_for_category config Types.GeneralLimit)
+  check int "general" 60 (Masc_domain.limit_for_category config Masc_domain.GeneralLimit)
 
 let test_limit_for_category_broadcast () =
-  let config : Types.rate_limit_config = {
+  let config : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
@@ -1051,10 +1051,10 @@ let test_limit_for_category_broadcast () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check int "broadcast" 30 (Types.limit_for_category config Types.BroadcastLimit)
+  check int "broadcast" 30 (Masc_domain.limit_for_category config Masc_domain.BroadcastLimit)
 
 let test_limit_for_category_task_ops () =
-  let config : Types.rate_limit_config = {
+  let config : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = [];
@@ -1063,101 +1063,101 @@ let test_limit_for_category_task_ops () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  check int "task_ops" 100 (Types.limit_for_category config Types.TaskOpsLimit)
+  check int "task_ops" 100 (Masc_domain.limit_for_category config Masc_domain.TaskOpsLimit)
 
 (* ============================================================
    category_for_tool Tests
    ============================================================ *)
 
 let test_category_for_tool_broadcast () =
-  check bool "masc_broadcast" true (Types.category_for_tool "masc_broadcast" = Types.BroadcastLimit)
+  check bool "masc_broadcast" true (Masc_domain.category_for_tool "masc_broadcast" = Masc_domain.BroadcastLimit)
   (* masc_listen removed: tool pruned *)
 
 let test_category_for_tool_task_ops () =
-  check bool "masc_add_task" true (Types.category_for_tool "masc_add_task" = Types.TaskOpsLimit);
-  check bool "masc_transition" true (Types.category_for_tool "masc_transition" = Types.TaskOpsLimit)
+  check bool "masc_add_task" true (Masc_domain.category_for_tool "masc_add_task" = Masc_domain.TaskOpsLimit);
+  check bool "masc_transition" true (Masc_domain.category_for_tool "masc_transition" = Masc_domain.TaskOpsLimit)
 
 (* Regression guard for #8873: plan-slot writes must share the
    TaskOpsLimit (30/min) bucket with the other per-task ops, not fall
    through to GeneralLimit (10/min). *)
 let test_category_for_tool_plan_slot_writes () =
   check bool "masc_plan_set_task" true
-    (Types.category_for_tool "masc_plan_set_task" = Types.TaskOpsLimit);
+    (Masc_domain.category_for_tool "masc_plan_set_task" = Masc_domain.TaskOpsLimit);
   check bool "masc_plan_clear_task" true
-    (Types.category_for_tool "masc_plan_clear_task" = Types.TaskOpsLimit)
+    (Masc_domain.category_for_tool "masc_plan_clear_task" = Masc_domain.TaskOpsLimit)
 
 let test_category_for_tool_general () =
-  check bool "masc_status" true (Types.category_for_tool "masc_status" = Types.GeneralLimit);
-  check bool "unknown" true (Types.category_for_tool "unknown_tool" = Types.GeneralLimit);
+  check bool "masc_status" true (Masc_domain.category_for_tool "masc_status" = Masc_domain.GeneralLimit);
+  check bool "unknown" true (Masc_domain.category_for_tool "unknown_tool" = Masc_domain.GeneralLimit);
   (* masc_batch_add_tasks intentionally stays in GeneralLimit until a
      maintainer call on batch rate-limiting (#8873). *)
   check bool "masc_batch_add_tasks" true
-    (Types.category_for_tool "masc_batch_add_tasks" = Types.GeneralLimit)
+    (Masc_domain.category_for_tool "masc_batch_add_tasks" = Masc_domain.GeneralLimit)
 
 (* ============================================================
    more masc_error_to_string Tests (coverage for all variants)
    ============================================================ *)
 
 let test_masc_error_agent_already_joined () =
-  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.AlreadyJoined "agent1")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.AlreadyJoined "agent1")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_task_not_claimed () =
-  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.NotClaimed "t1")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.NotClaimed "t1")) in
   check bool "contains claim guidance" true
     (try let _ = Str.search_forward (Str.regexp "Claim/start it first") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_invalid_state () =
-  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.InvalidState "cancelled")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidState "cancelled")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_not_open () =
-  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.NotOpen "agent")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.NotOpen "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_already_open () =
-  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.AlreadyOpen { agent = "a1"; target = "a2" })) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.AlreadyOpen { agent = "a1"; target = "a2" })) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_portal_closed () =
-  let s = Types.masc_error_to_string (Types.Portal (Types.Portal_error.Closed "agent")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Portal (Masc_domain.Portal_error.Closed "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_json () =
-  let s = Types.masc_error_to_string (Types.System (Types.System_error.InvalidJson "bad json")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.InvalidJson "bad json")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_io_error () =
-  let s = Types.masc_error_to_string (Types.System (Types.System_error.IoError "read failed")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.IoError "read failed")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_agent_name () =
-  let s = Types.masc_error_to_string (Types.Agent (Types.Agent_error.InvalidName "bad name")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.InvalidName "bad name")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_task_id () =
-  let s = Types.masc_error_to_string (Types.Task (Types.Task_error.InvalidId "bad id")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidId "bad id")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_file_path () =
-  let s = Types.masc_error_to_string (Types.System (Types.System_error.InvalidFilePath "bad path")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.System (Masc_domain.System_error.InvalidFilePath "bad path")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_unauthorized () =
-  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Unauthorized "missing token")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "missing token")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_forbidden () =
-  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Forbidden { agent = "a1"; action = "reset" })) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent = "a1"; action = "reset" })) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_token_expired () =
-  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.TokenExpired "agent")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired "agent")) in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_invalid_token () =
-  let s = Types.masc_error_to_string (Types.Auth (Types.Auth_error.InvalidToken "bad token")) in
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "bad token")) in
   check bool "nonempty" true (String.length s > 0)
 
 (* ============================================================
@@ -1165,15 +1165,15 @@ let test_masc_error_invalid_token () =
    ============================================================ *)
 
 let test_default_tempo_config_mode () =
-  let c = Types.default_tempo_config in
-  check string "mode normal" "normal" (Types.tempo_mode_to_string c.mode)
+  let c = Masc_domain.default_tempo_config in
+  check string "mode normal" "normal" (Masc_domain.tempo_mode_to_string c.mode)
 
 let test_default_tempo_config_delay () =
-  let c = Types.default_tempo_config in
+  let c = Masc_domain.default_tempo_config in
   check int "delay_ms" 0 c.delay_ms
 
 let test_default_tempo_config_reason () =
-  let c = Types.default_tempo_config in
+  let c = Masc_domain.default_tempo_config in
   check (option string) "reason none" None c.reason
 
 (* ============================================================
@@ -1181,14 +1181,14 @@ let test_default_tempo_config_reason () =
    ============================================================ *)
 
 let test_tempo_config_to_yojson () =
-  let c : Types.tempo_config = {
-    mode = Types.Slow;
+  let c : Masc_domain.tempo_config = {
+    mode = Masc_domain.Slow;
     delay_ms = 100;
     reason = Some "testing";
     set_by = Some "claude";
     set_at = Some "2024-01-15T12:00:00Z";
   } in
-  let json = Types.tempo_config_to_yojson c in
+  let json = Masc_domain.tempo_config_to_yojson c in
   match json with
   | `Assoc fields ->
     check bool "has mode" true (List.mem_assoc "mode" fields);
@@ -1203,15 +1203,15 @@ let test_tempo_config_of_yojson_ok () =
     ("set_by", `Null);
     ("set_at", `Null);
   ] in
-  match Types.tempo_config_of_yojson json with
+  match Masc_domain.tempo_config_of_yojson json with
   | Ok c ->
-    check string "mode" "fast" (Types.tempo_mode_to_string c.mode);
+    check string "mode" "fast" (Masc_domain.tempo_mode_to_string c.mode);
     check int "delay_ms" 50 c.delay_ms
   | Error e -> fail ("expected Ok: " ^ e)
 
 let test_tempo_config_of_yojson_error () =
   let json = `Assoc [("mode", `String "invalid_mode")] in
-  match Types.tempo_config_of_yojson json with
+  match Masc_domain.tempo_config_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
@@ -1220,15 +1220,15 @@ let test_tempo_config_of_yojson_error () =
    ============================================================ *)
 
 let test_default_rate_limit_per_minute () =
-  let c = Types.default_rate_limit in
+  let c = Masc_domain.default_rate_limit in
   check int "per_minute" 10 c.per_minute
 
 let test_default_rate_limit_burst () =
-  let c = Types.default_rate_limit in
+  let c = Masc_domain.default_rate_limit in
   check int "burst_allowed" 5 c.burst_allowed
 
 let test_default_rate_limit_multipliers () =
-  let c = Types.default_rate_limit in
+  let c = Masc_domain.default_rate_limit in
   check (float 0.01) "worker" 1.0 c.worker_multiplier;
   check (float 0.01) "admin" 2.0 c.admin_multiplier
 
@@ -1237,7 +1237,7 @@ let test_default_rate_limit_multipliers () =
    ============================================================ *)
 
 let test_rate_limit_config_to_yojson () =
-  let c : Types.rate_limit_config = {
+  let c : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
     priority_agents = ["claude"; "gemini"];
@@ -1246,7 +1246,7 @@ let test_rate_limit_config_to_yojson () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 100;
   } in
-  let json = Types.rate_limit_config_to_yojson c in
+  let json = Masc_domain.rate_limit_config_to_yojson c in
   match json with
   | `Assoc fields ->
     check bool "has per_minute" true (List.mem_assoc "per_minute" fields);
@@ -1263,7 +1263,7 @@ let test_rate_limit_config_of_yojson_ok () =
     ("broadcast_per_minute", `Int 60);
     ("task_ops_per_minute", `Int 200);
   ] in
-  match Types.rate_limit_config_of_yojson json with
+  match Masc_domain.rate_limit_config_of_yojson json with
   | Ok c ->
     check int "per_minute" 120 c.per_minute;
     check int "broadcast_per_minute" 60 c.broadcast_per_minute
@@ -1271,7 +1271,7 @@ let test_rate_limit_config_of_yojson_ok () =
 
 let test_rate_limit_config_of_yojson_defaults () =
   let json = `Assoc [] in
-  match Types.rate_limit_config_of_yojson json with
+  match Masc_domain.rate_limit_config_of_yojson json with
   | Ok c ->
     check int "default per_minute" 10 c.per_minute
   | Error e -> fail ("expected Ok with defaults: " ^ e)
@@ -1281,12 +1281,12 @@ let test_rate_limit_config_of_yojson_defaults () =
    ============================================================ *)
 
 let test_tool_result_to_yojson_success () =
-  let r : Types.tool_result = {
+  let r : Masc_domain.tool_result = {
     success = true;
     message = "Operation completed";
     data = None;
   } in
-  let json = Types.tool_result_to_yojson r in
+  let json = Masc_domain.tool_result_to_yojson r in
   match json with
   | `Assoc fields ->
     check bool "has success" true (List.mem_assoc "success" fields);
@@ -1294,12 +1294,12 @@ let test_tool_result_to_yojson_success () =
   | _ -> fail "expected Assoc"
 
 let test_tool_result_to_yojson_with_data () =
-  let r : Types.tool_result = {
+  let r : Masc_domain.tool_result = {
     success = false;
     message = "Error occurred";
     data = Some (`Assoc [("error_code", `Int 500)]);
   } in
-  let json = Types.tool_result_to_yojson r in
+  let json = Masc_domain.tool_result_to_yojson r in
   match json with
   | `Assoc fields ->
     check bool "has data" true (List.mem_assoc "data" fields)
@@ -1310,11 +1310,11 @@ let test_tool_result_to_yojson_with_data () =
    ============================================================ *)
 
 let test_task_to_yojson () =
-  let t : Types.task = {
+  let t : Masc_domain.task = {
     id = "task-001";
     title = "Test Task";
     description = "A test task";
-    task_status = Types.Todo;
+    task_status = Masc_domain.Todo;
     goal_id = None;
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
@@ -1324,7 +1324,7 @@ let test_task_to_yojson () =
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
-  let json = Types.task_to_yojson t in
+  let json = Masc_domain.task_to_yojson t in
   match json with
   | `Assoc fields ->
     check bool "has id" true (List.mem_assoc "id" fields);
@@ -1333,17 +1333,17 @@ let test_task_to_yojson () =
   | _ -> fail "expected Assoc"
 
 let test_task_to_yojson_with_worktree () =
-  let wt : Types.worktree_info = {
+  let wt : Masc_domain.worktree_info = {
     branch = "feature";
     path = ".worktrees/feature";
     git_root = "/repo";
     repo_name = "repo";
   } in
-  let t : Types.task = {
+  let t : Masc_domain.task = {
     id = "task-002";
     title = "Task with Worktree";
     description = "";
-    task_status = Types.InProgress { assignee = "claude"; started_at = "2024-01-15T12:00:00Z" };
+    task_status = Masc_domain.InProgress { assignee = "claude"; started_at = "2024-01-15T12:00:00Z" };
     goal_id = None;
     priority = 1;
     files = [];
@@ -1353,7 +1353,7 @@ let test_task_to_yojson_with_worktree () =
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
-  let json = Types.task_to_yojson t in
+  let json = Masc_domain.task_to_yojson t in
   match json with
   | `Assoc fields ->
     check bool "has worktree" true (List.mem_assoc "worktree" fields)
@@ -1369,7 +1369,7 @@ let test_task_of_yojson_ok () =
     ("files", `List [`String "a.ml"]);
     ("created_at", `String "2024-01-15T12:00:00Z");
   ] in
-  match Types.task_of_yojson json with
+  match Masc_domain.task_of_yojson json with
   | Ok t ->
     check string "id" "task-003" t.id;
     check string "title" "Parse Task" t.title
@@ -1377,7 +1377,7 @@ let test_task_of_yojson_ok () =
 
 let test_task_of_yojson_error () =
   let json = `Assoc [("id", `String "bad")] in
-  match Types.task_of_yojson json with
+  match Masc_domain.task_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing title)"
 
@@ -1386,17 +1386,17 @@ let test_task_of_yojson_error () =
    ============================================================ *)
 
 let test_a2a_task_to_yojson () =
-  let t : Types.a2a_task = {
+  let t : Masc_domain.a2a_task = {
     a2a_id = "a2a-001";
     from_agent = "claude";
     to_agent = "gemini";
     a2a_message = "Please review this";
-    a2a_status = Types.A2APending;
+    a2a_status = Masc_domain.A2APending;
     a2a_result = None;
     created_at = "2024-01-15T12:00:00Z";
     updated_at = "2024-01-15T12:00:00Z";
   } in
-  let json = Types.a2a_task_to_yojson t in
+  let json = Masc_domain.a2a_task_to_yojson t in
   match json with
   | `Assoc fields ->
     check bool "has id" true (List.mem_assoc "id" fields);
@@ -1405,17 +1405,17 @@ let test_a2a_task_to_yojson () =
   | _ -> fail "expected Assoc"
 
 let test_a2a_task_to_yojson_with_result () =
-  let t : Types.a2a_task = {
+  let t : Masc_domain.a2a_task = {
     a2a_id = "a2a-002";
     from_agent = "gemini";
     to_agent = "claude";
     a2a_message = "Task completed";
-    a2a_status = Types.A2ACompleted;
+    a2a_status = Masc_domain.A2ACompleted;
     a2a_result = Some "Done successfully";
     created_at = "2024-01-15T12:00:00Z";
     updated_at = "2024-01-15T13:00:00Z";
   } in
-  let json = Types.a2a_task_to_yojson t in
+  let json = Masc_domain.a2a_task_to_yojson t in
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "result" fields with
@@ -1434,7 +1434,7 @@ let test_a2a_task_of_yojson_ok () =
     ("createdAt", `String "2024-01-15T12:00:00Z");
     ("updatedAt", `String "2024-01-15T12:00:00Z");
   ] in
-  match Types.a2a_task_of_yojson json with
+  match Masc_domain.a2a_task_of_yojson json with
   | Ok t ->
     check string "id" "a2a-003" t.a2a_id;
     check string "from" "ollama" t.from_agent
@@ -1442,7 +1442,7 @@ let test_a2a_task_of_yojson_ok () =
 
 let test_a2a_task_of_yojson_error () =
   let json = `Assoc [("id", `String "bad")] in
-  match Types.a2a_task_of_yojson json with
+  match Masc_domain.a2a_task_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing fields)"
 
@@ -1451,14 +1451,14 @@ let test_a2a_task_of_yojson_error () =
    ============================================================ *)
 
 let test_portal_to_yojson () =
-  let p : Types.portal = {
+  let p : Masc_domain.portal = {
     portal_from = "claude";
     portal_target = "gemini";
     portal_opened_at = "2024-01-15T12:00:00Z";
-    portal_status = Types.PortalOpen;
+    portal_status = Masc_domain.PortalOpen;
     task_count = 5;
   } in
-  let json = Types.portal_to_yojson p in
+  let json = Masc_domain.portal_to_yojson p in
   match json with
   | `Assoc fields ->
     check bool "has from" true (List.mem_assoc "from" fields);
@@ -1474,7 +1474,7 @@ let test_portal_of_yojson_ok () =
     ("status", `String "open");
     ("taskCount", `Int 3);
   ] in
-  match Types.portal_of_yojson json with
+  match Masc_domain.portal_of_yojson json with
   | Ok p ->
     check string "from" "ollama" p.portal_from;
     check int "task_count" 3 p.task_count
@@ -1488,14 +1488,14 @@ let test_portal_of_yojson_closed () =
     ("status", `String "closed");
     ("taskCount", `Int 0);
   ] in
-  match Types.portal_of_yojson json with
+  match Masc_domain.portal_of_yojson json with
   | Ok p ->
-    check string "status" "closed" (Types.portal_state_to_string p.portal_status)
+    check string "status" "closed" (Masc_domain.portal_state_to_string p.portal_status)
   | Error e -> fail ("expected Ok: " ^ e)
 
 let test_portal_of_yojson_error () =
   let json = `Assoc [("from", `String "x")] in
-  match Types.portal_of_yojson json with
+  match Masc_domain.portal_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing fields)"
 

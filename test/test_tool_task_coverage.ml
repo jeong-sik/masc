@@ -101,13 +101,13 @@ let only_task ctx =
         (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
 
 let assert_task_todo ctx =
-  match (only_task ctx).Types.task_status with
-  | Types.Todo -> ()
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Todo -> ()
   | _ -> failwith "expected task to remain todo"
 
 let assert_task_claimed_by ctx agent_name =
-  match (only_task ctx).Types.task_status with
-  | Types.Claimed { assignee; _ } -> assert (assignee = agent_name)
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
   | _ -> failwith "expected task to be claimed"
 
 (* Test dispatch returns None for unknown tool *)
@@ -396,7 +396,7 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
   let tasks = Coord.get_tasks_raw ctx.config in
   assert (List.length tasks = 2);
   List.iter
-    (fun (task : Types.task) ->
+    (fun (task : Masc_domain.task) ->
        match task.contract with
        | Some contract ->
            assert (contract.completion_contract <> []);
@@ -760,7 +760,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     let _ = Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
     let _ =
       Coord.transition_task_r ctx.config ~agent_name:"test-agent"
-        ~task_id:"task-001" ~action:Types.Submit_for_verification ()
+        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
     in
     let success, result =
       Tool_task.handle_transition ctx
@@ -833,7 +833,7 @@ let () = test "add_task_schema_omits_removed_required_preset_argument" (fun () -
   let schema =
     match
       List.find_opt
-        (fun (schema : Types.tool_schema) ->
+        (fun (schema : Masc_domain.tool_schema) ->
            String.equal schema.name "masc_add_task")
         Tool_task_schemas.schemas
     with
@@ -961,7 +961,7 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
        ~capabilities:[ "keeper"; "preset:minimal" ] ()
    with
   | Ok _ -> ()
-  | Error e -> failwith (Types.masc_error_to_string e));
+  | Error e -> failwith (Masc_domain.masc_error_to_string e));
   let _ =
     Tool_task.handle_add_task ctx
       (`Assoc [ ("title", `String "Open claim task") ])
@@ -971,7 +971,7 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
-      | Types.Claimed { assignee; _ } -> assert (assignee = agent_name)
+      | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
       | _ -> failwith ("expected task to be claimed: " ^ result))
   | _ -> failwith ("expected exactly one task: " ^ result)
 )
@@ -1064,7 +1064,7 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
-      | Types.AwaitingVerification _ -> ()
+      | Masc_domain.AwaitingVerification _ -> ()
       | _ -> failwith "expected task to be awaiting_verification after done")
   | _ -> failwith "expected exactly one task after done transition"
 )
@@ -1130,7 +1130,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
   let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let _ =
     Coord.transition_task_r ctx.config ~agent_name:"other-agent"
-      ~task_id:"task-001" ~action:Types.Done_action ~notes:"done" ()
+      ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"done" ()
   in
   let success, result =
     Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])

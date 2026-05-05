@@ -174,7 +174,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Dated_jsonl.append metrics_store
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("channel", `String "heartbeat");
             ("snapshot_source", `String "keeper_context_status");
             ("context_ratio", `Float 0.1274375);
@@ -351,7 +351,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   ("outcome", `String "completed");
                 ] );
             ("error", `Assoc [ ("kind", `String "contract") ]);
-            ("ended_at", `String (Types.now_iso ()));
+            ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
       Operator_control.invalidate_snapshot_cache ();
       let snapshot =
@@ -622,7 +622,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Dated_jsonl.append metrics_store
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("channel", `String "turn");
             ("tool_call_count", `Int 2);
             ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
@@ -630,7 +630,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Dated_jsonl.append metrics_store
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("channel", `String "turn");
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
@@ -730,7 +730,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       Fs_compat.append_jsonl decision_path
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("selected_mode", `String "tool_use");
             ("tool_call_count", `Int 2);
             ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
@@ -739,7 +739,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
         Fs_compat.append_jsonl decision_path
           (`Assoc
             [
-              ("ts", `String (Types.now_iso ()));
+              ("ts", `String (Masc_domain.now_iso ()));
               ("selected_mode", `String "text_response");
               ("tool_call_count", `Int 0);
               ("tools_used", `List []);

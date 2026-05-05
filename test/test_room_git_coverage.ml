@@ -166,7 +166,7 @@ let test_resolve_base_branch_returns_result () =
   match Coord_git.git_root ~base_path:(current_repo_base_path ()) with
   | Some root ->
       let result = Coord_git.resolve_base_branch root "main" in
-      let _ : (string * string option, Types.masc_error) result = result in
+      let _ : (string * string option, Masc_domain.masc_error) result = result in
       ()
   | None -> fail "need git repo"
 

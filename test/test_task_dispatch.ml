@@ -34,7 +34,7 @@ let test_add_task_in_jsonl_mode () =
       match Task_dispatch.add_task config ~title:"dispatch task" ~priority:3
               ~description:"from task dispatch test"
       with
-      | Error e -> Alcotest.fail (Types.show_masc_error e)
+      | Error e -> Alcotest.fail (Masc_domain.show_masc_error e)
       | Ok message ->
           Alcotest.(check bool) "returns success message" true
             (String.length message > 0))

@@ -65,7 +65,7 @@ let record_operator_judgment config ~surface ~target_type ~target_id ~summary
   let now_unix = Unix.gettimeofday () in
   ignore
     (Operator_judgment.record config ~surface ~target_type ~target_id ~summary
-       ~confidence:0.91 ?recommended_action ~generated_at:(Types.now_iso ())
+       ~confidence:0.91 ?recommended_action ~generated_at:(Masc_domain.now_iso ())
        ~generated_at_unix:now_unix
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))
        ~fresh_until_unix:(now_unix +. fresh_for_sec)

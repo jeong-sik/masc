@@ -1100,7 +1100,7 @@ let test_room_presence_syncs_capabilities () =
   let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in
   let agent =
     Coord.get_agents_raw config
-    |> List.find_opt (fun (agent : Types.agent) -> String.equal agent.name agent_name)
+    |> List.find_opt (fun (agent : Masc_domain.agent) -> String.equal agent.name agent_name)
   in
   match agent with
   | None -> fail "expected keeper agent after room presence sync"

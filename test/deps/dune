@@ -6,6 +6,7 @@
  (name masc_test_deps)
  (libraries
    (re_export agent_sdk)
+   (re_export agent_sdk.base)
    (re_export agent_sdk.llm_provider)
    (re_export alcotest)
    (re_export astring)

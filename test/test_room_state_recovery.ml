@@ -141,7 +141,7 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
         ("last_seen", `Float 1711411200.0);
       ]
   in
-  match Types.agent_of_yojson json with
+  match Masc_domain.agent_of_yojson json with
   | Ok agent ->
       check string "agent parsed" "keeper-sangsu-agent" agent.name;
       check bool "last_seen normalized to ISO" true
@@ -163,7 +163,7 @@ let test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at () =
         ("last_seen", `Null);
       ]
   in
-  match Types.agent_of_yojson json with
+  match Masc_domain.agent_of_yojson json with
   | Ok agent ->
       check string "agent parsed" "gemini-cool-whale" agent.name;
       check (option string) "current_task preserved"
@@ -189,7 +189,7 @@ let test_agent_of_yojson_annotates_invalid_last_seen () =
         ("last_seen", `Bool false);
       ]
   in
-  match Types.agent_of_yojson json with
+  match Masc_domain.agent_of_yojson json with
   | Ok _ -> fail "bool last_seen should not succeed without a usable joined_at"
   | Error msg ->
       let contains needle =
@@ -221,7 +221,7 @@ let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
         (* no joined_at, no last_seen *)
       ]
   in
-  match Types.agent_of_yojson json with
+  match Masc_domain.agent_of_yojson json with
   | Ok agent ->
       check string "agent parsed without last_seen or joined_at"
         "keeper-orphan" agent.name;

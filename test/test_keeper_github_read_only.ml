@@ -150,7 +150,7 @@ let make_meta ?current_task_id ?(sandbox_profile = Keeper_types.Local) () =
 let add_task_with_worktree ~config ~repo_dir ~repo_name =
   let _ = Coord.add_task config ~title:"GitHub work" ~priority:1 ~description:"" in
   let backlog = Coord.read_backlog config in
-  match backlog.Types.tasks with
+  match backlog.Masc_domain.tasks with
   | [] -> Alcotest.fail "expected added task"
   | task :: rest ->
     let updated_task =
@@ -158,7 +158,7 @@ let add_task_with_worktree ~config ~repo_dir ~repo_name =
         worktree =
           Some
             {
-              Types.branch = "main";
+              Masc_domain.branch = "main";
               path = repo_dir;
               git_root = repo_dir;
               repo_name;
@@ -167,8 +167,8 @@ let add_task_with_worktree ~config ~repo_dir ~repo_name =
     in
     Coord.write_backlog config
       {
-        Types.tasks = updated_task :: rest;
-        last_updated = Types.now_iso ();
+        Masc_domain.tasks = updated_task :: rest;
+        last_updated = Masc_domain.now_iso ();
         version = backlog.version + 1;
       };
     task.id
@@ -469,7 +469,7 @@ let test_resolve_task_repo_context_reports_missing_worktree () =
   let _ = Coord.add_task config ~title:"GitHub work" ~priority:1 ~description:"" in
   let backlog = Coord.read_backlog config in
   let task_id =
-    match backlog.Types.tasks with
+    match backlog.Masc_domain.tasks with
     | task :: _ -> task.id
     | [] -> Alcotest.fail "expected task"
   in

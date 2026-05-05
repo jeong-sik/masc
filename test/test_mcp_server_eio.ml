@@ -1637,9 +1637,9 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
 
   let (ok_status, _status_msg) =
@@ -1682,12 +1682,12 @@ let test_execute_tool_internal_agent_name_overrides_legacy_arg () =
 let check_task_still_todo config task_id =
   match
     Masc_mcp.Coord.get_tasks_raw config
-    |> List.find_opt (fun (task : Types.task) -> task.id = task_id)
+    |> List.find_opt (fun (task : Masc_domain.task) -> task.id = task_id)
   with
-  | Some { Types.task_status = Types.Todo; _ } -> ()
+  | Some { Masc_domain.task_status = Masc_domain.Todo; _ } -> ()
   | Some task ->
       Alcotest.failf "expected %s to remain todo, got %s" task_id
-        (Types.task_status_to_string task.task_status)
+        (Masc_domain.task_status_to_string task.task_status)
   | None -> Alcotest.failf "expected task %s to exist" task_id
 
 let check_auth_preflight_result ~tool_name ok msg =
@@ -1710,9 +1710,9 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
@@ -1740,9 +1740,9 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
@@ -1776,9 +1776,9 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"qa-king" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"hyphenated-generated-alias-claim-next"
@@ -1873,9 +1873,9 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   let ok, msg =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
@@ -1900,7 +1900,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   Alcotest.(check (option string)) "created_by set from token owner"
     (Some "stable-admin") task.created_by;
   Alcotest.(check string) "task remains todo" "todo"
-    (Types.task_status_to_string task.task_status);
+    (Masc_domain.task_status_to_string task.task_status);
   cleanup_dir base_path
 
 let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
@@ -1916,9 +1916,9 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   let ok, msg =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
@@ -1947,9 +1947,9 @@ let test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth (
   ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   let ok, msg =
     Mcp_eio.execute_tool_eio ~sw ~clock state
@@ -2000,7 +2000,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
     Alcotest.(check bool) "broadcast success" true ok_broadcast;
 
     let agents = Masc_mcp.Coord.get_agents_raw state.room_config in
-    let names = List.map (fun (a : Types.agent) -> a.name) agents in
+    let names = List.map (fun (a : Masc_domain.agent) -> a.name) agents in
     Alcotest.(check bool)
       "mcp session must not reuse TERM_SESSION_ID persisted nickname"
       false

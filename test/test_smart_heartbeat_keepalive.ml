@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Tests for smart heartbeat integration in keeper_keepalive.
 
     Verifies that the Heartbeat_smart module decisions correctly map
-    to Types.agent_status based on keeper_meta fields (current_task_id,
+    to Masc_domain.agent_status based on keeper_meta fields (current_task_id,
     paused), and that the env-config feature flag controls activation.
 
     These are unit-level tests of the mapping logic, not full keepalive
@@ -17,30 +17,30 @@ module HS = Masc_mcp.Heartbeat_smart
 (** Derive agent_status from keeper_meta fields, mirroring the logic
     in keeper_keepalive.ml run_heartbeat_loop. *)
 let derive_agent_status ~paused ~current_task_id =
-  if paused then Types.Inactive
+  if paused then Masc_domain.Inactive
   else match current_task_id with
-    | Some _ -> Types.Busy
-    | None -> Types.Active
+    | Some _ -> Masc_domain.Busy
+    | None -> Masc_domain.Active
 
 let test_status_busy_when_task_claimed () =
   let status = derive_agent_status ~paused:false ~current_task_id:(Some "task-42") in
-  check string "busy when task claimed" (Types.show_agent_status Types.Busy)
-    (Types.show_agent_status status)
+  check string "busy when task claimed" (Masc_domain.show_agent_status Masc_domain.Busy)
+    (Masc_domain.show_agent_status status)
 
 let test_status_active_when_no_task () =
   let status = derive_agent_status ~paused:false ~current_task_id:None in
-  check string "active when no task" (Types.show_agent_status Types.Active)
-    (Types.show_agent_status status)
+  check string "active when no task" (Masc_domain.show_agent_status Masc_domain.Active)
+    (Masc_domain.show_agent_status status)
 
 let test_status_inactive_when_paused () =
   let status = derive_agent_status ~paused:true ~current_task_id:(Some "task-99") in
-  check string "inactive when paused" (Types.show_agent_status Types.Inactive)
-    (Types.show_agent_status status)
+  check string "inactive when paused" (Masc_domain.show_agent_status Masc_domain.Inactive)
+    (Masc_domain.show_agent_status status)
 
 let test_status_inactive_when_paused_no_task () =
   let status = derive_agent_status ~paused:true ~current_task_id:None in
-  check string "inactive when paused, no task" (Types.show_agent_status Types.Inactive)
-    (Types.show_agent_status status)
+  check string "inactive when paused, no task" (Masc_domain.show_agent_status Masc_domain.Inactive)
+    (Masc_domain.show_agent_status status)
 
 (* ── Heartbeat_smart decision tests with keeper-derived statuses ─── *)
 
@@ -49,7 +49,7 @@ let test_skip_busy_with_task () =
   let now = Unix.gettimeofday () in
   let decision = HS.should_emit
     ~config
-    ~agent_status:Types.Busy
+    ~agent_status:Masc_domain.Busy
     ~last_activity:now
     ~last_heartbeat:(now -. 10.0) in
   check string "skip when busy" "skip:busy"
@@ -61,7 +61,7 @@ let test_emit_when_active_and_interval_elapsed () =
   (* last_heartbeat 31s ago, base interval 30s *)
   let decision = HS.should_emit
     ~config
-    ~agent_status:Types.Active
+    ~agent_status:Masc_domain.Active
     ~last_activity:now
     ~last_heartbeat:(now -. 31.0) in
   check bool "should emit" true (HS.should_emit_now decision)
@@ -72,7 +72,7 @@ let test_skip_idle_when_interval_not_elapsed () =
   (* last_heartbeat 10s ago, base interval 30s *)
   let decision = HS.should_emit
     ~config
-    ~agent_status:Types.Active
+    ~agent_status:Masc_domain.Active
     ~last_activity:now
     ~last_heartbeat:(now -. 10.0) in
   check bool "should not emit" false (HS.should_emit_now decision);

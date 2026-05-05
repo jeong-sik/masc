@@ -27,7 +27,7 @@ let check_set_equal label ~expected ~actual =
 
 let raw_schema_by_name name =
   Config.raw_all_tool_schemas
-  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
 (* {1 Parity Tests — each compares legacy hardcoded list vs surface SSOT} *)
 
@@ -193,7 +193,7 @@ let test_replacement_targets_have_schemas () =
      Not all need to be public — some are hidden but still callable. *)
   let internal = Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal in
   let all_schema_names =
-    List.map (fun (s : Types.tool_schema) -> s.name)
+    List.map (fun (s : Masc_domain.tool_schema) -> s.name)
       Config.raw_all_tool_schemas
   in
   List.iter (fun name ->
@@ -214,7 +214,7 @@ let test_keeper_internal_tools_have_schemas () =
   let standalone_schemas = [ Keeper_exec_tools.keeper_tool_search_schema ] in
   let schema_names =
     (Tool_shard.keeper_model_tools @ voice_schemas @ standalone_schemas)
-    |> List.map (fun (s : Types.tool_schema) -> s.name)
+    |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
     |> SS.of_list
   in
   let internal_names =
@@ -253,11 +253,11 @@ let test_no_orphaned_tools () =
   let is_known_orphan name = List.mem name known_orphans in
   let orphaned =
     Config.raw_all_tool_schemas
-    |> List.filter (fun (schema : Types.tool_schema) ->
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          not (on_any_surface schema.name)
          && not (is_deprecated schema.name)
          && not (is_known_orphan schema.name))
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   if orphaned <> [] then
     Alcotest.failf "Orphaned tools (no surface): {%s}"
@@ -351,7 +351,7 @@ let test_role_catalogs_drop_stale_entries_when_built () =
     (List.mem "masc_portal_open" coordinator_tools)
 
 let test_local_worker_compat_passthrough_schemas_match_registry () =
-  List.iter (fun (schema : Types.tool_schema) ->
+  List.iter (fun (schema : Masc_domain.tool_schema) ->
     match raw_schema_by_name schema.name with
     | None ->
         Alcotest.failf "missing raw schema for passthrough tool %s" schema.name

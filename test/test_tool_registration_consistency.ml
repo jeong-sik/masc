@@ -13,7 +13,7 @@ module WG = Masc_mcp__Workflow_guide
 (* ── All schema tool names ─────────────────────────────────────── *)
 
 let all_schema_names =
-  List.map (fun (s : Types.tool_schema) -> s.name) Config.all_tool_schemas
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Config.all_tool_schemas
 
 (* ── Test 1: Workflow guide references valid tools ────────────── *)
 

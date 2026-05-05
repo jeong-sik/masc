@@ -60,7 +60,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta failed: " ^ err)
 
-let contract_requiring_tools required_tools : Types.task_contract =
+let contract_requiring_tools required_tools : Masc_domain.task_contract =
   {
     strict = false;
     completion_contract = [];

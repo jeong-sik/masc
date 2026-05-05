@@ -46,7 +46,7 @@ let test_every_shard_tool_is_in_authoritative_registry () =
   let shard_schemas = Shard.all_keeper_tool_schemas in
   let missing =
     List.filter_map
-      (fun (s : Types.tool_schema) ->
+      (fun (s : Masc_domain.tool_schema) ->
         if registry_has s.name then None else Some s.name)
       shard_schemas
     |> List.sort_uniq String.compare

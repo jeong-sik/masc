@@ -57,7 +57,7 @@ let test_purge_old_dropped () =
   let g2 = make_goal ~status:Dropped ~days_ago:3 "g2" "Recent dropped" in
   let g3 = make_goal ~status:Active ~days_ago:1 "g3" "Active" in
   Goal_store.write_state config
-    { version = 1; updated_at = Types.now_iso ();
+    { version = 1; updated_at = Masc_domain.now_iso ();
       goals = [g1; g2; g3] };
   let result = Goal_janitor.run config in
   check int "purged old dropped" 1 result.purged;
@@ -74,7 +74,7 @@ let test_stagnate_old_active () =
   let g1 = make_goal ~status:Active ~days_ago:35 "g1" "Stale active" in
   let g2 = make_goal ~status:Active ~days_ago:5 "g2" "Fresh active" in
   Goal_store.write_state config
-    { version = 1; updated_at = Types.now_iso ();
+    { version = 1; updated_at = Masc_domain.now_iso ();
       goals = [g1; g2] };
   let result = Goal_janitor.run config in
   check int "stagnated 1" 1 result.stagnated;
@@ -92,7 +92,7 @@ let test_no_changes_when_clean () =
   let g1 = make_goal ~status:Active ~days_ago:1 "g1" "Fresh" in
   let g2 = make_goal ~status:Done ~days_ago:60 "g2" "Done long ago" in
   Goal_store.write_state config
-    { version = 1; updated_at = Types.now_iso ();
+    { version = 1; updated_at = Masc_domain.now_iso ();
       goals = [g1; g2] };
   let result = Goal_janitor.run config in
   check int "no purge" 0 result.purged;

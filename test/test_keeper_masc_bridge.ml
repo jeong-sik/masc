@@ -98,7 +98,7 @@ let allowed_names_of_json json =
 
 let test_inject_stores_filtered_masc () =
   init_keeper_tool_registry ();
-  let schemas : Types.tool_schema list =
+  let schemas : Masc_domain.tool_schema list =
     [
       { name = "masc_status"; description = ""; input_schema = `Assoc [] };
       { name = "masc_broadcast"; description = ""; input_schema = `Assoc [] };
@@ -254,7 +254,7 @@ let with_masc_schema_ref schemas f =
 
 let test_dashboard_tool_count_uses_schema_ssot () =
   let bridge_name = "mcp__masc__masc_status" in
-  let schema : Types.tool_schema =
+  let schema : Masc_domain.tool_schema =
     { name = bridge_name; description = ""; input_schema = `Assoc [] }
   in
   with_masc_schema_ref [ schema ] (fun () ->
@@ -652,7 +652,7 @@ let test_schemas_match_names () =
   Alcotest.(check int) "count matches"
     (List.length names) (List.length schemas);
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Alcotest.(check bool) (s.name ^ " in names") true
         (List.mem s.name names))
     schemas

@@ -334,7 +334,7 @@ let test_task_claimed () =
   (* Verify ACTUAL values *)
   assert_equal_string "task_id value" "task-001" (json_get_string resp.data "task_id");
   assert_equal_string "claimed_by value" "claude" (json_get_string resp.data "claimed_by");
-  (* Issue #8364: status after Claim is "claimed" (Variant: Types.Claimed),
+  (* Issue #8364: status after Claim is "claimed" (Variant: Masc_domain.Claimed),
      not "in_progress" (which requires a separate Start action). *)
   assert_equal_string "status value" "claimed" (json_get_string resp.data "status");
   (* Verify message mentions task and agent *)
@@ -374,7 +374,7 @@ let test_task_completed () =
   assert_equal_string "task_id" "task-001" (json_get_string resp.data "task_id");
   assert_equal_string "completed_by" "claude" (json_get_string resp.data "completed_by");
   assert_equal_string "notes" "All tests pass" (json_get_string resp.data "notes");
-  (* Issue #8412: status string comes from Types.task_status_to_string Done = "done",
+  (* Issue #8412: status string comes from Masc_domain.task_status_to_string Done = "done",
      not the cosmetic "completed" hand-rolled previously. *)
   assert_equal_string "status" "done" (json_get_string resp.data "status");
   Printf.printf "  test_task_completed passed\n"

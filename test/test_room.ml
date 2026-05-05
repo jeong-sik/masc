@@ -317,12 +317,12 @@ let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
 let transition_done_r config ~agent_name ~task_id ~notes =
   Coord.transition_task_r config ~agent_name ~task_id
-    ~action:Types.Done_action ~notes ()
+    ~action:Masc_domain.Done_action ~notes ()
 
 let transition_done config ~agent_name ~task_id ~notes =
   match transition_done_r config ~agent_name ~task_id ~notes with
   | Ok msg -> msg
-  | Error err -> Types.masc_error_to_string err
+  | Error err -> Masc_domain.masc_error_to_string err
 
 (* Helper to create fresh test environment.
    Eio context + Fs_compat.set_fs are set up in the top-level runner,
@@ -634,8 +634,8 @@ let test_event_log_on_claim_done () =
   (* Verify task state via Coord.read_backlog (backend-agnostic) *)
   let backlog = Coord.read_backlog config in
   let is_done = List.exists (fun t ->
-    match t.Types.task_status with Types.Done _ -> true | _ -> false
-  ) backlog.Types.tasks in
+    match t.Masc_domain.task_status with Masc_domain.Done _ -> true | _ -> false
+  ) backlog.Masc_domain.tasks in
   Alcotest.(check bool) "task completed" true is_done;
 
   let _ = Coord.reset config in
@@ -659,9 +659,9 @@ let test_heartbeat_updates_lastseen () =
 let test_is_agent_joined_after_default_join () =
   with_test_env (fun config ->
     let _ = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
-    let agents : Types.agent list = Coord.get_agents_raw config in
+    let agents : Masc_domain.agent list = Coord.get_agents_raw config in
     let gemini_name =
-      match List.find_opt (fun (agent : Types.agent) ->
+      match List.find_opt (fun (agent : Masc_domain.agent) ->
         String.length agent.name >= 6 && String.sub agent.name 0 6 = "gemini"
       ) agents with
       | Some agent -> agent.name
@@ -680,13 +680,13 @@ let test_room_bootstrap_preserves_backend_state () =
     in
     let backlog =
       {
-        Types.tasks = [];
-        last_updated = Types.now_iso ();
+        Masc_domain.tasks = [];
+        last_updated = Masc_domain.now_iso ();
         version = 7;
       }
     in
     Coord_utils.write_json config (Coord.backlog_path config)
-      (Types.backlog_to_yojson backlog);
+      (Masc_domain.backlog_to_yojson backlog);
 
     Coord.ensure_room_bootstrap config;
 
@@ -707,8 +707,8 @@ let test_read_backlog_r_recovers_from_last_good_snapshot () =
   with_test_env (fun config ->
     let expected =
       {
-        Types.tasks = [];
-        last_updated = Types.now_iso ();
+        Masc_domain.tasks = [];
+        last_updated = Masc_domain.now_iso ();
         version = 7;
       }
     in
@@ -1124,7 +1124,7 @@ let test_force_release_bypasses_assignee () =
     let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Different agent cannot release without force *)
     let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Types.Release () in
+        ~action:Masc_domain.Release () in
     Alcotest.(check bool) "normal release blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force release succeeds *)
@@ -1143,7 +1143,7 @@ let test_force_done_bypasses_assignee () =
     let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Normal done by different agent fails *)
     let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Types.Done_action ~notes:"forced" () in
+        ~action:Masc_domain.Done_action ~notes:"forced" () in
     Alcotest.(check bool) "normal done blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force done succeeds *)
@@ -1192,11 +1192,11 @@ let test_audit_orphan_awaiting_verification_tasks () =
         let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
         match
           Coord.transition_task_r config ~agent_name:test_agent_a
-            ~task_id:"task-001" ~action:Types.Submit_for_verification ()
+            ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
         with
         | Error err ->
             Alcotest.failf "submit for verification failed: %s"
-              (Types.show_masc_error err)
+              (Masc_domain.show_masc_error err)
         | Ok _ ->
             let orphans_before = Coord.audit_orphan_tasks config in
             Alcotest.(check int) "no verification orphans while active" 0
@@ -1465,21 +1465,21 @@ let test_bug006_transition_with_unsuffixed_name () =
     (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
     (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
-     | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
+     | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
     (* Transition (start) using the unsuffixed name — should resolve to "keeper-coder-agent" *)
     (match Coord.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
-             ~action:Types.Start () with
+             ~action:Masc_domain.Start () with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
-           (Types.show_masc_error e));
+           (Masc_domain.show_masc_error e));
     (* Complete using the unsuffixed name — same resolution path *)
     (match transition_done_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~notes:"done" with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "complete with unsuffixed name failed (BUG-006): %s"
-           (Types.show_masc_error e))
+           (Masc_domain.show_masc_error e))
   )
 
 let test_bug006_cancel_with_unsuffixed_name () =
@@ -1488,14 +1488,14 @@ let test_bug006_cancel_with_unsuffixed_name () =
     let _ = Coord.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
     (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
-     | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
+     | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
     (* Cancel using the unsuffixed name — should resolve to "keeper-coder-agent" *)
     (match Coord.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~reason:"test" with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "cancel with unsuffixed name failed (BUG-006): %s"
-           (Types.show_masc_error e))
+           (Masc_domain.show_masc_error e))
   )
 
 (* === Idle loop stop signal tests === *)

@@ -35,7 +35,7 @@ type fixture = {
 type contract_case = {
   init_mode : init_mode;
   prepare : fixture -> unit;
-  arguments : fixture -> Types.tool_schema -> Yojson.Safe.t;
+  arguments : fixture -> Masc_domain.tool_schema -> Yojson.Safe.t;
   expectation : expectation;
 }
 
@@ -43,7 +43,7 @@ type contract_case = {
    initialization (runtime, not link-time). No code generation step needed. *)
 let all_known_tool_names =
   Config.raw_all_tool_schemas
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   |> List.sort_uniq String.compare
 
 let strict_success_names =
@@ -564,14 +564,14 @@ let prepare_for_name fixture name =
     ensure_lock fixture
 
 let required_fields schema =
-  match assoc_field "required" schema.Types.input_schema with
+  match assoc_field "required" schema.Masc_domain.input_schema with
   | Some (`List values) ->
       values
       |> List.filter_map (function `String value -> Some value | _ -> None)
   | _ -> []
 
 let property_schema schema field =
-  match assoc_field "properties" schema.Types.input_schema with
+  match assoc_field "properties" schema.Masc_domain.input_schema with
   | Some (`Assoc props) -> List.assoc_opt field props
   | _ -> None
 
@@ -741,8 +741,8 @@ let field_value fixture ~tool_name field_name schema =
       | Some "object", _ -> `Assoc []
       | _ -> `String "tool-matrix")
 
-let tool_arguments fixture (schema : Types.tool_schema) =
-  let name = schema.Types.name in
+let tool_arguments fixture (schema : Masc_domain.tool_schema) =
+  let name = schema.Masc_domain.name in
   let fields =
     let required = required_fields schema in
     let optional =
@@ -961,7 +961,7 @@ let evaluate_expectation ~name expectation response =
             (Printf.sprintf "%s expected success or guard %s but got: %s" name
                (String.concat ", " fragments) text)
 
-let call_tool_json fixture (schema : Types.tool_schema) arguments =
+let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -972,7 +972,7 @@ let call_tool_json fixture (schema : Types.tool_schema) arguments =
           ( "params",
             `Assoc
               [
-                ("name", `String schema.Types.name);
+                ("name", `String schema.Masc_domain.name);
                 ("arguments", arguments);
               ] );
         ])
@@ -981,7 +981,7 @@ let call_tool_json fixture (schema : Types.tool_schema) arguments =
     ~mcp_session_id:fixture.sid fixture.state request
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
-    (schema : Types.tool_schema) =
+    (schema : Masc_domain.tool_schema) =
   let saved_home = Sys.getenv_opt "HOME" in
   let saved_env =
     [
@@ -1015,7 +1015,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
       (fun () ->
         Unix.putenv "HOME" base_path;
         try
-          let case = case_for_name schema.Types.name in
+          let case = case_for_name schema.Masc_domain.name in
           let fixture =
             make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
               case.init_mode
@@ -1023,13 +1023,13 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
           case.prepare fixture;
           let arguments = case.arguments fixture schema in
           let response = call_tool_json fixture schema arguments in
-          if String.equal schema.Types.name "masc_heartbeat_start" then
+          if String.equal schema.Masc_domain.name "masc_heartbeat_start" then
             Heartbeat.list ()
             |> List.iter (fun hb -> ignore (Heartbeat.stop hb.Heartbeat.id));
-          evaluate_expectation ~name:schema.Types.name case.expectation response
+          evaluate_expectation ~name:schema.Masc_domain.name case.expectation response
         with exn ->
           Error
             (Printf.sprintf "%s raised during contract execution: %s"
-               schema.Types.name (Printexc.to_string exn)))
+               schema.Masc_domain.name (Printexc.to_string exn)))
   in
   (base_path, result)

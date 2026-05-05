@@ -123,7 +123,7 @@ let () =
     | Error e ->
         failwith
           (Printf.sprintf "expected Ok on shared codebase, got Error %s"
-             (Types.masc_error_to_string e)))
+             (Masc_domain.masc_error_to_string e)))
 
 (* 2. Own-playground read — allowed. *)
 let () =
@@ -142,7 +142,7 @@ let () =
     | Error e ->
         failwith
           (Printf.sprintf "expected Ok on own playground, got Error %s"
-             (Types.masc_error_to_string e)))
+             (Masc_domain.masc_error_to_string e)))
 
 let () =
   test "relative_repos_prefix_maps_to_own_playground" (fun () ->
@@ -161,7 +161,7 @@ let () =
         failwith
           (Printf.sprintf
              "expected repos/ prefix to map into own playground, got Error %s"
-             (Types.masc_error_to_string e)))
+             (Masc_domain.masc_error_to_string e)))
 
 (* 3. Cross-keeper playground read — rejected with SSOT name. *)
 let () =
@@ -177,7 +177,7 @@ let () =
           (Printf.sprintf
              "expected Error on cross-keeper read, got Ok %S" resolved)
     | Error e ->
-        let msg = Types.masc_error_to_string e in
+        let msg = Masc_domain.masc_error_to_string e in
         assert (contains_substring msg "cross-keeper playground read blocked");
         assert (contains_substring msg "agent-alpha");
         assert (contains_substring msg ".masc/playground/agent-alpha/"))
@@ -197,7 +197,7 @@ let () =
              "expected Error on /etc/passwd traversal, got Ok %S"
              resolved)
     | Error e ->
-        let msg = Types.masc_error_to_string e in
+        let msg = Masc_domain.masc_error_to_string e in
         assert (contains_substring msg "Path traversal detected"))
 
 (* 5. Playground root itself (not a file beneath it) — allowed for own. *)
@@ -213,7 +213,7 @@ let () =
         failwith
           (Printf.sprintf
              "expected Ok on own playground root, got Error %s"
-             (Types.masc_error_to_string e)))
+             (Masc_domain.masc_error_to_string e)))
 
 (* 6. Playground root itself (other keeper) — blocked. *)
 let () =
@@ -229,7 +229,7 @@ let () =
              "expected Error on other playground root, got Ok %S"
              resolved)
     | Error e ->
-        let msg = Types.masc_error_to_string e in
+        let msg = Masc_domain.masc_error_to_string e in
         assert (contains_substring msg "cross-keeper playground read blocked"))
 
 (* 7. Symlink inside own playground pointing to another keeper's file.
@@ -254,7 +254,7 @@ let () =
              "expected Error on symlink to other keeper, got Ok %S"
              resolved)
     | Error e ->
-        let msg = Types.masc_error_to_string e in
+        let msg = Masc_domain.masc_error_to_string e in
         (* The symlink resolves to [other_abs/secret.env], which is
            under .masc/playground/agent-beta/, i.e. a foreign playground.
            validate_path passes it (still inside git root), then the
@@ -295,7 +295,7 @@ let () =
            mkdir, we would get a definite Error instead. *)
         let _ = resolved in ()
     | Error e ->
-        let msg = Types.masc_error_to_string e in
+        let msg = Masc_domain.masc_error_to_string e in
         assert (
           contains_substring msg "does not exist"
           || contains_substring msg "cross-keeper"))

@@ -53,7 +53,7 @@ let () =
                 ~is_read_only:true
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
-                ~required_permission:Types.CanAdmin
+                ~required_permission:Masc_domain.CanAdmin
                 ~effect_domain:Tool_catalog.Masc_coordination
                 ~requires_actor_binding:true
                 ~reason:"hidden for test"
@@ -63,7 +63,7 @@ let () =
             check bool "is_read_only" true spec.is_read_only;
             check bool "is_idempotent" true spec.is_idempotent;
             check bool "required_permission" true
-              (spec.required_permission = Some Types.CanAdmin);
+              (spec.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
               (spec.effect_domain = Some Tool_catalog.Masc_coordination);
             check bool "requires_actor_binding" true
@@ -155,7 +155,7 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~is_destructive:true
-                ~required_permission:Types.CanAdmin
+                ~required_permission:Masc_domain.CanAdmin
                 ~effect_domain:Tool_catalog.Main_worktree_write
                 ~requires_actor_binding:true
                 ~visibility:Tool_catalog.Hidden
@@ -166,7 +166,7 @@ let () =
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "destructive" true (meta.destructive = Some true);
             check bool "required_permission" true
-              (meta.required_permission = Some Types.CanAdmin);
+              (meta.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
               (meta.effect_domain = Some Tool_catalog.Main_worktree_write);
             check bool "requires_actor_binding" true
@@ -241,7 +241,7 @@ let () =
                 ()
             in
             let schema = Tool_spec.to_tool_schema spec in
-            check string "name" "__test_spec_schema_conv" schema.Types.name;
+            check string "name" "__test_spec_schema_conv" schema.Masc_domain.name;
             check string "description" "schema conv test" schema.description);
         ] );
       ( "tool_catalog_groups",

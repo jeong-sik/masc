@@ -533,11 +533,11 @@ let test_minimal_preset_includes_core_masc () =
 let test_autoresearch_keeper_tools_match_schema_inventory () =
   let raw_names =
     Tool_autoresearch_schemas.schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let names =
     Tool_shard.autoresearch_keeper_tools
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   check bool "autoresearch swarm start removed from raw autoresearch schemas" false
     (List.mem "masc_autoresearch_swarm_start" raw_names);

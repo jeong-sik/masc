@@ -10,7 +10,7 @@ open Masc_mcp
 (* ================================================================ *)
 
 let make_schema name description =
-  { Types.name; description;
+  { Masc_domain.name; description;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -75,7 +75,7 @@ let extended_tools =
   ]
 
 let names_of results =
-  List.map (fun (s : Types.tool_schema) -> s.name) results
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) results
 
 let has_tool name results =
   List.mem name (names_of results)

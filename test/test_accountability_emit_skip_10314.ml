@@ -74,7 +74,7 @@ let test_task_transition_non_keeper_increments () =
   (* "executor" is a bare keeper name, not [keeper-executor-agent].
      Pre-#10314 this dropped silently; now it surfaces. *)
   Acct.record_task_transition config ~agent_name:"executor"
-    ~task_id:"task-9001" ~transition:Types.Claim ~details:`Null;
+    ~task_id:"task-9001" ~transition:Masc_domain.Claim ~details:`Null;
   check (float 0.0001)
     "executor (non-keeper alias) drop is counted"
     (before +. 1.0)
@@ -156,7 +156,7 @@ let test_kind_and_reason_isolation () =
       ~reason:"not_keeper_agent_name"
   in
   Acct.record_task_transition config ~agent_name:"qa-king"
-    ~task_id:"task-9002" ~transition:Types.Start ~details:`Null;
+    ~task_id:"task-9002" ~transition:Masc_domain.Start ~details:`Null;
   check (float 0.0001)
     "completion_claim/not_keeper_agent_name unchanged when \
      task_transition bumps"

@@ -66,7 +66,7 @@ let write_pending_confirm config _session_id =
             ("target_id", `String "fixture-keeper");
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
             ("delegated_tool", `String "masc_keeper_msg");
-            ("created_at", `String (Types.now_iso ()));
+            ("created_at", `String (Masc_domain.now_iso ()));
             ("expires_at", `Null);
           ];
       ])
@@ -329,7 +329,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
                 ("name", `String keeper_name);
                 ("agent_name", `String keeper_name);
                 ("status", `String "offline");
-                ("updated_at", `String (Types.now_iso ()));
+                ("updated_at", `String (Masc_domain.now_iso ()));
                 ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
@@ -366,7 +366,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
         (Lib.Keeper_types.keeper_decision_log_path config keeper_name)
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("selected_mode", `String "text_response");
             ("action_source", `String "structured_model");
             ("tool_call_count", `Int 0);
@@ -380,7 +380,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
                 ("name", `String keeper_name);
                 ("agent_name", `String keeper_name);
                 ("status", `String "active");
-                ("updated_at", `String (Types.now_iso ()));
+                ("updated_at", `String (Masc_domain.now_iso ()));
                 ("allowed_tool_names", `List [ `String "masc_board_get" ]);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
@@ -452,7 +452,7 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
                 ("name", `String keeper_name);
                 ("agent_name", `String keeper_name);
                 ("status", `String "idle");
-                ("updated_at", `String (Types.now_iso ()));
+                ("updated_at", `String (Masc_domain.now_iso ()));
                 ("allowed_tool_names", `Null);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);

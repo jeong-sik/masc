@@ -13,7 +13,7 @@ let test_public_visible_surface_hides_deprecated_aliases () =
   let names =
     Lib.Capability_registry.visible_public_tool_schemas_from
       Lib.Config.raw_all_tool_schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   check bool "public contains masc_transition" true
     (List.mem "masc_transition" names)
@@ -22,7 +22,7 @@ let test_public_visible_surface_hides_pruned_voice_tools () =
   let names =
     Lib.Capability_registry.visible_public_tool_schemas_from
       Lib.Config.raw_all_tool_schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   check bool "public omits masc_voice_agent" false
     (List.mem "masc_voice_agent" names);
@@ -57,7 +57,7 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
   | Error err -> failf "expected local worker schemas: %s" err
   | Ok schemas ->
       let names =
-        List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
+        List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
       in
       check bool "heartbeat" true (List.mem "masc_heartbeat" names);
       check bool "masc_code_search" true (List.mem "masc_code_search" names);

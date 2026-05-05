@@ -182,7 +182,7 @@ let test_code_search_treats_dash_prefixed_query_as_literal () =
 
 let test_code_search_schema_requires_path () =
   let schema =
-    List.find_opt (fun (schema : Types.tool_schema) ->
+    List.find_opt (fun (schema : Masc_domain.tool_schema) ->
       String.equal schema.name "masc_code_search")
       Tool_code.schemas
   in

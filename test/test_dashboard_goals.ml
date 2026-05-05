@@ -50,7 +50,7 @@ let create_done_task config ~goal_id ~title =
        ~description:"done task fixture");
   let task_id =
     Coord.get_tasks_raw config
-    |> List.find_map (fun (task : Types.task) ->
+    |> List.find_map (fun (task : Masc_domain.task) ->
            if String.equal task.title title then Some task.id else None)
     |> function
     | Some task_id -> task_id
@@ -62,11 +62,11 @@ let create_done_task config ~goal_id ~title =
         ~notes ()
     with
     | Ok _ -> ()
-    | Error err -> fail (Types.masc_error_to_string err)
+    | Error err -> fail (Masc_domain.masc_error_to_string err)
   in
-  step Types.Claim "test fixture claim";
-  step Types.Start "test fixture start";
-  step Types.Done_action "test fixture done"
+  step Masc_domain.Claim "test fixture claim";
+  step Masc_domain.Start "test fixture start";
+  step Masc_domain.Done_action "test fixture done"
 
 let string_list_field json field =
   json |> member field |> to_list |> List.map to_string
@@ -109,8 +109,8 @@ let append_keeper_receipt ?(outcome = "ok")
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
     ?(cascade_outcome = "completed") (config : Coord.config)
     (meta : Keeper_types.keeper_meta) =
-  let started_at = Types.now_iso () in
-  let ended_at = Types.now_iso () in
+  let started_at = Masc_domain.now_iso () in
+  let ended_at = Masc_domain.now_iso () in
   let receipt : Keeper_execution_receipt.t =
     {
       keeper_name = meta.name;
@@ -336,7 +336,7 @@ let test_cancelled_only_goal_is_at_risk () =
   (match Coord.cancel_task_r config ~agent_name:"planner" ~task_id
            ~reason:"test cancellation" with
    | Ok _ -> ()
-   | Error err -> fail (Types.masc_error_to_string err));
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
   let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
   check string "cancelled-only health" "at_risk"
     (node |> member "health" |> to_string);

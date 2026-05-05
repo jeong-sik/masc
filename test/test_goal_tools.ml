@@ -76,7 +76,7 @@ let create_done_task config ~goal_id ~title =
        ~description:"done task fixture");
   let task_id =
     Coord.get_tasks_raw config
-    |> List.find_map (fun (task : Types.task) ->
+    |> List.find_map (fun (task : Masc_domain.task) ->
            if String.equal task.title title then Some task.id else None)
     |> function
     | Some task_id -> task_id
@@ -88,11 +88,11 @@ let create_done_task config ~goal_id ~title =
         ~notes ()
     with
     | Ok _ -> ()
-    | Error err -> fail (Types.masc_error_to_string err)
+    | Error err -> fail (Masc_domain.masc_error_to_string err)
   in
-  step Types.Claim "test fixture claim";
-  step Types.Start "test fixture start";
-  step Types.Done_action "test fixture done"
+  step Masc_domain.Claim "test fixture claim";
+  step Masc_domain.Start "test fixture start";
+  step Masc_domain.Done_action "test fixture done"
 
 let expect_error (result : Tool_coord.tool_result option) =
   match result with

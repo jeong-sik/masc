@@ -4,7 +4,7 @@ module Types = Masc_domain
 
     Guards the closed-enum contract that prometheus dashboards depend on
     (issue #11266 Track 2a). Stable string labels must round-trip and
-    every modelled [Types.t] constructor must classify to a non-[Other]
+    every modelled [Masc_domain.t] constructor must classify to a non-[Other]
     label. *)
 
 open Alcotest
@@ -31,7 +31,7 @@ let test_of_string_unknown_returns_none () =
       Alcotest.fail "of_string should return None for unknown label"
 
 let test_classify_invalid_token () =
-  match Aek.classify (Types.Auth (Types.Auth_error.InvalidToken "x")) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "x")) with
   | Aek.Token_mismatch -> ()
   | other ->
       Alcotest.failf
@@ -39,7 +39,7 @@ let test_classify_invalid_token () =
         (Aek.to_string other)
 
 let test_classify_token_expired () =
-  match Aek.classify (Types.Auth (Types.Auth_error.TokenExpired "x")) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired "x")) with
   | Aek.Token_expired -> ()
   | other ->
       Alcotest.failf
@@ -47,7 +47,7 @@ let test_classify_token_expired () =
         (Aek.to_string other)
 
 let test_classify_unauthorized () =
-  match Aek.classify (Types.Auth (Types.Auth_error.Unauthorized "x")) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "x")) with
   | Aek.Unauthorized -> ()
   | other ->
       Alcotest.failf
@@ -55,7 +55,7 @@ let test_classify_unauthorized () =
         (Aek.to_string other)
 
 let test_classify_forbidden () =
-  match Aek.classify (Types.Auth (Types.Auth_error.Forbidden { agent = "a"; action = "b" })) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent = "a"; action = "b" })) with
   | Aek.Forbidden -> ()
   | other ->
       Alcotest.failf
@@ -63,7 +63,7 @@ let test_classify_forbidden () =
         (Aek.to_string other)
 
 let test_classify_agent_not_found () =
-  match Aek.classify (Types.Agent (Types.Agent_error.NotFound "x")) with
+  match Aek.classify (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "x")) with
   | Aek.Agent_not_found -> ()
   | other ->
       Alcotest.failf
@@ -71,7 +71,7 @@ let test_classify_agent_not_found () =
         (Aek.to_string other)
 
 let test_classify_io_error () =
-  match Aek.classify (Types.System (Types.System_error.IoError "x")) with
+  match Aek.classify (Masc_domain.System (Masc_domain.System_error.IoError "x")) with
   | Aek.Io_error -> ()
   | other ->
       Alcotest.failf
@@ -79,7 +79,7 @@ let test_classify_io_error () =
         (Aek.to_string other)
 
 let test_classify_invalid_json () =
-  match Aek.classify (Types.System (Types.System_error.InvalidJson "x")) with
+  match Aek.classify (Masc_domain.System (Masc_domain.System_error.InvalidJson "x")) with
   | Aek.Invalid_json -> ()
   | other ->
       Alcotest.failf
@@ -89,7 +89,7 @@ let test_classify_invalid_json () =
 let test_classify_unmodelled_falls_to_other () =
   (* StorageError is not auth-relevant and intentionally falls through
      to [Other]. *)
-  match Aek.classify (Types.System (Types.System_error.StorageError "disk")) with
+  match Aek.classify (Masc_domain.System (Masc_domain.System_error.StorageError "disk")) with
   | Aek.Other -> ()
   | other ->
       Alcotest.failf

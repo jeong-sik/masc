@@ -412,7 +412,7 @@ let contains needle haystack =
 let error_msg result =
   match result with
   | Ok _ -> ""
-  | Error (Types.System (Types.System_error.IoError m)) -> m
+  | Error (Masc_domain.System (Masc_domain.System_error.IoError m)) -> m
   | Error _ -> "<non-IoError>"
 
 let make_config base_path : Masc_mcp.Coord.config =
@@ -499,7 +499,7 @@ let test_writable_path_maps_relative_repos_prefix () =
   match result with
   | Error e ->
     fail ("expected repos/ prefix to map into own playground, got: "
-          ^ Types.masc_error_to_string e)
+          ^ Masc_domain.masc_error_to_string e)
   | Ok resolved ->
     (check string) "repos/ path resolves under own playground repos"
       expected resolved

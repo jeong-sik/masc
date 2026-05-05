@@ -89,7 +89,7 @@ let save_credential_or_fail base_path ~agent_name ~role ~raw_token =
   | Ok _ -> ()
   | Error err ->
       failf "failed to seed credential for %s: %s"
-        agent_name (Types.masc_error_to_string err)
+        agent_name (Masc_domain.masc_error_to_string err)
 
 let raw_token_file base_path agent_name =
   Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
@@ -107,7 +107,7 @@ let find_mcp_client report client_name =
 let test_warns_for_codex_worker_admin_route_mismatch () =
   with_temp_dir "auth-doctor-warn" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -116,12 +116,12 @@ let test_warns_for_codex_worker_admin_route_mismatch () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"codex" ~role:Types.Worker
+  save_credential_or_fail base_path ~agent_name:"codex" ~role:Masc_domain.Worker
     ~raw_token:"codex-token";
   save_credential_or_fail base_path ~agent_name:"codex-mcp-client"
-    ~role:Types.Worker ~raw_token:"codex-mcp-token";
+    ~role:Masc_domain.Worker ~raw_token:"codex-mcp-token";
   save_credential_or_fail base_path ~agent_name:"dashboard-dev"
-    ~role:Types.Admin ~raw_token:"dashboard-dev-token";
+    ~role:Masc_domain.Admin ~raw_token:"dashboard-dev-token";
   with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
@@ -153,7 +153,7 @@ let test_warns_for_codex_worker_admin_route_mismatch () =
 let test_errors_when_no_admin_bearer_source_exists () =
   with_temp_dir "auth-doctor-error" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -162,7 +162,7 @@ let test_errors_when_no_admin_bearer_source_exists () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"codex" ~role:Types.Worker
+  save_credential_or_fail base_path ~agent_name:"codex" ~role:Masc_domain.Worker
     ~raw_token:"codex-token";
   with_env "MASC_HOST" "0.0.0.0" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "1" @@ fun () ->
@@ -191,7 +191,7 @@ let test_errors_when_no_admin_bearer_source_exists () =
 let test_ignores_stale_admin_raw_token_file () =
   with_temp_dir "auth-doctor-stale" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -200,7 +200,7 @@ let test_ignores_stale_admin_raw_token_file () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Masc_domain.Admin
     ~raw_token:"live-admin-token";
   Auth.save_private_text_file (raw_token_file base_path "admin")
     "stale-admin-token";
@@ -228,7 +228,7 @@ let test_ignores_stale_admin_raw_token_file () =
 let test_reports_codex_mcp_bearer_env () =
   with_temp_dir "auth-doctor-codex-mcp" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -237,12 +237,12 @@ let test_reports_codex_mcp_bearer_env () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Masc_domain.Admin
     ~raw_token:"admin-token";
   Auth.save_private_text_file (raw_token_file base_path "admin")
     "admin-token";
   save_credential_or_fail base_path ~agent_name:"codex-mcp-client"
-    ~role:Types.Worker ~raw_token:"codex-mcp-token";
+    ~role:Masc_domain.Worker ~raw_token:"codex-mcp-token";
   with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
@@ -277,7 +277,7 @@ let test_reports_codex_mcp_bearer_env () =
 let test_reports_claude_and_gemini_mcp_client_identities () =
   with_temp_dir "auth-doctor-mcp-clients" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -286,16 +286,16 @@ let test_reports_claude_and_gemini_mcp_client_identities () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Masc_domain.Admin
     ~raw_token:"admin-token";
   Auth.save_private_text_file (raw_token_file base_path "admin")
     "admin-token";
   save_credential_or_fail base_path ~agent_name:"claude"
-    ~role:Types.Worker ~raw_token:"claude-token";
+    ~role:Masc_domain.Worker ~raw_token:"claude-token";
   Auth.save_private_text_file (raw_token_file base_path "claude")
     "claude-token";
   save_credential_or_fail base_path ~agent_name:"gemini"
-    ~role:Types.Worker ~raw_token:"gemini-token";
+    ~role:Masc_domain.Worker ~raw_token:"gemini-token";
   Auth.save_private_text_file (raw_token_file base_path "gemini")
     "gemini-token";
   with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
@@ -330,7 +330,7 @@ let test_reports_claude_and_gemini_mcp_client_identities () =
 let test_reports_codex_config_pipeline_stages () =
   with_temp_dir "auth-doctor-codex-config-ok" @@ fun base_path ->
   let auth_cfg =
-    Types.
+    Masc_domain.
       {
         enabled = true;
         room_secret_hash = None;
@@ -340,8 +340,8 @@ let test_reports_codex_config_pipeline_stages () =
   in
   Auth.save_auth_config base_path auth_cfg;
   save_credential_or_fail base_path ~agent_name:"codex-mcp-client"
-    ~role:Types.Worker ~raw_token:"codex-mcp-token";
-  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+    ~role:Masc_domain.Worker ~raw_token:"codex-mcp-token";
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Masc_domain.Admin
     ~raw_token:"admin-token";
   Auth.save_private_text_file (raw_token_file base_path "admin")
     "admin-token";

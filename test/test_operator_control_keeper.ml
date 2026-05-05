@@ -311,6 +311,65 @@ let test_keeper_sandbox_status_exposes_local_summary () =
           status_json |> member "sandbox_live" |> member "effective_mode"
           |> to_string))
 
+let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-persisted" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect persisted sandbox summary");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_registry.clear ();
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:(`Assoc [ ("include_preflight", `Bool false) ])
+      in
+      Alcotest.(check bool) "fleet sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let json = parse_json_exn body in
+      let item =
+        json |> member "items" |> to_list
+        |> List.find_opt (fun row ->
+             row |> member "keeper" |> to_string = keeper_name)
+      in
+      match item with
+      | None -> Alcotest.fail "persisted keeper missing from fleet sandbox status"
+      | Some row ->
+          Alcotest.(check string) "persisted effective mode" "local"
+            (row |> member "effective_mode" |> to_string);
+          Alcotest.(check (option string)) "persisted why_no_container"
+            (Some "sandbox_profile=local")
+            (row |> member "why_no_container" |> to_string_option))
+
 let test_keeper_sandbox_start_status_stop_with_fake_docker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

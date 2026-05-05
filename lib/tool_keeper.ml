@@ -1075,6 +1075,14 @@ let parse_network_mode_or_error raw =
         (Printf.sprintf "invalid network_mode %S (allowed: %s)" raw
            (String.concat ", " valid_network_mode_strings))
 
+let keeper_sandbox_status_fleet_names ctx =
+  let registry_names =
+    Keeper_registry.all ~base_path:ctx.config.base_path ()
+    |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+  in
+  registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
+  |> dedupe_sorted_strings
+
 let handle_keeper_sandbox_status ctx args : tool_result =
   let verbose = get_bool args "verbose" false in
   let include_preflight = get_bool args "include_preflight" true in
@@ -1086,12 +1094,9 @@ let handle_keeper_sandbox_status ctx args : tool_result =
   match String.trim (get_string args "name" "") with
   | "" ->
       let items =
-        Keeper_registry.all ~base_path:ctx.config.base_path ()
-        |> List.sort (fun (a : Keeper_registry.registry_entry)
-                          (b : Keeper_registry.registry_entry) ->
-             String.compare a.name b.name)
-        |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-             match read_meta ctx.config entry.name with
+        keeper_sandbox_status_fleet_names ctx
+        |> List.filter_map (fun name ->
+             match read_meta ctx.config name with
              | Ok (Some meta) -> Some (render_item meta)
              | Ok None | Error _ -> None)
       in

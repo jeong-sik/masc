@@ -6,13 +6,16 @@
       1. its default is preserved when the original literal was a
          deliberately-tuned value (autoresearch_codegen=120s,
          tool_deep_review=180s, anti_rationalization=180s);
-      2. the two "fantasy" 60s budgets ([auto_responder],
+      2. the two old "fantasy" 60s budgets ([auto_responder],
          [dashboard_provider_runs]) get raised to [default_timeout_sec]
          (300s) — the original 60s did not match observed p50 latency
          (50–700s) and produced 27 timeouts/session;
-      3. the operator can override any single caller's budget via
+      3. dashboard judge daemons stay advisory and bounded by default
+         instead of holding an OAS CLI subprocess for multiple dashboard
+         refresh intervals;
+      4. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
-      4. the operator can set a fallback for unknown / future callers
+      5. the operator can set a fallback for unknown / future callers
          via [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC].
 
     The lookup order is per-caller env > per-caller hardcoded default
@@ -42,6 +45,14 @@ type caller =
     we preserve the value so the fix does not regress
     autoresearch / deep_review / anti_rationalization. *)
 let global_default_sec = 300.0
+
+(** Dashboard judges are background/advisory signal generators.  They run on the
+    operator screen cadence, so a default at or above the generic 300s worker
+    budget can pin a CLI-backed OAS child for several refreshes and starve the
+    live dashboard.  Keep this below the default 60s judge interval; operators
+    can still raise it per caller when they explicitly prefer completeness over
+    responsiveness. *)
+let dashboard_judge_default_sec = 45.0
 
 let caller_key = function
   | Auto_responder -> "auto_responder"
@@ -80,20 +91,13 @@ let known_default_sec = function
   | Keeper_persona_authoring
   | Server_openai_compat -> Some 120.0
   | Tool_deep_review | Anti_rationalization -> Some 180.0
-  (* #9629: Governance + Operator judges are LLM-via-OAS-worker calls
-     with the same observed p50 latency as Auto_responder /
-     Dashboard_provider_runs (50–700s).  Pre-migration these read
-     [Env_config.Inference.{operator,dashboard_governance}_judge_timeout_seconds]
-     directly via legacy [run_safe ~timeout_s], bypassing this SSOT.
-     Operator_judge in particular fell back to the global 30s
-     inference timeout — far below p50 — and produced the
-     "Execution timed out after 60.0s" warnings reported in #9629
-     (the 60s figure came from [Env_config.Inference.timeout_seconds]
-     overrides at the time).  Aligning both judges with the
-     Auto_responder default keeps the OAS-bridge SSOT consistent and
-     ends the asymmetry where one judge waited 30s and the other
-     300s for the same shape of LLM call. *)
-  | Governance_judge | Operator_judge -> Some global_default_sec
+  (* #9629 moved both judges into this SSOT after Operator_judge inherited a
+     too-short generic inference timeout.  Live dashboard evidence showed the
+     opposite failure mode: a 300s advisory judge budget can leave a
+     CLI-backed child running for minutes while operator/health surfaces stall.
+     Keep the caller-specific env overrides, but make the checked-in default
+     bounded for dashboard responsiveness. *)
+  | Governance_judge | Operator_judge -> Some dashboard_judge_default_sec
   | Unknown _ -> None
 
 let upper_case s =
@@ -144,8 +148,9 @@ let trimmed_value_opt name =
          no legacy alias is registered for the caller.
       3. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 120/180s budgets for compute-heavy
-         callers; raises the fantasy 60s budgets to
-         [global_default_sec] (300s).
+         callers; raises the old fantasy 60s worker budgets to
+         [global_default_sec] (300s); bounds dashboard judge daemons to
+         [dashboard_judge_default_sec].
       4. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override

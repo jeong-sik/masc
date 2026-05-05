@@ -3,3 +3,6 @@ val disposition_fields_json :
 
 val snapshot_json :
   config:Coord.config -> meta:Keeper_types.keeper_meta -> Yojson.Safe.t
+
+val summary_json :
+  config:Coord.config -> meta:Keeper_types.keeper_meta -> Yojson.Safe.t

@@ -885,6 +885,71 @@ let execution_summary_json ~meta ~latest_receipt =
         | None -> `Null );
     ]
 
+let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
+  let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
+  let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
+  let latest_terminal_reason =
+    latest_terminal_reason_opt ~latest_decision ~latest_receipt
+  in
+  let latest_terminal_reason_json =
+    latest_terminal_reason
+    |> Option.map Keeper_turn_terminal.to_json
+    |> Option.value ~default:`Null
+  in
+  let latest_next_action =
+    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
+  in
+  let pending_approval_count =
+    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  in
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let attention_fields =
+    Keeper_status_bridge.attention_fields_json config meta
+  in
+  let fallback_disposition, fallback_disposition_reason =
+    disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
+  in
+  let disposition, disposition_reason, operator_disposition,
+      operator_disposition_reason =
+    effective_disposition_fields ~fallback_disposition
+      ~fallback_reason:fallback_disposition_reason latest_receipt
+  in
+  let needs_attention =
+    assoc_bool_default "needs_attention" ~default:false attention_fields
+    || String.equal disposition "Pause"
+    || String.equal disposition "Alert"
+  in
+  let attention_reason =
+    assoc_string_opt "attention_reason" attention_fields
+  in
+  let next_human_action =
+    assoc_string_opt "next_human_action" attention_fields
+  in
+  let execution_summary =
+    execution_summary_json ~meta ~latest_receipt
+  in
+  let latest_causal_event =
+    match terminal_reason_timeline_event ~latest_decision ~latest_receipt with
+    | Some event -> event
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("disposition", `String disposition);
+      ("disposition_reason", `String disposition_reason);
+      ("operator_disposition", `String operator_disposition);
+      ("operator_disposition_reason", `String operator_disposition_reason);
+      ("needs_attention", `Bool needs_attention);
+      ("attention_reason", Json_util.string_opt_to_json attention_reason);
+      ("next_human_action", Json_util.string_opt_to_json next_human_action);
+      ("execution", execution_summary);
+      ("latest_terminal_reason", latest_terminal_reason_json);
+      ("latest_next_action", Json_util.string_opt_to_json latest_next_action);
+      ("latest_causal_event", latest_causal_event);
+    ]
+
 let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
     ~next_human_action =

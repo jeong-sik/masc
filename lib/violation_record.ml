@@ -21,6 +21,12 @@ type t = Agent_sdk.Mode_enforcer.violation = {
   violation_kind : violation_kind;
 }
 
+(** Violation enriched with source-path evidence. *)
+type enriched = {
+  base : t;
+  evidence : Effect_evidence.t;
+}
+
 let violation_kind_of_string s =
   match String.lowercase_ascii s with
   | "mutating_in_diagnose" -> Ok Agent_sdk.Mode_enforcer.Mutating_in_diagnose
@@ -58,6 +64,33 @@ let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
     in
     parse [] items
   | _ -> Error "expected JSON array of violation records"
+
+let of_json_enriched (json : Yojson.Safe.t) : (enriched, string) result =
+  match of_json json with
+  | Error e -> Error e
+  | Ok base ->
+    let evidence = Effect_evidence.of_json json in
+    Ok { base; evidence }
+
+let of_json_list_enriched (json : Yojson.Safe.t) : (enriched list, string) result =
+  match json with
+  | `List items ->
+    let rec parse acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        (match of_json_enriched item with
+         | Ok v -> parse (v :: acc) rest
+         | Error e -> Error e)
+    in
+    parse [] items
+  | _ -> Error "expected JSON array of violation records"
+
+let check_source_path_present (ev : enriched) : (unit, string) result =
+  if Effect_evidence.is_populated ev.evidence then Ok ()
+  else
+    Error (Printf.sprintf
+      "violation for tool '%s' is missing source_path evidence at \
+       Mode_enforcer boundary" ev.base.tool_name)
 
 let minimum_required_mode (v : t) : Agent_sdk.Execution_mode.t =
   match v.violation_kind with

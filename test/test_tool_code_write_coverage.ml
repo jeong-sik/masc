@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coverage tests for Tool_code_write — git clone URL parsing
     and org allowlist validation. Pure function tests only. *)
 

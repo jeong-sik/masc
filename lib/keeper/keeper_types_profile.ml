@@ -1109,11 +1109,17 @@ let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
   | [] -> ()
   | unknown ->
     let unknown = normalize_unknown_keeper_toml_keys unknown in
-    if warn_unknown_keeper_toml_keys_once ~path unknown then
+    if warn_unknown_keeper_toml_keys_once ~path unknown then begin
+      Prometheus.inc_counter
+        Prometheus.metric_config_unknown_keys_ignored
+        ~labels:[("file_path", path)]
+        ~delta:(float_of_int (List.length unknown))
+        ();
       Log.Keeper.warn
         "keeper TOML %s has unknown keys: %s"
         path
         (String.concat ", " unknown)
+    end
 
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs

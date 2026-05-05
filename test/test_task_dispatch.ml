@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 open Masc_mcp
 
 let with_temp_config f =

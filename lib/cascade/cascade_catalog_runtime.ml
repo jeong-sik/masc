@@ -215,6 +215,22 @@ let profile_probes (profile_candidates : candidate_runtime list) =
         "runtime provider health is advisory; bootstrap skips live probe")
     profile_candidates
 
+let record_advisory_probe_skips (profiles : profile_snapshot list) =
+  List.iter
+    (fun (profile : profile_snapshot) ->
+      List.iter
+        (fun (candidate : candidate_runtime) ->
+          Prometheus.inc_counter
+            Prometheus.metric_provider_health_probe_skipped
+            ~labels:
+              [
+                ("provider_name", provider_kind_string candidate.provider_cfg);
+                ("profile_name", profile.name);
+              ]
+            ())
+        profile.candidates)
+    profiles
+
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
     [
@@ -610,6 +626,7 @@ let validate_path_result ~config_path =
               profiles = profile_snapshots;
             }
           in
+          record_advisory_probe_skips profile_snapshots;
           if rejected_profiles = [] then
             Ok { snapshot; rejected_update = None }
           else

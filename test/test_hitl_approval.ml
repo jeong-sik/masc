@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for the HITL approval pipeline (#5907).
 
     Proves:

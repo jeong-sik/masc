@@ -89,7 +89,7 @@ let test_promoted_json_shape () =
       ~argv:[ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
       ~cwd
       ~envp:(Unix.environment ())
-      ~timeout_sec:30.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
       ()
   in
   match out with

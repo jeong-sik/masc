@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 open Masc_mcp
 open Test_operator_control_support
 

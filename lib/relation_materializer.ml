@@ -42,7 +42,7 @@ let build_batch_mutation ~agent ~peers ~context =
 let record_collaborations_async ~tag ~context ~agent ~peers =
   let do_batch () =
     let mutation = build_batch_mutation ~agent ~peers ~context in
-    match Graphql_client.mutate ~timeout_sec:10.0 ~mutation () with
+    match Graphql_client.mutate ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~mutation () with
     | Ok _ -> ()
     | Error msg -> log_err tag msg
   in

@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 module Cases = Test_keeper_tool_matrix_cases
 
 let result_prefix = "__KEEPER_TOOL_MATRIX_RESULT__"

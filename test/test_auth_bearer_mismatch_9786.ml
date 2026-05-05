@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (* test/test_auth_bearer_mismatch_9786.ml
 
    #9786: agent A presents a token that resolves to credential

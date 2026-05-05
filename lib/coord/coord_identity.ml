@@ -23,7 +23,7 @@ let get_tty () =
                 ~actor:"coord/identity"
                 ~raw_source:"tty"
                 ~summary:"coord tty probe"
-                ~timeout_sec:5.0
+                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Coord_identity ())
                 [ "tty" ]
             in
             let trimmed = String.trim output in

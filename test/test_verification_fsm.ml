@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** test_verification_fsm -- FSM transition tests for AwaitingVerification state.
 
     Tests Phase B+C transitions with MASC_VERIFICATION_FSM_ENABLED=true:

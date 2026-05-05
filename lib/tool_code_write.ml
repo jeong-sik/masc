@@ -68,7 +68,7 @@ let git_common_root path =
   try
     match
       Process_eio.run_argv_with_status
-        ~timeout_sec:5.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
         [ "git"; "-C"; path; "rev-parse"; "--git-common-dir" ]
     with
     | Unix.WEXITED 0, output ->
@@ -754,7 +754,7 @@ let handle_code_git ctx args =
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:30.0 ?env:env_opt cmd with
+        match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
         | Unix.WEXITED code, output ->
           let response = `Assoc [
             ("status", `String (if code = 0 then "ok" else "error"));

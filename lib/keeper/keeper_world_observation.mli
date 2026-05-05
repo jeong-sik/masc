@@ -183,6 +183,12 @@ val collect_board_events :
   meta:Keeper_types.keeper_meta ->
   pending_board_event list * int * int
 
+val collect_board_events_without_advancing_cursor :
+  base_path:string ->
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  pending_board_event list * int * int
+
 val board_signal_match :
   continuity_summary:string ->
   meta:Keeper_types.keeper_meta ->
@@ -226,6 +232,19 @@ val observe :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation
+
+(** Non-mutating probe for the smart-heartbeat gate.
+
+    Returns [true] when durable room state already contains work that should
+    force a keeper cycle even if the adaptive heartbeat would otherwise
+    [Skip_idle]. Unlike {!observe}, this helper does not advance board or
+    message cursors. *)
+val durable_signal_present :
+  allowed_tool_names:string list option ->
+  pending_board_events:pending_board_event list option ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  bool
 
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool

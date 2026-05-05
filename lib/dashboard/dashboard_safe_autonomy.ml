@@ -772,7 +772,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:false
-      ~config ~meta ~timeout_sec:3.0 ~verbose:false ()
+      ~config ~meta ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dashboard ()) ~verbose:false ()
   in
   let domains =
     [

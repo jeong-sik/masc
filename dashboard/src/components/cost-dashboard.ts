@@ -650,7 +650,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
   return html`
     <section class="flex flex-col gap-2" aria-label="Heuristic by module">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.unique_decision_tuples} unique tuples</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.decision_shape_count} decision shapes · ${coverage.mixed_outcome_sites} mixed sites</span>
       </div>
       <div class="flex flex-col gap-2">
         ${sortedModules.map(([moduleName, sites]) => {

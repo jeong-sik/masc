@@ -42,6 +42,8 @@ type coverage_site = {
 type coverage_report = {
   total_events : int;
   sites : coverage_site list;
+  decision_shape_count : int;
+  mixed_outcome_sites : int;
   unique_decision_tuples : int;
 }
 
@@ -81,8 +83,10 @@ val recent : int -> Yojson.Safe.t list
 (** Read the N most recent events as JSON objects. *)
 
 val coverage_report_of_events : Yojson.Safe.t list -> coverage_report
-(** Summarize event coverage by module/site and count distinct
-    raw/threshold/triggered tuples. *)
+(** Summarize event coverage by module/site.  [decision_shape_count]
+    counts distinct module/site/threshold/triggered shapes; it deliberately
+    ignores [raw_value] so noisy score churn does not masquerade as coverage.
+    [unique_decision_tuples] is retained as a wire-compatible alias. *)
 
 val recent_coverage : int -> coverage_report
 (** Read recent events and summarize their coverage. *)

@@ -1119,6 +1119,8 @@ export interface CoverageSite {
 
 export interface HeuristicCoverage {
   total_events: number
+  decision_shape_count: number
+  mixed_outcome_sites: number
   unique_decision_tuples: number
   sites: CoverageSite[]
 }
@@ -1135,9 +1137,12 @@ function decodeCoverageSite(raw: unknown): CoverageSite | null {
 
 function decodeHeuristicCoverage(raw: unknown): HeuristicCoverage | null {
   if (!isRecord(raw)) return null
+  const decisionShapeCount = asInt(raw.decision_shape_count) ?? asInt(raw.unique_decision_tuples) ?? 0
   return {
     total_events: asInt(raw.total_events) ?? 0,
-    unique_decision_tuples: asInt(raw.unique_decision_tuples) ?? 0,
+    decision_shape_count: decisionShapeCount,
+    mixed_outcome_sites: asInt(raw.mixed_outcome_sites) ?? 0,
+    unique_decision_tuples: decisionShapeCount,
     sites: asRecordArray(raw.sites)
       .map(decodeCoverageSite)
       .filter((s): s is CoverageSite => s !== null),

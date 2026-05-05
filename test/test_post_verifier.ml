@@ -170,6 +170,16 @@ let test_heuristic_coverage_report_groups_sites () =
         {
           module_name = "post_verifier";
           site = "relevance";
+          raw_value = 0.9;
+          threshold = 0.5;
+          triggered = true;
+          provenance = Hm.Post_verifier "relevance";
+          timestamp = 2.5;
+        };
+      Hm.event_to_json
+        {
+          module_name = "post_verifier";
+          site = "relevance";
           raw_value = 0.2;
           threshold = 0.5;
           triggered = false;
@@ -189,9 +199,12 @@ let test_heuristic_coverage_report_groups_sites () =
     ]
   in
   let report = Hm.coverage_report_of_events events in
-  check int "total events" 3 report.total_events;
+  check int "total events" 4 report.total_events;
   check int "two sites" 2 (List.length report.sites);
-  check int "three distinct tuples" 3 report.unique_decision_tuples;
+  check int "three decision shapes" 3 report.decision_shape_count;
+  check int "compat tuple count aliases decision shapes" 3
+    report.unique_decision_tuples;
+  check int "one mixed outcome site" 1 report.mixed_outcome_sites;
   let post_verifier_site =
     List.find
       (fun (site : Hm.coverage_site) ->
@@ -199,8 +212,8 @@ let test_heuristic_coverage_report_groups_sites () =
          && site.site = "relevance")
       report.sites
   in
-  check int "site count" 2 post_verifier_site.count;
-  check int "site triggered count" 1 post_verifier_site.triggered_count
+  check int "site count" 3 post_verifier_site.count;
+  check int "site triggered count" 2 post_verifier_site.triggered_count
 
 (* ================================================================ *)
 (* Runner                                                           *)

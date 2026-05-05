@@ -1,10 +1,10 @@
 import { h } from 'preact'
-import { render, screen } from '@testing-library/preact'
+import { fireEvent, render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { BoardSurface } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
 import { route } from '../../router'
-import { contentCategory } from './board-state'
+import { boardHearths, contentCategory } from './board-state'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -26,6 +26,7 @@ vi.mock('../../router', () => ({
 vi.mock('../../api', () => ({
   fetchBoardPost: vi.fn(),
   votePost: vi.fn(),
+  fetchBoardHearths: vi.fn().mockResolvedValue([]),
   commentPost: vi.fn(),
   createPost: vi.fn(),
 }))
@@ -45,6 +46,7 @@ vi.mock('./board-state', async () => {
     fetchBoardPost: vi.fn(),
     commentPost: vi.fn(),
     createPost: vi.fn(),
+    refreshBoardHearths: vi.fn(),
   }
 })
 
@@ -125,6 +127,12 @@ describe('contentCategory', () => {
 describe('BoardSurface Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ posts: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
     boardPosts.value = []
     boardLoading.value = false
     boardSortMode.value = 'recent'
@@ -132,6 +140,8 @@ describe('BoardSurface Component', () => {
     boardExcludeAutomation.value = false
     boardHiddenCategories.value = new Set(['system'])
     boardAuthorFilter.value = ''
+    boardHearthFilter.value = ''
+    boardHearths.value = [{ name: 'ops', count: 0 }]
     route.value = { params: {} } as any
   })
 
@@ -171,5 +181,24 @@ describe('BoardSurface Component', () => {
     ]
     render(h(BoardSurface, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
+  })
+
+  it('applies a hearth filter from the server hearth list', () => {
+    boardHearths.value = [{ name: 'ops', count: 2 }]
+    boardPosts.value = [
+      makePost({
+        id: 'post-ops',
+        title: 'Ops note',
+        body: 'ops content',
+        author: 'keeper',
+        hearth: 'ops',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByRole('button', { name: 'hearth ops 2 posts' }))
+
+    expect(boardHearthFilter.value).toBe('ops')
+    expect(screen.getByRole('button', { name: 'hearth ops 2 posts' })).toHaveAttribute('aria-pressed', 'true')
   })
 })

@@ -330,7 +330,7 @@ let discover_repositories ~base_path =
   let git_dirs =
     try
       let cmd =
-        Printf.sprintf "find %s -name \".git\" -maxdepth 3 -type d 2>/dev/null"
+        Printf.sprintf "find %s -maxdepth 4 -name \".git\" -type d 2>/dev/null"
           (Filename.quote base_path)
       in
       let ic = Unix.open_process_in cmd in
@@ -346,10 +346,30 @@ let discover_repositories ~base_path =
     with
     | Sys_error _ | Unix.Unix_error _ | Failure _ -> []
   in
-  let is_masc_dir path =
-    let masc_prefix = Filename.concat base_path ".masc" in
-    String.length path >= String.length masc_prefix
-    && String.sub path 0 (String.length masc_prefix) = masc_prefix
+  let has_hidden_segment_under_base path =
+    if String.equal path base_path then false
+    else
+      let base_prefix =
+        if String.length base_path > 0
+           && Char.equal base_path.[String.length base_path - 1] '/'
+        then base_path
+        else base_path ^ "/"
+      in
+      let prefix_len = String.length base_prefix in
+      if
+        String.length path < prefix_len
+        || not (String.equal (String.sub path 0 prefix_len) base_prefix)
+      then false
+      else
+        let rel =
+          String.sub path prefix_len (String.length path - prefix_len)
+        in
+        rel
+        |> String.split_on_char '/'
+        |> List.exists (fun segment ->
+               String.length segment > 0
+               && (not (String.equal segment "." || String.equal segment ".."))
+               && Char.equal segment.[0] '.')
   in
   let candidates =
     List.filter_map
@@ -359,7 +379,7 @@ let discover_repositories ~base_path =
           if Filename.is_relative repo_dir then Filename.concat base_path repo_dir
           else repo_dir
         in
-        if is_masc_dir abs_repo_dir then None
+        if has_hidden_segment_under_base abs_repo_dir then None
         else if List.exists (String.equal abs_repo_dir) existing_paths then None
         else
           let url_cmd =

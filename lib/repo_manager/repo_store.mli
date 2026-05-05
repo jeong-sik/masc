@@ -44,7 +44,7 @@ val local_path : base_path:string -> repository -> string
 
 val discover_repositories : base_path:string -> (repository list, string) result
 (** [discover_repositories ~base_path] scans [base_path] for git repositories
-    (directories containing [.git] up to depth 3) and returns a list of
+    (directories containing [.git] up to depth 4) and returns a list of
     candidate {!repository} records inferred from their [origin] remote URL.
 
     Directories under [.masc/] and repositories already registered in

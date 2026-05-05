@@ -61,12 +61,12 @@ let with_temp_base_path f =
 let save_cred base_path ~agent_name ~raw_token =
   match
     Auth.save_raw_token_credential base_path
-      ~agent_name ~role:Types.Worker ~raw_token
+      ~agent_name ~role:Masc_domain.Worker ~raw_token
   with
   | Ok _ -> ()
   | Error e ->
     Alcotest.failf "failed to seed credential %s: %s" agent_name
-      (Types.masc_error_to_string e)
+      (Masc_domain.masc_error_to_string e)
 
 (* A's credential never saved; B's credential saved with token-B.
    Verifying A with token-B triggers the cross-agent mismatch
@@ -80,10 +80,10 @@ let test_cross_agent_mismatch_advances_counter () =
     Auth.verify_token dir ~agent_name:"agent-a-9786" ~token:"token-b-raw"
   in
   (match result with
-   | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
    | Error e ->
      Alcotest.failf "expected Unauthorized, got: %s"
-       (Types.masc_error_to_string e)
+       (Masc_domain.masc_error_to_string e)
    | Ok _ -> Alcotest.fail "expected Unauthorized, got Ok");
   Alcotest.(check (float 0.0001))
     "mismatch counter (A, B) advanced by 1"

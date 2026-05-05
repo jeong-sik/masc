@@ -30,75 +30,75 @@ let is_error result =
   match result with Ok _ -> false | Error _ -> true
 
 (* ============================================================ *)
-(* Types.Agent_id Tests                                          *)
+(* Masc_domain.Agent_id Tests                                          *)
 (* ============================================================ *)
 
 let test_agent_id_of_string () =
-  let id = Types.Agent_id.of_string "claude-123" in
-  check string "to_string" "claude-123" (Types.Agent_id.to_string id)
+  let id = Masc_domain.Agent_id.of_string "claude-123" in
+  check string "to_string" "claude-123" (Masc_domain.Agent_id.to_string id)
 
 let test_agent_id_equal () =
-  let a = Types.Agent_id.of_string "agent-a" in
-  let b = Types.Agent_id.of_string "agent-a" in
-  let c = Types.Agent_id.of_string "agent-b" in
-  check bool "equal same" true (Types.Agent_id.equal a b);
-  check bool "not equal different" false (Types.Agent_id.equal a c)
+  let a = Masc_domain.Agent_id.of_string "agent-a" in
+  let b = Masc_domain.Agent_id.of_string "agent-a" in
+  let c = Masc_domain.Agent_id.of_string "agent-b" in
+  check bool "equal same" true (Masc_domain.Agent_id.equal a b);
+  check bool "not equal different" false (Masc_domain.Agent_id.equal a c)
 
 let test_agent_id_to_yojson () =
-  let id = Types.Agent_id.of_string "test-agent" in
-  let json = Types.Agent_id.to_yojson id in
+  let id = Masc_domain.Agent_id.of_string "test-agent" in
+  let json = Masc_domain.Agent_id.to_yojson id in
   check json_string "json string" (`String "test-agent") json
 
 let test_agent_id_of_yojson_valid () =
-  let result = Types.Agent_id.of_yojson (`String "valid-agent") in
+  let result = Masc_domain.Agent_id.of_yojson (`String "valid-agent") in
   check bool "is ok" true (is_ok result)
 
 let test_agent_id_of_yojson_invalid () =
-  let result = Types.Agent_id.of_yojson (`Int 123) in
+  let result = Masc_domain.Agent_id.of_yojson (`Int 123) in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.Task_id Tests                                           *)
+(* Masc_domain.Task_id Tests                                           *)
 (* ============================================================ *)
 
 let test_task_id_of_string () =
-  let id = Types.Task_id.of_string "task-456" in
-  check string "to_string" "task-456" (Types.Task_id.to_string id)
+  let id = Masc_domain.Task_id.of_string "task-456" in
+  check string "to_string" "task-456" (Masc_domain.Task_id.to_string id)
 
 let test_task_id_equal () =
-  let a = Types.Task_id.of_string "task-a" in
-  let b = Types.Task_id.of_string "task-a" in
-  let c = Types.Task_id.of_string "task-b" in
-  check bool "equal same" true (Types.Task_id.equal a b);
-  check bool "not equal different" false (Types.Task_id.equal a c)
+  let a = Masc_domain.Task_id.of_string "task-a" in
+  let b = Masc_domain.Task_id.of_string "task-a" in
+  let c = Masc_domain.Task_id.of_string "task-b" in
+  check bool "equal same" true (Masc_domain.Task_id.equal a b);
+  check bool "not equal different" false (Masc_domain.Task_id.equal a c)
 
 let test_task_id_generate () =
-  let id1 = Types.Task_id.generate () in
-  let id2 = Types.Task_id.generate () in
-  let s1 = Types.Task_id.to_string id1 in
-  let s2 = Types.Task_id.to_string id2 in
+  let id1 = Masc_domain.Task_id.generate () in
+  let id2 = Masc_domain.Task_id.generate () in
+  let s1 = Masc_domain.Task_id.to_string id1 in
+  let s2 = Masc_domain.Task_id.to_string id2 in
   check bool "starts with task-" true (String.length s1 > 5);
   check bool "different ids" false (s1 = s2)
 
 let test_task_id_to_yojson () =
-  let id = Types.Task_id.of_string "task-test" in
-  let json = Types.Task_id.to_yojson id in
+  let id = Masc_domain.Task_id.of_string "task-test" in
+  let json = Masc_domain.Task_id.to_yojson id in
   check json_string "json string" (`String "task-test") json
 
 let test_task_id_of_yojson_valid () =
-  let result = Types.Task_id.of_yojson (`String "valid-task") in
+  let result = Masc_domain.Task_id.of_yojson (`String "valid-task") in
   check bool "is ok" true (is_ok result)
 
 let test_task_id_of_yojson_invalid () =
-  let result = Types.Task_id.of_yojson (`Bool true) in
+  let result = Masc_domain.Task_id.of_yojson (`Bool true) in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.Timestamp Tests                                         *)
+(* Masc_domain.Timestamp Tests                                         *)
 (* ============================================================ *)
 
 let test_now_iso_format () =
-  let ts = Types.now_iso () in
+  let ts = Masc_domain.now_iso () in
   (* ISO8601 format: YYYY-MM-DDTHH:MM:SSZ *)
   check bool "length >= 20" true (String.length ts >= 20);
   check bool "contains T" true (String.contains ts 'T');
@@ -106,28 +106,28 @@ let test_now_iso_format () =
 
 let test_parse_iso8601_valid () =
   let ts = "2024-12-25T10:30:45Z" in
-  let result = Types.parse_iso8601 ts in
+  let result = Masc_domain.parse_iso8601 ts in
   check bool "positive timestamp" true (result > 0.0)
 
 let test_parse_iso8601_invalid () =
   let ts = "invalid-timestamp" in
   let default = 12345.0 in
-  let result = Types.parse_iso8601 ~default_time:default ts in
+  let result = Masc_domain.parse_iso8601 ~default_time:default ts in
   check (float 0.1) "uses default" default result
 
 (* ============================================================ *)
-(* Types.agent_status Tests                                      *)
+(* Masc_domain.agent_status Tests                                      *)
 (* ============================================================ *)
 
 let test_agent_status_to_string () =
-  check string "Active" "active" (Types.agent_status_to_string Types.Active);
-  check string "Busy" "busy" (Types.agent_status_to_string Types.Busy);
-  check string "Listening" "listening" (Types.agent_status_to_string Types.Listening);
-  check string "Inactive" "inactive" (Types.agent_status_to_string Types.Inactive)
+  check string "Active" "active" (Masc_domain.agent_status_to_string Masc_domain.Active);
+  check string "Busy" "busy" (Masc_domain.agent_status_to_string Masc_domain.Busy);
+  check string "Listening" "listening" (Masc_domain.agent_status_to_string Masc_domain.Listening);
+  check string "Inactive" "inactive" (Masc_domain.agent_status_to_string Masc_domain.Inactive)
 
 let test_agent_status_of_string_opt () =
-  check bool "active Some" true (Types.agent_status_of_string_opt "active" = Some Types.Active);
-  check bool "unknown None" true (Types.agent_status_of_string_opt "unknown" = None)
+  check bool "active Some" true (Masc_domain.agent_status_of_string_opt "active" = Some Masc_domain.Active);
+  check bool "unknown None" true (Masc_domain.agent_status_of_string_opt "unknown" = None)
 
 (* #10748: Result-based parser must not collapse unknown input to a
    default — explicit Error preserves the original string so callers
@@ -135,251 +135,251 @@ let test_agent_status_of_string_opt () =
    typos/future-variants to "Active". *)
 let test_agent_status_of_string_r () =
   check bool "active Ok"
-    true (Types.agent_status_of_string_r "active" = Ok Types.Active);
+    true (Masc_domain.agent_status_of_string_r "active" = Ok Masc_domain.Active);
   check bool "busy Ok"
-    true (Types.agent_status_of_string_r "busy" = Ok Types.Busy);
-  (match Types.agent_status_of_string_r "bogus" with
+    true (Masc_domain.agent_status_of_string_r "busy" = Ok Masc_domain.Busy);
+  (match Masc_domain.agent_status_of_string_r "bogus" with
    | Ok _ -> failwith "unknown input must be Error, not Ok"
    | Error msg ->
      check bool "Error preserves original input"
        true (String_util.contains_substring msg "bogus"))
 
 let test_agent_status_to_yojson () =
-  let json = Types.agent_status_to_yojson Types.Busy in
+  let json = Masc_domain.agent_status_to_yojson Masc_domain.Busy in
   check json_string "busy json" (`String "busy") json
 
 let test_agent_status_of_yojson_valid () =
-  let result = Types.agent_status_of_yojson (`String "listening") in
+  let result = Masc_domain.agent_status_of_yojson (`String "listening") in
   check bool "is ok" true (is_ok result);
   match result with
-  | Ok status -> check bool "is Listening" true (status = Types.Listening)
+  | Ok status -> check bool "is Listening" true (status = Masc_domain.Listening)
   | Error _ -> failwith "should be ok"
 
 let test_agent_status_of_yojson_invalid () =
-  let result = Types.agent_status_of_yojson (`String "garbage") in
+  let result = Masc_domain.agent_status_of_yojson (`String "garbage") in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.task_status Tests                                       *)
+(* Masc_domain.task_status Tests                                       *)
 (* ============================================================ *)
 
 let test_task_status_todo () =
-  let status = Types.Todo in
-  check string "to_string" "todo" (Types.task_status_to_string status);
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  let status = Masc_domain.Todo in
+  check string "to_string" "todo" (Masc_domain.task_status_to_string status);
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_claimed () =
-  let status = Types.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
-  check string "to_string" "claimed" (Types.task_status_to_string status);
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
+  check string "to_string" "claimed" (Masc_domain.task_status_to_string status);
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_in_progress () =
-  let status = Types.InProgress { assignee = "gemini"; started_at = "2024-01-01T01:00:00Z" } in
-  check string "to_string" "in_progress" (Types.task_status_to_string status);
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  let status = Masc_domain.InProgress { assignee = "gemini"; started_at = "2024-01-01T01:00:00Z" } in
+  check string "to_string" "in_progress" (Masc_domain.task_status_to_string status);
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_done () =
-  let status = Types.Done {
+  let status = Masc_domain.Done {
     assignee = "codex";
     completed_at = "2024-01-01T02:00:00Z";
     notes = Some "All tests pass"
   } in
-  check string "to_string" "done" (Types.task_status_to_string status);
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  check string "to_string" "done" (Masc_domain.task_status_to_string status);
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_done_no_notes () =
-  let status = Types.Done {
+  let status = Masc_domain.Done {
     assignee = "codex";
     completed_at = "2024-01-01T02:00:00Z";
     notes = None
   } in
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_cancelled () =
-  let status = Types.Cancelled {
+  let status = Masc_domain.Cancelled {
     cancelled_by = "admin";
     cancelled_at = "2024-01-01T03:00:00Z";
     reason = Some "Duplicate task"
   } in
-  check string "to_string" "cancelled" (Types.task_status_to_string status);
-  let json = Types.task_status_to_yojson status in
-  let result = Types.task_status_of_yojson json in
+  check string "to_string" "cancelled" (Masc_domain.task_status_to_string status);
+  let json = Masc_domain.task_status_to_yojson status in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_of_yojson_unknown () =
   let json = `Assoc [("status", `String "unknown_status")] in
-  let result = Types.task_status_of_yojson json in
+  let result = Masc_domain.task_status_of_yojson json in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.tempo_mode Tests                                        *)
+(* Masc_domain.tempo_mode Tests                                        *)
 (* ============================================================ *)
 
 let test_tempo_mode_to_string () =
-  check string "Normal" "normal" (Types.tempo_mode_to_string Types.Normal);
-  check string "Slow" "slow" (Types.tempo_mode_to_string Types.Slow);
-  check string "Fast" "fast" (Types.tempo_mode_to_string Types.Fast);
-  check string "Paused" "paused" (Types.tempo_mode_to_string Types.Paused)
+  check string "Normal" "normal" (Masc_domain.tempo_mode_to_string Masc_domain.Normal);
+  check string "Slow" "slow" (Masc_domain.tempo_mode_to_string Masc_domain.Slow);
+  check string "Fast" "fast" (Masc_domain.tempo_mode_to_string Masc_domain.Fast);
+  check string "Paused" "paused" (Masc_domain.tempo_mode_to_string Masc_domain.Paused)
 
 let test_tempo_mode_of_string () =
-  check bool "normal ok" true (is_ok (Types.tempo_mode_of_string "normal"));
-  check bool "slow ok" true (is_ok (Types.tempo_mode_of_string "slow"));
-  check bool "fast ok" true (is_ok (Types.tempo_mode_of_string "fast"));
-  check bool "paused ok" true (is_ok (Types.tempo_mode_of_string "paused"));
-  check bool "unknown error" true (is_error (Types.tempo_mode_of_string "turbo"))
+  check bool "normal ok" true (is_ok (Masc_domain.tempo_mode_of_string "normal"));
+  check bool "slow ok" true (is_ok (Masc_domain.tempo_mode_of_string "slow"));
+  check bool "fast ok" true (is_ok (Masc_domain.tempo_mode_of_string "fast"));
+  check bool "paused ok" true (is_ok (Masc_domain.tempo_mode_of_string "paused"));
+  check bool "unknown error" true (is_error (Masc_domain.tempo_mode_of_string "turbo"))
 
 let test_tempo_mode_roundtrip () =
-  let modes = [Types.Normal; Types.Slow; Types.Fast; Types.Paused] in
+  let modes = [Masc_domain.Normal; Masc_domain.Slow; Masc_domain.Fast; Masc_domain.Paused] in
   List.iter (fun mode ->
-    let json = Types.tempo_mode_to_yojson mode in
-    let result = Types.tempo_mode_of_yojson json in
+    let json = Masc_domain.tempo_mode_to_yojson mode in
+    let result = Masc_domain.tempo_mode_of_yojson json in
     check bool "roundtrip ok" true (is_ok result)
   ) modes
 
 (* ============================================================ *)
-(* Types.tempo_config Tests                                      *)
+(* Masc_domain.tempo_config Tests                                      *)
 (* ============================================================ *)
 
 let test_default_tempo_config () =
-  let cfg = Types.default_tempo_config in
-  check bool "mode is Normal" true (cfg.mode = Types.Normal);
+  let cfg = Masc_domain.default_tempo_config in
+  check bool "mode is Normal" true (cfg.mode = Masc_domain.Normal);
   check int "delay_ms is 0" 0 cfg.delay_ms;
   check bool "reason is None" true (cfg.reason = None)
 
 let test_tempo_config_roundtrip () =
-  let cfg = Types.{
+  let cfg = Masc_domain.{
     mode = Slow;
     delay_ms = 500;
     reason = Some "Heavy workload";
     set_by = Some "admin";
     set_at = Some "2024-01-01T00:00:00Z";
   } in
-  let json = Types.tempo_config_to_yojson cfg in
-  let result = Types.tempo_config_of_yojson json in
+  let json = Masc_domain.tempo_config_to_yojson cfg in
+  let result = Masc_domain.tempo_config_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.a2a_task_status Tests                                   *)
+(* Masc_domain.a2a_task_status Tests                                   *)
 (* ============================================================ *)
 
 let test_a2a_task_status_all () =
   let statuses = [
-    (Types.A2APending, "pending");
-    (Types.A2ARunning, "running");
-    (Types.A2ACompleted, "completed");
-    (Types.A2AFailed, "failed");
-    (Types.A2ACanceled, "canceled");
+    (Masc_domain.A2APending, "pending");
+    (Masc_domain.A2ARunning, "running");
+    (Masc_domain.A2ACompleted, "completed");
+    (Masc_domain.A2AFailed, "failed");
+    (Masc_domain.A2ACanceled, "canceled");
   ] in
   List.iter (fun (status, expected) ->
-    check string "to_string" expected (Types.a2a_task_status_to_string status);
-    let json = Types.a2a_task_status_to_yojson status in
-    let result = Types.a2a_task_status_of_yojson json in
+    check string "to_string" expected (Masc_domain.a2a_task_status_to_string status);
+    let json = Masc_domain.a2a_task_status_to_yojson status in
+    let result = Masc_domain.a2a_task_status_of_yojson json in
     check bool "roundtrip ok" true (is_ok result)
   ) statuses
 
 let test_a2a_task_status_of_string_unknown () =
-  let result = Types.a2a_task_status_of_string "unknown" in
+  let result = Masc_domain.a2a_task_status_of_string "unknown" in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.portal_state Tests                                      *)
+(* Masc_domain.portal_state Tests                                      *)
 (* ============================================================ *)
 
 let test_portal_state_all () =
-  let states = [(Types.PortalOpen, "open"); (Types.PortalClosed, "closed")] in
+  let states = [(Masc_domain.PortalOpen, "open"); (Masc_domain.PortalClosed, "closed")] in
   List.iter (fun (state, expected) ->
-    check string "to_string" expected (Types.portal_state_to_string state);
-    let json = Types.portal_state_to_yojson state in
-    let result = Types.portal_state_of_yojson json in
+    check string "to_string" expected (Masc_domain.portal_state_to_string state);
+    let json = Masc_domain.portal_state_to_yojson state in
+    let result = Masc_domain.portal_state_of_yojson json in
     check bool "roundtrip ok" true (is_ok result)
   ) states
 
 let test_portal_state_of_string_unknown () =
-  let result = Types.portal_state_of_string "half-open" in
+  let result = Masc_domain.portal_state_of_string "half-open" in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.agent_role Tests                                        *)
+(* Masc_domain.agent_role Tests                                        *)
 (* ============================================================ *)
 
 let test_agent_role_all () =
-  let roles = [(Types.Worker, "worker"); (Types.Admin, "admin")] in
+  let roles = [(Masc_domain.Worker, "worker"); (Masc_domain.Admin, "admin")] in
   List.iter (fun (role, expected) ->
-    check string "to_string" expected (Types.agent_role_to_string role);
-    let json = Types.agent_role_to_yojson role in
-    let result = Types.agent_role_of_yojson json in
+    check string "to_string" expected (Masc_domain.agent_role_to_string role);
+    let json = Masc_domain.agent_role_to_yojson role in
+    let result = Masc_domain.agent_role_of_yojson json in
     check bool "roundtrip ok" true (is_ok result)
   ) roles
 
 let test_agent_role_of_string_unknown () =
-  let result = Types.agent_role_of_string "superadmin" in
+  let result = Masc_domain.agent_role_of_string "superadmin" in
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Types.permissions Tests                                       *)
+(* Masc_domain.permissions Tests                                       *)
 (* ============================================================ *)
 
 let test_permissions_worker () =
-  let perms = Types.permissions_for_role Types.Worker in
-  check bool "can read" true (List.mem Types.CanReadState perms);
-  check bool "can add task" true (List.mem Types.CanAddTask perms);
-  check bool "can broadcast" true (List.mem Types.CanBroadcast perms);
-  check bool "cannot init" false (List.mem Types.CanInit perms)
+  let perms = Masc_domain.permissions_for_role Masc_domain.Worker in
+  check bool "can read" true (List.mem Masc_domain.CanReadState perms);
+  check bool "can add task" true (List.mem Masc_domain.CanAddTask perms);
+  check bool "can broadcast" true (List.mem Masc_domain.CanBroadcast perms);
+  check bool "cannot init" false (List.mem Masc_domain.CanInit perms)
 
 let test_permissions_admin () =
-  let perms = Types.permissions_for_role Types.Admin in
-  check bool "can init" true (List.mem Types.CanInit perms);
-  check bool "can reset" true (List.mem Types.CanReset perms);
-  check bool "can admin" true (List.mem Types.CanAdmin perms)
+  let perms = Masc_domain.permissions_for_role Masc_domain.Admin in
+  check bool "can init" true (List.mem Masc_domain.CanInit perms);
+  check bool "can reset" true (List.mem Masc_domain.CanReset perms);
+  check bool "can admin" true (List.mem Masc_domain.CanAdmin perms)
 
 let test_has_permission () =
-  check bool "worker can read" true (Types.has_permission Types.Worker Types.CanReadState);
-  check bool "worker cannot init" false (Types.has_permission Types.Worker Types.CanInit);
-  check bool "admin can init" true (Types.has_permission Types.Admin Types.CanInit)
+  check bool "worker can read" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
+  check bool "worker cannot init" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanInit);
+  check bool "admin can init" true (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanInit)
 
 (* ============================================================ *)
-(* Types.rate_limit Tests                                        *)
+(* Masc_domain.rate_limit Tests                                        *)
 (* ============================================================ *)
 
 let test_default_rate_limit () =
-  let cfg = Types.default_rate_limit in
+  let cfg = Masc_domain.default_rate_limit in
   check int "per_minute" 10 cfg.per_minute;
   check int "burst_allowed" 5 cfg.burst_allowed;
   check (float 0.01) "worker_multiplier" 1.0 cfg.worker_multiplier;
   check (float 0.01) "admin_multiplier" 2.0 cfg.admin_multiplier
 
 let test_limit_for_category () =
-  let cfg = Types.default_rate_limit in
-  check int "general" cfg.per_minute (Types.limit_for_category cfg Types.GeneralLimit);
-  check int "broadcast" cfg.broadcast_per_minute (Types.limit_for_category cfg Types.BroadcastLimit);
-  check int "task_ops" cfg.task_ops_per_minute (Types.limit_for_category cfg Types.TaskOpsLimit)
+  let cfg = Masc_domain.default_rate_limit in
+  check int "general" cfg.per_minute (Masc_domain.limit_for_category cfg Masc_domain.GeneralLimit);
+  check int "broadcast" cfg.broadcast_per_minute (Masc_domain.limit_for_category cfg Masc_domain.BroadcastLimit);
+  check int "task_ops" cfg.task_ops_per_minute (Masc_domain.limit_for_category cfg Masc_domain.TaskOpsLimit)
 
 let test_category_for_tool () =
-  check bool "broadcast" true (Types.category_for_tool "masc_broadcast" = Types.BroadcastLimit);
-  check bool "status" true (Types.category_for_tool "masc_status" = Types.GeneralLimit)
+  check bool "broadcast" true (Masc_domain.category_for_tool "masc_broadcast" = Masc_domain.BroadcastLimit);
+  check bool "status" true (Masc_domain.category_for_tool "masc_status" = Masc_domain.GeneralLimit)
 
 let test_multiplier_for_role () =
-  let cfg = Types.default_rate_limit in
-  check (float 0.01) "worker" 1.0 (Types.multiplier_for_role cfg Types.Worker);
-  check (float 0.01) "admin" 2.0 (Types.multiplier_for_role cfg Types.Admin)
+  let cfg = Masc_domain.default_rate_limit in
+  check (float 0.01) "worker" 1.0 (Masc_domain.multiplier_for_role cfg Masc_domain.Worker);
+  check (float 0.01) "admin" 2.0 (Masc_domain.multiplier_for_role cfg Masc_domain.Admin)
 
 let test_effective_limit () =
-  let cfg = Types.default_rate_limit in
-  let eff = Types.effective_limit cfg ~role:Types.Admin ~category:Types.GeneralLimit in
+  let cfg = Masc_domain.default_rate_limit in
+  let eff = Masc_domain.effective_limit cfg ~role:Masc_domain.Admin ~category:Masc_domain.GeneralLimit in
   check int "admin general" 20 eff (* 10 * 2.0 *)
 
 let test_rate_limit_config_roundtrip () =
-  let cfg = Types.{
+  let cfg = Masc_domain.{
     per_minute = 20;
     burst_allowed = 10;
     priority_agents = ["admin-1"; "admin-2"];
@@ -388,50 +388,50 @@ let test_rate_limit_config_roundtrip () =
     broadcast_per_minute = 30;
     task_ops_per_minute = 60;
   } in
-  let json = Types.rate_limit_config_to_yojson cfg in
-  let result = Types.rate_limit_config_of_yojson json in
+  let json = Masc_domain.rate_limit_config_to_yojson cfg in
+  let result = Masc_domain.rate_limit_config_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.masc_error Tests                                        *)
+(* Masc_domain.masc_error Tests                                        *)
 (* ============================================================ *)
 
 let test_masc_error_to_string () =
   check bool "NotInitialized" true
-    (String.length (Types.masc_error_to_string (Types.System Types.System_error.NotInitialized)) > 0);
+    (String.length (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized)) > 0);
   check bool "AgentNotFound" true
-    (String.length (Types.masc_error_to_string (Types.Agent (Types.Agent_error.NotFound "test"))) > 0);
+    (String.length (Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "test"))) > 0);
   check bool "TaskAlreadyClaimed" true
-    (String.length (Types.masc_error_to_string
-      (Types.Task (Types.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" }))) > 0);
+    (String.length (Masc_domain.masc_error_to_string
+      (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id = "t1"; by = "agent" }))) > 0);
   check bool "RateLimitExceeded" true
-    (String.length (Types.masc_error_to_string
-      (Types.RateLimitExceeded {
+    (String.length (Masc_domain.masc_error_to_string
+      (Masc_domain.RateLimitExceeded {
         limit = 10; current = 15; wait_seconds = 30;
-        category = Types.BroadcastLimit
+        category = Masc_domain.BroadcastLimit
       })) > 0)
 
 (* ============================================================ *)
-(* Types.worktree_info Tests                                     *)
+(* Masc_domain.worktree_info Tests                                     *)
 (* ============================================================ *)
 
 let test_worktree_info_roundtrip () =
-  let wt = Types.{
+  let wt = Masc_domain.{
     branch = "feature/test";
     path = ".worktrees/feature-test";
     git_root = "/home/user/project";
     repo_name = "project";
   } in
-  let json = Types.worktree_info_to_yojson wt in
-  let result = Types.worktree_info_of_yojson json in
+  let json = Masc_domain.worktree_info_to_yojson wt in
+  let result = Masc_domain.worktree_info_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.task Tests                                              *)
+(* Masc_domain.task Tests                                              *)
 (* ============================================================ *)
 
 let test_task_roundtrip () =
-  let task = Types.{
+  let task = Masc_domain.{
     id = "task-123";
     title = "Test Task";
     description = "A test task for coverage";
@@ -445,12 +445,12 @@ let test_task_roundtrip () =
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
-  let json = Types.task_to_yojson task in
-  let result = Types.task_of_yojson json in
+  let json = Masc_domain.task_to_yojson task in
+  let result = Masc_domain.task_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_with_worktree () =
-  let task = Types.{
+  let task = Masc_domain.{
     id = "task-456";
     title = "Worktree Task";
     description = "Task with worktree";
@@ -469,16 +469,16 @@ let test_task_with_worktree () =
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
-  let json = Types.task_to_yojson task in
-  let result = Types.task_of_yojson json in
+  let json = Masc_domain.task_to_yojson task in
+  let result = Masc_domain.task_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.backlog Tests                                           *)
+(* Masc_domain.backlog Tests                                           *)
 (* ============================================================ *)
 
 let test_backlog_roundtrip () =
-  let backlog = Types.{
+  let backlog = Masc_domain.{
     tasks = [
       { id = "t1"; title = "Task 1"; description = "Desc 1";
         task_status = Todo; goal_id = None; priority = 1; files = [];
@@ -496,16 +496,16 @@ let test_backlog_roundtrip () =
     last_updated = "2024-01-02T00:00:00Z";
     version = 5;
   } in
-  let json = Types.backlog_to_yojson backlog in
-  let result = Types.backlog_of_yojson json in
+  let json = Masc_domain.backlog_to_yojson backlog in
+  let result = Masc_domain.backlog_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.a2a_task Tests                                          *)
+(* Masc_domain.a2a_task Tests                                          *)
 (* ============================================================ *)
 
 let test_a2a_task_roundtrip () =
-  let task = Types.{
+  let task = Masc_domain.{
     a2a_id = "a2a-123";
     from_agent = "claude";
     to_agent = "gemini";
@@ -515,12 +515,12 @@ let test_a2a_task_roundtrip () =
     created_at = "2024-01-01T00:00:00Z";
     updated_at = "2024-01-01T01:00:00Z";
   } in
-  let json = Types.a2a_task_to_yojson task in
-  let result = Types.a2a_task_of_yojson json in
+  let json = Masc_domain.a2a_task_to_yojson task in
+  let result = Masc_domain.a2a_task_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_a2a_task_with_result () =
-  let task = Types.{
+  let task = Masc_domain.{
     a2a_id = "a2a-456";
     from_agent = "gemini";
     to_agent = "codex";
@@ -530,57 +530,57 @@ let test_a2a_task_with_result () =
     created_at = "2024-01-01T00:00:00Z";
     updated_at = "2024-01-01T02:00:00Z";
   } in
-  let json = Types.a2a_task_to_yojson task in
-  let result = Types.a2a_task_of_yojson json in
+  let json = Masc_domain.a2a_task_to_yojson task in
+  let result = Masc_domain.a2a_task_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.portal Tests                                            *)
+(* Masc_domain.portal Tests                                            *)
 (* ============================================================ *)
 
 let test_portal_roundtrip () =
-  let portal = Types.{
+  let portal = Masc_domain.{
     portal_from = "claude";
     portal_target = "gemini";
     portal_opened_at = "2024-01-01T00:00:00Z";
     portal_status = PortalOpen;
     task_count = 5;
   } in
-  let json = Types.portal_to_yojson portal in
-  let result = Types.portal_of_yojson json in
+  let json = Masc_domain.portal_to_yojson portal in
+  let result = Masc_domain.portal_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.tool_result Tests                                       *)
+(* Masc_domain.tool_result Tests                                       *)
 (* ============================================================ *)
 
 let test_tool_result_success () =
-  let result = Types.{
+  let result = Masc_domain.{
     success = true;
     message = "Operation completed";
     data = Some (`Assoc [("count", `Int 42)]);
   } in
-  let json = Types.tool_result_to_yojson result in
+  let json = Masc_domain.tool_result_to_yojson result in
   let open Yojson.Safe.Util in
   check bool "has success" true (json |> member "success" |> to_bool);
   check string "message" "Operation completed" (json |> member "message" |> to_string)
 
 let test_tool_result_no_data () =
-  let result = Types.{
+  let result = Masc_domain.{
     success = false;
     message = "Operation failed";
     data = None;
   } in
-  let json = Types.tool_result_to_yojson result in
+  let json = Masc_domain.tool_result_to_yojson result in
   let open Yojson.Safe.Util in
   check bool "success false" false (json |> member "success" |> to_bool)
 
 (* ============================================================ *)
-(* Types.agent_credential Tests                                  *)
+(* Masc_domain.agent_credential Tests                                  *)
 (* ============================================================ *)
 
 let test_agent_credential_roundtrip () =
-  let cred = Types.{
+  let cred = Masc_domain.{
     id = None;
     agent_id = None;
     agent_name = "claude-secure";
@@ -589,12 +589,12 @@ let test_agent_credential_roundtrip () =
     created_at = "2024-01-01T00:00:00Z";
     expires_at = Some "2024-02-01T00:00:00Z";
   } in
-  let json = Types.agent_credential_to_yojson cred in
-  let result = Types.agent_credential_of_yojson json in
+  let json = Masc_domain.agent_credential_to_yojson cred in
+  let result = Masc_domain.agent_credential_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_agent_credential_no_expiry () =
-  let cred = Types.{
+  let cred = Masc_domain.{
     id = None;
     agent_id = None;
     agent_name = "worker-1";
@@ -603,28 +603,28 @@ let test_agent_credential_no_expiry () =
     created_at = "2024-01-01T00:00:00Z";
     expires_at = None;
   } in
-  let json = Types.agent_credential_to_yojson cred in
-  let result = Types.agent_credential_of_yojson json in
+  let json = Masc_domain.agent_credential_to_yojson cred in
+  let result = Masc_domain.agent_credential_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Types.auth_config Tests                                       *)
+(* Masc_domain.auth_config Tests                                       *)
 (* ============================================================ *)
 
 let test_default_auth_config () =
-  let cfg = Types.default_auth_config in
+  let cfg = Masc_domain.default_auth_config in
   check bool "not enabled" false cfg.enabled;
   check int "token_expiry_hours" 24 cfg.token_expiry_hours
 
 let test_auth_config_roundtrip () =
-  let cfg = Types.{
+  let cfg = Masc_domain.{
     enabled = true;
     room_secret_hash = Some "sha256:secret";
     require_token = true;
     token_expiry_hours = 48;
   } in
-  let json = Types.auth_config_to_yojson cfg in
-  let result = Types.auth_config_of_yojson json in
+  let json = Masc_domain.auth_config_to_yojson cfg in
+  let result = Masc_domain.auth_config_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)

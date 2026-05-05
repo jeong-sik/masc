@@ -92,7 +92,7 @@ let test_should_emit_busy_with_busy_skip () =
   let now = Time_compat.now () in
   check_decision "busy + busy_skip=true → Skip_busy"
     HS.Skip_busy
-    (HS.should_emit ~config ~agent_status:Types.Busy
+    (HS.should_emit ~config ~agent_status:Masc_domain.Busy
        ~last_activity:(now -. 1.0) ~last_heartbeat:(now -. 60.0))
 
 let test_should_emit_busy_without_busy_skip () =
@@ -100,7 +100,7 @@ let test_should_emit_busy_without_busy_skip () =
   let now = Time_compat.now () in
   check_decision "busy + busy_skip=false → Emit (interval elapsed)"
     HS.Emit
-    (HS.should_emit ~config ~agent_status:Types.Busy
+    (HS.should_emit ~config ~agent_status:Masc_domain.Busy
        ~last_activity:(now -. 1.0) ~last_heartbeat:(now -. 60.0))
 
 let test_should_emit_active_interval_elapsed () =
@@ -108,7 +108,7 @@ let test_should_emit_active_interval_elapsed () =
   let now = Time_compat.now () in
   check_decision "active + interval elapsed → Emit"
     HS.Emit
-    (HS.should_emit ~config ~agent_status:Types.Active
+    (HS.should_emit ~config ~agent_status:Masc_domain.Active
        ~last_activity:(now -. 5.0) ~last_heartbeat:(now -. 60.0))
 
 let test_should_emit_active_within_interval () =
@@ -116,7 +116,7 @@ let test_should_emit_active_within_interval () =
   let now = Time_compat.now () in
   check_decision "active + within interval → Skip_idle"
     (HS.Skip_idle 0.0)
-    (HS.should_emit ~config ~agent_status:Types.Active
+    (HS.should_emit ~config ~agent_status:Masc_domain.Active
        ~last_activity:(now -. 5.0) ~last_heartbeat:(now -. 5.0))
 
 let test_should_emit_max_silence_safety_net () =
@@ -130,7 +130,7 @@ let test_should_emit_max_silence_safety_net () =
   let now = Time_compat.now () in
   check_decision "very long silence (>900s) → Emit even when interval > 900"
     HS.Emit
-    (HS.should_emit ~config ~agent_status:Types.Active
+    (HS.should_emit ~config ~agent_status:Masc_domain.Active
        ~last_activity:(now -. 1000.0) ~last_heartbeat:(now -. 1000.0))
 
 (* ── default_config sanity ───────────────────────────────────────────── *)

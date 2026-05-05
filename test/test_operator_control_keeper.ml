@@ -225,7 +225,7 @@ let test_keeper_sandbox_tools_are_public_and_titled () =
     (fun (name, expected_title) ->
       let schema_present =
         List.exists
-          (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+          (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
           Config.raw_all_tool_schemas
       in
       Alcotest.(check bool) (name ^ " schema present") true schema_present;
@@ -1254,7 +1254,7 @@ let test_keeper_status_exposes_model_observability () =
         (Keeper_types.keeper_metrics_store config keeper_name)
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("model_used", `String "stale:old-path");
             ( "cascade",
               `Assoc
@@ -1274,7 +1274,7 @@ let test_keeper_status_exposes_model_observability () =
         (Keeper_types.keeper_metrics_store config keeper_name)
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("model_used", `String "llama:qwen3.5-3b-a3b-ud-q8-xl");
             ( "cascade",
               `Assoc
@@ -1441,7 +1441,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
         (Keeper_types.keeper_metrics_store config keeper_name)
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("model_used", `String stale_selected_model);
             ( "cascade",
               `Assoc
@@ -1953,7 +1953,7 @@ let test_keeper_down_only_pauses_current_base_path () =
 let test_keeper_status_schema_makes_name_optional () =
   let schema =
     List.find
-      (fun (spec : Types.tool_schema) ->
+      (fun (spec : Masc_domain.tool_schema) ->
          String.equal spec.name "masc_keeper_status")
       Tool_keeper.schemas
   in
@@ -2089,7 +2089,7 @@ proactive_enabled = true
                 };
             };
           paused = true;
-          updated_at = Types.now_iso ();
+          updated_at = Masc_domain.now_iso ();
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config mutated with
@@ -2247,7 +2247,7 @@ proactive_enabled = true
       let stale_meta =
         { stale_base with
           cascade_name = "vendor_mix_balanced";
-          updated_at = Types.now_iso ();
+          updated_at = Masc_domain.now_iso ();
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config stale_meta with
@@ -2500,7 +2500,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
         (Keeper_types.keeper_decision_log_path config keeper_name)
         (`Assoc
           [
-            ("ts", `String (Types.now_iso ()));
+            ("ts", `String (Masc_domain.now_iso ()));
             ("selected_mode", `String "text_response");
             ("action_source", `String "fallback_after_validation_failure");
             ("tool_call_count", `Int 0);

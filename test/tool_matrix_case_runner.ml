@@ -26,7 +26,7 @@ let emit_result ~base_path name = function
 
 let find_schema name =
   Masc_mcp.Config.raw_all_tool_schemas
-  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
 let () =
   Printexc.record_backtrace true;

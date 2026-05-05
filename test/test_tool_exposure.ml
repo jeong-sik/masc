@@ -46,7 +46,7 @@ let () =
               in
               let schema_names =
                 List.map
-                  (fun (s : Types.tool_schema) -> s.name)
+                  (fun (s : Masc_domain.tool_schema) -> s.name)
                   all_schemas
               in
               let names =
@@ -179,7 +179,7 @@ let () =
               let schemas = Config.raw_all_tool_schemas in
               let violations =
                 List.filter_map
-                  (fun (s : Types.tool_schema) ->
+                  (fun (s : Masc_domain.tool_schema) ->
                     let len = String.length s.description in
                     if len > max_chars then
                       Some (Printf.sprintf "%s: %d chars" s.name len)
@@ -196,7 +196,7 @@ let () =
               let schemas = Config.visible_tool_schemas () in
               let total =
                 List.fold_left
-                  (fun acc (s : Types.tool_schema) ->
+                  (fun acc (s : Masc_domain.tool_schema) ->
                     acc + String.length s.description)
                   0 schemas
               in
@@ -245,7 +245,7 @@ let () =
             (fun () ->
               let all_names =
                 Config.raw_all_tool_schemas
-                |> List.map (fun (s : Types.tool_schema) -> s.name)
+                |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
               in
               (* masc_code_search has a schema but is not public *)
               let internal = "masc_code_search" in

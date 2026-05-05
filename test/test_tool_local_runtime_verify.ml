@@ -34,7 +34,7 @@ let make_endpoint ~url ~model_id ~ctx_size ~total_slots ~busy =
     D.url;
     healthy = true;
     models = [ { D.id = model_id; owned_by = "llamacpp" } ];
-    props = Some { D.total_slots; ctx_size; model = "" };
+    props = Some { D.total_slots; ctx_size; model = ""; supports_tools = None };
     slots = Some { D.total = total_slots; busy; idle = total_slots - busy };
     capabilities = Llm_provider.Capabilities.openai_chat_extended_capabilities;
   }

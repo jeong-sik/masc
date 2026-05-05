@@ -40,7 +40,7 @@ let test_hook_invoked_on_successful_claim () =
    with
    | Ok _ -> ()
    | Error e ->
-     fail (Printf.sprintf "claim failed: %s" (Types.show_masc_error e)));
+     fail (Printf.sprintf "claim failed: %s" (Masc_domain.show_masc_error e)));
   match !calls with
   | [ (agent_name, task_id) ] ->
     check string "hook agent_name" "claude" agent_name;
@@ -61,7 +61,7 @@ let test_hook_failure_does_not_block_claim () =
       (Astring.String.is_infix ~affix:"claimed" msg)
   | Error e ->
     failf "claim must succeed even if hook raises; got: %s"
-      (Types.show_masc_error e)
+      (Masc_domain.show_masc_error e)
 
 let test_hook_not_invoked_on_already_claimed () =
   with_test_env @@ fun config ->
@@ -71,7 +71,7 @@ let test_hook_not_invoked_on_already_claimed () =
    with
    | Ok _ -> ()
    | Error e ->
-     fail (Printf.sprintf "first claim failed: %s" (Types.show_masc_error e)));
+     fail (Printf.sprintf "first claim failed: %s" (Masc_domain.show_masc_error e)));
   let calls = ref 0 in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
       incr calls);

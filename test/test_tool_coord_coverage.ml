@@ -73,7 +73,7 @@ let make_test_ctx () =
   Unix.mkdir tmp 0o755;
   let config = Coord.default_config tmp in
   Auth.save_auth_config config.base_path
-    { Types.default_auth_config with enabled = false; require_token = false };
+    { Masc_domain.default_auth_config with enabled = false; require_token = false };
   { Tool_coord.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
@@ -147,10 +147,10 @@ let () = test "dispatch_status_done_summary" (fun () ->
   ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
   (match
      Coord.transition_task_r ctx.config ~agent_name:"test-agent"
-       ~task_id:"task-001" ~action:Types.Done_action ~notes:"ok" ()
+       ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"ok" ()
    with
   | Ok _ -> ()
-  | Error err -> failwith (Types.masc_error_to_string err));
+  | Error err -> failwith (Masc_domain.masc_error_to_string err));
   let args = `Assoc [] in
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some { success; message = result } ->
@@ -493,19 +493,19 @@ let () = test "get_bool_missing" (fun () ->
 )
 
 (* Issue #7646: valid_next_actions_for_status hint tests. One per
-   [Types.task_status] variant. The witness ensures every variant has a
+   [Masc_domain.task_status] variant. The witness ensures every variant has a
    defined hint AND the ones with content list each action canonically. *)
 let next_hint = Coord_task.next_actions_hint
 
 let () = test "next_hint_todo lists claim and cancel" (fun () ->
-  let h = next_hint Types.Todo in
+  let h = next_hint Masc_domain.Todo in
   assert (str_contains h "claim");
   assert (str_contains h "cancel");
   assert (str_contains h "valid_next_actions=")
 )
 
 let () = test "next_hint_claimed lists start, done, release, cancel" (fun () ->
-  let h = next_hint (Types.Claimed { assignee = "a"; claimed_at = "t" }) in
+  let h = next_hint (Masc_domain.Claimed { assignee = "a"; claimed_at = "t" }) in
   assert (str_contains h "start");
   assert (str_contains h "done");
   assert (str_contains h "release");
@@ -513,14 +513,14 @@ let () = test "next_hint_claimed lists start, done, release, cancel" (fun () ->
 )
 
 let () = test "next_hint_in_progress lists done and release" (fun () ->
-  let h = next_hint (Types.InProgress { assignee = "a"; started_at = "t" }) in
+  let h = next_hint (Masc_domain.InProgress { assignee = "a"; started_at = "t" }) in
   assert (str_contains h "done");
   assert (str_contains h "release");
   assert (not (str_contains h "claim"))  (* Claim is not legal from InProgress *)
 )
 
 let () = test "next_hint_awaiting_verification lists approve and reject" (fun () ->
-  let h = next_hint (Types.AwaitingVerification {
+  let h = next_hint (Masc_domain.AwaitingVerification {
     assignee = "a"; submitted_at = "t"; verification_id = "v";
     deadline = None }) in
   assert (str_contains h "approve");
@@ -528,12 +528,12 @@ let () = test "next_hint_awaiting_verification lists approve and reject" (fun ()
 )
 
 let () = test "next_hint_done is empty (terminal)" (fun () ->
-  let h = next_hint (Types.Done { assignee = "a"; completed_at = "t"; notes = None }) in
+  let h = next_hint (Masc_domain.Done { assignee = "a"; completed_at = "t"; notes = None }) in
   assert (h = "")
 )
 
 let () = test "next_hint_cancelled is empty (terminal)" (fun () ->
-  let h = next_hint (Types.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }) in
+  let h = next_hint (Masc_domain.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }) in
   assert (h = "")
 )
 

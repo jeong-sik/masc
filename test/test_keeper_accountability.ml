@@ -221,12 +221,12 @@ let test_agent_reputation_penalizes_unsupported_claims () =
            ~task_id:"task-001");
       (match
          Coord.transition_task_r config ~agent_name:"keeper-rep-agent"
-           ~task_id:"task-001" ~action:Types.Done_action ()
+           ~task_id:"task-001" ~action:Masc_domain.Done_action ()
        with
       | Ok _ -> ()
       | Error err ->
           Alcotest.failf "done transition failed: %s"
-            (Types.masc_error_to_string err));
+            (Masc_domain.masc_error_to_string err));
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -389,7 +389,7 @@ let test_task_transition_normalizes_keeper_name_in_history () =
   with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
       Keeper_accountability.record_task_transition config
         ~agent_name:"keeper-sangsu-agent" ~task_id:"task-legacy"
-        ~transition:Types.Claim ~details:(`Assoc []);
+        ~transition:Masc_domain.Claim ~details:(`Assoc []);
       let summary =
         Keeper_accountability.accountability_summary_json config
           ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent"
@@ -404,10 +404,10 @@ let test_task_transition_resolution_rows_include_identity () =
   with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
       Keeper_accountability.record_task_transition config
         ~agent_name:"keeper-sangsu-agent" ~task_id:"task-resolution"
-        ~transition:Types.Claim ~details:(`Assoc []);
+        ~transition:Masc_domain.Claim ~details:(`Assoc []);
       Keeper_accountability.record_task_transition config
         ~agent_name:"keeper-sangsu-agent" ~task_id:"task-resolution"
-        ~transition:Types.Done_action ~details:(`Assoc []);
+        ~transition:Masc_domain.Done_action ~details:(`Assoc []);
       let resolution =
         read_accountability_events config.base_path
         |> List.find_opt (fun json ->

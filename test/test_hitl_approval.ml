@@ -819,13 +819,13 @@ let test_approval_get_dispatch_not_found () =
 let test_approval_get_rejects_worker_role () =
   match
     Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"worker"
-      ~role:Types.Worker ~tool_name:"masc_approval_get"
+      ~role:Masc_domain.Worker ~tool_name:"masc_approval_get"
   with
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error err ->
       Alcotest.fail
         (Printf.sprintf "expected forbidden, got %s"
-           (Types.masc_error_to_string err))
+           (Masc_domain.masc_error_to_string err))
   | Ok () -> Alcotest.fail "worker should not be allowed to call approval_get"
 
 (* ── 4. Approval callback integration ────────────────────── *)

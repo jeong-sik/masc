@@ -54,9 +54,9 @@ let has_keeper_prefix name =
 let known_non_keeper_tool_names () : string list =
   List.concat [
     Tool_shard.autoresearch_keeper_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name);
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
     Tool_shard.coding_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name);
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
     Tool_code_write.tool_names;
     (* MASC tools injected via tool_policy.toml masc groups *)
     Keeper_tool_registry.injected_masc_tool_names ();
@@ -183,7 +183,7 @@ let test_shard_tools_overlap_with_agent_documented () =
   (* Mode removal: coding shard (now in defaults) includes the approved shared
      worktree/code tools that also appear in the agent surface. *)
   let keeper_tools = Tool_shard.keeper_model_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name) in
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name) in
   let agent_tools = Agent_tool_surfaces.spawned_agent_public_tool_names in
   let overlap = List.filter (fun name -> List.mem name agent_tools) keeper_tools in
   List.iter (fun name ->

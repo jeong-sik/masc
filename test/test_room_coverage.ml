@@ -117,7 +117,7 @@ let detail_matches details expected =
 let find_agent_name_by_prefix config prefix =
   match
     List.find_opt
-      (fun (agent : Types.agent) -> String.starts_with ~prefix agent.name)
+      (fun (agent : Masc_domain.agent) -> String.starts_with ~prefix agent.name)
       (Coord.get_agents_raw config)
   with
   | Some agent -> agent.name
@@ -125,12 +125,12 @@ let find_agent_name_by_prefix config prefix =
 
 let transition_done_r config ~agent_name ~task_id ~notes =
   Coord.transition_task_r config ~agent_name ~task_id
-    ~action:Types.Done_action ~notes ()
+    ~action:Masc_domain.Done_action ~notes ()
 
 let transition_done config ~agent_name ~task_id ~notes =
   match transition_done_r config ~agent_name ~task_id ~notes with
   | Ok msg -> msg
-  | Error err -> Types.masc_error_to_string err
+  | Error err -> Masc_domain.masc_error_to_string err
 
 let audit_has_entry entries ~agent_id ~action_pred ~details =
   List.exists
@@ -238,7 +238,7 @@ let test_claim_next_skips_done_and_cancelled () =
          ~reason:"cancelled"
      with
     | Ok _ -> ()
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
 
     let result = Coord.claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "claims the remaining todo task" true
@@ -246,8 +246,8 @@ let test_claim_next_skips_done_and_cancelled () =
 
     let tasks = Coord.get_tasks_raw config in
     let status_of task_id =
-      match List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks with
-      | Some task -> Types.task_status_to_string task.task_status
+      match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
+      | Some task -> Masc_domain.task_status_to_string task.task_status
       | None -> Alcotest.failf "missing task %s" task_id
     in
     Alcotest.(check string) "done task preserved" "done" (status_of "task-001");
@@ -266,7 +266,7 @@ let test_claim_next_terminal_only_backlog () =
          ~reason:"cancelled"
      with
     | Ok _ -> ()
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
 
     let result = Coord.claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "terminal backlog reports no unclaimed tasks" true
@@ -292,7 +292,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
   with_test_env (fun config ->
     let agent_name =
       match Coord.get_agents_raw config with
-      | [ agent ] -> agent.Types.name
+      | [ agent ] -> agent.Masc_domain.name
       | _ -> Alcotest.fail "expected exactly one joined agent"
     in
     let _ = Coord.add_task config ~title:"Done already" ~priority:1 ~description:"" in
@@ -301,23 +301,23 @@ let test_claim_next_reconciles_stale_agent_current_task () =
        transition_done_r config ~agent_name ~task_id:"task-001" ~notes:"done"
      with
     | Ok _ -> ()
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let agent_file =
       Filename.concat (Coord.agents_dir config)
         (Coord.safe_filename agent_name ^ ".json")
     in
     let stale_agent =
-      match Coord.read_json config agent_file |> Types.agent_of_yojson with
+      match Coord.read_json config agent_file |> Masc_domain.agent_of_yojson with
       | Ok agent ->
-          { agent with status = Types.Busy; current_task = Some "task-001" }
+          { agent with status = Masc_domain.Busy; current_task = Some "task-001" }
       | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
     in
-    Coord.write_json config agent_file (Types.agent_to_yojson stale_agent);
+    Coord.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
     match Coord.claim_next_r config ~agent_name () with
     | Coord.Claim_next_no_unclaimed ->
         let agents = Coord.get_agents_raw config in
         let agent_after =
-          List.find_opt (fun (agent : Types.agent) ->
+          List.find_opt (fun (agent : Masc_domain.agent) ->
             String.equal agent.name agent_name) agents
         in
         (match agent_after with
@@ -326,7 +326,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
               "stale current_task cleared" None agent.current_task;
             Alcotest.(check string)
               "status reset to active" "active"
-              (Types.agent_status_to_string agent.status)
+              (Masc_domain.agent_status_to_string agent.status)
         | None -> Alcotest.fail "agent missing after reconcile")
     | _ -> Alcotest.fail "expected no_unclaimed after stale reconcile"
   )
@@ -356,11 +356,11 @@ let test_claim_next_auto_releases_previous () =
 
     (* Verify task-001 is back to Todo (not orphaned) via raw task data *)
     let tasks = Coord.get_tasks_raw config in
-    let task_001 = List.find_opt (fun (t : Types.task) -> t.id = "task-001") tasks in
+    let task_001 = List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-001") tasks in
     (match task_001 with
      | Some t ->
          Alcotest.(check string) "task-001 released to todo"
-           "todo" (Types.task_status_to_string t.task_status)
+           "todo" (Masc_domain.task_status_to_string t.task_status)
      | None -> Alcotest.fail "task-001 not found in backlog")
   )
 
@@ -413,7 +413,7 @@ let test_release_hard_stop_blocks_future_claim_next () =
     let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Coord.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    let handoff_context : Types.task_handoff_context =
+    let handoff_context : Masc_domain.task_handoff_context =
       {
         summary = "PR #6561 not found - do not reclaim";
         reason = Some "phantom artifact";
@@ -429,18 +429,18 @@ let test_release_hard_stop_blocks_future_claim_next () =
          ~handoff_context ()
      with
     | Ok _ -> ()
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let task_001 =
       match
         List.find_opt
-          (fun (t : Types.task) -> String.equal t.id "task-001")
+          (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
           (Coord.get_tasks_raw config)
       with
       | Some task -> task
       | None -> Alcotest.fail "task-001 not found after release"
     in
     Alcotest.(check string) "task-001 back to todo" "todo"
-      (Types.task_status_to_string task_001.task_status);
+      (Masc_domain.task_status_to_string task_001.task_status);
     Alcotest.(check int) "release increments cycle count" 1 task_001.cycle_count;
     Alcotest.(check (option string)) "hard-stop reason persisted"
       (Some "PR #6561 not found - do not reclaim")
@@ -455,7 +455,7 @@ let test_release_hard_stop_blocks_direct_reclaim () =
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    let handoff_context : Types.task_handoff_context =
+    let handoff_context : Masc_domain.task_handoff_context =
       {
         summary = "PR #6561 not found - do not reclaim";
         reason = Some "phantom artifact";
@@ -471,27 +471,27 @@ let test_release_hard_stop_blocks_direct_reclaim () =
          ~handoff_context ()
      with
     | Ok _ -> ()
-    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-    | Error (Types.Task (Types.Task_error.InvalidState message)) ->
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
         Alcotest.(check bool) "direct claim blocked by do_not_reclaim_reason" true
           (str_contains message "blocked from re-claim")
     | Error e ->
         Alcotest.fail
-          ("expected TaskInvalidState, got " ^ Types.masc_error_to_string e)
+          ("expected TaskInvalidState, got " ^ Masc_domain.masc_error_to_string e)
     | Ok _ -> Alcotest.fail "direct claim should be blocked after hard-stop release")
 
 let write_tasks config tasks =
   let backlog = Coord.read_backlog config in
-  let updated : Types.backlog =
-    { tasks; last_updated = Types.now_iso (); version = backlog.version + 1 }
+  let updated : Masc_domain.backlog =
+    { tasks; last_updated = Masc_domain.now_iso (); version = backlog.version + 1 }
   in
   Coord.write_backlog config updated
 
 let task_by_id config task_id =
   match
     List.find_opt
-      (fun (t : Types.task) -> String.equal t.id task_id)
+      (fun (t : Masc_domain.task) -> String.equal t.id task_id)
       (Coord.get_tasks_raw config)
   with
   | Some task -> task
@@ -507,7 +507,7 @@ let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
     let backlog = Coord.read_backlog config in
     let tasks =
       List.map
-        (fun (t : Types.task) ->
+        (fun (t : Masc_domain.task) ->
            if String.equal t.id "task-001"
            then
              { t with
@@ -544,7 +544,7 @@ let test_claim_next_prefers_unblocked_over_legacy_auto_cycle () =
     let backlog = Coord.read_backlog config in
     let tasks =
       List.map
-        (fun (t : Types.task) ->
+        (fun (t : Masc_domain.task) ->
            if String.equal t.id "task-001"
            then
              { t with
@@ -573,10 +573,10 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
     for _ = 1 to 3 do
       (match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
        | Ok _ -> ()
-       | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+       | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
       (match Coord.release_task_r config ~agent_name:claude ~task_id:"task-001" () with
        | Ok _ -> ()
-       | Error e -> Alcotest.fail (Types.masc_error_to_string e))
+       | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
     done;
     let task = task_by_id config "task-001" in
     Alcotest.(check int) "release cycles still tracked" 3 task.cycle_count;
@@ -586,7 +586,7 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
     | Ok _ -> ()
     | Error e ->
       Alcotest.fail
-        ("retryable task should remain claimable: " ^ Types.masc_error_to_string e))
+        ("retryable task should remain claimable: " ^ Masc_domain.masc_error_to_string e))
 
 (* ============================================================ *)
 (* Update Priority Tests                                         *)
@@ -653,7 +653,7 @@ let test_cancel_task_nonexistent () =
   with_test_env (fun config ->
     let result = Coord.cancel_task_r config ~agent_name:"claude" ~task_id:"task-999" ~reason:"" in
     match result with
-    | Error (Types.Task (Types.Task_error.NotFound _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -665,7 +665,7 @@ let test_cancel_done_task () =
 
     let result = Coord.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:"" in
     match result with
-    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -676,7 +676,7 @@ let test_cancel_done_task () =
 let test_transition_claim () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Claim () in
+    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Claim () in
     match result with
     | Ok msg -> Alcotest.(check bool) "claim via transition" true (str_contains msg "todo" && str_contains msg "claimed")
     | Error _ -> Alcotest.fail "Expected Ok"
@@ -687,7 +687,7 @@ let test_transition_start () =
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
-    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Start () in
+    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Start () in
     match result with
     | Ok msg -> Alcotest.(check bool) "start via transition" true (str_contains msg "in_progress")
     | Error _ -> Alcotest.fail "Expected Ok"
@@ -720,9 +720,9 @@ let test_transition_invalid () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     (* Try to start without claiming first *)
-    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Start () in
+    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Start () in
     match result with
-    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
@@ -732,9 +732,9 @@ let test_transition_version_mismatch () =
 
     (* Pass wrong expected version *)
     let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001"
-                   ~action:Types.Claim ~expected_version:999 () in
+                   ~action:Masc_domain.Claim ~expected_version:999 () in
     match result with
-    | Error (Types.Task (Types.Task_error.InvalidState _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
   )
 
@@ -742,12 +742,12 @@ let test_transition_done_idempotent () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Done_action () in
+    let _ = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Done_action () in
     (* Second done call should succeed as no-op *)
-    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Done_action () in
+    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Done_action () in
     match result with
     | Ok msg -> Alcotest.(check bool) "done idempotent" true (str_contains msg "no-op")
-    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Types.masc_error_to_string e)
+    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Masc_domain.masc_error_to_string e)
   )
 
 let test_transition_done_awards_task_reward_once () =
@@ -762,15 +762,15 @@ let test_transition_done_awards_task_reward_once () =
       (match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
        | Ok _ -> ()
        | Error err ->
-         Alcotest.failf "claim_task_r failed: %s" (Types.show_masc_error err));
+         Alcotest.failf "claim_task_r failed: %s" (Masc_domain.show_masc_error err));
       (match
          Coord.transition_task_r config ~agent_name:claude ~task_id:"task-001"
-           ~action:Types.Start ()
+           ~action:Masc_domain.Start ()
        with
        | Ok _ -> ()
        | Error err ->
          Alcotest.failf "transition_task_r start failed: %s"
-           (Types.show_masc_error err));
+           (Masc_domain.show_masc_error err));
       (match
          transition_done_r config ~agent_name:claude ~task_id:"task-001"
            ~notes:"done"
@@ -778,7 +778,7 @@ let test_transition_done_awards_task_reward_once () =
        | Ok _ -> ()
        | Error err ->
          Alcotest.failf "transition_task_r done failed: %s"
-           (Types.show_masc_error err));
+           (Masc_domain.show_masc_error err));
       let balance_after_done =
         Agent_economy.get_balance ~base_path:config.base_path ~agent_name:claude
       in
@@ -792,7 +792,7 @@ let test_transition_done_awards_task_reward_once () =
          Alcotest.(check bool) "repeat done is no-op" true
            (str_contains msg "no-op")
        | Error err ->
-         Alcotest.failf "repeat done failed: %s" (Types.show_masc_error err));
+         Alcotest.failf "repeat done failed: %s" (Masc_domain.show_masc_error err));
       let balance_after_repeat =
         Agent_economy.get_balance ~base_path:config.base_path ~agent_name:claude
       in
@@ -803,12 +803,12 @@ let test_transition_cancel_idempotent () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     (* Cancel from Todo (allowed) *)
-    let _ = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Cancel () in
+    let _ = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Cancel () in
     (* Second cancel call should succeed as no-op *)
-    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Cancel () in
+    let result = Coord.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Masc_domain.Cancel () in
     match result with
     | Ok msg -> Alcotest.(check bool) "cancel idempotent" true (str_contains msg "no-op")
-    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Types.masc_error_to_string e)
+    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Masc_domain.masc_error_to_string e)
   )
 
 (* ============================================================ *)
@@ -896,22 +896,22 @@ let test_task_transitions_emit_observability () =
     | Ok _ -> ()
     | Error err ->
         Alcotest.failf "claim_task_r failed: %s"
-          (Types.show_masc_error err));
+          (Masc_domain.show_masc_error err));
     (match
        Coord.transition_task_r config ~agent_name:claude ~task_id:"task-001"
-         ~action:Types.Start ()
+         ~action:Masc_domain.Start ()
      with
     | Ok _ -> ()
     | Error err ->
         Alcotest.failf "transition_task_r start failed: %s"
-          (Types.show_masc_error err));
+          (Masc_domain.show_masc_error err));
     (match
        transition_done_r config ~agent_name:claude ~task_id:"task-001"
          ~notes:"done" with
     | Ok _ -> ()
     | Error err ->
         Alcotest.failf "transition_task_r done failed: %s"
-          (Types.show_masc_error err));
+          (Masc_domain.show_masc_error err));
 
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool) "audit claim recorded" true
@@ -1150,7 +1150,7 @@ let test_get_agents_raw () =
   with_test_env (fun config ->
     let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["test"] () in
 
-    let agents : Types.agent list = Coord.get_agents_raw config in
+    let agents : Masc_domain.agent list = Coord.get_agents_raw config in
     (* claude from init + gemini *)
     Alcotest.(check bool) "at least 2 agents" true (List.length agents >= 2)
   )
@@ -1168,8 +1168,8 @@ let test_is_agent_joined () =
   with_test_env (fun config ->
     (* claude is joined from init *)
     (* Note: agent names are auto-generated with nicknames, so we check by type prefix *)
-    let agents : Types.agent list = Coord.get_agents_raw config in
-    let has_agent = List.exists (fun (a : Types.agent) ->
+    let agents : Masc_domain.agent list = Coord.get_agents_raw config in
+    let has_agent = List.exists (fun (a : Masc_domain.agent) ->
       String.length a.name >= 6 && String.sub a.name 0 6 = "claude"
     ) agents in
     Alcotest.(check bool) "claude is joined" true has_agent
@@ -1196,7 +1196,7 @@ let test_transition_done_r_not_claimed () =
 
     let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     match result with
-    | Error (Types.Task (Types.Task_error.InvalidState msg)) ->
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
         Alcotest.(check bool) "mentions todo state" true (str_contains msg "todo")
     | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
@@ -1205,7 +1205,7 @@ let test_transition_done_r_not_found () =
   with_test_env (fun config ->
     let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     match result with
-    | Error (Types.Task (Types.Task_error.NotFound _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
   )
 
@@ -1226,7 +1226,7 @@ let test_claim_task_r_already_claimed () =
 
     let result = Coord.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
-    | Error (Types.Task (Types.Task_error.AlreadyClaimed _)) -> ()
+    | Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _)) -> ()
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed"
   )
 
@@ -1287,7 +1287,7 @@ let test_update_agent_status () =
 
     (* Get the actual agent name (auto-generated nickname) *)
     let agents = Coord.get_agents_raw config in
-    let gemini = List.find_opt (fun (a : Types.agent) ->
+    let gemini = List.find_opt (fun (a : Masc_domain.agent) ->
       String.length a.name >= 6 && String.sub a.name 0 6 = "gemini"
     ) agents in
     match gemini with
@@ -1304,7 +1304,7 @@ let test_update_agent_capabilities () =
     let _ = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
 
     let agents = Coord.get_agents_raw config in
-    let gemini = List.find_opt (fun (a : Types.agent) ->
+    let gemini = List.find_opt (fun (a : Masc_domain.agent) ->
       String.length a.name >= 6 && String.sub a.name 0 6 = "gemini"
     ) agents in
     match gemini with
@@ -1321,7 +1321,7 @@ let test_update_agent_not_found () =
   with_test_env (fun config ->
     let result = Coord.update_agent_r config ~agent_name:"nonexistent" ~status:"active" () in
     match result with
-    | Error (Types.Agent (Types.Agent_error.NotFound _)) -> ()
+    | Error (Masc_domain.Agent (Masc_domain.Agent_error.NotFound _)) -> ()
     | _ -> Alcotest.fail "Expected AgentNotFound"
   )
 
@@ -1331,12 +1331,12 @@ let test_update_agent_not_found () =
 
 let test_append_archive_tasks () =
   with_test_env (fun config ->
-    let task : Types.task = {
+    let task : Masc_domain.task = {
       id = "task-test";
       title = "Archive Test";
       description = "Test description";
       goal_id = None;
-      task_status = Types.Done {
+      task_status = Masc_domain.Done {
         assignee = "claude";
         completed_at = "2026-01-01T00:00:00Z";
         notes = None;

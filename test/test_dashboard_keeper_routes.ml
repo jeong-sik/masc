@@ -2,7 +2,7 @@ open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_dashboard
 module Keeper_api = Masc_mcp.Server_dashboard_http_keeper_api
 module Auth = Masc_mcp.Auth
-module Types = Types
+module Types = Masc_domain
 
 type http_result =
   { status : int option
@@ -555,22 +555,22 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
        ~agent_name:"bootstrap-admin");
   let admin_token =
     match
-      Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin
+      Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin
     with
     | Ok (token, _cred) -> token
-    | Error err -> fail (Types.masc_error_to_string err)
+    | Error err -> fail (Masc_domain.masc_error_to_string err)
   in
   config, admin_token
 ;;
 
 let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_name =
-  let timestamp = Types.now_iso () in
-  let agent : Types.agent =
+  let timestamp = Masc_domain.now_iso () in
+  let agent : Masc_domain.agent =
     {
       id = None;
       name = agent_name;
       agent_type;
-      status = Types.Active;
+      status = Masc_domain.Active;
       capabilities;
       current_task = None;
       joined_at = timestamp;
@@ -582,7 +582,7 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
     Filename.concat (Masc_mcp.Coord.agents_dir config)
       (Masc_mcp.Coord.safe_filename agent_name ^ ".json")
   in
-  Masc_mcp.Coord.write_json config agent_file (Types.agent_to_yojson agent)
+  Masc_mcp.Coord.write_json config agent_file (Masc_domain.agent_to_yojson agent)
 ;;
 
 let append_execution_receipt ?(tool_contract_result = "satisfied")
@@ -599,8 +599,8 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
   in
-  let started_at = Types.now_iso () in
-  let ended_at = Types.now_iso () in
+  let started_at = Masc_domain.now_iso () in
+  let ended_at = Masc_domain.now_iso () in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
     {
       keeper_name = meta.name;
@@ -956,7 +956,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   let agent_name = "worker-swift-fox" in
   seed_agent_file ~capabilities:[ "coding" ] config agent_name;
   ignore
-    (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Types.Admin);
+    (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
@@ -1010,10 +1010,10 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     meta.agent_name;
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name:keeper_name
-       ~role:Types.Admin);
+       ~role:Masc_domain.Admin);
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name:meta.agent_name
-       ~role:Types.Admin);
+       ~role:Masc_domain.Admin);
   let agent_metrics_dir =
     Masc_mcp.Metrics_store_eio.agent_metrics_dir config meta.agent_name
   in
@@ -1536,9 +1536,9 @@ let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
     (fun () ->
        let legacy_raw =
          match Auth.create_token base_path ~agent_name:"dashboard-dev"
-                 ~role:Types.Admin with
+                 ~role:Masc_domain.Admin with
          | Ok (raw, _cred) -> raw
-         | Error err -> fail (Types.masc_error_to_string err)
+         | Error err -> fail (Masc_domain.masc_error_to_string err)
        in
        let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
        let canonical_path = Routes.dashboard_dev_token_path base_path in
@@ -1557,7 +1557,7 @@ let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
                 check string "canonical credential owner" "dashboard"
                   cred.agent_name
             | Error err ->
-                fail (Types.masc_error_to_string err)))
+                fail (Masc_domain.masc_error_to_string err)))
 ;;
 
 let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
@@ -1568,15 +1568,15 @@ let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
     (fun () ->
        let canonical_raw =
          match Auth.create_token base_path ~agent_name:"dashboard"
-                 ~role:Types.Admin with
+                 ~role:Masc_domain.Admin with
          | Ok (raw, _cred) -> raw
-         | Error err -> fail (Types.masc_error_to_string err)
+         | Error err -> fail (Masc_domain.masc_error_to_string err)
        in
        let legacy_raw =
          match Auth.create_token base_path ~agent_name:"dashboard-dev"
-                 ~role:Types.Admin with
+                 ~role:Masc_domain.Admin with
          | Ok (raw, _cred) -> raw
-         | Error err -> fail (Types.masc_error_to_string err)
+         | Error err -> fail (Masc_domain.masc_error_to_string err)
        in
        let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
        let canonical_path = Routes.dashboard_dev_token_path base_path in

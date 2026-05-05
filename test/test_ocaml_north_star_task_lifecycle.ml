@@ -55,7 +55,7 @@ let add_task config =
 let task config task_id =
   match
     List.find_opt
-      (fun (task : Types.task) -> String.equal task.id task_id)
+      (fun (task : Masc_domain.task) -> String.equal task.id task_id)
       (Coord.read_backlog config).tasks
   with
   | Some task -> task
@@ -63,17 +63,17 @@ let task config task_id =
 ;;
 
 let status_name config task_id =
-  (task config task_id).task_status |> Types.task_status_to_string
+  (task config task_id).task_status |> Masc_domain.task_status_to_string
 ;;
 
 let expect_ok label = function
   | Ok value -> value
-  | Error err -> fail (label ^ ": " ^ Types.masc_error_to_string err)
+  | Error err -> fail (label ^ ": " ^ Masc_domain.masc_error_to_string err)
 ;;
 
 let expect_invalid_transition label = function
-  | Error (Types.Task (Types.Task_error.InvalidState msg)) -> msg
-  | Error err -> fail (label ^ ": unexpected error " ^ Types.masc_error_to_string err)
+  | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) -> msg
+  | Error err -> fail (label ^ ": unexpected error " ^ Masc_domain.masc_error_to_string err)
   | Ok msg -> fail (label ^ ": unexpectedly succeeded: " ^ msg)
 ;;
 
@@ -86,11 +86,11 @@ let test_claim_start_done_path () =
     let task_id = add_task config in
     check string "initial" "todo" (status_name config task_id);
     ignore
-      (transition config ~agent_name:"worker" ~task_id ~action:Types.Claim ()
+      (transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Claim ()
        |> expect_ok "claim");
     check string "after claim" "claimed" (status_name config task_id);
     ignore
-      (transition config ~agent_name:"worker" ~task_id ~action:Types.Start ()
+      (transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Start ()
        |> expect_ok "start");
     check string "after start" "in_progress" (status_name config task_id);
     ignore
@@ -98,23 +98,23 @@ let test_claim_start_done_path () =
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Done_action
+         ~action:Masc_domain.Done_action
          ~notes:"tests pass"
          ()
        |> expect_ok "done");
     check string "after done" "done" (status_name config task_id);
     match (task config task_id).task_status with
-    | Types.Done { assignee; notes; _ } ->
+    | Masc_domain.Done { assignee; notes; _ } ->
       check string "assignee" "worker" assignee;
       check (option string) "notes" (Some "tests pass") notes
-    | other -> fail ("expected done, got " ^ Types.task_status_to_string other))
+    | other -> fail ("expected done, got " ^ Masc_domain.task_status_to_string other))
 ;;
 
 let test_done_from_todo_is_rejected () =
   with_config (fun config ->
     let task_id = add_task config in
     let msg =
-      transition config ~agent_name:"worker" ~task_id ~action:Types.Done_action ()
+      transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Done_action ()
       |> expect_invalid_transition "done from todo"
     in
     check
@@ -129,10 +129,10 @@ let test_release_from_claimed_returns_to_todo () =
   with_config (fun config ->
     let task_id = add_task config in
     ignore
-      (transition config ~agent_name:"worker" ~task_id ~action:Types.Claim ()
+      (transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Claim ()
        |> expect_ok "claim");
     ignore
-      (transition config ~agent_name:"worker" ~task_id ~action:Types.Release ()
+      (transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Release ()
        |> expect_ok "release");
     check string "released" "todo" (status_name config task_id);
     check int "cycle count increments" 1 (task config task_id).cycle_count)
@@ -146,13 +146,13 @@ let test_cancel_from_todo_is_terminal () =
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Cancel
+         ~action:Masc_domain.Cancel
          ~reason:"not needed"
          ()
        |> expect_ok "cancel");
     check string "cancelled" "cancelled" (status_name config task_id);
     let msg =
-      transition config ~agent_name:"worker" ~task_id ~action:Types.Claim ()
+      transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Claim ()
       |> expect_invalid_transition "claim cancelled"
     in
     check
@@ -166,14 +166,14 @@ let test_done_is_idempotent_terminal () =
   with_config (fun config ->
     let task_id = add_task config in
     ignore
-      (transition config ~agent_name:"worker" ~task_id ~action:Types.Claim ()
+      (transition config ~agent_name:"worker" ~task_id ~action:Masc_domain.Claim ()
        |> expect_ok "claim");
     ignore
       (transition
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Done_action
+         ~action:Masc_domain.Done_action
          ~notes:"first"
          ()
        |> expect_ok "done");
@@ -183,7 +183,7 @@ let test_done_is_idempotent_terminal () =
          config
          ~agent_name:"worker"
          ~task_id
-         ~action:Types.Done_action
+         ~action:Masc_domain.Done_action
          ~notes:"second"
          ()
        |> expect_ok "done idempotent");
@@ -194,9 +194,9 @@ let test_done_is_idempotent_terminal () =
       before_version
       after_backlog.version;
     match (task config task_id).task_status with
-    | Types.Done { notes; _ } ->
+    | Masc_domain.Done { notes; _ } ->
       check (option string) "original notes" (Some "first") notes
-    | other -> fail ("expected done, got " ^ Types.task_status_to_string other))
+    | other -> fail ("expected done, got " ^ Masc_domain.task_status_to_string other))
 ;;
 
 let () =

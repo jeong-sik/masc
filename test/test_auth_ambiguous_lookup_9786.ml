@@ -71,7 +71,7 @@ let ambiguous_lookup_total () =
 
 let first_match_for_hash ~base ~token_hash =
   Masc_mcp.Auth.list_credentials base
-  |> List.find (fun (cred : Types.agent_credential) ->
+  |> List.find (fun (cred : Masc_domain.agent_credential) ->
        String.equal cred.token token_hash)
   |> fun cred -> cred.agent_name
 

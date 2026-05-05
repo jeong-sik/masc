@@ -13,7 +13,7 @@
 open Alcotest
 
 module Session = Masc_mcp.Session
-module Types = Types
+module Types = Masc_domain
 
 (* ============================================================
    Type Existence Tests
@@ -95,42 +95,42 @@ let test_create_tracker_burst_reset () =
 
 let test_get_timestamps_general () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.GeneralLimit [1.0; 2.0; 3.0] in
-  let ts = Session.get_timestamps rt Types.GeneralLimit in
+  let rt = Session.set_timestamps rt Masc_domain.GeneralLimit [1.0; 2.0; 3.0] in
+  let ts = Session.get_timestamps rt Masc_domain.GeneralLimit in
   check int "general count" 3 (List.length ts)
 
 let test_get_timestamps_broadcast () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.BroadcastLimit [1.0; 2.0] in
-  let ts = Session.get_timestamps rt Types.BroadcastLimit in
+  let rt = Session.set_timestamps rt Masc_domain.BroadcastLimit [1.0; 2.0] in
+  let ts = Session.get_timestamps rt Masc_domain.BroadcastLimit in
   check int "broadcast count" 2 (List.length ts)
 
 let test_get_timestamps_task_ops () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.TaskOpsLimit [5.0] in
-  let ts = Session.get_timestamps rt Types.TaskOpsLimit in
+  let rt = Session.set_timestamps rt Masc_domain.TaskOpsLimit [5.0] in
+  let ts = Session.get_timestamps rt Masc_domain.TaskOpsLimit in
   check int "task_ops count" 1 (List.length ts)
 
 let test_set_timestamps_general () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.GeneralLimit [1.0; 2.0] in
-  check int "set general" 2 (List.length (Session.get_timestamps rt Types.GeneralLimit))
+  let rt = Session.set_timestamps rt Masc_domain.GeneralLimit [1.0; 2.0] in
+  check int "set general" 2 (List.length (Session.get_timestamps rt Masc_domain.GeneralLimit))
 
 let test_set_timestamps_broadcast () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.BroadcastLimit [3.0; 4.0; 5.0] in
-  check int "set broadcast" 3 (List.length (Session.get_timestamps rt Types.BroadcastLimit))
+  let rt = Session.set_timestamps rt Masc_domain.BroadcastLimit [3.0; 4.0; 5.0] in
+  check int "set broadcast" 3 (List.length (Session.get_timestamps rt Masc_domain.BroadcastLimit))
 
 let test_set_timestamps_task_ops () =
   let rt = Session.create_tracker (Time_compat.now ()) in
-  let rt = Session.set_timestamps rt Types.TaskOpsLimit [6.0] in
-  check int "set task_ops" 1 (List.length (Session.get_timestamps rt Types.TaskOpsLimit))
+  let rt = Session.set_timestamps rt Masc_domain.TaskOpsLimit [6.0] in
+  check int "set task_ops" 1 (List.length (Session.get_timestamps rt Masc_domain.TaskOpsLimit))
 
 let test_set_get_roundtrip () =
   let rt = Session.create_tracker (Time_compat.now ()) in
   let ts = [10.0; 20.0; 30.0] in
-  let rt = Session.set_timestamps rt Types.GeneralLimit ts in
-  let ts' = Session.get_timestamps rt Types.GeneralLimit in
+  let rt = Session.set_timestamps rt Masc_domain.GeneralLimit ts in
+  let ts' = Session.get_timestamps rt Masc_domain.GeneralLimit in
   check (list (float 0.1)) "roundtrip" ts ts'
 
 (* ============================================================

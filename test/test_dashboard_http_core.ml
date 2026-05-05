@@ -276,11 +276,11 @@ let test_dashboard_planning_http_json_includes_coordination_fsm () =
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true }
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Types.Worker with
-  | Error e -> fail (Types.masc_error_to_string e)
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let json =
         Lib.Server_dashboard_http_core.dashboard_shell_http_json
@@ -309,7 +309,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
 let test_dashboard_shell_auth_json_reports_missing_token () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true }
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
   let json =
@@ -331,11 +331,11 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
 let test_execution_actor_for_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true }
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Types.Worker with
-  | Error e -> fail (Types.masc_error_to_string e)
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let actor =
         Lib.Server_dashboard_http_execution_surfaces.execution_actor_for_request
@@ -352,11 +352,11 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
-    { Types.default_auth_config with enabled = true; require_token = true }
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Types.Worker with
-  | Error e -> fail (Types.masc_error_to_string e)
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let verifier =
         Lib.Server_routes_http_routes_verification.verifier_of_request

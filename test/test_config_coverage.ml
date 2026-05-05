@@ -11,7 +11,7 @@ module Tool_catalog = Masc_mcp.Tool_catalog
 module Tool_help_registry = Masc_mcp.Tool_help_registry
 module Tool_shard = Masc_mcp.Tool_shard
 
-let dummy_schema name : Types.tool_schema =
+let dummy_schema name : Masc_domain.tool_schema =
   {
     name;
     description = "dummy";
@@ -46,10 +46,10 @@ let test_all_tool_names_contains_approval_get () =
 
 let test_shard_base_tools_registered_for_help () =
   List.iter
-    (fun (tool : Types.tool_schema) ->
+    (fun (tool : Masc_domain.tool_schema) ->
       let registered =
         Config.raw_all_tool_schemas
-        |> List.exists (fun (schema : Types.tool_schema) ->
+        |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                String.equal schema.name tool.name)
       in
       check bool (tool.name ^ " in raw schemas") true registered;
@@ -61,9 +61,9 @@ let test_shard_base_tools_registered_for_help () =
 
 let test_approval_get_requires_admin_permission () =
   check bool "approval_get admin-only" true
-    (Auth.permission_for_tool "masc_approval_get" = Some Types.CanAdmin);
+    (Auth.permission_for_tool "masc_approval_get" = Some Masc_domain.CanAdmin);
   check bool "approval_resolve admin-only" true
-    (Auth.permission_for_tool "masc_approval_resolve" = Some Types.CanAdmin)
+    (Auth.permission_for_tool "masc_approval_resolve" = Some Masc_domain.CanAdmin)
 
 let test_all_tool_names_omit_removed_mode_tools () =
   let names = Config.all_tool_names () in

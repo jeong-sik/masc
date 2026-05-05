@@ -7,7 +7,7 @@ open Alcotest
 module Auth = Masc_mcp.Auth
 module Tool_spec = Masc_mcp.Tool_spec
 module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Types = Types
+module Types = Masc_domain
 
 (* Setup a temp directory for testing *)
 let setup_test_room () =
@@ -142,14 +142,14 @@ let test_sha256_hash () =
 (* ============================================ *)
 
 let test_default_auth_config () =
-  let cfg = Types.default_auth_config in
+  let cfg = Masc_domain.default_auth_config in
   check bool "auth enabled by default" true cfg.enabled;
   check bool "token required by default" true cfg.require_token;
   check int "24hr expiry by default" 24 cfg.token_expiry_hours
 
 let test_save_load_auth_config () =
   let dir = setup_test_room () in
-  let cfg = { Types.default_auth_config with enabled = true; require_token = true } in
+  let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
   Auth.save_auth_config dir cfg;
   let loaded = Auth.load_auth_config dir in
   check bool "enabled persisted" true loaded.enabled;
@@ -162,7 +162,7 @@ let test_save_load_auth_config_in_eio_runtime () =
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
       with_eio_runtime (fun () ->
-        let cfg = { Types.default_auth_config with enabled = true; require_token = true } in
+        let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
         Auth.save_auth_config dir cfg;
         let loaded = Auth.load_auth_config dir in
         check bool "enabled persisted in eio" true loaded.enabled;
@@ -173,7 +173,7 @@ let test_auth_config_saved_private () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      let cfg = { Types.default_auth_config with enabled = true } in
+      let cfg = { Masc_domain.default_auth_config with enabled = true } in
       Auth.save_auth_config dir cfg;
       check int "auth config mode 0600" 0o600
         (permission_bits (Auth.auth_config_file dir)))
@@ -184,12 +184,12 @@ let test_auth_config_saved_private () =
 
 let test_create_credential () =
   let dir = setup_test_room () in
-  let result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
+  let result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
   cleanup_test_room dir;
   match result with
   | Ok (raw_token, cred) ->
       check string "agent_name matches" "claude" cred.agent_name;
-      check bool "role is Worker" true (cred.role = Types.Worker);
+      check bool "role is Worker" true (cred.role = Masc_domain.Worker);
       check int "raw token is 64 chars" 64 (String.length raw_token);
       check int "stored token is 64 chars" 64 (String.length cred.token)
   | Error _ ->
@@ -200,14 +200,14 @@ let test_credential_saved_private () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      match Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker with
+      match Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker with
       | Ok _ ->
           check int "credential mode 0600" 0o600
             (permission_bits (Auth.credential_file dir "claude"))
       | Error e ->
           fail
             (Printf.sprintf "create_token should succeed: %s"
-               (Types.masc_error_to_string e)))
+               (Masc_domain.masc_error_to_string e)))
 
 let test_room_secret_saved_private () =
   let dir = setup_test_room () in
@@ -220,7 +220,7 @@ let test_room_secret_saved_private () =
 
 let test_verify_token () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Admin in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
   let verify_result = match create_result with
     | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"claude" ~token:raw_token
     | Error e -> Error e
@@ -229,15 +229,15 @@ let test_verify_token () =
   match create_result, verify_result with
   | Ok _, Ok cred ->
       check string "verified agent matches" "claude" cred.agent_name;
-      check bool "verified role matches" true (cred.role = Types.Admin)
+      check bool "verified role matches" true (cred.role = Masc_domain.Admin)
   | Ok _, Error e ->
-      fail (Printf.sprintf "verify_token should succeed: %s" (Types.masc_error_to_string e))
+      fail (Printf.sprintf "verify_token should succeed: %s" (Masc_domain.masc_error_to_string e))
   | Error _, _ ->
       fail "create_token should succeed"
 
 let test_verify_wrong_token () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
   let verify_result = match create_result with
     | Ok _ -> Auth.verify_token dir ~agent_name:"claude" ~token:"wrongtoken"
     | Error e -> Error e
@@ -246,17 +246,17 @@ let test_verify_wrong_token () =
   match create_result, verify_result with
   | Ok _, Ok _ ->
       fail "verify_token should fail with wrong token"
-  | Ok _, Error (Types.Auth (Types.Auth_error.InvalidToken _)) ->
+  | Ok _, Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
       (* Expected *)
       ()
   | Ok _, Error e ->
-      fail (Printf.sprintf "wrong error type: %s" (Types.masc_error_to_string e))
+      fail (Printf.sprintf "wrong error type: %s" (Masc_domain.masc_error_to_string e))
   | Error _, _ ->
       fail "create_token should succeed"
 
 let test_verify_token_reports_token_owner_on_agent_mismatch () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"codex" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
   let verify_result =
     match create_result with
     | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"gemini" ~token:raw_token
@@ -264,8 +264,8 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   in
   cleanup_test_room dir;
   match create_result, verify_result with
-  | Ok _, Error (Types.Auth (Types.Auth_error.Unauthorized msg)) ->
-      let rendered = Types.masc_error_to_string (Types.Auth (Types.Auth_error.Unauthorized msg)) in
+  | Ok _, Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) ->
+      let rendered = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) in
       check bool "mismatch message names token owner" true
         (String.contains rendered '('
          && contains_substring rendered "bearer token belongs to codex");
@@ -277,13 +277,13 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   | Ok _, Error e ->
       fail
         (Printf.sprintf "wrong error type for mismatch: %s"
-           (Types.masc_error_to_string e))
+           (Masc_domain.masc_error_to_string e))
   | Error _, _ ->
       fail "create_token should succeed"
 
 let test_verify_token_allows_generated_alias_for_token_owner_prefix () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"qa-king" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"qa-king" ~role:Masc_domain.Worker in
   let verify_result =
     match create_result with
     | Ok (raw_token, _) ->
@@ -294,17 +294,17 @@ let test_verify_token_allows_generated_alias_for_token_owner_prefix () =
   match create_result, verify_result with
   | Ok _, Ok cred ->
       check string "token owner credential returned" "qa-king" cred.agent_name;
-      check bool "role preserved" true (cred.role = Types.Worker)
+      check bool "role preserved" true (cred.role = Masc_domain.Worker)
   | Ok _, Error e ->
       fail
         (Printf.sprintf "generated alias should reuse owner token: %s"
-           (Types.masc_error_to_string e))
+           (Masc_domain.masc_error_to_string e))
   | Error _, _ ->
       fail "create_token should succeed"
 
 let test_resolve_agent_from_token () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Masc_domain.Worker in
   let resolve_result =
     match create_result with
     | Ok (raw_token, _) -> Auth.resolve_agent_from_token dir ~token:raw_token
@@ -313,20 +313,20 @@ let test_resolve_agent_from_token () =
   cleanup_test_room dir;
   match resolve_result with
   | Ok agent_name -> check string "resolved agent" "resolver" agent_name
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_list_credentials () =
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Types.Admin in
-  let _ = Auth.create_token dir ~agent_name:"gemini" ~role:Types.Worker in
-  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Types.Worker in
+  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
+  let _ = Auth.create_token dir ~agent_name:"gemini" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
   check int "3 credentials" 3 (List.length creds)
 
 let test_delete_credential () =
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
+  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
   Auth.delete_credential dir "claude";
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
@@ -336,21 +336,21 @@ let test_load_credential_redirect_stub () =
   (* UUID-backed credentials write a redirect stub so legacy exact-name
      lookups continue to work after Phase-3 migration. *)
   let dir = setup_test_room () in
-  let id = Types.Credential_id.generate () in
-  let cred : Types.agent_credential =
+  let id = Masc_domain.Credential_id.generate () in
+  let cred : Masc_domain.agent_credential =
     {
       id = Some id;
       agent_id = None;
       agent_name = "adversary";
       token = "hashed-token";
-      role = Types.Worker;
+      role = Masc_domain.Worker;
       created_at = "2026-01-01T00:00:00Z";
       expires_at = None;
     }
   in
   Auth.save_credential dir cred;
   let stub_hit = Auth.load_credential dir "adversary" in
-  let uuid_hit = Auth.load_credential dir (Types.Credential_id.to_string id) in
+  let uuid_hit = Auth.load_credential dir (Masc_domain.Credential_id.to_string id) in
   cleanup_test_room dir;
   (match stub_hit with
    | Some loaded when loaded.agent_name = "adversary" -> ()
@@ -364,15 +364,15 @@ let test_delete_uuid_backed_credential_removes_redirect_target () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      let id = Types.Credential_id.generate () in
+      let id = Masc_domain.Credential_id.generate () in
       let raw_token = "uuid-backed-secret" in
-      let cred : Types.agent_credential =
+      let cred : Masc_domain.agent_credential =
         {
           id = Some id;
           agent_id = None;
           agent_name = "adversary";
           token = Auth.sha256_hash raw_token;
-          role = Types.Worker;
+          role = Masc_domain.Worker;
           created_at = "2026-01-01T00:00:00Z";
           expires_at = None;
         }
@@ -384,20 +384,20 @@ let test_delete_uuid_backed_credential_removes_redirect_target () =
            fail
              (Printf.sprintf
                 "uuid-backed credential should verify before delete: %s"
-                (Types.masc_error_to_string e)));
+                (Masc_domain.masc_error_to_string e)));
       Auth.delete_credential dir "adversary";
       check bool "agent stub removed" true
         (Option.is_none (Auth.load_credential dir "adversary"));
       check bool "uuid target removed" true
         (Option.is_none
-           (Auth.load_credential dir (Types.Credential_id.to_string id)));
+           (Auth.load_credential dir (Masc_domain.Credential_id.to_string id)));
       (match Auth.find_credential_by_token dir ~token:raw_token with
-       | Error (Types.Auth (Types.Auth_error.InvalidToken _)) -> ()
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
        | Error e ->
            fail
              (Printf.sprintf
                 "expected deleted token to be invalid: %s"
-                (Types.masc_error_to_string e))
+                (Masc_domain.masc_error_to_string e))
        | Ok cred ->
            fail (Printf.sprintf "deleted token still resolves to %s" cred.agent_name));
       check int "0 credentials after uuid-backed delete" 0
@@ -407,12 +407,12 @@ let test_load_credential_exact_wins_over_fallback () =
   (* If both the nickname file and the prefix file exist, the exact
      match wins so a per-nickname override remains possible. *)
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Types.Worker in
-  let _ = Auth.create_token dir ~agent_name:"adversary-fair-tapir" ~role:Types.Admin in
+  let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"adversary-fair-tapir" ~role:Masc_domain.Admin in
   let resolved = Auth.load_credential dir "adversary-fair-tapir" in
   cleanup_test_room dir;
   match resolved with
-  | Some cred when cred.agent_name = "adversary-fair-tapir" && cred.role = Types.Admin -> ()
+  | Some cred when cred.agent_name = "adversary-fair-tapir" && cred.role = Masc_domain.Admin -> ()
   | Some cred ->
       fail (Printf.sprintf "unexpected resolution: %s/%s" cred.agent_name
               (match cred.role with Worker -> "Worker" | Admin -> "Admin"))
@@ -452,7 +452,7 @@ let test_verify_token_keeper_exact_match () =
       fail
         (Printf.sprintf
            "keeper credential should verify with exact agent_name: %s"
-           (Types.masc_error_to_string e))
+           (Masc_domain.masc_error_to_string e))
 
 (* Was: this test validated a legacy fallback where a bare-form
    credential ("sangsu") was accepted as a verification source for a
@@ -471,11 +471,11 @@ let test_verify_token_keeper_alias_archives_dual_identity_bare () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Worker with
+      match Auth.create_token dir ~agent_name:"sangsu" ~role:Masc_domain.Worker with
       | Error e ->
           fail
             (Printf.sprintf "stable keeper token creation failed: %s"
-               (Types.masc_error_to_string e))
+               (Masc_domain.masc_error_to_string e))
       | Ok (stale_bare_token, _) -> (
           match
             Auth.ensure_keeper_credential dir
@@ -484,7 +484,7 @@ let test_verify_token_keeper_alias_archives_dual_identity_bare () =
           | Error e ->
               fail
                 (Printf.sprintf "keeper credential bootstrap failed: %s"
-                   (Types.masc_error_to_string e))
+                   (Masc_domain.masc_error_to_string e))
           | Ok _ -> (
               check bool "canonical credential exists" true
                 (Option.is_some
@@ -517,14 +517,14 @@ let test_load_credential_missing_keeper_alias_stays_quiet () =
         (!resolved, stderr_output))
   in
   check (option string) "missing keeper alias returns none" None
-    (Option.map (fun cred -> cred.Types.agent_name) resolved);
+    (Option.map (fun cred -> cred.Masc_domain.agent_name) resolved);
   check string "missing keeper alias emits no parse noise" ""
     (String.trim stderr_output)
 
 let test_verify_token_dashboard_legacy_alias_fallback () =
   let dir = setup_test_room () in
   let result =
-    match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Types.Admin with
+    match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Masc_domain.Admin with
     | Ok (raw_token, _) ->
         Auth.verify_token dir ~agent_name:"dashboard" ~token:raw_token
     | Error e -> Error e
@@ -537,14 +537,14 @@ let test_verify_token_dashboard_legacy_alias_fallback () =
       fail
         (Printf.sprintf
            "dashboard should accept legacy dashboard-dev credential: %s"
-           (Types.masc_error_to_string e))
+           (Masc_domain.masc_error_to_string e))
 
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_room () in
   let raw_token = "fixed-admin-token" in
   let save_result =
     Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
-      ~role:Types.Admin ~raw_token
+      ~role:Masc_domain.Admin ~raw_token
   in
   let verify_result =
     match save_result with
@@ -556,12 +556,12 @@ let test_save_raw_token_credential_uses_provided_token () =
   match verify_result with
   | Ok cred ->
       check string "saved credential owner" "bootstrap-admin" cred.agent_name;
-      check bool "saved credential role is admin" true (cred.role = Types.Admin)
+      check bool "saved credential role is admin" true (cred.role = Masc_domain.Admin)
   | Error e ->
       fail
         (Printf.sprintf
            "provided raw token should verify after save_raw_token_credential: %s"
-           (Types.masc_error_to_string e))
+           (Masc_domain.masc_error_to_string e))
 
 let test_ensure_keeper_credential_uses_per_keeper_token () =
   let dir = setup_test_room () in
@@ -580,7 +580,7 @@ let test_ensure_keeper_credential_uses_per_keeper_token () =
           in
           check string "keeper credential exact name" "keeper-masc-improver-agent" cred.agent_name;
           check bool "keeper credential has uuid id" true (Option.is_some cred.id);
-          check bool "keeper credential is worker" true (cred.role = Types.Worker);
+          check bool "keeper credential is worker" true (cred.role = Masc_domain.Worker);
           check bool "keeper bearer is not the shared internal token" false
             (Auth.verify_internal_keeper_token dir ~token:raw_token);
           check bool "internal keeper token hash persisted" true
@@ -604,12 +604,12 @@ let test_ensure_keeper_credential_uses_per_keeper_token () =
                fail
                  (Printf.sprintf
                     "per-keeper bearer token should verify: %s"
-                    (Types.masc_error_to_string e)))
+                    (Masc_domain.masc_error_to_string e)))
       | Error e ->
           fail
             (Printf.sprintf
                "ensure_keeper_credential should mint a per-keeper token: %s"
-               (Types.masc_error_to_string e)))
+               (Masc_domain.masc_error_to_string e)))
 
 (* PR-3a regression guards: ensure_keeper_credential self-heals
    dual-identity by archiving any pre-existing bare-form credential
@@ -641,9 +641,9 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       (* Historical residue: a bare-form credential created by an older
          path (e.g., pre-#10440 boot, CLI login) with its own token. *)
       let _ =
-        match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Worker with
+        match Auth.create_token dir ~agent_name:"sangsu" ~role:Masc_domain.Worker with
         | Ok r -> r
-        | Error e -> fail (Types.masc_error_to_string e)
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
       in
       let bare_path = Auth.credential_file dir "sangsu" in
       check bool "bare credential pre-exists" true (Sys.file_exists bare_path);
@@ -653,7 +653,7 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
            ~agent_name:"keeper-sangsu-agent"
        with
        | Ok _ -> ()
-       | Error e -> fail (Types.masc_error_to_string e));
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
       check bool "bare credential moved out of agents/" false
         (Sys.file_exists bare_path);
       check bool "bare credential archived" true
@@ -688,7 +688,7 @@ let test_ensure_keeper_credential_archives_redirect_stub_bare () =
            ~agent_name:"keeper-sangsu-agent"
        with
        | Ok _ -> ()
-       | Error e -> fail (Types.masc_error_to_string e));
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
       check bool "bare redirect stub moved out of agents/" false
         (Sys.file_exists bare_path);
       check bool "bare redirect stub archived" true
@@ -708,7 +708,7 @@ let test_ensure_keeper_credential_no_archive_when_no_bare () =
            ~agent_name:"keeper-sangsu-agent"
        with
        | Ok _ -> ()
-       | Error e -> fail (Types.masc_error_to_string e));
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
       let archive = archive_dir_of dir in
       check bool "no archive directory created on clean state" false
         (Sys.file_exists archive))
@@ -728,7 +728,7 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
       let shared_raw_token = "shared-codex-token" in
       let _ =
         Auth.save_raw_token_credential dir ~agent_name:"codex-mcp-client"
-          ~role:Types.Admin ~raw_token:shared_raw_token
+          ~role:Masc_domain.Admin ~raw_token:shared_raw_token
       in
       let reused_result =
         with_env "MASC_MCP_TOKEN" shared_raw_token (fun () ->
@@ -750,7 +750,7 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
           fail
             (Printf.sprintf
                "ensure_keeper_credential should reuse persisted keeper token: %s"
-               (Types.masc_error_to_string e)))
+               (Masc_domain.masc_error_to_string e)))
 
 let test_ensure_keeper_credential_reuses_uuid () =
   let dir = setup_test_room () in
@@ -776,13 +776,13 @@ let test_ensure_keeper_credential_reuses_uuid () =
           fail
             (Printf.sprintf
                "ensure_keeper_credential should keep a stable UUID: %s"
-               (Types.masc_error_to_string e))
+               (Masc_domain.masc_error_to_string e))
       | Ok (first_cred, second_cred) -> (
           match first_cred.id, second_cred.id with
           | Some first_id, Some second_id ->
               check string "keeper credential UUID stable"
-                (Types.Credential_id.to_string first_id)
-                (Types.Credential_id.to_string second_id);
+                (Masc_domain.Credential_id.to_string first_id)
+                (Masc_domain.Credential_id.to_string second_id);
               check int "one logical keeper credential" 1
                 (List.length (Auth.list_credentials dir))
           | _ -> fail "keeper credentials should be UUID-backed"))
@@ -793,21 +793,21 @@ let test_ensure_keeper_credential_reuses_uuid () =
 
 let test_worker_permissions () =
   check bool "worker can read" true
-    (Types.has_permission Types.Worker Types.CanReadState);
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
   check bool "worker can claim" true
-    (Types.has_permission Types.Worker Types.CanClaimTask);
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanClaimTask);
   check bool "worker cannot init" false
-    (Types.has_permission Types.Worker Types.CanInit)
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanInit)
 
 let test_admin_permissions () =
   check bool "admin can read" true
-    (Types.has_permission Types.Admin Types.CanReadState);
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanReadState);
   check bool "admin can init" true
-    (Types.has_permission Types.Admin Types.CanInit);
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanInit);
   check bool "admin can reset" true
-    (Types.has_permission Types.Admin Types.CanReset);
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanReset);
   check bool "admin can admin" true
-    (Types.has_permission Types.Admin Types.CanAdmin)
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanAdmin)
 
 (* ============================================ *)
 (* Authorization tests                          *)
@@ -816,8 +816,8 @@ let test_admin_permissions () =
 let test_auth_disabled_allows_all () =
   let dir = setup_test_room () in
   Auth.save_auth_config dir
-    { Types.default_auth_config with enabled = false; require_token = false };
-  let result = Auth.check_permission dir ~agent_name:"anyone" ~token:None ~permission:Types.CanInit in
+    { Masc_domain.default_auth_config with enabled = false; require_token = false };
+  let result = Auth.check_permission dir ~agent_name:"anyone" ~token:None ~permission:Masc_domain.CanInit in
   cleanup_test_room dir;
   match result with
   | Ok () -> ()
@@ -826,46 +826,46 @@ let test_auth_disabled_allows_all () =
 let test_auth_enabled_requires_token () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let result = Auth.check_permission dir ~agent_name:"claude" ~token:None ~permission:Types.CanClaimTask in
+  let result = Auth.check_permission dir ~agent_name:"claude" ~token:None ~permission:Masc_domain.CanClaimTask in
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "should require token"
-  | Error (Types.Auth (Types.Auth_error.Unauthorized _)) -> ()
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
   | Error _ -> fail "wrong error type"
 
 let test_auth_enabled_with_valid_token () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
-        Auth.check_permission dir ~agent_name:"claude" ~token:(Some raw_token) ~permission:Types.CanClaimTask
+        Auth.check_permission dir ~agent_name:"claude" ~token:(Some raw_token) ~permission:Masc_domain.CanClaimTask
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match check_result with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_permission_denied_for_worker_admin_action () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
-        Auth.check_permission dir ~agent_name:"worker_agent" ~token:(Some raw_token) ~permission:Types.CanInit
+        Auth.check_permission dir ~agent_name:"worker_agent" ~token:(Some raw_token) ~permission:Masc_domain.CanInit
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match check_result with
   | Ok () -> fail "worker should not get admin action"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
   let result =
     match create_result with
     | Ok (raw_token, _) ->
@@ -877,12 +877,12 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   cleanup_test_room dir;
   match result with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
   let before =
     strict_unknown_tool_denial_count
       ~agent_name:"worker_agent" ~tool_class:"external"
@@ -898,12 +898,12 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "unknown non-masc tool should be denied in strict mode"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) ->
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) ->
       check (float 0.0001) "denial counter increments"
         (before +. 1.0)
         (strict_unknown_tool_denial_count
            ~agent_name:"worker_agent" ~tool_class:"external")
-  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   (* #10205 finding 1: lock the [internal_tool_prefixes] vocabulary
@@ -918,7 +918,7 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   ] in
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
   let result =
     match create_result with
     | Ok (raw_token, _) ->
@@ -937,13 +937,13 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   cleanup_test_room dir;
   match result with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_known_keeper_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result =
-    Auth.create_token dir ~agent_name:"keeper-analyst-agent" ~role:Types.Worker
+    Auth.create_token dir ~agent_name:"keeper-analyst-agent" ~role:Masc_domain.Worker
   in
   let result =
     match create_result with
@@ -962,7 +962,7 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   cleanup_test_room dir;
   match result with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   let result =
@@ -973,23 +973,23 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
              | Error _ as e -> e
              | Ok () ->
                  Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-                   ~role:Types.Worker ~tool_name)
+                   ~role:Masc_domain.Worker ~tool_name)
           (Ok ()) keeper_strict_auth_regression_tools)
   in
   match result with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
     with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
         Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-          ~role:Types.Worker ~tool_name:"keeper_totally_fake")
+          ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake")
   in
   match result with
   | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
-  | Error (Types.Auth (Types.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_declared_tool_permission_from_tool_spec () =
   let name = "__test_declared_permission_tool" in
@@ -1000,12 +1000,12 @@ let test_declared_tool_permission_from_tool_spec () =
       ~module_tag:Tool_dispatch.Mod_misc
       ~input_schema:(`Assoc [ ("type", `String "object") ])
       ~handler_binding:Tag_dispatch
-      ~required_permission:Types.CanAdmin
+      ~required_permission:Masc_domain.CanAdmin
       ()
   in
   Tool_spec.register spec;
   check bool "tool permission comes from Tool_spec metadata" true
-    (Auth.permission_for_tool name = Some Types.CanAdmin)
+    (Auth.permission_for_tool name = Some Masc_domain.CanAdmin)
 
 (* ============================================ *)
 (* Enable/disable tests                         *)

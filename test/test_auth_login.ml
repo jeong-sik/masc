@@ -35,17 +35,17 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
   with_temp_dir "auth-login" @@ fun base_path ->
   match
     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
-      ~agent_name:"codex-mcp-client" ~role:Types.Worker ()
+      ~agent_name:"codex-mcp-client" ~role:Masc_domain.Worker ()
   with
   | Error err ->
-      failf "login mint failed: %s" (Types.masc_error_to_string err)
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
   | Ok report ->
       let cfg = Auth.load_auth_config base_path in
       check bool "auth enabled" true cfg.enabled;
       check bool "require token" true cfg.require_token;
       check string "agent" "codex-mcp-client" report.agent_name;
       check string "role" "worker"
-        (Types.agent_role_to_string report.role);
+        (Masc_domain.agent_role_to_string report.role);
       check string "codex env" "MASC_MCP_TOKEN"
         report.codex_token_env_var;
       check string "client env" "MASC_MCP_TOKEN"
@@ -65,7 +65,7 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
              cred.expires_at
        | Error err ->
            failf "minted token did not verify: %s"
-             (Types.masc_error_to_string err));
+             (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports mcp token" true
         (contains_substring ~needle:"export MASC_MCP_TOKEN="
@@ -84,10 +84,10 @@ let test_login_prints_claude_client_env () =
   with_temp_dir "auth-login-claude" @@ fun base_path ->
   match
     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
-      ~agent_name:"claude" ~role:Types.Worker ()
+      ~agent_name:"claude" ~role:Masc_domain.Worker ()
   with
   | Error err ->
-      failf "login mint failed: %s" (Types.masc_error_to_string err)
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
   | Ok report ->
       check string "agent" "claude" report.agent_name;
       check string "client env" "MASC_CLAUDE_MCP_TOKEN"
@@ -101,7 +101,7 @@ let test_login_prints_claude_client_env () =
              cred.expires_at
        | Error err ->
            failf "minted claude token did not verify: %s"
-             (Types.masc_error_to_string err));
+             (Masc_domain.masc_error_to_string err));
       check string "codex env remains pinned" "MASC_MCP_TOKEN"
         report.codex_token_env_var;
       let shell = Auth_login.render_shell report in

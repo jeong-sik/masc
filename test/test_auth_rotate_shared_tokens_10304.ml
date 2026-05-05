@@ -58,7 +58,7 @@ let seed_shared_credential base_path ~agent_name ~role ~raw_token =
     Auth.save_raw_token_credential base_path ~agent_name ~role ~raw_token
   with
   | Ok cred -> cred
-  | Error e -> failf "seed credential failed: %s" (Types.masc_error_to_string e)
+  | Error e -> failf "seed credential failed: %s" (Masc_domain.masc_error_to_string e)
 
 let outcome_names_of (o : Auth.rotation_outcome) =
   List.map fst o.rotated_agents
@@ -92,10 +92,10 @@ let raw_token_value base_path agent_name =
 let test_no_shared_returns_empty () =
   with_temp_base @@ fun base ->
   ignore
-    (seed_shared_credential base ~agent_name:"alice" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"alice" ~role:Masc_domain.Worker
        ~raw_token:"alice-unique-token");
   ignore
-    (seed_shared_credential base ~agent_name:"bob" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"bob" ~role:Masc_domain.Worker
        ~raw_token:"bob-unique-token");
   let outcomes = Auth.rotate_shared_tokens base in
   check int "no shared groups, no rotation"
@@ -111,13 +111,13 @@ let test_shared_group_rotates_to_unique () =
   let shared = "shared-bearer-token-abc" in
   ignore
     (seed_shared_credential base ~agent_name:"keeper-a"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"keeper-b"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"keeper-c"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   (* Audit before rotation: one group of 3. *)
   let groups_before = Auth.audit_token_uniqueness base in
   check int "audit sees 1 group before rotation"
@@ -157,7 +157,7 @@ let test_shared_group_rotates_to_unique () =
                agent_name cred.agent_name
          | Error e ->
              failf "%s raw token should verify after rotation: %s"
-               agent_name (Types.masc_error_to_string e));
+               agent_name (Masc_domain.masc_error_to_string e));
   (* Audit is empty after rotation. *)
   check int "audit is clean after rotation"
     0 (List.length (Auth.audit_token_uniqueness base))
@@ -169,17 +169,17 @@ let test_rotation_preserves_role () =
   let shared = "role-mix-shared-token" in
   ignore
     (seed_shared_credential base ~agent_name:"admin-keeper"
-       ~role:Types.Admin ~raw_token:shared);
+       ~role:Masc_domain.Admin ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"worker-keeper"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   let _ = Auth.rotate_shared_tokens base in
   check string "admin keeper kept Admin role"
     "admin"
-    (Types.agent_role_to_string (credential_role base "admin-keeper"));
+    (Masc_domain.agent_role_to_string (credential_role base "admin-keeper"));
   check string "worker keeper kept Worker role"
     "worker"
-    (Types.agent_role_to_string (credential_role base "worker-keeper"))
+    (Masc_domain.agent_role_to_string (credential_role base "worker-keeper"))
 
 (* --- 4. multiple shared groups -> stable order ------------------ *)
 
@@ -188,16 +188,16 @@ let test_two_shared_groups_sorted_by_prefix () =
   let token_alpha = "alpha-shared-token-zzz" in
   let token_beta = "beta-shared-token-yyy" in
   ignore
-    (seed_shared_credential base ~agent_name:"a1" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"a1" ~role:Masc_domain.Worker
        ~raw_token:token_alpha);
   ignore
-    (seed_shared_credential base ~agent_name:"a2" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"a2" ~role:Masc_domain.Worker
        ~raw_token:token_alpha);
   ignore
-    (seed_shared_credential base ~agent_name:"b1" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"b1" ~role:Masc_domain.Worker
        ~raw_token:token_beta);
   ignore
-    (seed_shared_credential base ~agent_name:"b2" ~role:Types.Worker
+    (seed_shared_credential base ~agent_name:"b2" ~role:Masc_domain.Worker
        ~raw_token:token_beta);
   let outcomes = Auth.rotate_shared_tokens base in
   check int "two outcome groups"
@@ -216,10 +216,10 @@ let test_idempotent_after_rotation () =
   let shared = "second-pass-token" in
   ignore
     (seed_shared_credential base ~agent_name:"x"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"y"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   let _ = Auth.rotate_shared_tokens base in
   let second_outcomes = Auth.rotate_shared_tokens base in
   check int "second rotation finds nothing to rotate"
@@ -232,13 +232,13 @@ let test_scoped_rotation_only_rotates_selected_agents () =
   let shared = "scoped-shared-token" in
   ignore
     (seed_shared_credential base ~agent_name:"keeper-a"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"keeper-b"
-       ~role:Types.Worker ~raw_token:shared);
+       ~role:Masc_domain.Worker ~raw_token:shared);
   ignore
     (seed_shared_credential base ~agent_name:"admin"
-       ~role:Types.Admin ~raw_token:shared);
+       ~role:Masc_domain.Admin ~raw_token:shared);
   let outcomes =
     Auth.rotate_shared_tokens_for_agents base
       ~agent_names:[ "keeper-a"; "keeper-b" ]

@@ -226,7 +226,7 @@ let selected_schemas () =
   | None -> Cases.all_keeper_tool_schemas ()
   | Some requested ->
       Cases.all_keeper_tool_schemas ()
-      |> List.filter (fun (schema : Types.tool_schema) ->
+      |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name requested)
 
 let run_tool_case_or_fail tool_name () =
@@ -241,7 +241,7 @@ let matrix_test_cases () =
   log_progress "registering %d matrix cases, per-case timeout=%ds"
     total timeout_sec;
   schemas
-  |> List.mapi (fun index (schema : Types.tool_schema) ->
+  |> List.mapi (fun index (schema : Masc_domain.tool_schema) ->
          let case_name =
            Printf.sprintf "%03d_%s" (index + 1) schema.name
          in

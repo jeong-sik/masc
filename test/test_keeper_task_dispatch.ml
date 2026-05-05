@@ -46,7 +46,7 @@ let only_task config =
     failwith
       (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
 
-let strict_contract ?(verify_gate_evidence = []) () : Types.task_contract =
+let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
   {
     strict = true;
     completion_contract = [ "tests pass" ];
@@ -62,7 +62,7 @@ let strict_contract ?(verify_gate_evidence = []) () : Types.task_contract =
       };
   }
 
-let contract_requiring_tools required_tools : Types.task_contract =
+let contract_requiring_tools required_tools : Masc_domain.task_contract =
   {
     strict = false;
     completion_contract = [];
@@ -314,8 +314,8 @@ let test_claim_respects_active_goal_ids () =
     let json = parse_json result in
     let claimed_task =
       Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Types.task) ->
-           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
     in
     match claimed_task with
     | Some task ->
@@ -356,8 +356,8 @@ let test_claim_falls_back_from_empty_auto_goal_scope () =
     let json = parse_json result in
     let claimed_task =
       Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Types.task) ->
-           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
     in
     match claimed_task with
     | Some task ->
@@ -394,8 +394,8 @@ let test_claim_skips_required_tools_without_access () =
     ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
     let claimed =
       Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Types.task) ->
-           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
     in
     match claimed with
     | Some task -> check string "claimed fallback" "Readable fallback" task.title
@@ -422,8 +422,8 @@ let test_claim_allows_required_tools_with_access () =
     ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
     let claimed =
       Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Types.task) ->
-           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
     in
     match claimed with
     | Some task -> check string "claimed required-tool task" "Needs bash" task.title
@@ -602,12 +602,12 @@ let test_done_redirects_to_verification_fsm () =
         | `Bool true ->
           let task = only_task config in
           (match task.task_status with
-           | Types.AwaitingVerification _ -> ()
+           | Masc_domain.AwaitingVerification _ -> ()
            | status ->
              fail
                (Printf.sprintf
                   "expected awaiting_verification, got %s"
-                  (Types.string_of_task_status status)))
+                  (Masc_domain.string_of_task_status status)))
         | _ -> fail "expected keeper_task_done to redirect into verification FSM")))
 
 let test_done_redirects_default_contract_task_to_verification_fsm () =
@@ -634,12 +634,12 @@ let test_done_redirects_default_contract_task_to_verification_fsm () =
       | `Bool true ->
         let task = only_task config in
         (match task.task_status with
-         | Types.AwaitingVerification _ -> ()
+         | Masc_domain.AwaitingVerification _ -> ()
          | status ->
            fail
              (Printf.sprintf
                 "expected awaiting_verification, got %s"
-                (Types.string_of_task_status status)));
+                (Masc_domain.string_of_task_status status)));
         (match task.contract with
          | Some contract ->
            check bool "default completion contract present" true
@@ -717,12 +717,12 @@ let test_submit_for_verification_transitions_task () =
         | `Bool true ->
             let task = only_task config in
             (match task.task_status with
-             | Types.AwaitingVerification _ -> ()
+             | Masc_domain.AwaitingVerification _ -> ()
              | status ->
                  fail
                    (Printf.sprintf
                       "expected awaiting_verification, got %s"
-                      (Types.string_of_task_status status)));
+                      (Masc_domain.string_of_task_status status)));
             let persisted_meta =
               match Keeper_types.read_meta config meta.name with
               | Ok (Some meta) -> meta

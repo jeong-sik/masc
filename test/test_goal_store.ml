@@ -36,7 +36,7 @@ let with_room f =
     ignore (Coord.init config ~agent_name:(Some "test"));
     f config)
 
-let iso_now () = Types.now_iso ()
+let iso_now () = Masc_domain.now_iso ()
 
 let make_goal id title =
   let ts = iso_now () in

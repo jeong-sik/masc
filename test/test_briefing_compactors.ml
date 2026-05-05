@@ -35,7 +35,7 @@
        - capabilities list capped at 2 (take 2). *)
 
 module C = Masc_mcp.Briefing_compactors
-module T = Types
+module T = Masc_domain
 
 (* ── Fixtures ──────────────────────────────────────────────── *)
 

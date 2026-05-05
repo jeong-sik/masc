@@ -429,6 +429,10 @@ let add_comment ~post_id ~author ~content ?parent_id
           ok
       | Error _ as err -> err)
 
+let current_vote_for_post ~voter ~post_id =
+  match backend () with
+  | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
+
 let vote ~voter ~post_id ~direction =
   let result =
     match backend () with
@@ -443,6 +447,10 @@ let vote ~voter ~post_id ~direction =
          "board vote failed: post_id=%s voter=%s: %s"
          post_id voter (Board_types.show_board_error e));
   result
+
+let current_vote_for_comment ~voter ~comment_id =
+  match backend () with
+  | Jsonl store -> Board.current_vote_for_comment store ~voter ~comment_id
 
 let vote_comment ~voter ~comment_id ~direction =
   let result =

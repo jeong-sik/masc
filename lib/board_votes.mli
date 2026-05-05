@@ -72,6 +72,14 @@ val vote_log_path : unit -> string
 
 (** {1 Voting} *)
 
+val current_vote_for_post :
+  store ->
+  voter:string ->
+  post_id:string ->
+  (vote_direction option, board_error) Result.t
+(** Returns the persisted vote direction for [voter] on [post_id],
+    if any. *)
+
 val vote :
   store ->
   voter:string ->
@@ -92,6 +100,14 @@ val vote :
     readers.  Every vote is broadcast to
     {!Thompson_sampling.record_vote} outside the state lock
     for posterior feedback. *)
+
+val current_vote_for_comment :
+  store ->
+  voter:string ->
+  comment_id:string ->
+  (vote_direction option, board_error) Result.t
+(** Returns the persisted vote direction for [voter] on [comment_id],
+    if any. *)
 
 val vote_comment :
   store ->

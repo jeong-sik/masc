@@ -81,7 +81,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { voteComment } from './board-state'
+import { voteComment, votePost } from './board-state'
 import { toggleReaction } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
@@ -249,6 +249,29 @@ describe('CommentThread', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
+  it('marks the current comment vote as pressed', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'already voted',
+        created_at: '2026-04-02T00:00:00Z',
+        vote_balance: 4,
+        current_vote: 'up',
+        has_voted: true,
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    const upvote = screen.getByRole('button', { name: '댓글 추천' })
+    expect(upvote).toHaveAttribute('aria-pressed', 'true')
+    expect(upvote).toBeDisabled()
+    expect(screen.getByRole('button', { name: '댓글 비추천' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('toggles a comment reaction from the thread', async () => {
     const comments = [
       {
@@ -402,5 +425,36 @@ describe('PostDetail', () => {
     expect(screen.getByText(/분류 근거:/)).toBeInTheDocument()
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
+  })
+
+  it('marks the current post vote as pressed', async () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 7,
+      vote_balance: 7,
+      current_vote: 'down',
+      has_voted: true,
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    const downvote = screen.getByRole('button', { name: '▼ 비추천' })
+    expect(downvote).toHaveAttribute('aria-pressed', 'true')
+    expect(downvote).toBeDisabled()
+    expect(screen.getByRole('button', { name: '▲ 추천' })).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: '▲ 추천' }))
+    await waitFor(() => {
+      expect(votePost).toHaveBeenCalledWith('post-1', 'up')
+    })
   })
 })

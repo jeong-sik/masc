@@ -1,8 +1,9 @@
-import { get, post, withRetries, defaultBoardVoter } from './core'
+import { currentDashboardActor, get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
+  BoardVoteDirection,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -330,6 +331,11 @@ function normalizeBoardActorIdentity(
   }
 }
 
+function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
+  const direction = asString(raw, '').trim().toLowerCase()
+  return direction === 'up' || direction === 'down' ? direction : null
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -342,6 +348,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const votesUp = asNumber(raw.votes_up, 0)
   const votesDown = asNumber(raw.votes_down, 0)
   const votes = asNumber(raw.votes, score || (votesUp - votesDown))
+  const currentVote = normalizeBoardVoteDirection(raw.current_vote)
+  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -382,6 +390,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
+    current_vote: currentVote,
+    has_voted: hasVoted,
     comment_count: commentCount,
     created_at: createdAt ?? '',
     updated_at: updatedAt ?? '',
@@ -409,6 +419,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votesDown = asNumber(raw.votes_down, 0)
   const score = asNumber(raw.score, votesUp - votesDown)
   const votes = asNumber(raw.votes, score)
+  const currentVote = normalizeBoardVoteDirection(raw.current_vote)
+  const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
   return {
     id,
     post_id: postId,
@@ -421,6 +433,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
+    current_vote: currentVote,
+    has_voted: hasVoted,
   }
 }
 
@@ -486,6 +500,7 @@ export async function fetchBoard(
     if (options?.excludeAutomation) params.set('exclude_automation', 'true')
     if (options?.author) params.set('author', options.author)
     if (options?.hearth) params.set('hearth', options.hearth)
+    params.set('voter', currentDashboardActor())
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -524,7 +539,11 @@ export async function fetchBoardReactions(
 
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
   return withRetries('fetchBoardPost', async () => {
-    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
+    const params = new URLSearchParams({
+      format: 'flat',
+      voter: currentDashboardActor(),
+    })
+    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
     const post = normalizeBoardPost(postRaw) ?? {
       id: postId,

@@ -111,6 +111,28 @@ let board_actor_author_for_write raw =
   | Some (keeper_name, _, _) -> keeper_name
   | None -> String.trim raw
 
+let board_voter_query request =
+  query_param request "voter"
+  |> Option.map String.trim
+  |> Fun.flip Option.bind (fun raw ->
+       if raw = "" then None else Some (board_actor_author_for_write raw))
+
+let board_current_vote_for_post ~voter ~post_id =
+  match voter with
+  | None -> None
+  | Some voter -> (
+      match Board_dispatch.current_vote_for_post ~voter ~post_id with
+      | Ok vote -> Some vote
+      | Error _ -> Some None)
+
+let board_current_vote_for_comment ~voter ~comment_id =
+  match voter with
+  | None -> None
+  | Some voter -> (
+      match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+      | Ok vote -> Some vote
+      | Error _ -> Some None)
+
 let max_filtered_board_window = 5200
 
 let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
@@ -118,14 +140,26 @@ let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
   if exclude_system || exclude_automation then max base max_filtered_board_window
   else base
 
-let board_comment_dashboard_json (c : Board.comment) : Yojson.Safe.t =
+let board_vote_state_fields = function
+  | None -> []
+  | Some None -> [ ("current_vote", `Null); ("has_voted", `Bool false) ]
+  | Some (Some direction) ->
+      [
+        ("current_vote", `String (Board.vote_direction_to_string direction));
+        ("has_voted", `Bool true);
+      ]
+
+let board_comment_dashboard_json ?current_vote (c : Board.comment) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
   match Board.comment_to_yojson c with
   | `Assoc fields ->
-      `Assoc (fields @ [ ("author_identity", board_actor_identity_json author) ])
+      `Assoc
+        (fields
+         @ [ ("author_identity", board_actor_identity_json author) ]
+         @ board_vote_state_fields current_vote)
   | other -> other
 
-let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
+let board_post_dashboard_json ?current_vote ~author_karma (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let base_fields =
     match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
@@ -153,7 +187,8 @@ let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
           ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);
-        ] )
+        ]
+      @ board_vote_state_fields current_vote )
 
 let dashboard_compact_mode request =
   match query_param request "mode" with

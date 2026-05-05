@@ -134,6 +134,21 @@ let record_vote_side_effect store outcome =
     ~agent_name:outcome.vote_author_name
     ~direction:vote_dir
 
+let current_vote_for_post store ~voter ~post_id
+    : (vote_direction option, board_error) Result.t =
+  match Agent_id.of_string voter with
+  | Error e -> Error e
+  | Ok agent ->
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      with_lock store (fun () ->
+        let post_key = Post_id.to_string pid in
+        if not (Hashtbl.mem store.posts post_key) then Error (Post_not_found post_id)
+        else
+          let vote_key = "post:" ^ post_key ^ ":" ^ Agent_id.to_string agent in
+          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
+
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -214,6 +229,24 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
            record_vote_side_effect store outcome;
            Ok delta
        | Error _ as e -> e)
+
+let current_vote_for_comment store ~voter ~comment_id
+    : (vote_direction option, board_error) Result.t =
+  match Agent_id.of_string voter with
+  | Error e -> Error e
+  | Ok agent ->
+  match Comment_id.of_string comment_id with
+  | Error e -> Error e
+  | Ok cid ->
+      with_lock store (fun () ->
+        let comment_key = Comment_id.to_string cid in
+        if not (Hashtbl.mem store.comments comment_key) then
+          Error (Comment_not_found comment_id)
+        else
+          let vote_key =
+            "comment:" ^ comment_key ^ ":" ^ Agent_id.to_string agent
+          in
+          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
 (** Vote on a comment *)
 let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =

@@ -84,11 +84,20 @@ type git_outputs =
   }
 
 val snapshot_of_outputs :
-  generated_at:string -> git_outputs -> snapshot
+  ?repo_id:string -> ?repo_label:string -> generated_at:string -> git_outputs -> snapshot
 (** Pure converter used by tests and the HTTP capture path. *)
 
+val empty_json : string -> Yojson.Safe.t
+(** Empty dashboard graph response with one warning. *)
+
 val dashboard_http_json :
-  config:Coord.config -> limit:int -> Yojson.Safe.t
+  ?repo_id:string ->
+  ?repo_label:string ->
+  ?repo_root:string ->
+  config:Coord.config ->
+  limit:int ->
+  unit ->
+  Yojson.Safe.t
 (** Capture the local repository graph for dashboard JSON responses. *)
 
 type git_capture_hook =

@@ -35,6 +35,21 @@ describe('createFileTreeStore', () => {
     ])
   })
 
+  it('treats empty-string parent as root for server-supplied nodes', () => {
+    const s = createFileTreeStore()
+    s.seed([
+      { path: 'lib', label: 'lib', depth: 0, parent: '', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
+      { path: 'lib/main.ml', label: 'main.ml', depth: 1, parent: 'lib', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
+      { path: 'README.md', label: 'README.md', depth: 0, parent: '', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
+    ])
+
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/main.ml',
+      'README.md',
+    ])
+  })
+
   it('expands nested directories on demand', () => {
     const s = createFileTreeStore()
     s.seed(SAMPLE)

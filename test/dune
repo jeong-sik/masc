@@ -48,6 +48,7 @@
         test_keeper_cascade_profile
         test_cascade_capability_profile
         test_cascade_required_capability_profile
+        test_cascade_secondary_entry_parser
         test_cascade_validator_capability_lint
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
@@ -254,6 +255,7 @@
           test_keeper_cascade_profile
           test_cascade_capability_profile
           test_cascade_required_capability_profile
+          test_cascade_secondary_entry_parser
           test_cascade_validator_capability_lint
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
@@ -1058,6 +1060,7 @@
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
+(include stanzas/test_dune_local_script.inc)
 (include stanzas/test_env_config_coord_git_local_timeout.inc)
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 (include stanzas/test_env_config_dashboard_execution_timeouts.inc)
@@ -1169,6 +1172,7 @@
 (include stanzas/test_process_eio_default_timeout.inc)
 (include stanzas/test_provider_kind_resolution.inc)
 (include stanzas/test_release_train_guard_script.inc)
+(include stanzas/test_reqd_invalid_state_swallow.inc)
 (include stanzas/test_require_tool_use_violation_counter_10091.inc)
 (include stanzas/test_sandbox_clone_conflict.inc)
 (include stanzas/test_server_state_product.inc)

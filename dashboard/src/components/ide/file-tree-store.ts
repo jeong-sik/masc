@@ -43,6 +43,10 @@ export interface FileTreeStore {
   readonly nodeCount: () => number
 }
 
+function normalizedParent(parent: string | null): string | null {
+  return parent === '' ? null : parent
+}
+
 export function createFileTreeStore(): FileTreeStore {
   const allNodes = signal<ReadonlyArray<FileTreeNode>>([])
   const expanded = signal<ReadonlySet<string>>(new Set())
@@ -67,7 +71,7 @@ export function createFileTreeStore(): FileTreeStore {
 
     const visible: FileTreeNode[] = []
     for (const n of nodes) {
-      let cur: string | null = n.parent
+      let cur: string | null = normalizedParent(n.parent)
       let chainOpen = true
       while (cur !== null) {
         if (!open.has(cur)) {
@@ -75,7 +79,7 @@ export function createFileTreeStore(): FileTreeStore {
           break
         }
         const parent = byPath.get(cur)
-        cur = parent ? parent.parent : null
+        cur = parent ? normalizedParent(parent.parent) : null
       }
       if (chainOpen) visible.push(n)
     }

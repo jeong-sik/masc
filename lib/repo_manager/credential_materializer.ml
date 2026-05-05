@@ -28,6 +28,10 @@ let gh_hosts_yml = "hosts.yml"
 let close_fd_noerr fd =
   try Unix.close fd with Unix.Unix_error _ -> ()
 
+let rec waitpid_no_intr flags pid =
+  try Unix.waitpid flags pid
+  with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_intr flags pid
+
 let env_key kv =
   match String.index_opt kv '=' with
   | None -> kv
@@ -79,7 +83,7 @@ let gh_auth_status_ok ~gh_config_dir =
   match pid with
   | None -> false
   | Some pid -> (
-      match snd (Unix.waitpid [] pid) with
+      match snd (waitpid_no_intr [] pid) with
       | Unix.WEXITED 0 -> true
       | _ -> false)
 
@@ -210,7 +214,7 @@ let read_operator_ambient_token () : string option =
          while true do Buffer.add_channel buf ic 64 done
        with End_of_file -> ());
       close_in_noerr ic;
-      let status = snd (Unix.waitpid [] pid) in
+      let status = snd (waitpid_no_intr [] pid) in
       (match status with
        | Unix.WEXITED 0 ->
            let token = String.trim (Buffer.contents buf) in
@@ -437,7 +441,7 @@ let provision_via_with_token ?credential_id ?identity_label
                with
                | Sys_error _ ->
                    close_out_noerr oc);
-              let status = snd (Unix.waitpid [] pid) in
+              let status = snd (waitpid_no_intr [] pid) in
               (match status with
                | Unix.WEXITED 0 ->
                    (* RFC-0008 F-2: relabel hosts.yml:user back to the

@@ -46,10 +46,19 @@ type summary =
   ; overall_convergence_pct : int
   }
 
+type fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
+
 type response =
   { generated_at : string
   ; tree : node list
   ; summary : summary
+  ; fetch_status : fetch_status
   }
 
 let fixture_summary : summary =
@@ -62,7 +71,7 @@ let fixture_summary : summary =
 ;;
 
 let fixture : response =
-  { generated_at = ""; tree = []; summary = fixture_summary }
+  { generated_at = ""; tree = []; summary = fixture_summary; fetch_status = Fetch_pending }
 ;;
 
 (* ---------- manual Yojson decoding ---------- *)
@@ -168,5 +177,12 @@ let response_of_yojson json : response =
     | `Assoc _ as s -> summary_of_yojson s
     | _ -> fixture_summary
   in
-  { generated_at = string_field json "generated_at"; tree; summary }
+  { generated_at = string_field json "generated_at"; tree; summary; fetch_status = Fetch_fresh }
+;;
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch pending"
+  | Fetch_fresh -> "fetch ok"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "stale %dx" consecutive_failures
 ;;

@@ -26,6 +26,45 @@ interface IdeExplorerProps {
   readonly subscribeRepositories?: (listener: () => void) => () => void
 }
 
+type ExplorerScopeTone = 'accent' | 'muted'
+
+interface ExplorerScopeLabel {
+  readonly label: string
+  readonly tone: ExplorerScopeTone
+}
+
+function repositoryLabel(
+  repositories: ReadonlyArray<Repository>,
+  repoId: string,
+): string {
+  const repository = repositories.find(candidate => candidate.id === repoId)
+  return repository?.name.trim() || repoId
+}
+
+export function explorerScopeLabel(
+  source: WorkspaceSource,
+  keeperName: string,
+  repositories: ReadonlyArray<Repository> = [],
+): ExplorerScopeLabel {
+  const keeper = keeperName.trim()
+  if (keeper) return { label: `@${keeper}`, tone: 'accent' }
+
+  switch (source.kind) {
+    case 'repository':
+      return { label: repositoryLabel(repositories, source.repoId), tone: 'accent' }
+    case 'repository_missing':
+    case 'repository_unknown':
+      return { label: `${repositoryLabel(repositories, source.repoId)} fallback`, tone: 'muted' }
+    case 'playground':
+      return { label: `@${source.keeper}`, tone: 'accent' }
+    case 'playground_missing':
+    case 'keeper_unknown':
+      return { label: `@${source.keeper} fallback`, tone: 'muted' }
+    case 'project':
+      return { label: 'project', tone: 'muted' }
+  }
+}
+
 export function IdeExplorer({
   fileTreeStore: store,
   workspaceSource,
@@ -99,6 +138,7 @@ export function IdeExplorer({
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
   const fileCount = filtered.filter(n => !n.hasChildren).length
+  const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
 
   return html`
     <div
@@ -125,7 +165,13 @@ export function IdeExplorer({
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
+        <span>EXPLORER · <span
+            style=${{
+              color: scopeLabel.tone === 'accent'
+                ? 'var(--color-accent-fg)'
+                : 'var(--color-fg-muted)',
+            }}
+          >${scopeLabel.label}</span></span>
         <span>${fileCount} FILES</span>
       </header>
       ${repoList.length > 0 || onRepositoryScan ? html`

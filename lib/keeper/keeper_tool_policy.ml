@@ -73,7 +73,7 @@ let warn_unloaded_policy_config_once ~accessor ~outcome =
       "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; %s"
       accessor outcome
 
-(* PR #13185 review: the warn message originally hard-coded
+(* PR #13129 review: the warn message originally hard-coded
    "returning fallback", which is misleading on the strict
    accessor path that raises [Invalid_argument] instead.  Take
    [outcome] from the caller so the log line accurately describes

@@ -313,25 +313,74 @@ let run_read_line cmd =
         try Ok (input_line ic) with End_of_file -> Error "no output")
   with Sys_error msg -> Error msg
 
+(* Pure path normalization fallback for environments where the path does
+   not exist on disk yet (Unix.realpath would raise) or Unix is
+   unavailable.  Drops empty segments and "."; folds ".." against the
+   accumulator. *)
+let normalize_path raw =
+  if String.length raw = 0 then raw
+  else
+    let absolute = Char.equal raw.[0] '/' in
+    let parts = String.split_on_char '/' raw in
+    let acc = ref [] in
+    List.iter
+      (fun p ->
+        match p with
+        | "" | "." -> ()
+        | ".." -> (match !acc with _ :: rest -> acc := rest | [] -> ())
+        | _ -> acc := p :: !acc)
+      parts;
+    let body = String.concat "/" (List.rev !acc) in
+    if absolute then "/" ^ body
+    else if String.equal body "" then "."
+    else body
+
+let canonical_path raw =
+  try Unix.realpath raw
+  with Unix.Unix_error _ | Sys_error _ -> normalize_path raw
+
 let discover_repositories ~base_path =
   let toml_exists = repositories_toml_exists base_path in
+  (* Issue #13188 + #13217 review: [find <base_path>] echoes the
+     search-path prefix in every result, and a relative base_path
+     (e.g. ["workspace"]) used to duplicate via [Filename.concat
+     base_path repo_dir].  Beyond simple absolute conversion we also
+     have to canonicalize because [Filename.concat (Sys.getcwd ())
+     "."] yields ["/cwd/."] — find would then emit ["/cwd/./repo"],
+     which [String.equal] does not match against existing repos
+     stored as ["/cwd/repo"] and silently rediscovers them.  Resolve
+     [base_path] to its canonical absolute form (symlinks + ".."
+     + redundant "." collapsed) before invoking [find] so every
+     downstream comparison sees a single normalized representation. *)
+  let abs_base_path = canonical_path base_path in
   let existing_paths =
     match load_all ~base_path with
     | Ok repos ->
         repos
         |> List.filter (fun (r : repository) ->
+            (* Reviewer #13217: legacy-default detection used to compare
+               [local_path r] against [base_path] textually.  When
+               [base_path = "."] and [repo.local_path = "."],
+               [local_path] concatenates to ["./."] which does not
+               equal [base_path] — the default repo then leaks into
+               [existing_paths], causing the real repo at base_path to
+               be classified as "already known" and skipped.  Compare
+               raw [r.local_path] against [base_path] directly so the
+               relative-default case is detected without going through
+               [Filename.concat]. *)
             not
               ((not toml_exists)
                && String.equal r.id "default"
-               && String.equal (local_path ~base_path r) base_path))
-        |> List.map (fun (r : repository) -> local_path ~base_path r)
+               && String.equal r.local_path base_path))
+        |> List.map (fun (r : repository) ->
+            canonical_path (local_path ~base_path:abs_base_path r))
     | Error _ -> []
   in
   let git_dirs =
     try
       let cmd =
         Printf.sprintf "find %s -maxdepth 4 -name \".git\" -type d 2>/dev/null"
-          (Filename.quote base_path)
+          (Filename.quote abs_base_path)
       in
       let ic = Unix.open_process_in cmd in
       Fun.protect
@@ -347,13 +396,13 @@ let discover_repositories ~base_path =
     | Sys_error _ | Unix.Unix_error _ | Failure _ -> []
   in
   let has_hidden_segment_under_base path =
-    if String.equal path base_path then false
+    if String.equal path abs_base_path then false
     else
       let base_prefix =
-        if String.length base_path > 0
-           && Char.equal base_path.[String.length base_path - 1] '/'
-        then base_path
-        else base_path ^ "/"
+        if String.length abs_base_path > 0
+           && Char.equal abs_base_path.[String.length abs_base_path - 1] '/'
+        then abs_base_path
+        else abs_base_path ^ "/"
       in
       let prefix_len = String.length base_prefix in
       if
@@ -374,11 +423,10 @@ let discover_repositories ~base_path =
   let candidates =
     List.filter_map
       (fun git_dir ->
-        let repo_dir = Filename.dirname git_dir in
-        let abs_repo_dir =
-          if Filename.is_relative repo_dir then Filename.concat base_path repo_dir
-          else repo_dir
-        in
+        (* Canonicalize again here in case find traversed a symlink the
+           caller did not anticipate; the existing-repo membership check
+           below relies on identical normalized representations. *)
+        let abs_repo_dir = canonical_path (Filename.dirname git_dir) in
         if has_hidden_segment_under_base abs_repo_dir then None
         else if List.exists (String.equal abs_repo_dir) existing_paths then None
         else

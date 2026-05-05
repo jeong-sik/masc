@@ -22,29 +22,39 @@ interface MemoryGraphProps {
   nodes: MemoryNode[]
   edges: MemoryEdge[]
   onSelectNode?: (id: string) => void
+  width?: number
+  height?: number
+  ariaLabel?: string
   testId?: string
 }
 
-export function MemoryGraph({ nodes, edges, onSelectNode, testId }: MemoryGraphProps) {
+export function MemoryGraph({
+  nodes,
+  edges,
+  onSelectNode,
+  width = 400,
+  height = 300,
+  ariaLabel = '메모리 그래프',
+  testId,
+}: MemoryGraphProps) {
   if (nodes.length === 0) {
     return html`
       <div
         data-testid=${testId}
         class="flex h-48 items-center justify-center text-xs text-[var(--color-fg-muted)]"
         role="img"
-        aria-label="메모리 그래프"
+        aria-label=${ariaLabel}
+        style=${{ height: `${height}px` }}
       >
         노드가 없습니다.
       </div>
     `
   }
 
-  const width = 400
-  const height = 300
   const nodeMap = new Map(nodes.map((n) => [n.id, n]))
 
   return html`
-    <figure data-testid=${testId} class="w-full overflow-auto" aria-label="메모리 그래프">
+    <figure data-testid=${testId} class="w-full overflow-auto" aria-label=${ariaLabel}>
       <svg
         viewBox="0 0 ${width} ${height}"
         class="w-full h-auto"

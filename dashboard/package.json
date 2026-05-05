@@ -71,7 +71,7 @@
     "happy-dom": "^20.9.0",
     "jest-axe": "^9.0.0",
     "postcss": "^8.5.14",
-    "rollup-plugin-visualizer": "^7.0.1",
+    "rollup-plugin-visualizer": "^6.0.5",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",

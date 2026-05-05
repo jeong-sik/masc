@@ -1802,6 +1802,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   (Some failure_reason)
             | None -> ()
           end;
+          (match
+             Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
+               terminal_reason.code
+           with
+           | Some progress_class ->
+               Keeper_passive_loop_detector.record_turn
+                 ~keeper_name:updated_meta.name ~progress_class
+           | None -> ());
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")

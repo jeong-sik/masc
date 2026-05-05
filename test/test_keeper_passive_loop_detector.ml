@@ -15,6 +15,7 @@ let setup () = PLD.reset_all_for_test ()
 (* ── Tests ──────────────────────────────────────────────────────────── *)
 
 let test_initial_streak_zero () =
+  Eio_main.run @@ fun _env ->
   setup ();
   check int "no-state keeper streak = 0" 0
     (PLD.current_streak ~keeper_name:"k1")
@@ -33,6 +34,77 @@ let test_claim_context_increments_streak () =
   PLD.record_turn ~keeper_name:"k1" ~progress_class:"claim_context";
   check int "claim_context increments" 1
     (PLD.current_streak ~keeper_name:"k1")
+
+let test_terminal_reason_maps_required_tool_failures () =
+  check (option string) "no tool call maps to detector class"
+    (Some "required_tool_no_call")
+    (PLD.progress_class_of_terminal_reason_code
+       "required_tool_use_no_tool_call");
+  check (option string) "unsatisfied maps to detector class"
+    (Some "required_tool_unsatisfied")
+    (PLD.progress_class_of_terminal_reason_code
+       "required_tool_use_unsatisfied");
+  check (option string) "provider errors do not count"
+    None
+    (PLD.progress_class_of_terminal_reason_code "provider_error")
+
+let test_required_tool_no_call_fires_metric_at_three () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  let labels =
+    [ ("keeper", "k-required-no-call"); ("kind", "required_tool_no_call") ]
+  in
+  let before =
+    P.metric_value_or_zero
+      P.metric_keeper_required_tool_loop_detected_total
+      ~labels ()
+  in
+  PLD.record_turn ~keeper_name:"k-required-no-call"
+    ~progress_class:"required_tool_no_call";
+  PLD.record_turn ~keeper_name:"k-required-no-call"
+    ~progress_class:"required_tool_no_call";
+  check int "below required-tool threshold" 2
+    (PLD.current_streak ~keeper_name:"k-required-no-call");
+  check (float 0.001) "no metric before threshold" before
+    (P.metric_value_or_zero
+       P.metric_keeper_required_tool_loop_detected_total
+       ~labels ());
+  PLD.record_turn ~keeper_name:"k-required-no-call"
+    ~progress_class:"required_tool_no_call";
+  check int "at required-tool threshold" 3
+    (PLD.current_streak ~keeper_name:"k-required-no-call");
+  check (float 0.001) "required-tool metric increments once"
+    (before +. 1.0)
+    (P.metric_value_or_zero
+       P.metric_keeper_required_tool_loop_detected_total
+       ~labels ())
+
+let test_required_tool_streak_does_not_inherit_passive_streak () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  PLD.record_turn ~keeper_name:"k-family" ~progress_class:"passive_status";
+  PLD.record_turn ~keeper_name:"k-family" ~progress_class:"passive_status";
+  check int "passive streak starts" 2
+    (PLD.current_streak ~keeper_name:"k-family");
+  PLD.record_turn ~keeper_name:"k-family"
+    ~progress_class:"required_tool_no_call";
+  check int "required-tool family starts its own streak" 1
+    (PLD.current_streak ~keeper_name:"k-family")
+
+let test_required_tool_nudge_mentions_real_tool_call () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  for _ = 1 to 3 do
+    PLD.record_turn ~keeper_name:"k-required-nudge"
+      ~progress_class:"required_tool_no_call"
+  done;
+  match PLD.nudge_message ~keeper_name:"k-required-nudge" with
+  | None -> fail "expected required-tool nudge at threshold"
+  | Some msg ->
+      check bool "nudge names required tool loop" true
+        (Re.execp (Re.compile (Re.str "REQUIRED TOOL LOOP")) msg);
+      check bool "nudge requires real keeper tool" true
+        (Re.execp (Re.compile (Re.str "real keeper tool call")) msg)
 
 let test_execution_resets_streak () =
   Eio_main.run @@ fun _env ->
@@ -185,6 +257,14 @@ let () =
         test_passive_increments_streak;
       test_case "claim_context increments streak" `Quick
         test_claim_context_increments_streak;
+      test_case "terminal reason maps required-tool failures" `Quick
+        test_terminal_reason_maps_required_tool_failures;
+      test_case "required-tool no-call fires at 3" `Quick
+        test_required_tool_no_call_fires_metric_at_three;
+      test_case "required-tool streak is separate from passive streak" `Quick
+        test_required_tool_streak_does_not_inherit_passive_streak;
+      test_case "required-tool nudge asks for real tool" `Quick
+        test_required_tool_nudge_mentions_real_tool_call;
       test_case "execution resets streak" `Quick
         test_execution_resets_streak;
       test_case "completion resets streak" `Quick

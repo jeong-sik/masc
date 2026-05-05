@@ -107,6 +107,11 @@ val format_slot_holders : ?limit:int -> (string * float) list -> string
 (** Operator-facing one-line summary of all holder pools. *)
 val slot_holders_summary : ?limit:int -> now:float -> unit -> string
 
+(** Re-export of {!Keeper_turn_slot.force_release_holder_for} so the
+    supervisor and tests have a single import point alongside the holder
+    snapshot accessors. *)
+val force_release_holder_for : keeper_name:string -> (string * float) list
+
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit

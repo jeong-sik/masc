@@ -425,6 +425,67 @@ let release_keeper_turn_slot ~keeper_name state =
     Eio.Semaphore.release reactive_turn_semaphore
   end
 
+(** Force-release every slot recorded for [keeper_name] in [holder_table].
+    Called by the supervisor when a keeper has been declared crashed but
+    its fiber has not returned through the [Fun.protect] finally branch
+    in [with_keeper_turn_slot] — typically because the LLM subprocess
+    swallowed the cancellation and never produced [Eio.Cancel.Cancelled].
+
+    Returns the list of [(label, age_sec)] pairs that were force-released
+    so the supervisor can stamp the diagnosis onto the keeper meta. The
+    list is empty when nothing was held.
+
+    Idempotency / over-release: the natural release path
+    ([release_keeper_turn_slot]) checks [state.acquired_*] flags before
+    calling [Eio.Semaphore.release]. After force-release the holder
+    table no longer has the entry, but the keeper's [slot_state] flags
+    remain set — so a late-returning fiber will release the semaphore a
+    second time, raising the count above [reactive_turn_limit] briefly
+    (Eio counting semaphores allow over-release safely; the count just
+    re-converges on the next saturation). The bounded over-release is
+    accepted as the cost of unblocking the fleet — the alternative
+    ([slot_state] reaching the supervisor across closures) would
+    require shared mutable state that the current architecture
+    deliberately keeps closure-local.
+
+    2026-05-05 motivation: 16 keepers held [reactive_slot] for 18-25
+    minutes each behind LLM subprocess hangs while
+    [reactive_available=0]. The existing [force_unresolved_watchdog_crash]
+    path stamps the keeper as crashed but does not return the slot, so
+    the next cohort of keepers waits another 180s on
+    [acquire_bounded] and trips the same idle-turn watchdog. *)
+let force_release_holder_for ~keeper_name : (string * float) list =
+  let now = Time_compat.now () in
+  let released_with_age = ref [] in
+  let try_release ~label ~sem =
+    let snapshot =
+      with_holder_lock (fun () ->
+        match Hashtbl.find_opt holder_table (label, keeper_name) with
+        | None -> None
+        | Some acquired_at ->
+          Hashtbl.remove holder_table (label, keeper_name);
+          Some acquired_at)
+    in
+    match snapshot with
+    | None -> ()
+    | Some acquired_at ->
+      let age = now -. acquired_at in
+      Eio.Semaphore.release sem;
+      released_with_age := (label, age) :: !released_with_age;
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_slot_force_released
+        ~labels:[("keeper", keeper_name); ("label", label)]
+        ();
+      Log.Keeper.error
+        "%s: force-released %s slot held for %.0fs (zombie fiber, \
+         likely stuck in LLM subprocess)"
+        keeper_name label age
+  in
+  try_release ~label:"reactive" ~sem:reactive_turn_semaphore;
+  try_release ~label:"autonomous" ~sem:autonomous_turn_semaphore;
+  try_release ~label:"turn" ~sem:turn_semaphore;
+  !released_with_age
+
 let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
     Hashtbl.reset last_autonomous_completion)

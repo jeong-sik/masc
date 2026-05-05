@@ -587,6 +587,7 @@ val metric_fsm_guard_violation : string
     Cardinality: ≤ 2 series, fleet-independent. *)
 val metric_keeper_lifecycle_callback_failures : string
 val metric_keeper_supervisor_cleanup_failures : string
+val metric_keeper_slot_force_released : string
 val metric_keeper_stale_watchdog_tick_failures : string
 
 (** PR-J: number of times the per-turn OAS event-bus drain helper ran,

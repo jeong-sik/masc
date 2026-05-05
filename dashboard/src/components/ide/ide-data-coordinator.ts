@@ -56,10 +56,19 @@ function isManagedMirrorRepository(repository: Repository): boolean {
     || localPath.includes('/.masc/repos/')
 }
 
+// Reviewer #13232: detect Windows drive-letter absolute paths
+// (e.g. "C:/Users/.../repo" or "D:\\projects\\repo") after
+// backslash normalization so workspace repos on Windows are not
+// classified as managed mirrors and dropped from IDE default
+// selection.  Posix absolute paths still match via the
+// leading-slash branch.
+const WINDOWS_DRIVE_LETTER_PREFIX = /^[A-Za-z]:\//
 function isWorkspaceRepository(repository: Repository): boolean {
   const localPath = repository.local_path.replace(/\\/g, '/')
-  return localPath.startsWith('/')
-    && !localPath.includes('/.masc/')
+  const isAbsolute =
+    localPath.startsWith('/') ||
+    WINDOWS_DRIVE_LETTER_PREFIX.test(localPath)
+  return isAbsolute && !localPath.includes('/.masc/')
 }
 
 function isMascMcpRepository(repository: Repository): boolean {

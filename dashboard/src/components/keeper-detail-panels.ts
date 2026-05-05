@@ -25,7 +25,7 @@ const CTX_COLOR_CRITICAL = 'var(--color-status-err)'
 const CTX_COLOR_WARN = 'var(--amber-bright)'
 const CTX_COLOR_OK = 'var(--emerald)'
 
-export function ctxColor(pct: number): string {
+function ctxColor(pct: number): string {
   return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
 }
 
@@ -68,11 +68,11 @@ const CTX_SEGMENT_COLORS: Record<string, string> = {
   unattributed: 'var(--color-border-default)',
 }
 
-export function ctxSegmentLabel(key: string): string {
+function ctxSegmentLabel(key: string): string {
   return CTX_SEGMENT_LABELS[key] ?? key.replace(/[_-]+/g, ' ')
 }
 
-export function ctxSegmentColor(key: string): string {
+function ctxSegmentColor(key: string): string {
   return CTX_SEGMENT_COLORS[key] ?? 'var(--color-fg-muted)'
 }
 
@@ -88,7 +88,7 @@ export function ctxSegmentColor(key: string): string {
  * default render path avoids an unnecessary array allocation. Does not
  * mutate the input.
  */
-export function filterCtxCompositionEntries(
+function filterCtxCompositionEntries(
   entries: ReadonlyArray<readonly [string, PromptSegmentTelemetry]>,
   query: string,
 ): ReadonlyArray<readonly [string, PromptSegmentTelemetry]> {
@@ -606,12 +606,12 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   `
 }
 
-export function formatFingerprint(value: string | null | undefined): string {
+function formatFingerprint(value: string | null | undefined): string {
   if (!value) return '-'
   return value.length > 16 ? `${value.slice(0, 16)}…` : value
 }
 
-export function formatSegmentLabel(key: string): string {
+function formatSegmentLabel(key: string): string {
   return key.replace(/[_-]+/g, ' ')
 }
 
@@ -900,7 +900,7 @@ const SPARKLINE_H = 40
 const SPARKLINE_PAD = 2
 const MODEL_NAME_MAX_LEN = 20
 
-export function miniSparkline(
+function miniSparkline(
   data: number[],
   maxOverride?: number,
 ): string {

@@ -1624,7 +1624,7 @@ let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
     (entry : Keeper_registry.registry_entry) : float option =
   let meta = entry.meta in
   if meta.paused then None
-  else if entry.phase = Keeper_state_machine.Dead then None
+  else if entry.phase <> Keeper_state_machine.Running then None
   else if meta.runtime.autonomous_turn_count <= 0 then
     (* Brand-new keeper: not stuck, just hasn't started. *)
     None

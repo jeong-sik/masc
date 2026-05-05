@@ -1304,6 +1304,30 @@ let () =
                 ~started_at:0.0
             in
             check (option (float 0.1)) "Dead → None" None (detect entry));
+        test_case "Crashed phase -> None (handled by supervisor crash path)" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-crashed"
+                ~paused:false
+                ~phase:KSM.Crashed
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "Crashed -> None" None (detect entry));
+        test_case "Restarting phase -> None (handled by supervisor restart path)" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-restarting"
+                ~paused:false
+                ~phase:KSM.Restarting
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "Restarting -> None" None (detect entry));
         test_case "brand-new keeper (autonomous_turn_count=0) → None" `Quick
           (fun () ->
             let entry = make_test_entry

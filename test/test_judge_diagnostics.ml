@@ -51,6 +51,44 @@ let test_format_lenient_fallback_truncates_huge_raw () =
   check bool "preview is bounded" true
     (String.length out < 1500)
 
+let test_record_lenient_fallback_increments_metrics () =
+  let raw = "not-json" in
+  let labels = [("judge", "governance")] in
+  let unparseable_before =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_governance_judge_unparseable
+      ~labels
+      ()
+  in
+  let fallback_before =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_governance_lenient_json_fallback_hit
+      ~labels
+      ()
+  in
+  let out =
+    Judge_diagnostics.record_lenient_fallback
+      ~judge_label:"Governance"
+      raw
+  in
+  check bool "returns formatted diagnostic" true
+    (try
+       let re = Re.Pcre.re "Governance judge returned unparseable" |> Re.compile in
+       ignore (Re.exec re out); true
+     with Not_found -> false);
+  check (float 0.0001) "unparseable counter increments"
+    (unparseable_before +. 1.0)
+    (Prometheus.metric_value_or_zero
+       Prometheus.metric_governance_judge_unparseable
+       ~labels
+       ());
+  check (float 0.0001) "fallback counter increments"
+    (fallback_before +. 1.0)
+    (Prometheus.metric_value_or_zero
+       Prometheus.metric_governance_lenient_json_fallback_hit
+       ~labels
+       ())
+
 let () =
   run "judge_diagnostics (#9774)"
     [
@@ -66,5 +104,7 @@ let () =
             test_format_lenient_fallback_includes_label;
           test_case "preview is bounded for huge raw" `Quick
             test_format_lenient_fallback_truncates_huge_raw;
+          test_case "record increments metrics" `Quick
+            test_record_lenient_fallback_increments_metrics;
         ] );
     ]

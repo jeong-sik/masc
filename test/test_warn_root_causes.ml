@@ -256,6 +256,24 @@ let tool_policy_unloaded_metric accessor =
     ~labels:[("accessor", accessor)]
     ()
 
+let string_contains text needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) text 0);
+    true
+  with Not_found -> false
+
+let check_policy_not_loaded_raises accessor call =
+  match call () with
+  | () -> failf "%s should raise when tool_policy config is unloaded" accessor
+  | exception Invalid_argument msg ->
+      check bool (accessor ^ " error names accessor") true
+        (string_contains msg accessor);
+      check bool (accessor ^ " error names init_policy_config") true
+        (string_contains msg "init_policy_config")
+  | exception exn ->
+      failf "%s raised unexpected exception: %s" accessor
+        (Printexc.to_string exn)
+
 let test_tool_policy_unloaded_accessors_emit_metric () =
   Keeper_tool_policy.reset_policy_config_for_test ();
   let allowed_orgs_before =
@@ -268,16 +286,35 @@ let test_tool_policy_unloaded_accessors_emit_metric () =
   in
   check bool "allowed_orgs pre-init query increments metric" true
     (allowed_orgs_after >= allowed_orgs_before +. 1.0);
-  let clone_depth_before =
-    tool_policy_unloaded_metric "clone_depth"
+  let strict_accessors =
+    [
+      ("clone_depth", fun () -> ignore (Keeper_tool_policy.clone_depth ()));
+      ( "clone_timeout_sec",
+        fun () -> ignore (Keeper_tool_policy.clone_timeout_sec ()) );
+      ( "push_timeout_sec",
+        fun () -> ignore (Keeper_tool_policy.push_timeout_sec ()) );
+      ( "pr_create_timeout_sec",
+        fun () -> ignore (Keeper_tool_policy.pr_create_timeout_sec ()) );
+      ( "gh_cache_ttl_sec",
+        fun () -> ignore (Keeper_tool_policy.gh_cache_ttl_sec ()) );
+      ( "gh_cache_fetch_page_size",
+        fun () -> ignore (Keeper_tool_policy.gh_cache_fetch_page_size ()) );
+      ( "gh_cache_fetch_timeout_sec",
+        fun () -> ignore (Keeper_tool_policy.gh_cache_fetch_timeout_sec ()) );
+      ( "gh_cache_max_alternatives",
+        fun () -> ignore (Keeper_tool_policy.gh_cache_max_alternatives ()) );
+      ( "gh_cache_max_output_bytes",
+        fun () -> ignore (Keeper_tool_policy.gh_cache_max_output_bytes ()) );
+    ]
   in
-  check int "pre-init clone_depth fallback unchanged" 0
-    (Keeper_tool_policy.clone_depth ());
-  let clone_depth_after =
-    tool_policy_unloaded_metric "clone_depth"
-  in
-  check bool "clone_depth pre-init query increments metric" true
-    (clone_depth_after >= clone_depth_before +. 1.0);
+  List.iter
+    (fun (accessor, call) ->
+      let before = tool_policy_unloaded_metric accessor in
+      check_policy_not_loaded_raises accessor call;
+      let after = tool_policy_unloaded_metric accessor in
+      check bool (accessor ^ " pre-init query increments metric") true
+        (after >= before +. 1.0))
+    strict_accessors;
   init_registry ()
 
 let tool_policy_init_failed_metric base_path =

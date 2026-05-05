@@ -2,6 +2,7 @@ import { signal, effect } from '@preact/signals'
 import { activeIdeFile } from './ide-shell'
 import { activeKeeperName } from '../../keeper-state'
 import {
+  discoverRepositories,
   fetchRepositoriesList,
   type Repository,
 } from '../../api/repositories'
@@ -38,6 +39,7 @@ export interface IdeDataCoordinator {
   readonly repositories: () => ReadonlyArray<Repository>
   readonly activeRepositoryId: () => string | null
   readonly setActiveRepositoryId: (repoId: string | null) => void
+  readonly scanRepositories: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories: (listener: () => void) => () => void
   readonly dispose: () => void
 }
@@ -63,11 +65,28 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
 
   let abortController = new AbortController()
 
-  fetchRepositoriesList()
-    .then(repositories => {
-      activeRepositoryIdSignal.value = repositories[0]?.id ?? null
-      repositoriesSignal.value = repositories
-    })
+  const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
+    const current = activeRepositoryIdSignal.value
+    const nextActive = current && repositories.some(repository => repository.id === current)
+      ? current
+      : repositories[0]?.id ?? null
+    activeRepositoryIdSignal.value = nextActive
+    repositoriesSignal.value = repositories
+  }
+
+  const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
+    const repositories = await fetchRepositoriesList()
+    applyRepositories(repositories)
+    return repositories
+  }
+
+  const scanRepositories = async (): Promise<ReadonlyArray<Repository>> => {
+    const registered = await discoverRepositories()
+    await refreshRepositories()
+    return registered
+  }
+
+  refreshRepositories()
     .catch(() => {
       repositoriesSignal.value = []
     })
@@ -153,6 +172,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     setActiveRepositoryId: (repoId: string | null) => {
       activeRepositoryIdSignal.value = repoId
     },
+    scanRepositories,
     subscribeRepositories: (listener: () => void) =>
       repositoriesSignal.subscribe(listener),
     dispose: () => {

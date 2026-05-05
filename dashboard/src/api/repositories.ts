@@ -1,4 +1,4 @@
-import { get, type GetOptions } from './core'
+import { get, post, type GetOptions } from './core'
 
 export type RepoStatus = 'active' | 'paused' | 'error'
 
@@ -59,5 +59,10 @@ export function normalizeRepository(raw: unknown): Repository | null {
 
 export async function fetchRepositoriesList(opts: GetOptions = {}): Promise<Repository[]> {
   const raw = await get<unknown>('/api/v1/repositories', opts)
+  return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
+}
+
+export async function discoverRepositories(): Promise<Repository[]> {
+  const raw = await post<unknown>('/api/v1/repositories/discover', {})
   return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
 }

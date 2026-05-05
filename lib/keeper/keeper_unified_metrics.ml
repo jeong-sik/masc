@@ -678,10 +678,12 @@ let append_decision_record
         | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
         | _ -> Keeper_turn_terminal.of_code "unknown_error")
   in
+  let terminal_reason_code = terminal_reason.Keeper_turn_terminal.code in
   let json =
     `Assoc
       ([
         ("id", `String (decision_id ~meta ~ts:now_ts ~suffix_seed));
+        ("event", `String "turn");
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
         ("audience", `String "internal_human_only");
@@ -695,6 +697,12 @@ let append_decision_record
         ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
         ("runtime_contract", runtime_contract);
         ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
+        ("terminal_reason_code", `String terminal_reason_code);
+        ( "terminal_reason_severity",
+          `String
+            (Keeper_turn_terminal.severity_to_string
+               terminal_reason.Keeper_turn_terminal.severity) );
+        ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
         ("tool_contract", tool_contract_json ~tool_call_count ~tools_used result);
         ("pending_approval_count", `Int pending_approval_count);
@@ -707,6 +715,7 @@ let append_decision_record
         ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
+        ("duration_ms", `Int latency_ms);
         ("semaphore_wait_ms", `Int semaphore_wait_ms);
         ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
         ("observed_affordances", `List (List.map (fun s -> `String s) affordances));

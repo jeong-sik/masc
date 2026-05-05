@@ -1654,6 +1654,42 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
              && event |> member "next_human_action" |> to_string = "create_or_link_worktree")
            timeline))
 
+let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-trust-terminal-code-alias" in
+      let meta = { minimal_meta with name = keeper_name } in
+      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      Keeper_types.mkdir_p (Filename.dirname decision_path);
+      Masc_mcp.Keeper_types_support.append_jsonl_line
+        decision_path
+        (`Assoc
+          [
+            ("ts_unix", `Float 1_712_000_010.0);
+            ("trace_id", `String "trace-terminal-code-alias");
+            ("turn_id", `Int 9);
+            ("terminal_reason_code", `String "provider_error");
+          ]);
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      check string "latest terminal code alias" "provider_error"
+        (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
+      let timeline = snapshot |> member "causal_timeline" |> to_list in
+      check bool "terminal reason alias event present" true
+        (List.exists
+           (fun event ->
+             event |> member "kind" |> to_string = "terminal_reason"
+             && event |> member "summary" |> to_string = "provider or cascade failed")
+           timeline))
+
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "contains name" true (String.length sys > 0);
@@ -3453,6 +3489,8 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(json |> member "tool_call_count" |> to_int);
       check int "turn id persisted" 8
         Yojson.Safe.Util.(json |> member "turn_id" |> to_int);
+      check int "duration alias persisted" 42
+        Yojson.Safe.Util.(json |> member "duration_ms" |> to_int);
       check (option string) "task id persisted"
         (Some "task-runtime-trust")
         Yojson.Safe.Util.(json |> member "task_id" |> to_string_option);
@@ -3503,6 +3541,8 @@ let test_append_decision_record_persists_tool_calls () =
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float);
 	      check string "terminal reason success" "success"
 	        Yojson.Safe.Util.(json |> member "terminal_reason" |> member "code" |> to_string);
+	      check string "terminal reason code alias" "success"
+	        Yojson.Safe.Util.(json |> member "terminal_reason_code" |> to_string);
 	      check string "provider context selected model" "codex_cli:gpt-5.4"
 	        Yojson.Safe.Util.(json |> member "provider_context" |> member "selected_model" |> to_string);
 	      check string "tool contract requirement" "optional"
@@ -3586,8 +3626,12 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
         read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
       in
       let open Yojson.Safe.Util in
+      check int "error duration alias persisted" 19
+        (json |> member "duration_ms" |> to_int);
       check string "terminal code" "gh_repo_context_missing_worktree"
         (json |> member "terminal_reason" |> member "code" |> to_string);
+      check string "terminal code alias" "gh_repo_context_missing_worktree"
+        (json |> member "terminal_reason_code" |> to_string);
       check string "next action" "create_or_link_worktree"
         (json |> member "terminal_reason" |> member "next_action" |> to_string);
       check string "tool contract unknown for error path" "unknown"
@@ -7195,6 +7239,8 @@ let () =
 	            test_runtime_trust_snapshot_tolerates_null_telemetry;
 	          test_case "runtime trust snapshot surfaces terminal reason" `Quick
 	            test_runtime_trust_snapshot_surfaces_terminal_reason;
+	          test_case "runtime trust snapshot reads terminal reason code alias" `Quick
+	            test_runtime_trust_snapshot_reads_terminal_reason_code_alias;
 	          test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );

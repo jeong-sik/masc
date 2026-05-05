@@ -181,39 +181,6 @@ let contains_substring ~needle haystack =
   in
   loop 0
 
-let capture_stderr f =
-  let pipe_read, pipe_write = Unix.pipe () in
-  let saved_stderr = Unix.dup Unix.stderr in
-  Unix.dup2 pipe_write Unix.stderr;
-  Unix.close pipe_write;
-  let result =
-    try
-      f ();
-      Ok ()
-    with exn ->
-      Error (exn, Printexc.get_raw_backtrace ())
-  in
-  flush stderr;
-  Unix.dup2 saved_stderr Unix.stderr;
-  Unix.close saved_stderr;
-  Unix.set_nonblock pipe_read;
-  let buf = Buffer.create 256 in
-  let tmp = Bytes.create 256 in
-  let rec read_all () =
-    match Unix.read pipe_read tmp 0 (Bytes.length tmp) with
-    | 0 -> ()
-    | n ->
-        Buffer.add_subbytes buf tmp 0 n;
-        read_all ()
-    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
-  in
-  read_all ();
-  Unix.close pipe_read;
-  let output = Buffer.contents buf in
-  match result with
-  | Ok () -> output
-  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
-
 let response_text (resp : Agent_sdk.Types.api_response) =
   resp.Agent_sdk.Types.content
   |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
@@ -2150,24 +2117,26 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
-  let filtered = ref [] in
-  let stderr =
-    capture_stderr (fun () ->
-        filtered :=
-          Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
-            ~keeper_name:"sangsu"
-            ?runtime_mcp_policy
-            ~require_tool_choice_support:true
-            ~require_tool_support:true
-            ~label:"tool_use_strict"
-            [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ])
+  let codex_provider = make_codex_cli_provider_cfg () in
+  let skip_log =
+    Masc_mcp.Oas_worker_named.codex_keeper_bound_skip_log_message
+      ~label:"tool_use_strict" ~keeper_name:"sangsu" codex_provider
+      Masc_mcp.Oas_worker_named.Codex_keeper_bound_actor_required
   in
-  Alcotest.(check bool) "codex skip decision logged" true
-    (contains_substring
-       ~needle:
-         "skipping provider=codex_cli:codex for keeper=sangsu reason=codex_keeper_bound_actor_required"
-       stderr);
-  match !filtered with
+  Alcotest.(check (option string)) "codex skip decision log message"
+    (Some
+       "cascade tool_use_strict: skipped provider=codex_cli:codex for keeper=sangsu reason=codex_keeper_bound_actor_required")
+    skip_log;
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~label:"tool_use_strict"
+      [ codex_provider; make_kimi_cli_provider_cfg () ]
+  in
+  match filtered with
   | [ provider_cfg ] ->
       Alcotest.(check bool) "kimi remains after codex bound-actor filter" true
         (provider_cfg.kind = Llm_provider.Provider_config.Kimi_cli)

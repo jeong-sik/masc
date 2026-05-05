@@ -89,6 +89,16 @@ type filter_rejection_reason =
 
 val filter_rejection_reason_label : filter_rejection_reason -> string
 
+val codex_keeper_bound_skip_log_message :
+  label:string ->
+  keeper_name:string ->
+  Llm_provider.Provider_config.t ->
+  filter_rejection_reason ->
+  string option
+(** Build the operator-visible codex bound-actor skip message, or [None] for
+    rejection classes that this codex-specific diagnostic intentionally does
+    not log. *)
+
 val classify_filter_rejection :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->

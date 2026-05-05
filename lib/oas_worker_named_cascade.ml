@@ -141,16 +141,59 @@ let filter_rejection_reason_label = function
   | Required_tool_use r ->
       Provider_tool_support.rejection_reason_label r
 
-let log_skip_decision ~label ~keeper_name provider_cfg reason =
+let codex_keeper_bound_skip_seen : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let codex_keeper_bound_skip_seen_mutex = Mutex.create ()
+
+let codex_keeper_bound_skip_restate_sec = 3600.0
+
+let codex_keeper_bound_skip_should_emit ~label ~provider_label ~keeper_name
+    ~reason_label =
+  let key =
+    Printf.sprintf "%s|%s|%s|%s" label provider_label keeper_name reason_label
+  in
+  let now = Unix.gettimeofday () in
+  Mutex.lock codex_keeper_bound_skip_seen_mutex;
+  let first =
+    match Hashtbl.find_opt codex_keeper_bound_skip_seen key with
+    | None -> true
+    | Some last -> now -. last >= codex_keeper_bound_skip_restate_sec
+  in
+  if first then Hashtbl.replace codex_keeper_bound_skip_seen key now;
+  Mutex.unlock codex_keeper_bound_skip_seen_mutex;
+  first
+
+let codex_keeper_bound_skip_log_message
+    ~label ~keeper_name provider_cfg reason =
   match reason with
   | Codex_keeper_bound_actor_required ->
-      Log.Misc.info
-        "cascade %s: skipping provider=%s for keeper=%s reason=%s; continuing with remaining providers or secondary fallback"
-        label
-        (Provider_tool_support.provider_debug_label provider_cfg)
-        keeper_name
-        (filter_rejection_reason_label reason)
-  | Tool_lane_unsupported | Required_tool_use _ -> ()
+      Some
+        (Printf.sprintf "cascade %s: skipped provider=%s for keeper=%s reason=%s"
+           label
+           (Provider_tool_support.provider_debug_label provider_cfg)
+           keeper_name
+           (filter_rejection_reason_label reason))
+  | Tool_lane_unsupported | Required_tool_use _ -> None
+
+let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
+  match
+    codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason
+  with
+  | None -> ()
+  | Some message ->
+      let provider_label =
+        Provider_tool_support.provider_debug_label provider_cfg
+      in
+      let reason_label = filter_rejection_reason_label reason in
+      if
+        codex_keeper_bound_skip_should_emit ~label ~provider_label ~keeper_name
+          ~reason_label
+      then
+        Log.Misc.info
+          "%s; repeated identical skip decisions demoted to DEBUG for the next %.0fs"
+          message codex_keeper_bound_skip_restate_sec
+      else Log.Misc.debug "%s" message
 
 let classify_filter_rejection
     ~(keeper_name : string)
@@ -315,7 +358,8 @@ let filter_candidate_providers_for_tool_support
            with
            | None -> (provider_cfg :: kept, rejected, provider_index + 1)
            | Some reason ->
-               log_skip_decision ~label ~keeper_name provider_cfg reason;
+               log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg
+                 reason;
                let swap =
                  match secondary_resolver with
                  | None -> Either.Right (provider_cfg, reason)

@@ -13,7 +13,20 @@ type candidate_probe = {
   status : candidate_probe_status;
 }
 
-type profile_snapshot = {
+type candidate_runtime = {
+  model_string : string;
+  provider_cfg : Llm_provider.Provider_config.t;
+}
+
+(* [profile_build] is the validated profile shape. [profile_snapshot] used
+   to be a near-duplicate of this record with an extra [probes] field, but
+   the probes were never refreshed after construction and every probe was
+   produced by mapping [candidates] through [candidate_probe_skipped] with
+   the same advisory message — so the probes are derived from [candidates]
+   on demand and the snapshot can reuse [profile_build] directly. The
+   [profile_snapshot] alias is kept for documentation: a [profile_build]
+   embedded in a {!snapshot} is the validated, runtime-served form. *)
+type profile_build = {
   name : string;
   weighted_entries : Cascade_config_loader.weighted_entry list;
   inference_params : Cascade_config_loader.inference_params;
@@ -21,8 +34,10 @@ type profile_snapshot = {
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
-  probes : candidate_probe list;
+  candidates : candidate_runtime list;
 }
+
+type profile_snapshot = profile_build
 
 type snapshot = {
   source_path : string;
@@ -59,22 +74,6 @@ type state =
 type validation_result = {
   snapshot : snapshot;
   rejected_update : rejection option;
-}
-
-type candidate_runtime = {
-  model_string : string;
-  provider_cfg : Llm_provider.Provider_config.t;
-}
-
-type profile_build = {
-  name : string;
-  weighted_entries : Cascade_config_loader.weighted_entry list;
-  inference_params : Cascade_config_loader.inference_params;
-  api_key_env_overrides : (string * string) list;
-  strategy : Cascade_strategy.t;
-  ollama_max_concurrent : int option;
-  cli_max_concurrent : int option;
-  candidates : candidate_runtime list;
 }
 
 type cache = {
@@ -114,7 +113,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
     try (Unix.stat source_path).Unix.st_mtime with
     | Unix.Unix_error _ | Sys_error _ -> 0.0
   in
-  let profiles =
+  let profiles : profile_snapshot list =
     profile_names
     |> List.sort_uniq String.compare
     |> List.map (fun name ->
@@ -128,7 +127,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              strategy = Cascade_strategy.failover;
              ollama_max_concurrent = None;
              cli_max_concurrent = None;
-             probes = [];
+             candidates = [];
            })
   in
   let snapshot =
@@ -173,6 +172,49 @@ let int_opt_to_json = function
   | Some value -> `Int value
   | None -> `Null
 
+let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
+  Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+
+let candidate_probe_error (candidate : candidate_runtime) message =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_error message;
+  }
+
+let candidate_probe_ok (candidate : candidate_runtime) =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_ok;
+  }
+
+let candidate_probe_skipped (candidate : candidate_runtime) reason =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_skipped reason;
+  }
+
+(* Bootstrap-time probes are advisory: provider liveness is checked at
+   runtime, not catalog validation, so every candidate is converted via
+   [candidate_probe_skipped]. This helper is the single source of truth
+   for that mapping; [profile_snapshot] therefore stores [candidates]
+   and derives probes here on demand instead of carrying a parallel
+   [probes] field that would drift on any future refactor. *)
+let profile_probes (profile_candidates : candidate_runtime list) =
+  List.map
+    (fun candidate ->
+      candidate_probe_skipped candidate
+        "runtime provider health is advisory; bootstrap skips live probe")
+    profile_candidates
+
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
     [
@@ -202,7 +244,8 @@ let profile_snapshot_to_yojson (profile : profile_snapshot) =
         int_opt_to_json profile.ollama_max_concurrent );
       ("cli_max_concurrent", int_opt_to_json profile.cli_max_concurrent);
       ( "candidates",
-        `List (List.map candidate_probe_to_yojson profile.probes) );
+        `List
+          (List.map candidate_probe_to_yojson (profile_probes profile.candidates)) );
     ]
 
 let snapshot_to_yojson (snapshot : snapshot) =
@@ -314,36 +357,6 @@ let eio_caps ?sw ?net ?clock () =
   | _ ->
       Error
         "catalog validation requires Eio switch/net/clock capabilities"
-
-let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
-  Llm_provider.Provider_config.string_of_provider_kind cfg.kind
-
-let candidate_probe_error (candidate : candidate_runtime) message =
-  {
-    model_string = candidate.model_string;
-    provider_kind = provider_kind_string candidate.provider_cfg;
-    model_id = candidate.provider_cfg.model_id;
-    base_url = candidate.provider_cfg.base_url;
-    status = Probe_error message;
-  }
-
-let candidate_probe_ok (candidate : candidate_runtime) =
-  {
-    model_string = candidate.model_string;
-    provider_kind = provider_kind_string candidate.provider_cfg;
-    model_id = candidate.provider_cfg.model_id;
-    base_url = candidate.provider_cfg.base_url;
-    status = Probe_ok;
-  }
-
-let candidate_probe_skipped (candidate : candidate_runtime) reason =
-  {
-    model_string = candidate.model_string;
-    provider_kind = provider_kind_string candidate.provider_cfg;
-    model_id = candidate.provider_cfg.model_id;
-    base_url = candidate.provider_cfg.base_url;
-    status = Probe_skipped reason;
-  }
 
 let validate_strategy ~config_path ~name =
   let cfg =
@@ -579,26 +592,9 @@ let validate_path_result ~config_path =
                ~checked_at
                ~errors:top_errors ~profiles:statically_rejected_profiles)
         else
-          let profile_snapshots =
-            List.map
-              (fun (profile : profile_build) ->
-                {
-                  name = profile.name;
-                  weighted_entries = profile.weighted_entries;
-                  inference_params = profile.inference_params;
-                  api_key_env_overrides = profile.api_key_env_overrides;
-                  strategy = profile.strategy;
-                  ollama_max_concurrent = profile.ollama_max_concurrent;
-                  cli_max_concurrent = profile.cli_max_concurrent;
-                  probes =
-                    List.map
-                      (fun (candidate : candidate_runtime) ->
-                        candidate_probe_skipped candidate
-                          "runtime provider health is advisory; bootstrap skips live probe")
-                      profile.candidates;
-                })
-              built_profiles
-          in
+          (* profile_snapshot is an alias for profile_build, so the
+             validated builders forward directly without a copy. *)
+          let profile_snapshots : profile_snapshot list = built_profiles in
           let rejected_profiles = statically_rejected_profiles in
           let default_profile_validated =
             List.exists

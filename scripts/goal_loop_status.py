@@ -144,6 +144,10 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
         consistency_findings = (
             consistency_raw if isinstance(consistency_raw, list) else []
         )
+        source_artifacts_raw = audit_catalog.get("source_artifacts")
+        source_artifacts = (
+            source_artifacts_raw if isinstance(source_artifacts_raw, dict) else None
+        )
         audit_catalog_summary = {
             "status": audit_catalog.get("status", "unknown"),
             "expected_findings_total": audit_catalog.get("expected_findings_total"),
@@ -159,10 +163,28 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             else 0,
             "consistency_findings_total": len(consistency_findings),
         }
+        if source_artifacts is not None:
+            audit_catalog_summary["source_artifacts_status"] = source_artifacts.get(
+                "status",
+                "unknown",
+            )
+            audit_catalog_summary["source_artifacts_total"] = source_artifacts.get(
+                "source_artifacts_total"
+            )
+            audit_catalog_summary["source_artifacts_resolved"] = source_artifacts.get(
+                "source_artifacts_resolved"
+            )
+            audit_catalog_summary["source_artifacts_missing"] = source_artifacts.get(
+                "source_artifacts_missing"
+            )
+            audit_catalog_summary["source_line_ref_errors"] = source_artifacts.get(
+                "line_ref_errors"
+            )
         audit_catalog_warning = (
             audit_catalog_summary["status"] != "COMPLETE"
             or audit_catalog_summary["source_documents_status"] != "COMPLETE"
             or audit_catalog_summary["consistency_findings_total"] > 0
+            or audit_catalog_summary.get("source_artifacts_status") == "INCOMPLETE"
         )
     status = (
         "critical"

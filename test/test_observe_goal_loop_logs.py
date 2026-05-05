@@ -196,6 +196,31 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(by_id["CD-8"].status, "NOT_EVALUATED")
         self.assertEqual(by_id["CD-8"].decision_id, "D-P1-1")
 
+    def test_orient_catalog_can_validate_missing_source_artifacts(self) -> None:
+        scan = json_from_fixture("observe.startup.json")
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            report = orient_goal_loop_logs.orient_scan(
+                scan,
+                audit_catalog=catalog,
+                audit_source_root=Path(raw_dir),
+            )
+
+        self.assertIsNotNone(report.audit_catalog)
+        assert report.audit_catalog is not None
+        source_artifacts = report.audit_catalog["source_artifacts"]
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_artifacts_total"], 12)
+        self.assertEqual(source_artifacts["source_artifacts_resolved"], 0)
+        self.assertEqual(source_artifacts["source_artifacts_missing"], 12)
+        self.assertIn(
+            "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            source_artifacts["missing_paths"],
+        )
+
     def test_orient_cli_can_fail_on_incomplete_catalog(self) -> None:
         result = subprocess.run(
             [
@@ -214,6 +239,28 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn('"status": "INCOMPLETE"', result.stdout)
+
+    def test_orient_cli_can_fail_on_missing_source_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ORIENT_SCRIPT_PATH),
+                    str(FIXTURE_DIR / "observe.startup.json"),
+                    "--audit-catalog",
+                    str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                    "--audit-source-root",
+                    raw_dir,
+                    "--require-source-artifacts",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"source_artifacts_missing": 12', result.stdout)
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

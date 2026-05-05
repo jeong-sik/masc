@@ -77,11 +77,17 @@
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --require-complete-catalog` checked at 2026-05-05T14:54:50Z, confidence
   High: exits non-zero until the full 206-row corpus is attached or checked in.
-- [근거] `rg --only-matching --no-filename
-  "(R-FATAL|CD|CE|CF|NF)-[0-9]+"
-  prompt_corpus/GOAL_LOOP -g "*.md" -g "*.json" | sort -u` checked at
-  2026-05-05T20:29:28Z, confidence High: the supplied Markdown/JSON corpus
-  itemizes only 18 unique audit IDs.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --audit-source-root . --require-source-artifacts` checked at
+  2026-05-06T05:54:00+09:00, confidence High: exits non-zero while the
+  catalog's logical `prompt_corpus/GOAL_LOOP/...` source paths are not backed
+  by checked source files.
+- [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
+  2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
+  18 unique audit IDs, but the underlying prompt source artifacts are not yet
+  replayable from the repository because `--require-source-artifacts` fails.
 
 ## Current Completion State
 
@@ -201,10 +207,11 @@ current runtime/code state, including 206 findings.
 
 The Orient skeleton is testable, and the prompt's external 206/214 aggregate
 claims are now machine-visible. The full set is still not encoded: current
-catalog replay reports 12/12 source documents covered, 18 itemized findings,
-188 missing 206-itemized rows, one open consistency finding for the 206-vs-214
-count mismatch, and 8 itemized rows that are not evaluable from the startup log
-patterns.
+catalog replay reports 12/12 source documents named by the manifest, missing
+checked source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths,
+18 itemized findings, 188 missing 206-itemized rows, one open consistency
+finding for the 206-vs-214 count mismatch, and 8 itemized rows that are not
+evaluable from the startup log patterns.
 
 ### 4. DECIDE
 
@@ -324,13 +331,16 @@ No convergence claim is valid yet. The only safe current statement is:
    three aggregate claims, one 206-vs-214 consistency finding, and 18 itemized
    findings, but `--require-complete-catalog` still fails with 188 missing rows
    against the 206 claim.
-2. Reconcile whether the governing audit total is 206 or 214 before closing
+2. Attach or check in stable source artifacts for the logical
+   `prompt_corpus/GOAL_LOOP/...` paths, or record a stable external artifact
+   root, so `--require-source-artifacts` passes.
+3. Reconcile whether the governing audit total is 206 or 214 before closing
    the GOAL LOOP objective.
-3. Re-run Orient against the complete corpus without changing code and update
+4. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
-4. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
+5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
-5. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule
@@ -340,5 +350,7 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
 - `verify.fail.json` is the latest Verify fixture.
 - The full 206-finding audit corpus is not replayed by Orient with
   `--require-complete-catalog` passing.
+- The catalog source paths are not replayed with `--require-source-artifacts`
+  passing.
 - The 206-vs-214 aggregate-count mismatch is still open.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.

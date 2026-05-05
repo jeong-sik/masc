@@ -233,7 +233,99 @@ def merged_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
     return [merged[finding_id] for finding_id in ordered_ids]
 
 
-def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | None:
+def source_artifact_summary(
+    catalog: dict[str, Any],
+    source_root: Path | None,
+) -> dict[str, Any] | None:
+    if source_root is None:
+        return None
+
+    refs: dict[str, list[int]] = {}
+
+    def add_ref(path_raw: Any, line_refs_raw: Any = None) -> None:
+        if not isinstance(path_raw, str) or not path_raw:
+            return
+        line_refs = refs.setdefault(path_raw, [])
+        if isinstance(line_refs_raw, list):
+            line_refs.extend(item for item in line_refs_raw if isinstance(item, int))
+
+    external_sources = catalog.get("external_sources", [])
+    if isinstance(external_sources, list):
+        for source in external_sources:
+            if isinstance(source, dict):
+                add_ref(source.get("path"), source.get("line_refs"))
+
+    aggregate_claims = catalog.get("aggregate_claims", [])
+    if isinstance(aggregate_claims, list):
+        for claim in aggregate_claims:
+            if not isinstance(claim, dict):
+                continue
+            source_paths = claim.get("source_paths", [])
+            if isinstance(source_paths, list):
+                for path_raw in source_paths:
+                    add_ref(path_raw)
+
+    consistency_findings = catalog.get("consistency_findings", [])
+    if isinstance(consistency_findings, list):
+        for finding in consistency_findings:
+            if not isinstance(finding, dict):
+                continue
+            source_paths = finding.get("source_paths", [])
+            if isinstance(source_paths, list):
+                for path_raw in source_paths:
+                    add_ref(path_raw)
+
+    findings = catalog.get("findings", [])
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            source = finding.get("source")
+            if isinstance(source, dict):
+                add_ref(source.get("path"), source.get("line_refs"))
+
+    missing_paths: list[str] = []
+    line_ref_errors: list[dict[str, Any]] = []
+    resolved = 0
+    for path_text, line_refs in sorted(refs.items()):
+        path = Path(path_text)
+        candidate = path if path.is_absolute() else source_root / path
+        if not candidate.is_file():
+            missing_paths.append(path_text)
+            continue
+        resolved += 1
+        if not line_refs:
+            continue
+        with candidate.open("r", encoding="utf-8") as handle:
+            line_count = sum(1 for _ in handle)
+        bad_refs = sorted({line_ref for line_ref in line_refs if line_ref > line_count})
+        if bad_refs:
+            line_ref_errors.append(
+                {
+                    "path": path_text,
+                    "line_count": line_count,
+                    "line_refs": bad_refs,
+                }
+            )
+
+    status = "COMPLETE" if not missing_paths and not line_ref_errors else "INCOMPLETE"
+    return {
+        "status": status,
+        "source_root": str(source_root),
+        "source_artifacts_total": len(refs),
+        "source_artifacts_resolved": resolved,
+        "source_artifacts_missing": len(missing_paths),
+        "line_ref_errors": len(line_ref_errors),
+        "missing_paths": missing_paths[:10],
+        "line_ref_error_samples": line_ref_errors[:10],
+    }
+
+
+def audit_catalog_summary(
+    catalog: dict[str, Any] | None,
+    *,
+    source_root: Path | None = None,
+) -> dict[str, Any] | None:
     if catalog is None:
         return None
     specs = catalog_specs(catalog)
@@ -262,7 +354,7 @@ def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | No
         status = "COMPLETE"
     else:
         status = "INCOMPLETE"
-    return {
+    summary = {
         "catalog_id": catalog.get("catalog_id", "unknown"),
         "source_status": catalog.get("source_status", "unknown"),
         "status": status,
@@ -277,12 +369,17 @@ def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | No
         "aggregate_claims": catalog.get("aggregate_claims", []),
         "consistency_findings": catalog.get("consistency_findings", []),
     }
+    artifacts = source_artifact_summary(catalog, source_root)
+    if artifacts is not None:
+        summary["source_artifacts"] = artifacts
+    return summary
 
 
 def orient_scan(
     scan: dict[str, Any],
     *,
     audit_catalog: dict[str, Any] | None = None,
+    audit_source_root: Path | None = None,
 ) -> OrientReport:
     patterns_raw = scan.get("patterns", {})
     patterns = patterns_raw if isinstance(patterns_raw, dict) else {}
@@ -336,7 +433,10 @@ def orient_scan(
             "findings_total": len(findings),
         },
         findings=findings,
-        audit_catalog=audit_catalog_summary(audit_catalog),
+        audit_catalog=audit_catalog_summary(
+            audit_catalog,
+            source_root=audit_source_root,
+        ),
     )
 
 
@@ -370,6 +470,15 @@ def report_to_text(report: OrientReport) -> str:
             f"covered={report.audit_catalog['source_documents_covered']} "
             f"expected={report.audit_catalog['source_documents_expected']}"
         )
+        source_artifacts = report.audit_catalog.get("source_artifacts")
+        if isinstance(source_artifacts, dict):
+            lines.append(
+                "source_artifacts: "
+                f"{source_artifacts['status']} "
+                f"resolved={source_artifacts['source_artifacts_resolved']} "
+                f"missing={source_artifacts['source_artifacts_missing']} "
+                f"line_ref_errors={source_artifacts['line_ref_errors']}"
+            )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:
             lines.append(f"consistency_findings: {len(consistency_findings)}")
@@ -421,9 +530,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--audit-source-root",
+        help=(
+            "Optional root used to validate audit catalog source paths and "
+            "line references."
+        ),
+    )
+    parser.add_argument(
         "--require-complete-catalog",
         action="store_true",
         help="Exit non-zero when --audit-catalog is absent or incomplete.",
+    )
+    parser.add_argument(
+        "--require-source-artifacts",
+        action="store_true",
+        help=(
+            "Exit non-zero when --audit-source-root is absent or source paths "
+            "and line references are incomplete."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -433,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
     report = orient_scan(
         load_json_input(args.scan_json),
         audit_catalog=load_audit_catalog_input(args.audit_catalog),
+        audit_source_root=Path(args.audit_source_root)
+        if args.audit_source_root is not None
+        else None,
     )
     if args.format == "json":
         print(report_to_json(report))
@@ -443,7 +570,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.require_complete_catalog:
         if report.audit_catalog is None:
             return 1
-        return 0 if report.audit_catalog.get("status") == "COMPLETE" else 1
+        if report.audit_catalog.get("status") != "COMPLETE":
+            return 1
+    if args.require_source_artifacts:
+        if report.audit_catalog is None:
+            return 1
+        source_artifacts = report.audit_catalog.get("source_artifacts")
+        if not isinstance(source_artifacts, dict):
+            return 1
+        if source_artifacts.get("status") != "COMPLETE":
+            return 1
     return 0
 
 

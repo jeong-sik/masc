@@ -64,11 +64,13 @@ Replay the external 206-audit claim catalog through Orient:
 python3 scripts/orient_goal_loop_logs.py \
   test/fixtures/goal_loop/observe.startup.json \
   --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --audit-source-root . \
   > /tmp/goal-loop-orient-audit.json
 
 python3 scripts/orient_goal_loop_logs.py \
   test/fixtures/goal_loop/observe.startup.json \
   --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --audit-source-root . \
   --format text
 ```
 
@@ -79,8 +81,24 @@ Expected key facts:
 - The source documents disagree on the aggregate audit total: 206 vs 214.
 - The source documents claim 206 findings for the current catalog total, but
   only 18 finding IDs are itemized in the checked artifacts.
+- `source_artifacts` is `INCOMPLETE` while the logical
+  `prompt_corpus/GOAL_LOOP/...` source paths are not backed by checked files.
 - `--require-complete-catalog` intentionally exits non-zero until the full
   row-level corpus is attached or checked in.
+
+Validate that source-artifact gap directly:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --audit-source-root . \
+  --require-source-artifacts
+```
+
+Expected key fact: this exits non-zero until the catalog's source files exist
+under `prompt_corpus/GOAL_LOOP/...`. That is separate from the row-level
+`--require-complete-catalog` gate.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:
@@ -95,5 +113,6 @@ python3 scripts/goal_loop_status.py \
 ```
 
 Expected key fact: `phases.orient.summary.audit_catalog` preserves the
-source-document coverage, missing row count, and open consistency finding; the
-Verify phase still exposes `post_act_verify_pending` in `violation_kinds`.
+source-document coverage, missing row count, missing source-artifact count, and
+open consistency finding; the Verify phase still exposes
+`post_act_verify_pending` in `violation_kinds`.

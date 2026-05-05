@@ -1,6 +1,73 @@
 # Changelog
 
 
+## [0.19.10] - 2026-05-05
+
+### Added
+- `feat(cascade)`: RFC-0027 PR-9c per-secondary metric label `dual_track_swap` (#13158).
+- `feat(dashboard)`: board comment thread controls (#13142).
+- `feat(goal)`: goal attainment projection surfaced in dashboard (#13131).
+- `feat`: observed keeper PR work metrics (#13177).
+
+### Changed
+- Bumped `agent_sdk` pin to `0.190.7` (#13151).
+- `refactor(dashboard)`: extracted board surface modules (#13147).
+- `chore(build)`: `dune-local.sh` guards missing opam deps + OCaml < 5.1 early (#13117).
+- `chore`: goal loop checklist added to PR template (#13145).
+- `fix(keeper)`: tightened action signals; removed zombie field (#13168).
+
+### Fixed — Keeper recovery & freeze
+- `fix(keeper)`: wake alive-stuck keepers (#13123).
+- `fix(keeper)`: recover alive-but-stuck keepers (#13106).
+- `fix(keeper)`: surface semaphore timeout phase (#13126).
+- `fix(keeper)`: degraded retry slot guard (#13120).
+- `fix`: bound keeper autoboot warmup jitter (#13119).
+- `fix`: `Int32` arithmetic for platform-stable warmup hash (#13156).
+
+### Fixed — Cascade & provider routing
+- `fix`: cascade on model access denial (#13146).
+- `fix(cascade)`: unblock `validate_path_result` on warning 16 (#13159).
+- `fix`: probe local providers in cascade catalog (#13124).
+
+### Fixed — OAS / tooling
+- `fix(oas)`: enable codex CLI keeper MCP approval (#13169).
+- `fix(oas)`: log codex CLI skip decisions (#13149).
+
+### Fixed — Goal loop / verification
+- `fix(dashboard)`: tokenize acronym prefixes; de-shadow non-finite test (#13176).
+- `review(#13166)`: camelCase tokenizer + state test update + 2 regressions (#13170).
+- `fix(dashboard)`: goal attainment projection follow-up (post-#13131) (#13166).
+- `fix`: aggregate goal loop phase status (#13160).
+- `fix`: link goal loop decisions to act artifacts (#13153).
+- `fix`: verify goal loop raw log contracts (#13150).
+- `fix`: surface governance fallback counters (#13143).
+
+### Fixed — Dashboard / IDE
+- `fix(dashboard)`: address hearth stack review feedback (#13175).
+- `fix(ide)`: register discovered repositories (#13173).
+- `fix(dashboard)`: bound judge bridge budgets (#13115).
+- `fix(dashboard)`: log keeper sub-op timings after row build (#13114).
+- `fix(dashboard)`: bound safe-autonomy sandbox probes (#13113).
+- `[codex]` Fix Code IDE read-only editor hydration (#13136).
+
+### Fixed — Misc
+- `fix(metrics)`: wire OAS LLM bridge callbacks (#13125).
+- `fix(metrics)`: persist heuristic events after late init (#13122).
+- `fix(keeper)`: preserve board signal wake stimuli (#13139).
+- `fix(keeper)`: scope claimable backlog signals (#13154).
+- `fix(keeper)`: surface unloaded tool policy accessors (#13129).
+- `fix(keeper)`: surface keeper toml unknown keys in health (#13138).
+- `fix`: surface credential starvation monitoring (#13148).
+- `fix(types)`: stabilize keeper facade cmi (#13130).
+- `fix(start)`: wait for transient port release (#13144).
+
+### Tests
+- `fix(test)`: exhaustive match on `Keeper_event_queue.classify` variants (#13174).
+- `test`: add goal loop fixture bundle (#13172).
+- `test(bootstrap)`: pin Int32 djb2 hash outputs cross-platform — tracker §L (#13167).
+- `test`: lock keeper PR capability invariants (#13137).
+
+
 ## [0.19.9] - 2026-05-05
 
 ### Changed

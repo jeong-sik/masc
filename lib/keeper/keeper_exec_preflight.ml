@@ -57,7 +57,7 @@ let handle_keeper_preflight_check
   (* Check 4: preset level *)
   let preset_ok =
     match Keeper_types.tool_access_preset meta.tool_access with
-    | Some (Coding | Delivery | Full) -> true
+    | Some (Research | Coding | Delivery | Full) -> true
     | _ -> false
   in
   let preset_name =

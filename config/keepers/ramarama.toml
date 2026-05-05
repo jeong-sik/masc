@@ -5,4 +5,4 @@ work_discovery_sources = ["board_posts"]
 
 [keeper.tool_access]
 kind = "preset"
-preset = "social"
+preset = "delivery"

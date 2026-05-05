@@ -11,6 +11,7 @@ val pr_review_event_of_string_opt : string -> pr_review_event option
 val pr_review_event_to_gh_flag : pr_review_event -> string
 val all_pr_review_events : pr_review_event list
 val valid_pr_review_event_strings : string list
+val pr_review_mutation_preset_ok : Keeper_types.tool_preset option -> bool
 
 (** Detect "PR not found" markers in [gh] CLI output (REST 404 + GraphQL
     "could not resolve"). Exposed for unit testing the parser; keepers

@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Types = Types
+module Types = Masc_domain
 
 (* ============================================================
    Agent_id Tests

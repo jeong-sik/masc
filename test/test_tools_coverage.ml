@@ -1,6 +1,6 @@
 (** Comprehensive Tests for Tools module - MCP Tool Definitions *)
 
-open Types
+open Masc_domain
 open Masc_mcp.Tools
 
 let schema_inventory = all_schemas_extended

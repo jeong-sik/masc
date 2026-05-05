@@ -95,7 +95,9 @@
   19 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, 5/5
   aggregate claim source checks verified from resolved documents, and a
   non-blocking structured-source-ID surface of 91 total IDs with 72 not in the
-  strict GOAL LOOP audit catalog.
+  strict GOAL LOOP audit catalog, grouped as `F:4`, `NEW:10`, `P-DASH:13`,
+  `P-EIO:7`, `P-FSM:10`, `P-HARD:5`, `P-MUT:2`, `P-PROAC:1`, `P-PROV:4`,
+  `P-STR:3`, `P-TURN:3`, and `S:10`.
 - [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and `wc -l
   <GOAL_LOOP_SOURCE_ROOT>/*.md` checked at 2026-05-06T06:23:00+09:00,
   confidence High: the catalog records SHA-256 and line-count identity for all
@@ -247,7 +249,8 @@ external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
 catalog-itemized findings, 5/5 aggregate claim source checks verified from
 resolved documents, 12/12 source identity checks verified against checked
 SHA-256 and line-count metadata, 91 broader structured source IDs with 72 not
-in the strict audit catalog, 187 missing 206-itemized rows, one open
+in the strict audit catalog across 12 uncataloged ID families, 187 missing
+206-itemized rows, one open
 consistency finding for the 206-vs-214 count mismatch that fails
 `--require-consistency-resolved`, and 9 itemized rows that are not evaluable
 from the startup log patterns.

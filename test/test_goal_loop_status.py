@@ -155,6 +155,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_ids_missing_from_source": 19,
                         "source_structured_item_ids_total": 0,
                         "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_id_families": [],
                         "source_aggregate_claim_status": "INCOMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 5,
@@ -184,6 +185,7 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 19)
         self.assertEqual(audit_catalog["source_structured_item_ids_total"], 0)
         self.assertEqual(audit_catalog["source_structured_item_ids_uncataloged"], 0)
+        self.assertEqual(audit_catalog["source_structured_item_id_families"], [])
         self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_missing"], 5)
@@ -231,6 +233,14 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_ids_missing_from_source": 0,
                         "source_structured_item_ids_total": 18,
                         "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_id_families": [
+                            {
+                                "family": "NF",
+                                "total": 8,
+                                "uncataloged": 0,
+                                "uncataloged_samples": [],
+                            }
+                        ],
                         "source_aggregate_claim_status": "COMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 0,
@@ -249,6 +259,17 @@ class GoalLoopStatusTest(unittest.TestCase):
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
         self.assertEqual(audit_catalog["consistency_findings_open"], 0)
+        self.assertEqual(
+            audit_catalog["source_structured_item_id_families"],
+            [
+                {
+                    "family": "NF",
+                    "total": 8,
+                    "uncataloged": 0,
+                    "uncataloged_samples": [],
+                }
+            ],
+        )
 
     def test_malformed_catalog_consistency_finding_counts_open(self) -> None:
         self.assertTrue(goal_loop_status.consistency_finding_is_open("bad"))

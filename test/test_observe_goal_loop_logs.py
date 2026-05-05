@@ -98,6 +98,18 @@ def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
     return body
 
 
+def structured_family_map(source_artifacts: dict[str, object]) -> dict[str, dict]:
+    families = source_artifacts["source_structured_item_id_families"]
+    assert isinstance(families, list)
+    result: dict[str, dict] = {}
+    for family in families:
+        assert isinstance(family, dict)
+        family_name = family["family"]
+        assert isinstance(family_name, str)
+        result[family_name] = family
+    return result
+
+
 class ObserveGoalLoopLogsTest(unittest.TestCase):
     def test_scan_counts_prompt_signatures(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -398,6 +410,10 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
         self.assertEqual(source_artifacts["source_structured_item_ids_total"], 19)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
+        families = structured_family_map(source_artifacts)
+        self.assertEqual(families["CC"]["total"], 1)
+        self.assertEqual(families["R-FATAL"]["total"], 2)
+        self.assertEqual(families["NF"]["total"], 8)
         self.assertEqual(source_artifacts["source_aggregate_claim_status"], "COMPLETE")
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 5)
@@ -443,6 +459,46 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_identity_checks_failed"], 0)
         self.assertEqual(source_artifacts["source_structured_item_ids_total"], 1)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
+
+    def test_orient_catalog_groups_uncataloged_structured_source_ids(self) -> None:
+        content = "\n".join(
+            [
+                "NF-1",
+                "NEW-1",
+                "P-DASH-01",
+                "F01",
+                "S02",
+                "",
+            ]
+        )
+        catalog = {
+            "external_sources": [
+                {"path": "prompt_corpus/GOAL_LOOP/source.md", "line_refs": [1]}
+            ],
+            "findings": [{"finding_id": "NF-1"}],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_path = Path(raw_dir) / "source.md"
+            source_path.write_text(content, encoding="utf-8")
+            source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                catalog,
+                Path(raw_dir),
+                source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 5)
+        self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 4)
+        families = structured_family_map(source_artifacts)
+        self.assertEqual(families["NF"]["total"], 1)
+        self.assertEqual(families["NF"]["uncataloged"], 0)
+        self.assertEqual(families["NEW"]["uncataloged_samples"], ["NEW-1"])
+        self.assertEqual(families["P-DASH"]["uncataloged_samples"], ["P-DASH-01"])
+        self.assertEqual(families["F"]["uncataloged_samples"], ["F01"])
+        self.assertEqual(families["S"]["uncataloged_samples"], ["S02"])
 
     def test_orient_catalog_detects_source_identity_mismatch(self) -> None:
         catalog = {
@@ -685,6 +741,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertIn('"source_artifacts_resolved": 12', result.stdout)
         self.assertIn('"source_itemized_finding_ids_total": 19', result.stdout)
         self.assertIn('"source_structured_item_ids_total": 19', result.stdout)
+        self.assertIn('"source_structured_item_id_families"', result.stdout)
         self.assertIn('"source_aggregate_claim_status": "COMPLETE"', result.stdout)
         self.assertIn('"source_aggregate_claim_sources_verified": 5', result.stdout)
 

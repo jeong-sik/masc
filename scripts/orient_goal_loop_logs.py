@@ -25,6 +25,45 @@ SOURCE_STRUCTURED_ITEM_ID_RE = re.compile(
 SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
+def structured_item_id_family(item_id: str) -> str:
+    if item_id.startswith("R-FATAL-"):
+        return "R-FATAL"
+    if item_id.startswith("P-"):
+        parts = item_id.split("-")
+        if len(parts) >= 2:
+            return "-".join(parts[:2])
+        return "P"
+    if re.fullmatch(r"[SF][0-9]+", item_id):
+        return item_id[0]
+    return item_id.split("-", 1)[0]
+
+
+def structured_item_id_family_summary(
+    structured_item_ids: set[str],
+    catalog_finding_ids: set[str],
+) -> list[dict[str, Any]]:
+    families: dict[str, dict[str, Any]] = {}
+    for item_id in sorted(structured_item_ids):
+        family = structured_item_id_family(item_id)
+        entry = families.setdefault(
+            family,
+            {
+                "family": family,
+                "total": 0,
+                "uncataloged": 0,
+                "uncataloged_samples": [],
+            },
+        )
+        entry["total"] += 1
+        if item_id in catalog_finding_ids:
+            continue
+        entry["uncataloged"] += 1
+        samples = entry["uncataloged_samples"]
+        if len(samples) < 10:
+            samples.append(item_id)
+    return [families[family] for family in sorted(families)]
+
+
 def exact_number_pattern(value: int) -> str:
     return rf"(?<!\d){value}(?!\d)"
 
@@ -535,6 +574,10 @@ def source_artifact_summary(
     source_structured_ids_uncataloged = sorted(
         source_structured_item_ids - catalog_finding_ids
     )
+    source_structured_item_id_families = structured_item_id_family_summary(
+        source_structured_item_ids,
+        catalog_finding_ids,
+    )
     source_itemized_id_status = (
         "COMPLETE"
         if not source_ids_missing_from_catalog and not catalog_ids_missing_from_source
@@ -586,6 +629,7 @@ def source_artifact_summary(
         "source_structured_item_ids_uncataloged": len(
             source_structured_ids_uncataloged
         ),
+        "source_structured_item_id_families": source_structured_item_id_families,
         **aggregate_claims,
         "source_identity_status": source_identity_status,
         "source_identity_checks_total": source_identity_checks_total,
@@ -804,6 +848,24 @@ def report_to_text(report: OrientReport) -> str:
                 f"total={source_artifacts['source_structured_item_ids_total']} "
                 f"uncataloged={source_artifacts['source_structured_item_ids_uncataloged']}"
             )
+            structured_families = source_artifacts.get(
+                "source_structured_item_id_families",
+                [],
+            )
+            if isinstance(structured_families, list):
+                uncataloged_families = [
+                    f"{family['family']}:{family['uncataloged']}"
+                    for family in structured_families
+                    if isinstance(family, dict)
+                    and isinstance(family.get("family"), str)
+                    and isinstance(family.get("uncataloged"), int)
+                    and family["uncataloged"] > 0
+                ]
+                if uncataloged_families:
+                    lines.append(
+                        "structured_source_id_families: "
+                        + ", ".join(uncataloged_families)
+                    )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:
             lines.append(

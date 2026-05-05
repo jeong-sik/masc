@@ -217,6 +217,9 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             audit_catalog_summary["source_structured_item_ids_uncataloged"] = (
                 source_artifacts.get("source_structured_item_ids_uncataloged")
             )
+            audit_catalog_summary["source_structured_item_id_families"] = (
+                source_artifacts.get("source_structured_item_id_families", [])
+            )
             audit_catalog_summary["source_aggregate_claim_status"] = (
                 source_artifacts.get("source_aggregate_claim_status", "unknown")
             )

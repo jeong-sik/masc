@@ -628,6 +628,7 @@
         test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
+        test_keeper_prompt_external
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
@@ -822,6 +823,7 @@
         test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
+        test_keeper_prompt_external
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader

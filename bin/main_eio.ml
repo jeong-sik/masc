@@ -392,7 +392,8 @@ let dispatch_route ~routes ~request ~path reqd =
   | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param request "format") in
-      let (status, body) = board_post_detail_json ~response_format:format ~post_id in
+      let voter = board_voter_query request in
+      let (status, body) = board_post_detail_json ~voter ~response_format:format ~post_id in
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd
 

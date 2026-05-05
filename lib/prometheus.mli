@@ -491,6 +491,11 @@ val metric_provider_health_probe_skipped : string
 (** Total bootstrap/runtime-catalog provider health probes intentionally
     skipped as advisory. Labels: [provider_name, profile_name]. *)
 
+val metric_provider_actual_health_status : string
+(** Last advisory provider health status observed by runtime catalog
+    validation. Values: 0=unknown/skipped, 1=healthy, 3=unhealthy.
+    Labels: [provider_name, profile_name, model_id]. *)
+
 val metric_keeper_invariant_violations : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values

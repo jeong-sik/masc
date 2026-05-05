@@ -18,14 +18,9 @@ type candidate_runtime = {
   provider_cfg : Llm_provider.Provider_config.t;
 }
 
-(* [profile_build] is the validated profile shape. [profile_snapshot] used
-   to be a near-duplicate of this record with an extra [probes] field, but
-   the probes were never refreshed after construction and every probe was
-   produced by mapping [candidates] through [candidate_probe_skipped] with
-   the same advisory message — so the probes are derived from [candidates]
-   on demand and the snapshot can reuse [profile_build] directly. The
-   [profile_snapshot] alias is kept for documentation: a [profile_build]
-   embedded in a {!snapshot} is the validated, runtime-served form. *)
+(* [profile_build] is the validated profile shape. Provider liveness remains
+   advisory and never rejects a catalog, but the runtime snapshot carries the
+   latest probe evidence observed during validation. *)
 type profile_build = {
   name : string;
   weighted_entries : Cascade_config_loader.weighted_entry list;
@@ -35,6 +30,7 @@ type profile_build = {
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
   candidates : candidate_runtime list;
+  probes : candidate_probe list;
 }
 
 type profile_snapshot = profile_build
@@ -128,6 +124,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              ollama_max_concurrent = None;
              cli_max_concurrent = None;
              candidates = [];
+             probes = [];
            })
   in
   let snapshot =
@@ -202,33 +199,114 @@ let candidate_probe_skipped (candidate : candidate_runtime) reason =
     status = Probe_skipped reason;
   }
 
-(* Bootstrap-time probes are advisory: provider liveness is checked at
-   runtime, not catalog validation, so every candidate is converted via
-   [candidate_probe_skipped]. This helper is the single source of truth
-   for that mapping; [profile_snapshot] therefore stores [candidates]
-   and derives probes here on demand instead of carrying a parallel
-   [probes] field that would drift on any future refactor. *)
+let advisory_skip_reason =
+  "runtime provider health is advisory; bootstrap skips live probe"
+
+let cloud_skip_reason =
+  "cloud provider health is advisory; bootstrap probes local endpoints only"
+
 let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
-    (fun candidate ->
-      candidate_probe_skipped candidate
-        "runtime provider health is advisory; bootstrap skips live probe")
+    (fun candidate -> candidate_probe_skipped candidate advisory_skip_reason)
     profile_candidates
 
-let record_advisory_probe_skips (profiles : profile_snapshot list) =
+let normalize_endpoint_url url =
+  let trimmed = String.trim url in
+  let rec drop_trailing_slash s =
+    let len = String.length s in
+    if len > 0 && s.[len - 1] = '/' then
+      drop_trailing_slash (String.sub s 0 (len - 1))
+    else
+      s
+  in
+  drop_trailing_slash trimmed
+
+let endpoint_status_for_candidate statuses (candidate : candidate_runtime) =
+  let target = normalize_endpoint_url candidate.provider_cfg.base_url in
+  List.find_opt
+    (fun (status : Llm_provider.Discovery.endpoint_status) ->
+      String.equal target (normalize_endpoint_url status.url))
+    statuses
+
+let profile_probes_from_statuses statuses profile_candidates =
+  List.map
+    (fun (candidate : candidate_runtime) ->
+      if not (Llm_provider.Provider_config.is_local candidate.provider_cfg) then
+        candidate_probe_skipped candidate cloud_skip_reason
+      else
+        match endpoint_status_for_candidate statuses candidate with
+        | Some status when status.healthy -> candidate_probe_ok candidate
+        | Some status ->
+            candidate_probe_error candidate
+              (Printf.sprintf "local endpoint unhealthy: %s" status.url)
+        | None ->
+            candidate_probe_error candidate
+              (Printf.sprintf "local endpoint was not probed: %s"
+                 candidate.provider_cfg.base_url))
+    profile_candidates
+
+let attach_probe_results ?sw ?net (profiles : profile_snapshot list) =
+  match sw, net with
+  | Some sw, Some net ->
+      let endpoints =
+        profiles
+        |> List.concat_map (fun (profile : profile_snapshot) -> profile.candidates)
+        |> List.filter (fun (candidate : candidate_runtime) ->
+               Llm_provider.Provider_config.is_local candidate.provider_cfg)
+        |> List.map (fun (candidate : candidate_runtime) ->
+               candidate.provider_cfg.base_url)
+        |> List.map normalize_endpoint_url
+        |> List.sort_uniq String.compare
+      in
+      let statuses =
+        match endpoints with
+        | [] -> []
+        | _ :: _ -> Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
+      in
+      List.map
+        (fun (profile : profile_snapshot) ->
+          {
+            profile with
+            probes = profile_probes_from_statuses statuses profile.candidates;
+          })
+        profiles
+  | _ ->
+      List.map
+        (fun (profile : profile_snapshot) ->
+          { profile with probes = profile_probes profile.candidates })
+        profiles
+
+let probe_health_value = function
+  | Probe_skipped _ -> 0.0
+  | Probe_ok -> 1.0
+  | Probe_error _ -> 3.0
+
+let record_probe_metrics (profiles : profile_snapshot list) =
   List.iter
     (fun (profile : profile_snapshot) ->
       List.iter
-        (fun (candidate : candidate_runtime) ->
-          Prometheus.inc_counter
-            Prometheus.metric_provider_health_probe_skipped
+        (fun (probe : candidate_probe) ->
+          (match probe.status with
+           | Probe_skipped _ ->
+               Prometheus.inc_counter
+                 Prometheus.metric_provider_health_probe_skipped
+                 ~labels:
+                   [
+                     ("provider_name", probe.provider_kind);
+                     ("profile_name", profile.name);
+                   ]
+                 ()
+           | Probe_ok | Probe_error _ -> ());
+          Prometheus.set_gauge
+            Prometheus.metric_provider_actual_health_status
             ~labels:
               [
-                ("provider_name", provider_kind_string candidate.provider_cfg);
+                ("provider_name", probe.provider_kind);
                 ("profile_name", profile.name);
+                ("model_id", probe.model_id);
               ]
-            ())
-        profile.candidates)
+            (probe_health_value probe.status))
+        profile.probes)
     profiles
 
 let candidate_probe_to_yojson (probe : candidate_probe) =
@@ -260,8 +338,7 @@ let profile_snapshot_to_yojson (profile : profile_snapshot) =
         int_opt_to_json profile.ollama_max_concurrent );
       ("cli_max_concurrent", int_opt_to_json profile.cli_max_concurrent);
       ( "candidates",
-        `List
-          (List.map candidate_probe_to_yojson (profile_probes profile.candidates)) );
+        `List (List.map candidate_probe_to_yojson profile.probes) );
     ]
 
 let snapshot_to_yojson (snapshot : snapshot) =
@@ -499,6 +576,7 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               ollama_max_concurrent;
               cli_max_concurrent;
               candidates;
+              probes = profile_probes candidates;
             }
 
 let runtime_required_profiles ~config_path =
@@ -529,7 +607,7 @@ let runtime_required_profile_names ?config_path () =
   else
     runtime_required_profiles ~config_path
 
-let validate_path_result ~config_path =
+let validate_path_result ?sw ?net ~config_path =
   let checked_at = Unix.gettimeofday () in
   let source_state = active_source_state ~config_path in
   let source_path = source_state.info.source_path in
@@ -608,9 +686,9 @@ let validate_path_result ~config_path =
                ~checked_at
                ~errors:top_errors ~profiles:statically_rejected_profiles)
         else
-          (* profile_snapshot is an alias for profile_build, so the
-             validated builders forward directly without a copy. *)
-          let profile_snapshots : profile_snapshot list = built_profiles in
+          let profile_snapshots : profile_snapshot list =
+            attach_probe_results ?sw ?net built_profiles
+          in
           let rejected_profiles = statically_rejected_profiles in
           let default_profile_validated =
             List.exists
@@ -626,7 +704,7 @@ let validate_path_result ~config_path =
               profiles = profile_snapshots;
             }
           in
-          record_advisory_probe_skips profile_snapshots;
+          record_probe_metrics profile_snapshots;
           if rejected_profiles = [] then
             Ok { snapshot; rejected_update = None }
           else
@@ -657,10 +735,8 @@ let validate_path_result ~config_path =
               Ok { snapshot; rejected_update = Some rejection }
 
 let validate_path ?sw ?net ?clock ~config_path () =
-  let (_ : Eio.Switch.t option) = sw in
-  let (_ : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option) = net in
   let (_ : float Eio.Time.clock_ty Eio.Resource.t option) = clock in
-  match validate_path_result ~config_path with
+  match validate_path_result ?sw ?net ~config_path with
   | Ok result -> Ok result.snapshot
   | Error _ as e -> e
 
@@ -725,7 +801,7 @@ let inspect_active ?sw ?net ?clock () =
       match cached_result with
       | Some result -> result
       | None -> (
-          match validate_path_result ~config_path with
+          match validate_path_result ?sw ?net ~config_path with
           | Ok { snapshot; rejected_update = None } ->
               with_cache_lock (fun () ->
                   cache :=

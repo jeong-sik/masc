@@ -306,6 +306,71 @@ let runtime_mcp_policy_without_http_headers
   in
   { policy with servers }
 
+let is_authorization_header (key, value) =
+  String.equal (String.lowercase_ascii (String.trim key)) "authorization"
+  && String.starts_with ~prefix:"Bearer " (String.trim value)
+
+let authorization_header_from_policy
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  List.find_map
+    (function
+      | Llm_provider.Llm_transport.Http_server { name = "masc"; headers; _ } ->
+          List.find_opt is_authorization_header headers
+      | _ -> None)
+    policy.servers
+
+let per_keeper_authorization_header ~agent_name =
+  match keeper_name_of_agent_name agent_name with
+  | None -> None
+  | Some _ ->
+      let base_path = Env_config_core.base_path () in
+      Auth.load_raw_token base_path ~agent_name
+      |> Option.map (fun raw -> ("Authorization", "Bearer " ^ raw))
+
+let runtime_mcp_policy_uses_bound_actor_tools
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  List.exists Tool_catalog.requires_actor_binding policy.allowed_tool_names
+
+let add_masc_authorization_header authorization_header
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  let servers =
+    List.map
+      (function
+        | Llm_provider.Llm_transport.Http_server ({ name = "masc"; headers; _ } as server) ->
+            Llm_provider.Llm_transport.Http_server
+              {
+                server with
+                headers =
+                  upsert_http_header
+                    ~key:(fst authorization_header)
+                    ~value:(snd authorization_header)
+                    headers;
+              }
+        | server -> server)
+      policy.servers
+  in
+  { policy with servers }
+
+let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
+  runtime_mcp_policy_uses_bound_actor_tools policy
+  && Option.is_some (per_keeper_authorization_header ~agent_name)
+
+let codex_runtime_mcp_policy_for_agent ~agent_name policy =
+  let stripped =
+    runtime_mcp_policy_without_http_headers policy
+    |> runtime_mcp_policy_with_masc_agent_name
+         ~include_internal_token:false ~agent_name
+  in
+  let authorization_header =
+    if runtime_mcp_policy_uses_bound_actor_tools policy then
+      per_keeper_authorization_header ~agent_name
+    else
+      authorization_header_from_policy policy
+  in
+  match authorization_header with
+  | Some header -> add_masc_authorization_header header stripped
+  | None -> stripped
+
 let runtime_mcp_policy_for_provider
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(agent_name : string)
@@ -316,20 +381,11 @@ let runtime_mcp_policy_for_provider
   in
   match policy_opt, provider_cfg.kind, agent_name with
   | Some policy, Llm_provider.Provider_config.Codex_cli, Some agent_name ->
-      (* PR-F (Plan v3 Leak 2a): Codex CLI runtime MCP rejects most
-         per-request HTTP headers, but the masc HTTP server still needs
-         the keeper's identity to avoid collapsing to
-         [Auth.find_credential_by_token]'s alphabetical first-match
-         (the #9786 root cause behind the [bearer token belongs to X]
-         rejection storm).  Strip ambient/auth headers as before, then
-         re-inject the non-secret identity-only whitelist
-         (x-masc-agent-name, x-masc-keeper-name)
-         so the server side resolves the requester correctly even when
-         ambient-env auth is the primary channel. *)
-      let stripped = runtime_mcp_policy_without_http_headers policy in
-      Some
-        (runtime_mcp_policy_with_masc_agent_name
-           ~include_internal_token:false ~agent_name stripped)
+      (* Codex CLI still cannot carry arbitrary per-request headers, but OAS
+         routes [Authorization: Bearer ...] through [bearer_token_env_var].
+         Keep only that auth path plus non-secret identity headers so Codex can
+         pre-approve runtime MCP tools without leaking tokens through argv. *)
+      Some (codex_runtime_mcp_policy_for_agent ~agent_name policy)
   | Some policy, Llm_provider.Provider_config.Codex_cli, None ->
       (* No agent_name to inject — preserve the legacy strip-all behavior. *)
       Some (runtime_mcp_policy_without_http_headers policy)

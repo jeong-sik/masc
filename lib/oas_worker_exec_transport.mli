@@ -138,11 +138,20 @@ val runtime_mcp_policy_with_masc_agent_name :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
 
+val codex_cli_can_auth_keeper_bound_runtime_mcp :
+  agent_name:string ->
+  Llm_provider.Llm_transport.runtime_mcp_policy ->
+  bool
+(** [true] when [agent_name] maps to a keeper with a persisted raw bearer
+    token and [policy] contains actor-bound runtime MCP tools.  Codex CLI
+    can carry that token via OAS [bearer_token_env_var] without placing it in
+    argv. *)
+
 (** Provider-specific shaping of the runtime MCP policy.  For Codex_cli the
-    policy is stripped of HTTP headers (provider rejects most per-request
-    headers) and the identity-only whitelist is re-injected.  Other providers
-    receive the policy with [runtime_mcp_policy_with_masc_agent_name]
-    applied when [agent_name] is non-empty. *)
+    policy is stripped to Codex-safe headers: [Authorization: Bearer ...]
+    plus non-secret MASC identity headers.  Other providers receive the policy
+    with [runtime_mcp_policy_with_masc_agent_name] applied when [agent_name] is
+    non-empty. *)
 val runtime_mcp_policy_for_provider :
   provider_cfg:Llm_provider.Provider_config.t ->
   agent_name:string ->

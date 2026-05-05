@@ -8,6 +8,30 @@ open Keeper_types
 
 exception Semaphore_wait_timeout of float
 
+type semaphore_wait_phase =
+  | Autonomous_queue_head
+  | Autonomous_slot
+  | Reactive_slot
+  | Turn_slot
+
+let semaphore_wait_phase_to_string = function
+  | Autonomous_queue_head -> "autonomous_queue_head"
+  | Autonomous_slot -> "autonomous_slot"
+  | Reactive_slot -> "reactive_slot"
+  | Turn_slot -> "turn_slot"
+;;
+
+type semaphore_wait_timeout = {
+  timeout_wait_sec : float;
+  timeout_phase : semaphore_wait_phase;
+  timeout_autonomous_available : int;
+  timeout_reactive_available : int;
+  timeout_turn_available : int;
+  timeout_queue_depth : int;
+  timeout_queue_ahead : int option;
+  timeout_holders : (string * float) list;
+}
+
 let int_of_env_default_with_deprecated
     ~primary
     ~deprecated
@@ -291,6 +315,22 @@ let semaphore_wait_timeout_sec =
     ~default:180.0 ~min_v:5.0 ~max_v:Float.max_float
 ;;
 
+let semaphore_wait_timeout_snapshot
+    ~phase
+    ?queue_ahead
+    ?(holders = [])
+    () : semaphore_wait_timeout =
+  {
+    timeout_wait_sec = semaphore_wait_timeout_sec;
+    timeout_phase = phase;
+    timeout_autonomous_available = Eio.Semaphore.get_value autonomous_turn_semaphore;
+    timeout_reactive_available = Eio.Semaphore.get_value reactive_turn_semaphore;
+    timeout_turn_available = Eio.Semaphore.get_value turn_semaphore;
+    timeout_queue_depth = List.length (autonomous_waiter_snapshot_for_test ());
+    timeout_queue_ahead = queue_ahead;
+    timeout_holders = holders;
+  }
+
 (** Per-keeper record of the last autonomous turn completion timestamp.
     Used by the fairness cooldown to prevent a fast-cycling keeper from
     monopolizing the autonomous slot when peers are waiting.
@@ -480,7 +520,8 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
   end
 
 let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
-    ~(started_at : float) : (unit, [> `Semaphore_wait_timeout of float ]) result =
+    ~(started_at : float)
+  : (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result =
   if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
   then Ok ()
   else
@@ -509,7 +550,12 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
         ~labels:[ ("keeper", keeper_name);
                   ("channel", "autonomous_queue_head") ]
         ();
-      Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec)
+      Error
+        (`Semaphore_wait_timeout
+          (semaphore_wait_timeout_snapshot
+             ~phase:Autonomous_queue_head
+             ~queue_ahead:ahead
+             ()))
     else (
       (match Eio_context.get_clock_opt () with
        | Some clock -> Eio.Time.sleep clock autonomous_queue_poll_sec
@@ -559,7 +605,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       autonomous_ticket = ref None;
     }
   in
-  let acquire_bounded ~label sem =
+  let acquire_bounded ~label ~phase sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
       (try
@@ -591,7 +637,9 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           ~labels:[ ("keeper", keeper_name);
                     ("channel", label) ]
           ();
-        Error (`Semaphore_wait_timeout semaphore_wait_timeout_sec))
+        Error
+          (`Semaphore_wait_timeout
+            (semaphore_wait_timeout_snapshot ~phase ~holders ())))
     | None ->
       (* No Eio clock available: we are running outside an Eio main loop
          (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
@@ -632,7 +680,12 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           with
           | Error _ as e -> e
           | Ok () ->
-            match acquire_bounded ~label:"autonomous" autonomous_turn_semaphore with
+            match
+              acquire_bounded
+                ~label:"autonomous"
+                ~phase:Autonomous_slot
+                autonomous_turn_semaphore
+            with
             | Error _ as e -> e
             | Ok () ->
               slot_state.acquired_autonomous := true;
@@ -648,7 +701,12 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         let reactive_result =
           if is_autonomous then Ok ()
           else
-            match acquire_bounded ~label:"reactive" reactive_turn_semaphore with
+            match
+              acquire_bounded
+                ~label:"reactive"
+                ~phase:Reactive_slot
+                reactive_turn_semaphore
+            with
             | Error _ as e -> e
             | Ok () ->
               slot_state.acquired_reactive := true;
@@ -657,7 +715,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         match reactive_result with
         | Error _ as e -> e
         | Ok () ->
-        match acquire_bounded ~label:"turn" turn_semaphore with
+        match acquire_bounded ~label:"turn" ~phase:Turn_slot turn_semaphore with
         | Error _ as e -> e
         | Ok () ->
           slot_state.acquired_turn := true;

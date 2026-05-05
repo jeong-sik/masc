@@ -1,5 +1,24 @@
 exception Semaphore_wait_timeout of float
 
+type semaphore_wait_phase =
+  | Autonomous_queue_head
+  | Autonomous_slot
+  | Reactive_slot
+  | Turn_slot
+
+val semaphore_wait_phase_to_string : semaphore_wait_phase -> string
+
+type semaphore_wait_timeout = {
+  timeout_wait_sec : float;
+  timeout_phase : semaphore_wait_phase;
+  timeout_autonomous_available : int;
+  timeout_reactive_available : int;
+  timeout_turn_available : int;
+  timeout_queue_depth : int;
+  timeout_queue_ahead : int option;
+  timeout_holders : (string * float) list;
+}
+
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
@@ -62,7 +81,7 @@ val wait_for_autonomous_queue_head_for_test :
   keeper_name:string ->
   ticket:int ->
   started_at:float ->
-  (unit, [> `Semaphore_wait_timeout of float ]) result
+  (unit, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Pure computation: seconds keeper should yield before re-entering queue
     at time [now].  0.0 = no yield needed. *)
@@ -91,11 +110,11 @@ val with_keeper_turn_slot :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
-  ('a, [> `Semaphore_wait_timeout of float ]) result
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
 val with_keeper_turn_slot_for_test :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
-  ('a, [> `Semaphore_wait_timeout of float ]) result
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result

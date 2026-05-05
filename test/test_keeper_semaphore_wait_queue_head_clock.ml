@@ -52,11 +52,20 @@ let test_stale_started_at_times_out_immediately () =
           ~ticket:ours
           ~started_at:stale_started_at
       with
-      | Error (`Semaphore_wait_timeout waited) ->
+      | Error (`Semaphore_wait_timeout timeout) ->
         Alcotest.(check (float 0.001))
           "timeout value is the configured cap"
           timeout_sec
-          waited
+          timeout.timeout_wait_sec;
+        Alcotest.(check string)
+          "timeout phase is queue-head wait"
+          "autonomous_queue_head"
+          (Keeper_turn_slot.semaphore_wait_phase_to_string
+             timeout.timeout_phase);
+        Alcotest.(check (option int))
+          "timeout records waiters ahead"
+          (Some 1)
+          timeout.timeout_queue_ahead
       | Ok () ->
         Alcotest.fail
           "expected Semaphore_wait_timeout from a stale [started_at] but got Ok"

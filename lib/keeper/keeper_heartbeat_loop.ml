@@ -313,23 +313,35 @@ type semaphore_wait_observation_kind =
   | Semaphore_wait_pending
   | Semaphore_wait_timeout
 
-let semaphore_wait_observation_reasons ~kind ~channel =
+let semaphore_wait_observation_reasons ?phase_label ~kind ~channel () =
   let kind_reason =
     match kind with
     | Semaphore_wait_pending -> "semaphore_wait_pending"
     | Semaphore_wait_timeout -> "semaphore_wait_timeout"
   in
+  let wait_reason =
+    match phase_label with
+    | Some phase -> "phase_" ^ phase
+    | None -> "peers_holding_slot"
+  in
   [
     kind_reason;
-    "peers_holding_slot";
+    wait_reason;
     "channel_" ^ Keeper_world_observation.channel_to_string channel;
   ]
 
-let record_semaphore_wait_observation ~base_path ~keeper_name ~channel ~kind =
+let record_semaphore_wait_observation
+    ?phase_label
+    ~base_path
+    ~keeper_name
+    ~channel
+    ~kind
+    () =
   Keeper_registry.record_skip_reasons
     ~base_path
     keeper_name
-    ~reasons:(semaphore_wait_observation_reasons ~kind ~channel)
+    ~reasons:
+      (semaphore_wait_observation_reasons ?phase_label ~kind ~channel ())
 
 let oas_timeout_budget_observation_reasons =
   [
@@ -594,7 +606,8 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
           ~channel:turn_decision.channel
-          ~kind:Semaphore_wait_pending;
+          ~kind:Semaphore_wait_pending
+          ();
         (* RFC-0026 PR-E-1.6+1.7 shadow: ask the new admission router
            what it WOULD have decided, increment the shadow outcome
            counter, then fall through to the existing semaphore path
@@ -740,25 +753,39 @@ let run_keepalive_unified_turn
               updated)
         with
         | Ok meta -> meta
-        | Error (`Semaphore_wait_timeout wait_sec) ->
-          (* Peers held the turn semaphore longer than the wait cap — not a
-             keeper failure. Skip this cycle and let the next heartbeat retry
-             once a slot opens up. Failure counters intentionally NOT ticked
-             (this is starvation, not crash); but [last_blocker_class] IS
-             updated so the dashboard surfaces the stuck reason — without it
-             the keeper appears as [outcome=never_started, blocker_class=null]
-             and operators see "alive but invisible" (2026-05-05 fleet stuck
-             diagnosis evidence). *)
+        | Error (`Semaphore_wait_timeout timeout) ->
+          (* Slot/queue wait exceeded the cap — not a keeper failure. Skip this
+             cycle and let the next heartbeat retry. Failure counters
+             intentionally NOT ticked (this is starvation, not crash); but
+             [last_blocker_class] IS updated so the dashboard surfaces the
+             stuck reason — without it the keeper appears as
+             [outcome=never_started, blocker_class=null] and operators see
+             "alive but invisible" (2026-05-05 fleet stuck diagnosis
+             evidence). *)
+          let phase_label =
+            Keeper_turn_slot.semaphore_wait_phase_to_string
+              timeout.timeout_phase
+          in
           record_semaphore_wait_observation
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
-            ~kind:Semaphore_wait_timeout;
-          let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
-          let reactive_avail = Eio.Semaphore.get_value Keeper_turn_slot.reactive_turn_semaphore in
-          let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
-          let holder_summary =
-            Keeper_turn_slot.slot_holders_summary ~now:(Time_compat.now ()) ()
+            ~phase_label
+            ~kind:Semaphore_wait_timeout
+            ();
+          let queue_ahead_text =
+            match timeout.timeout_queue_ahead with
+            | None -> ""
+            | Some ahead -> Printf.sprintf " queue_ahead=%d" ahead
+          in
+          let holder_text =
+            match timeout.timeout_holders with
+            | [] -> "none"
+            | holders ->
+              holders
+              |> List.map (fun (name, age) ->
+                   Printf.sprintf "%s/%.0fs" name age)
+              |> String.concat ", "
           in
           (* #13099 review: [last_blocker] gets capped to 200 chars by
              [cap_blocker] on meta load (narrative budget for dashboards),
@@ -772,14 +799,29 @@ let run_keepalive_unified_turn
                still attribute the starvation to specific peers.  *)
           let persisted_blocker =
             Printf.sprintf
-              "skipped: semaphore wait > %.0fs (cascade=%s, \
-               autonomous_available=%d reactive_available=%d \
-               turn_available=%d)"
-              wait_sec meta_after_triage.cascade_name auto_avail reactive_avail
-              turn_avail
+              "skipped: semaphore wait > %.0fs phase=%s \
+               (cascade=%s%s queue_depth=%d autonomous_available=%d \
+               reactive_available=%d turn_available=%d)"
+              timeout.timeout_wait_sec
+              phase_label
+              meta_after_triage.cascade_name
+              queue_ahead_text
+              timeout.timeout_queue_depth
+              timeout.timeout_autonomous_available
+              timeout.timeout_reactive_available
+              timeout.timeout_turn_available
           in
           let log_diagnostic =
-            Printf.sprintf "%s peers=%s" persisted_blocker holder_summary
+            Printf.sprintf "%s holders=[%s]" persisted_blocker holder_text
+          in
+          let blocker_class =
+            match timeout.timeout_phase with
+            | Keeper_turn_slot.Autonomous_queue_head
+            | Keeper_turn_slot.Autonomous_slot ->
+              Keeper_types.Autonomous_slot_wait_timeout
+            | Keeper_turn_slot.Reactive_slot
+            | Keeper_turn_slot.Turn_slot ->
+              Keeper_types.Turn_timeout_after_queue_wait
           in
           Log.Keeper.warn
             "%s: skipping turn (%s)"
@@ -792,7 +834,7 @@ let run_keepalive_unified_turn
             (fun rt ->
               { rt with
                 last_blocker = persisted_blocker;
-                last_blocker_class = Some Keeper_types.Autonomous_slot_wait_timeout;
+                last_blocker_class = Some blocker_class;
               })
             meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then

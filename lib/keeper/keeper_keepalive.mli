@@ -52,12 +52,29 @@ val semaphore_wait_timeout_sec : float
     heartbeat. *)
 
 exception Semaphore_wait_timeout of float
-(** Raised inside [with_keeper_turn_slot] when acquiring either the
-    autonomous, reactive, or global turn semaphore exceeds
-    [semaphore_wait_timeout_sec]. The float carries the wait cap so the
-    caller can render it without re-reading the env var. Callers should
-    treat this as "skip this turn, retry on next heartbeat" rather than
-    a keeper failure. *)
+(** Legacy exception form. The [with_keeper_turn_slot*] result path below
+    carries {!semaphore_wait_timeout}, which includes the phase and runtime
+    snapshot. Callers should treat this as "skip this turn, retry on next
+    heartbeat" rather than a keeper failure. *)
+
+type semaphore_wait_phase =
+  | Autonomous_queue_head
+  | Autonomous_slot
+  | Reactive_slot
+  | Turn_slot
+
+val semaphore_wait_phase_to_string : semaphore_wait_phase -> string
+
+type semaphore_wait_timeout = {
+  timeout_wait_sec : float;
+  timeout_phase : semaphore_wait_phase;
+  timeout_autonomous_available : int;
+  timeout_reactive_available : int;
+  timeout_turn_available : int;
+  timeout_queue_depth : int;
+  timeout_queue_ahead : int option;
+  timeout_holders : (string * float) list;
+}
 
 (** Test-only reset for the autonomous FIFO wait queue. *)
 val reset_autonomous_turn_queue_for_test : unit -> unit
@@ -161,7 +178,7 @@ val with_keeper_turn_slot_for_test :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
-  ('a, [> `Semaphore_wait_timeout of float ]) result
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
 val with_in_turn_liveness_pulse_for_test :

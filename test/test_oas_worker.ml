@@ -1645,7 +1645,9 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
       ~model_label:"not-a-model-label"
       ~goal:"test goal"
       ~masc_tools:[]
-      ~dispatch:(fun ~name:_ ~args:_ -> (true, "ok"))
+      ~dispatch:(fun ~name ~args:_ ->
+        Tool_result.wrap ~tool_name:name ~start_time:(Time_compat.now ())
+          (true, "ok"))
       ()
   with
   | Ok _ ->

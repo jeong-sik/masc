@@ -31,13 +31,20 @@ val yield_if_ready : unit -> unit
     No-op before {!enable} or when called from a context where Eio cannot
     currently yield. *)
 
+val fair_yield : unit -> unit
+(** Named cooperative yield for scheduler-fair keeper/cascade boundaries.
+    Equivalent to {!yield_if_ready}. *)
+
+val default_fair_yield_interval : int
+(** Default step interval for CPU-heavy loops.  P0 fair-yield contract: 1000. *)
+
 type yield_meter
 (** Counter for periodic cooperative yields in CPU-heavy loops. Safe to share
     across fibers or domains. *)
 
 val create_yield_meter : ?interval:int -> unit -> yield_meter
 (** Create a meter that yields every [interval] steps.  Non-positive
-    intervals are coerced to 1.  Default: 1000. *)
+    intervals are coerced to 1.  Default: {!default_fair_yield_interval}. *)
 
 val yield_step : yield_meter -> unit
 (** Count one CPU work unit and call {!yield_if_ready} whenever the

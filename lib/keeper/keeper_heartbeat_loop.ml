@@ -1244,7 +1244,7 @@ let run_heartbeat_loop
       (* Yield before each heartbeat cycle to prevent N keeper fibers
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
-      Eio.Fiber.yield ();
+      Eio_guard.fair_yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let disk_meta_opt, new_meta_mtime =

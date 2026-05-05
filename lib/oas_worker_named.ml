@@ -585,7 +585,7 @@ let run_named
       Error
         terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
-      Eio.Fiber.yield (); (* Task 4-3: Prevent starvation during fast-fail cascades *)
+      Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_cfg.model_id with
       | Error msg ->
           Log.Misc.debug "cascade %s: skipping %s (provider cooldown: %s)" cascade_name provider_cfg.model_id msg;

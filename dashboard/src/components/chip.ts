@@ -28,7 +28,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { MONO_STACK } from './common/font-stacks'
 
-export type ChipKind =
+type ChipKind =
   | 'neutral'
   | 'brass'
   | 'ok'
@@ -38,9 +38,9 @@ export type ChipKind =
   | 'stalled'
   | 'ghost'
 
-export type ChipSize = 'sm' | 'default' | 'lg'
+type ChipSize = 'sm' | 'default' | 'lg'
 
-export interface ChipProps {
+interface ChipProps {
   children: ComponentChildren
   /** Tone. `undefined` ≡ `neutral`. `ghost` is a transparent variant. */
   kind?: ChipKind

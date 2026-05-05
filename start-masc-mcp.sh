@@ -631,7 +631,15 @@ raise_open_file_limit
 check_port_in_use() {
     local check_port="$1"
     local name="$2"
-    if [ -n "$check_port" ] && lsof -iTCP:"$check_port" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
+    local max_wait="${MASC_PORT_PREFLIGHT_WAIT_MAX_SEC:-2}"
+    local waited=0
+    while [ -n "$check_port" ] && lsof -iTCP:"$check_port" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; do
+        if [ "$waited" -lt "$max_wait" ]; then
+            echo "⏳ $name Port $check_port in use, waiting before build/init... (${waited}s/${max_wait}s)" >&2
+            sleep 1
+            waited=$((waited + 1))
+            continue
+        fi
         local listener_pid="$(lsof -iTCP:"$check_port" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
         local listener_cmd=""
         if [ -n "$listener_pid" ]; then
@@ -643,7 +651,7 @@ check_port_in_use() {
         fi
         echo "   Stop the existing server, choose another --port, or set MASC_ALLOW_PORT_REUSE=1." >&2
         exit 1
-    fi
+    done
 }
 
 if [ "$HTTP_MODE" = "true" ]; then

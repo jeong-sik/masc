@@ -318,6 +318,31 @@ let dispatch_route ~routes ~request ~path reqd =
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd
 
+let response_write_failure_msg = function
+  | Failure msg
+    when String.starts_with msg
+           ~prefix:"httpun.Reqd.respond_with_string: invalid state" ->
+      Some msg
+  | Failure "cannot write to closed writer" ->
+      Some "cannot write to closed writer"
+  | _ -> None
+
+let log_late_response_failure ~context msg =
+  Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
+    context msg
+
+let try_internal_error_response reqd msg =
+  try Http.Response.internal_error msg reqd with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> (
+      match response_write_failure_msg exn with
+      | Some failure_msg ->
+          log_late_response_failure ~context:"main_eio internal_error"
+            failure_msg
+      | None ->
+          Log.Http.warn "main_eio internal_error response failed: %s"
+            (Printexc.to_string exn))
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
@@ -341,19 +366,14 @@ let make_extended_handler routes =
        Previously the catch-all swallowed Cancelled and tried to write a 500
        response; that masks shutdown signals and interferes with per-connection
        switch cleanup. *)
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> (
       let msg = Printexc.to_string exn in
-      (* Http.Response.internal_error → Response.text → safe_respond_with_string
-         already guards against the "invalid state" Failure (2026-05-05 cycle9
-         OAS cancellation race), but the extra try here makes the intent explicit
-         and guards against any future refactoring that bypasses safe_respond. *)
-      (try Http.Response.internal_error msg reqd
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | inner ->
-              Log.Server.warn
-                "[http] error response skipped (reqd invalid state after %s): %s"
-                msg (Printexc.to_string inner))
+      match response_write_failure_msg exn with
+      | Some failure_msg ->
+          log_late_response_failure ~context:"main_eio request handler"
+            failure_msg
+      | None -> try_internal_error_response reqd msg)
 
 (** Main server loop *)
 let run_server ~sw:_ ~env ~host ~port ~base_path =

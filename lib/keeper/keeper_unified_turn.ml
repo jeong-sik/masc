@@ -2286,10 +2286,4 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           post_turn_complete_task ~cycle_completed;
           Ok updated_meta))
 
-let run_unified_turn ~config ~meta ~observation ~generation
-    ?channel ?semaphore_wait_ms ?shared_context
-    ?(yield_and_reacquire_slot : _ option)
-    () =
-  let _ = yield_and_reacquire_slot in
-  run_keeper_cycle ~config ~meta ~observation ~generation
-    ?channel ?semaphore_wait_ms ?shared_context ()
+let run_unified_turn = run_keeper_cycle

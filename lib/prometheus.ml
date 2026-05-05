@@ -1113,6 +1113,8 @@ let metric_keeper_post_turn_wirein_failures =
    the constant look like it has two declaration sites. *)
 let metric_keeper_recurring_failures =
   "masc_keeper_recurring_failures_total"
+let metric_keeper_slot_yield_total =
+  "masc_keeper_slot_yield_total"
 let metric_keeper_turn_cleanup_failures =
   "masc_keeper_turn_cleanup_failures_total"
 
@@ -2016,6 +2018,8 @@ let init () =
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
   add metric_keeper_turn_cleanup_failures
     "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, site." Counter;
+  add metric_keeper_slot_yield_total
+    "Slot yield and reacquire count during cascade rotation. Labels: keeper." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

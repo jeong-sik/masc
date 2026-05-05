@@ -290,3 +290,31 @@ module KeeperRetryBackoff : sig
   val transient_backoff_cap_sec : unit -> float
   val transient_backoff_sec : int -> float
 end
+
+(** {1 Cascade attempt liveness — RFC-0022 §9 rollout flag} *)
+
+module CascadeAttemptLiveness : sig
+  type mode =
+    | Off
+        (** No FSM driving, no counter, no kills. Equivalent to the
+            world before RFC-0022. *)
+
+    | Observe
+        (** FSM runs alongside the existing cascade attempt; would-be
+            kills are logged and counted ([masc_cascade_attempt_liveness_kill_total]),
+            but the cascade FSM never sees them. Default. *)
+
+    | Enforce
+        (** FSM runs and would-be kills are reported back to the
+            cascade FSM as [Failed_attempt], advancing to the next
+            provider. Reserved for PR-3+ once observation has produced
+            calibration data per §9 Phase B. *)
+
+  val mode : unit -> mode
+  (** Read [MASC_CASCADE_ATTEMPT_LIVENESS]. Unrecognised values fall
+      back to {!Observe} (with a one-time stderr warning). *)
+
+  val mode_label : mode -> string
+  (** Stable string label for telemetry / log output:
+      [off | observe | enforce]. *)
+end

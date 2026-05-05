@@ -197,6 +197,10 @@ val metric_keeper_operator_clear : string
     [kind="out_of_roots"|"not_found_relative"]. *)
 val metric_keeper_path_rejection : string
 
+val metric_keeper_admission_shadow_outcome : string
+(** RFC-0026 PR-E-1.6 shadow observation. Counter; labels
+    [keeper] and [outcome \in {legacy, dispatch, wait, surface}]. *)
+
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string
@@ -405,6 +409,28 @@ val metric_anti_rationalization_excuse_pattern : string
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
+
+val metric_cascade_attempt_liveness_kill : string
+(** RFC-0022 §9 — would-be ([mode=observe]) and actual ([mode=enforce])
+    in-attempt liveness kills, broken down by failure class.
+
+    Labels: [kind, mode, provider] where:
+    - [kind] ∈ [no_first_token | inter_chunk_idle | wall_exceeded | provider_error]
+    - [mode] ∈ [observe | enforce]
+    - [provider] is the cascade label that produced the attempt
+
+    Use the {b observe}-mode counter to calibrate the per-profile
+    budgets (cloud_fast / cloud_thinking / local_27b / local_70b_plus)
+    against [scripts/diag-keeper-cycle.sh] before flipping any profile
+    to {b enforce}. *)
+
+val metric_cascade_attempt_liveness_observed : string
+(** RFC-0022 PR-2 §3 — per-attempt finalizer counter regardless of
+    outcome. Labels: [cascade], [provider], [outcome] ∈ {success |
+    kill | wire_error}. The kill-rate is
+    [kill_total / observed_total]. *)
+
+
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)
@@ -790,6 +816,22 @@ val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
   (* Centralized metric constants for inline string replacement. *)
 val metric_keeper_tool_use_failure : string
+val metric_keeper_tool_not_allowed : string
+(** #13xxx: counter incremented every time the keeper dispatch layer
+    denies a tool call because the tool is not in the keeper's allowlist.
+    Surfaces preset drift (e.g. [board_core] group omitted from the
+    keeper's [tool_groups]) and deny-list collisions as a Prometheus
+    alert rather than requiring operators to grep
+    [keepers/*.decisions.jsonl] after the fact.
+    Labels:
+    - [keeper] — keeper name
+    - [tool]   — tool name attempted (bounded by tool registry, ~100)
+    - [reason] — [not_in_candidate_set | denied_by_policy |
+                  not_in_allow_set]
+    Operator alert: [rate(masc_keeper_tool_not_allowed_total[5m]) > 0]
+    on any [(keeper, tool)] pair means that keeper is looping without
+    making progress — its BDI is requesting a tool that its preset
+    does not permit. *)
 val metric_after_turn_response_model_empty : string
 val metric_after_turn_response_model_alias : string
 val metric_pricing_catalog_miss : string

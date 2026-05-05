@@ -470,6 +470,16 @@ let metric_keeper_tool_emission_pushes =
 let metric_keeper_path_rejection =
   "masc_keeper_path_rejection_total"
 
+(* RFC-0026 PR-E-1.6 admission router shadow observation
+   (keeper_admission_runtime.ml). Labels:
+     - keeper:  keeper_id
+     - outcome: legacy | dispatch | wait | surface
+
+   "legacy" dominates until PR-E-1.7 wires the registry + bucket
+   lookups via [Keeper_admission_runtime.set_*_lookup]. *)
+let metric_keeper_admission_shadow_outcome =
+  "masc_keeper_admission_shadow_outcome_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
@@ -857,6 +867,18 @@ let metric_anti_rationalization_excuse_pattern =
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
+
+(* RFC-0022 §9 attempt-liveness gate.  Counts would-be (Observe) and
+   actual (Enforce) liveness kills broken down by failure class.
+   Labels: [kind, mode, provider].
+
+   [observed_total] is the per-attempt finalizer counter regardless of
+   outcome (success | kill | wire_error). Useful for the kill-rate
+   ratio kill / observed. *)
+let metric_cascade_attempt_liveness_kill =
+  "masc_cascade_attempt_liveness_kill_total"
+let metric_cascade_attempt_liveness_observed =
+  "masc_cascade_attempt_liveness_observed_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
@@ -1075,6 +1097,21 @@ let metric_keeper_stale_broadcast_emit_failures =
    keeper_unified_metrics.ml. *)
 let metric_keeper_tool_use_failure =
   "masc_keeper_tool_use_failure_total"
+(* #13xxx: keeper dispatch layer denied a tool call because the
+   tool is not in the keeper's allowlist (preset drift, deny-list,
+   or unknown tool name).  Distinct from [metric_keeper_tool_use_failure]
+   (post-execution hook failure) and
+   [metric_keeper_turn_gate_rejected_terminal] (pre_tool_use guard
+   hard-reject).  Labels:
+   - [keeper] — keeper name (fleet-bounded)
+   - [tool]   — tool name attempted (registry-bounded, ~100 tools)
+   - [reason] — vocabulary:
+       "not_in_candidate_set" (unknown / not available to this preset)
+       "denied_by_policy"     (explicit deny-list entry)
+       "not_in_allow_set"     (tool exists but preset omits it)
+   Cardinality: ~16 keepers × ~100 tools × 3 reasons = ~4800 series. *)
+let metric_keeper_tool_not_allowed =
+  "masc_keeper_tool_not_allowed_total"
 let metric_after_turn_response_model_empty =
   "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias =
@@ -1281,6 +1318,14 @@ let init () =
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
   add metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
+  (* RFC-0026 PR-E-1.6 admission router shadow observation.
+     Emitted by keeper_admission_runtime.observe before the existing
+     [Keeper_turn_slot.with_keeper_turn_slot] call. *)
+  add metric_keeper_admission_shadow_outcome
+    "RFC-0026 PR-E-1.6 admission router shadow observation \
+     (labels: keeper, outcome=legacy|dispatch|wait|surface). \
+     [legacy] dominates until PR-E-1.7 wires registry+bucket lookups."
+    Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
   add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;
@@ -1972,6 +2017,17 @@ let init () =
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_keeper_tool_use_failure
     "Total keeper tool use failures during OAS hooks. Labels: keeper, tool." Counter;
+  add metric_keeper_tool_not_allowed
+    "Total keeper tool calls denied because the tool is not in the keeper's \
+     allowlist (preset drift, deny-list, or unknown tool name). \
+     Labels: keeper, tool, reason. \
+     reason ∈ {not_in_candidate_set, denied_by_policy, not_in_allow_set}. \
+     Alert on a non-zero rate for any (keeper, tool) pair: it means the \
+     keeper's BDI is attempting tools that its preset/policy does not \
+     permit, causing the keeper to loop without making progress. \
+     Distinct from masc_keeper_tool_use_failure_total (post-execution \
+     hook failure) and masc_keeper_turn_gate_rejected_terminal_total \
+     (pre_tool_use guard hard-reject)." Counter;
   add metric_after_turn_response_model_empty
     "After-turn response model resolution returned empty string." Counter;
   add metric_after_turn_response_model_alias

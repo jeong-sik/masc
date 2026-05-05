@@ -6,6 +6,7 @@
 
 open Alcotest
 module DE = Masc_mcp.Dashboard_execution
+module Prom = Masc_mcp.Prometheus
 
 let sample_timings () : DE.render_phase_timings_ms = {
   total_ms = 59800.0;
@@ -51,6 +52,77 @@ let test_format_with_zero_keepers () =
   check bool "zero keepers reports per_keeper=0" true
     (Astring.String.is_infix ~affix:"per_keeper=0ms" s)
 
+let phase_sum phase =
+  Prom.metric_value_or_zero
+    Prom.metric_dashboard_execution_render_phase_sec
+    ~labels:[("phase", phase)]
+    ()
+
+let phase_count phase =
+  Prom.metric_value_or_zero
+    (Prom.metric_dashboard_execution_render_phase_sec ^ "_count")
+    ~labels:[("phase", phase)]
+    ()
+
+let test_record_timings_observes_prometheus () =
+  let phases = [
+    "total"; "snapshot"; "operations"; "enrich";
+    "data_load"; "assemble";
+  ] in
+  let snapshot_before =
+    List.map (fun p -> p, phase_sum p, phase_count p) phases
+  in
+  let per_keeper_sum_before = phase_sum "enrich_per_keeper" in
+  let per_keeper_count_before = phase_count "enrich_per_keeper" in
+  let t = sample_timings () in
+  DE.record_render_phase_timings t;
+  let expected_increment = function
+    | "total" -> t.total_ms /. 1000.0
+    | "snapshot" -> t.snapshot_ms /. 1000.0
+    | "operations" -> t.operations_ms /. 1000.0
+    | "enrich" -> t.enrich_ms /. 1000.0
+    | "data_load" -> t.data_load_ms /. 1000.0
+    | "assemble" -> t.assemble_ms /. 1000.0
+    | other -> Alcotest.failf "unexpected phase %s" other
+  in
+  List.iter (fun (phase, sum_before, count_before) ->
+    check (float 1e-6)
+      (Printf.sprintf "%s phase seconds +%.3f" phase
+         (expected_increment phase))
+      (sum_before +. expected_increment phase)
+      (phase_sum phase);
+    check (float 1e-6)
+      (Printf.sprintf "%s phase count +1" phase)
+      (count_before +. 1.0)
+      (phase_count phase)
+  ) snapshot_before;
+  (* enrich_per_keeper is observed once per keeper (n_keepers=9) so that
+     Prometheus [sum / count] gives the actual average per-keeper enrich
+     time weighted by fleet size, instead of averaging render-level
+     means.  9 observations of 6.0s each = 54.0s sum, count +9. *)
+  check (float 1e-6) "per-keeper enrich seconds += 54.0 (9 × 6.0)"
+    (per_keeper_sum_before +. 54.0)
+    (phase_sum "enrich_per_keeper");
+  check (float 1e-6) "per-keeper enrich count += 9 (one per keeper)"
+    (per_keeper_count_before +. 9.0)
+    (phase_count "enrich_per_keeper")
+
+let test_record_timings_skips_per_keeper_when_idle () =
+  let per_keeper_sum_before = phase_sum "enrich_per_keeper" in
+  let per_keeper_count_before = phase_count "enrich_per_keeper" in
+  let total_count_before = phase_count "total" in
+  let idle = { (sample_timings ()) with n_keepers = 0; enrich_ms = 0.0 } in
+  DE.record_render_phase_timings idle;
+  check (float 1e-9) "idle render does not emit enrich_per_keeper sum"
+    per_keeper_sum_before
+    (phase_sum "enrich_per_keeper");
+  check (float 1e-9) "idle render does not emit enrich_per_keeper count"
+    per_keeper_count_before
+    (phase_count "enrich_per_keeper");
+  check (float 1e-6) "idle render still records total observation"
+    (total_count_before +. 1.0)
+    (phase_count "total")
+
 let () =
   run "dashboard_render_timing_9766" [
     ("phase_timing", [
@@ -62,5 +134,9 @@ let () =
           test_format_includes_all_phases;
         test_case "format handles zero keepers" `Quick
           test_format_with_zero_keepers;
+        test_case "record timings emits Prometheus phase metrics" `Quick
+          test_record_timings_observes_prometheus;
+        test_case "idle render skips enrich_per_keeper observation" `Quick
+          test_record_timings_skips_per_keeper_when_idle;
       ]);
   ]

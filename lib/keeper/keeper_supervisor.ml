@@ -1669,9 +1669,38 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
   let kill_class =
     Keeper_registry.Idle_turn { stall_seconds = elapsed }
   in
+  (* PR #13106 review: must NOT route through
+     [stale_watchdog_failure_reason], which preserves prior reasons
+     like [Turn_consecutive_failures] / [Exception] / etc.  Those
+     reasons are not in the [watchdog_stop_pending] restart set
+     ([Stale_turn_timeout | Stale_termination_storm |
+     Oas_timeout_budget_loop]), so preserving them would set
+     [fiber_stop = true] and then the supervisor's next sweep would
+     skip [force_unresolved_watchdog_crash] — the fiber goes dormant
+     instead of being restarted, defeating the entire recovery.
+
+     Force the watchdog cohort to [Stale_turn_timeout kill_class] so
+     [watchdog_stop_pending] / [record_loop_exit] both treat this as
+     a watchdog stop.  The prior reason is captured in the log line
+     for postmortem.
+
+     Idempotent: if the keeper is already in a watchdog cohort
+     ([Stale_turn_timeout] / [Stale_termination_storm] /
+     [Oas_timeout_budget_loop]), preserve it so we don't churn the
+     [stall_seconds] field on every poll. *)
+  let prior_str =
+    Option.map Keeper_registry.failure_reason_to_string
+      entry.last_failure_reason
+    |> Option.value ~default:"none"
+  in
   let reason =
-    Keeper_registry.stale_watchdog_failure_reason
-      ~prior:entry.last_failure_reason ~kill_class
+    match entry.last_failure_reason with
+    | Some
+        ( Keeper_registry.Stale_turn_timeout _
+        | Keeper_registry.Stale_termination_storm _
+        | Keeper_registry.Oas_timeout_budget_loop _ ) as kept ->
+        kept
+    | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)
   in
   Keeper_registry.set_failure_reason ~base_path entry.name reason;
   (* tla-lint: allow-mutation: fiber signal — alive-but-stuck recovery asks
@@ -1686,8 +1715,9 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
     ~labels:[("keeper", entry.name)]
     ();
   Log.Keeper.error
-    "%s: alive-but-stuck recovery requested (elapsed=%.0fs, failure_reason=%s)"
-    entry.name elapsed
+    "%s: alive-but-stuck recovery requested (elapsed=%.0fs, prior_reason=%s, \
+     failure_reason=%s)"
+    entry.name elapsed prior_str
     (Option.map Keeper_registry.failure_reason_to_string reason
      |> Option.value ~default:"unknown")
 

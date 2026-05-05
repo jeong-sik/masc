@@ -330,7 +330,7 @@ let discover_repositories ~base_path =
   let git_dirs =
     try
       let cmd =
-        Printf.sprintf "find %s -name \".git\" -maxdepth 4 -type d 2>/dev/null"
+        Printf.sprintf "find %s -maxdepth 4 -name \".git\" -type d 2>/dev/null"
           (Filename.quote base_path)
       in
       let ic = Unix.open_process_in cmd in
@@ -367,7 +367,9 @@ let discover_repositories ~base_path =
         rel
         |> String.split_on_char '/'
         |> List.exists (fun segment ->
-               String.length segment > 0 && Char.equal segment.[0] '.')
+               String.length segment > 0
+               && (not (String.equal segment "." || String.equal segment ".."))
+               && Char.equal segment.[0] '.')
   in
   let candidates =
     List.filter_map

@@ -314,6 +314,26 @@ let test_discover_ignores_hidden_dirs () =
             Alcotest.(check int) "ignores hidden directory repo" 0
               (List.length repos))
 
+let test_discover_relative_base_path_keeps_visible_repos () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_a = Filename.concat base_path "project-a" in
+        Unix.mkdir repo_a 0o755;
+        init_git_repo repo_a "https://github.com/test/project-a";
+        let cwd = Sys.getcwd () in
+        Fun.protect
+          ~finally:(fun () -> Sys.chdir cwd)
+          (fun () ->
+            Sys.chdir base_path;
+            match Repo_store.discover_repositories ~base_path:"." with
+            | Error e -> Alcotest.fail ("discover failed: " ^ e)
+            | Ok repos ->
+                Alcotest.(check int) "finds visible repo under relative base" 1
+                  (List.length repos);
+                let repo = List.hd repos in
+                Alcotest.(check string) "id" "project-a" repo.id))
+
 let test_migration_backward_compat_to_explicit () =
   with_temp_base_path (fun base_path ->
       (* Phase 1: no TOML — backward compat returns default repo *)
@@ -495,6 +515,8 @@ let () =
             test_discover_finds_grouped_workspace_repos;
           Alcotest.test_case "ignores hidden dirs" `Quick
             test_discover_ignores_hidden_dirs;
+          Alcotest.test_case "relative base path keeps visible repos" `Quick
+            test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
         ] );
       ( "migration",

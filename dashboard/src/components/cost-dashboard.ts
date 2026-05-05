@@ -41,11 +41,13 @@ import { replaceRoute, route } from '../router'
 
 type ViewMode = 'model' | 'keeper'
 export type CostFocus = 'agent' | 'matrix' | 'latency'
+export type AuditFocus = 'actor' | 'summary'
 
 export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
 
 const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
 const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
+const AUDIT_FOCUSES: AuditFocus[] = ['actor', 'summary']
 
 export function isCostView(v: string | undefined): v is CostView {
   return !!v && (COST_VIEWS as string[]).includes(v)
@@ -57,6 +59,16 @@ export function isCostFocus(v: string | undefined): v is CostFocus {
 
 export function viewModeForCostFocus(focus: CostFocus | null): ViewMode {
   return focus === 'agent' ? 'keeper' : 'model'
+}
+
+export function isAuditFocus(v: string | undefined): v is AuditFocus {
+  return !!v && (AUDIT_FOCUSES as string[]).includes(v)
+}
+
+export function auditRouteParams(focus: 'ledger' | AuditFocus): Record<string, string> {
+  return focus === 'ledger'
+    ? { section: 'runtime', view: 'audit' }
+    : { section: 'runtime', view: 'audit', focus }
 }
 
 type ModelLoadState =
@@ -112,6 +124,10 @@ const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' }
 const activeCostFocus = computed<CostFocus | null>(() => {
   const focus = route.value.params.focus
   return isCostFocus(focus) ? focus : null
+})
+const activeAuditFocus = computed<AuditFocus | null>(() => {
+  const focus = route.value.params.focus
+  return isAuditFocus(focus) ? focus : null
 })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
@@ -768,19 +784,215 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
   `
 }
 
-function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: number }) {
-  const severityClass = (sev: string): string => {
-    if (sev === 'error') return 'text-[var(--color-danger-fg)]'
-    if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
-    return 'text-text-muted'
+type AuditChip = 'ledger' | AuditFocus
+
+interface AuditActorSummary {
+  actor: string
+  count: number
+  error: number
+  warn: number
+  info: number
+  latest: string
+  topKind: string
+}
+
+interface AuditKindSummary {
+  kind: string
+  count: number
+  error: number
+  warn: number
+  info: number
+  latest: string
+}
+
+function severityClass(sev: string): string {
+  if (sev === 'error') return 'text-[var(--color-danger-fg)]'
+  if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
+  return 'text-text-muted'
+}
+
+function severityBuckets(entries: readonly AuditEntry[]): { error: number; warn: number; info: number } {
+  let error = 0
+  let warn = 0
+  for (const entry of entries) {
+    if (entry.severity === 'error') error += 1
+    else if (entry.severity === 'warn') warn += 1
+  }
+  return { error, warn, info: Math.max(0, entries.length - error - warn) }
+}
+
+function latestTs(entries: readonly AuditEntry[]): string {
+  return entries.reduce((latest, entry) => entry.ts > latest ? entry.ts : latest, '')
+}
+
+function mostFrequentKind(entries: readonly AuditEntry[]): string {
+  const counts = new Map<string, number>()
+  for (const entry of entries) {
+    const kind = entry.kind.trim() || '(unknown)'
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '—'
+}
+
+export function summarizeAuditActors(entries: readonly AuditEntry[]): AuditActorSummary[] {
+  const byActor = new Map<string, AuditEntry[]>()
+  for (const entry of entries) {
+    const actor = entry.actor.trim() || '(unknown)'
+    const bucket = byActor.get(actor) ?? []
+    bucket.push(entry)
+    byActor.set(actor, bucket)
+  }
+  return [...byActor.entries()]
+    .map(([actor, actorEntries]) => ({
+      actor,
+      count: actorEntries.length,
+      ...severityBuckets(actorEntries),
+      latest: latestTs(actorEntries),
+      topKind: mostFrequentKind(actorEntries),
+    }))
+    .sort((a, b) => b.count - a.count || a.actor.localeCompare(b.actor))
+}
+
+export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSummary[] {
+  const byKind = new Map<string, AuditEntry[]>()
+  for (const entry of entries) {
+    const kind = entry.kind.trim() || '(unknown)'
+    const bucket = byKind.get(kind) ?? []
+    bucket.push(entry)
+    byKind.set(kind, bucket)
+  }
+  return [...byKind.entries()]
+    .map(([kind, kindEntries]) => ({
+      kind,
+      count: kindEntries.length,
+      ...severityBuckets(kindEntries),
+      latest: latestTs(kindEntries),
+    }))
+    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
+}
+
+function updateAuditFocusParam(focus: AuditChip): void {
+  replaceRoute('monitoring', auditRouteParams(focus))
+}
+
+function AuditFocusRail({ focus, count }: { focus: AuditFocus | null; count: number }) {
+  const active: AuditChip = focus ?? 'ledger'
+  return html`
+    <${FilterChips}
+      chips=${[
+        { key: 'ledger', label: 'Ledger', count, title: 'raw audit ledger entries' },
+        { key: 'actor', label: 'By actor', count, title: 'actor별 audit ledger 집계' },
+        { key: 'summary', label: 'Summary', count, title: 'kind/severity별 audit ledger 요약' },
+      ]}
+      value=${active}
+      onChange=${updateAuditFocusParam}
+      class="w-full sm:w-auto"
+      size="sm"
+      tone="accent"
+    />
+  `
+}
+
+function AuditActorBoard({ entries }: { entries: AuditEntry[] }) {
+  const rows = summarizeAuditActors(entries)
+
+  if (rows.length === 0) {
+    return html`<div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">actor별로 집계할 audit entry가 없습니다.</div>`
   }
 
   return html`
-    <section class="flex flex-col gap-4" aria-label="Audit ledger">
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries</span>
+    <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]" aria-label="Audit by actor" data-testid="audit-by-actor">
+      <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit by actor · ${rows.length} actors</span>
       </div>
+      <div class="overflow-x-auto">
+        <table class="w-full" aria-label="Audit entries grouped by actor">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">actor</th>
+              <th scope="col" class="px-2 py-1.5 text-right">entries</th>
+              <th scope="col" class="px-2 py-1.5 text-right">error</th>
+              <th scope="col" class="px-2 py-1.5 text-right">warn</th>
+              <th scope="col" class="px-2 py-1.5 text-right">info</th>
+              <th scope="col" class="px-2 py-1.5 text-left">top kind</th>
+              <th scope="col" class="px-2 py-1.5 text-left">latest</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => html`
+              <tr key=${row.actor} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${row.actor}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-strong">${row.count}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-[var(--color-danger-fg)]">${row.error}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-[var(--color-warning-fg)]">${row.warn}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.info}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${row.topKind}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${row.latest}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
 
+function AuditSummaryBoard({ entries, count }: { entries: AuditEntry[]; count: number }) {
+  const rows = summarizeAuditKinds(entries)
+  const totals = severityBuckets(entries)
+  const maxCount = Math.max(1, ...rows.map(row => row.count))
+
+  return html`
+    <section class="flex flex-col gap-3" aria-label="Audit summary" data-testid="audit-summary">
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <${StatTile} label="Entries" value=${String(count)} delta=${{ direction: 'flat', text: `${entries.length} loaded` }} />
+        <${StatTile} label="Error" value=${String(totals.error)} status=${totals.error > 0 ? 'crit' : 'ok'} />
+        <${StatTile} label="Warn" value=${String(totals.warn)} status=${totals.warn > 0 ? 'warn' : 'ok'} />
+        <${StatTile} label="Kinds" value=${String(rows.length)} />
+      </div>
+      <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-2">
+          <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit summary · kind / severity</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full" aria-label="Audit entries grouped by kind">
+            <thead>
+              <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
+                <th scope="col" class="px-2 py-1.5 text-left">kind</th>
+                <th scope="col" class="px-2 py-1.5 text-right">count</th>
+                <th scope="col" class="px-2 py-1.5 text-left">share</th>
+                <th scope="col" class="px-2 py-1.5 text-right">error</th>
+                <th scope="col" class="px-2 py-1.5 text-right">warn</th>
+                <th scope="col" class="px-2 py-1.5 text-right">info</th>
+                <th scope="col" class="px-2 py-1.5 text-left">latest</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => html`
+                <tr key=${row.kind} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                  <td class="px-2 py-1.5 text-left font-mono text-text-strong">${row.kind}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-text-strong">${row.count}</td>
+                  <td class="px-2 py-1.5">
+                    <div class="h-2 min-w-20 rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
+                      <div class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]" style=${`width: ${Math.round((row.count / maxCount) * 100)}%`} />
+                    </div>
+                  </td>
+                  <td class="px-2 py-1.5 text-right font-mono text-[var(--color-danger-fg)]">${row.error}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-[var(--color-warning-fg)]">${row.warn}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.info}</td>
+                  <td class="px-2 py-1.5 text-left font-mono text-text-muted">${row.latest}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  `
+}
+
+function AuditLedgerTable({ entries }: { entries: AuditEntry[] }) {
+  return html`
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Audit ledger entries">
           <thead>
@@ -805,6 +1017,22 @@ function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: nu
           </tbody>
         </table>
       </div>
+  `
+}
+
+function AuditLedgerBoard({ entries, count, focus }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null }) {
+  return html`
+    <section class="flex flex-col gap-4" aria-label="Audit ledger">
+      <div class="flex flex-col items-start gap-2 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries</span>
+        <${AuditFocusRail} focus=${focus} count=${count} />
+      </div>
+
+      ${focus === 'actor'
+        ? html`<${AuditActorBoard} entries=${entries} />`
+        : focus === 'summary'
+          ? html`<${AuditSummaryBoard} entries=${entries} count=${count} />`
+          : html`<${AuditLedgerTable} entries=${entries} />`}
     </section>
   `
 }
@@ -1123,6 +1351,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           ? html`<${AuditLedgerBoard}
               entries=${auditLedgerState.value.data.entries}
               count=${auditLedgerState.value.data.count}
+              focus=${activeAuditFocus.value}
             />`
           : auditLedgerState.value.status === 'error'
             ? html`<${ErrorState}

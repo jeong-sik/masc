@@ -78,7 +78,7 @@ setKeeperRedirect((agentName: string) => {
  *
  * Input is never mutated.
  */
-export function filterOwnedTasks(
+function filterOwnedTasks(
   tasks: readonly Task[],
   query: string,
 ): readonly Task[] {
@@ -105,7 +105,7 @@ export function filterOwnedTasks(
  *
  * Input is never mutated.
  */
-export function filterTaskHistories(
+function filterTaskHistories(
   rows: readonly TaskHistoryRow[],
   query: string,
 ): readonly TaskHistoryRow[] {

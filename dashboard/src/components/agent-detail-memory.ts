@@ -19,11 +19,11 @@ interface Props {
   agentName: string
 }
 
-export function normalizeKeeperName(name: string): string {
+function normalizeKeeperName(name: string): string {
   return name.replace(/^keeper-/, '').replace(/-agent$/, '')
 }
 
-export function matchesKeeper(synapseAgent: string, keeperName: string): boolean {
+function matchesKeeper(synapseAgent: string, keeperName: string): boolean {
   const a = normalizeKeeperName(synapseAgent)
   const b = normalizeKeeperName(keeperName)
   return a === b
@@ -42,7 +42,7 @@ export function matchesKeeper(synapseAgent: string, keeperName: string): boolean
  *
  * Input is never mutated.
  */
-export function filterEpisodes(
+function filterEpisodes(
   episodes: readonly MemorySubsystemsEpisode[],
   query: string,
 ): readonly MemorySubsystemsEpisode[] {

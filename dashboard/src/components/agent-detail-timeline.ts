@@ -13,7 +13,7 @@ import { trimText } from '../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs } from './tool-call-shared'
 import type { AgentTimelineEvent } from '../api'
 
-export function timelineEventIcon(type: string): string {
+function timelineEventIcon(type: string): string {
   if (type === 'joined') return 'J'
   if (type.startsWith('task_')) return 'T'
   if (type === 'broadcast') return 'M'
@@ -47,7 +47,7 @@ function SummaryBadge({ children }: { children: unknown }) {
 
 type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
 
-export function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
+function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
   if (type.startsWith('task_')) return 'task'
   if (type === 'tool_call') return 'tool_call'
   if (type === 'broadcast') return 'broadcast'
@@ -55,7 +55,7 @@ export function timelineEventCategory(type: string): Exclude<TimelineEventCatego
   return 'other'
 }
 
-export function timelineEventSearchText(evt: AgentTimelineEvent): string {
+function timelineEventSearchText(evt: AgentTimelineEvent): string {
   const parts: string[] = [evt.type, timelineEventLabel(evt.type)]
   const d = evt.detail as Record<string, unknown> | undefined
   if (d && typeof d === 'object') {
@@ -67,7 +67,7 @@ export function timelineEventSearchText(evt: AgentTimelineEvent): string {
   return parts.join(' ').toLowerCase()
 }
 
-export function filterTimelineEvents(
+function filterTimelineEvents(
   events: AgentTimelineEvent[],
   category: TimelineEventCategory,
   query: string,
@@ -81,7 +81,7 @@ export function filterTimelineEvents(
   })
 }
 
-export function timelineCategoryCounts(
+function timelineCategoryCounts(
   events: AgentTimelineEvent[],
 ): Record<Exclude<TimelineEventCategory, 'all'>, number> {
   const counts = { task: 0, tool_call: 0, broadcast: 0, joined: 0, other: 0 }

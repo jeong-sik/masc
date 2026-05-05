@@ -26,7 +26,7 @@ function detailStr(detail: Record<string, unknown>, key: string): string {
 }
 
 /** Extract broadcast events with meaningful content from timeline */
-export function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
+function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
   return events
     .filter(evt => evt.type === 'broadcast')
     .filter(evt => {
@@ -37,14 +37,14 @@ export function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEv
 }
 
 /** Extract task-related events from timeline */
-export function extractTaskEvents(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
+function extractTaskEvents(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
   return events.filter(evt => evt.type.startsWith('task_'))
 }
 
 /** Group consecutive broadcasts that are part of the same report.
  *  Broadcasts within 60 seconds of each other (compared to the previous event,
  *  not the group start) are merged into one report card. */
-export function groupBroadcastsIntoReports(
+function groupBroadcastsIntoReports(
   broadcasts: AgentTimelineEvent[],
 ): { ts: string; content: string }[] {
   if (broadcasts.length === 0) return []
@@ -80,7 +80,7 @@ export function groupBroadcastsIntoReports(
 }
 
 /** Case-insensitive substring match on report content. Empty query returns all. */
-export function filterReportsByQuery(
+function filterReportsByQuery(
   reports: { ts: string; content: string }[],
   query: string,
 ): { ts: string; content: string }[] {
@@ -90,7 +90,7 @@ export function filterReportsByQuery(
 }
 
 /** Case-insensitive substring match on task event title/task_id. Empty query returns all. */
-export function filterTaskEventsByQuery(
+function filterTaskEventsByQuery(
   events: AgentTimelineEvent[],
   query: string,
 ): AgentTimelineEvent[] {

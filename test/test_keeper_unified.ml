@@ -2140,12 +2140,16 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring social_guidance "`keeper_task_claim` {}");
   check bool "social guidance includes board post when allowed" true
     (contains_substring social_guidance "`keeper_board_post` { content:");
+  check bool "social guidance includes web search when allowed" true
+    (contains_substring social_guidance "`masc_web_search` { query:");
   check bool "social guidance omits bash outside preset" false
     (contains_substring social_guidance "`keeper_bash` { cmd:");
   check bool "social guidance omits worktree outside preset" false
     (contains_substring social_guidance "`masc_worktree_create` { task_id:");
   check bool "coding guidance includes bash schema" true
     (contains_substring coding_guidance "`keeper_bash` { cmd:");
+  check bool "coding guidance includes web search schema" true
+    (contains_substring coding_guidance "`masc_web_search` { query:");
   check bool "coding guidance includes worktree schema" true
     (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
   check bool "legacy worktree branch_name schema removed" false

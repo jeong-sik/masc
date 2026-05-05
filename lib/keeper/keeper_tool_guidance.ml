@@ -54,6 +54,10 @@ let hints =
     ; call = "`keeper_bash` { cmd: \"<single shell command>\" }"
     ; description = "run one shell command in the keeper workspace"
     }
+  ; { name = "masc_web_search"
+    ; call = "`masc_web_search` { query: \"<current-info query>\", limit: 5 }"
+    ; description = "look up current public context before time-sensitive claims"
+    }
   ; { name = "masc_worktree_create"
     ; call = "`masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" }"
     ; description = "create a repo worktree before code edits"

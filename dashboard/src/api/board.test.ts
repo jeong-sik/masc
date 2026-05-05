@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   derivePostTitle,
+  createPost,
   fetchBoard,
   fetchBoardHearths,
   fetchBoardPost,
@@ -553,6 +554,30 @@ describe('fetchBoardPost', () => {
       vote_balance: 3,
       votes_up: 5,
       votes_down: 2,
+    })
+  })
+})
+
+describe('createPost', () => {
+  it('passes hearth assignment through to the board post tool', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('Plan', 'Body', 'dashboard-user', { hearth: ' ops ' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/tools/masc_board_post')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      title: 'Plan',
+      content: 'Body',
+      author: 'dashboard-user',
+      hearth: 'ops',
     })
   })
 })

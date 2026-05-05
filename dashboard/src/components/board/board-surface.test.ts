@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
 import { route } from '../../router'
-import { boardHearths, contentCategory } from './board-state'
+import { boardHearths, contentCategory, newPostHearth } from './board-state'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -142,6 +142,7 @@ describe('BoardSurface Component', () => {
     boardAuthorFilter.value = ''
     boardHearthFilter.value = ''
     boardHearths.value = [{ name: 'ops', count: 0 }]
+    newPostHearth.value = ''
     route.value = { params: {} } as any
   })
 
@@ -200,5 +201,15 @@ describe('BoardSurface Component', () => {
 
     expect(boardHearthFilter.value).toBe('ops')
     expect(screen.getByRole('button', { name: 'hearth ops 2 posts' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('prefills the compose hearth from the active hearth filter', () => {
+    boardHearthFilter.value = 'ops'
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByRole('button', { name: '+ 새 글 작성' }))
+
+    expect(screen.getByLabelText('새 글 hearth')).toHaveValue('ops')
+    expect(newPostHearth.value).toBe('ops')
   })
 })

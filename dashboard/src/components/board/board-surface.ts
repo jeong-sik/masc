@@ -47,6 +47,7 @@ import {
   showNewPostForm,
   newPostTitle,
   newPostContent,
+  newPostHearth,
   newPostSubmitting,
   PAGE_SIZE,
   categoryVisibleLimits,
@@ -205,7 +206,10 @@ function NewPostForm() {
     return html`
       <button type="button"
         class="w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
-        onClick=${() => { showNewPostForm.value = true }}
+        onClick=${() => {
+          newPostHearth.value = boardHearthFilter.value
+          showNewPostForm.value = true
+        }}
       >+ 새 글 작성</button>
     `
   }
@@ -228,10 +232,23 @@ function NewPostForm() {
         helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
         previewLimit=${2}
       />
+      <${TextInput}
+        name="board_post_hearth"
+        ariaLabel="새 글 hearth"
+        autoComplete="off"
+        placeholder="hearth (예: ops, research)"
+        value=${newPostHearth.value}
+        onInput=${(e: Event) => { newPostHearth.value = (e.target as HTMLInputElement).value }}
+      />
       <div class="flex gap-2 justify-end">
         <button type="button"
           class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)]"
-          onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
+          onClick=${() => {
+            showNewPostForm.value = false
+            newPostTitle.value = ''
+            newPostContent.value = ''
+            newPostHearth.value = ''
+          }}
         >취소</button>
         <button type="button"
           class="px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"

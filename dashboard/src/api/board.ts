@@ -511,12 +511,20 @@ export function voteComment(commentId: string, direction: 'up' | 'down'): Promis
   })
 }
 
-export function createPost(title: string, content: string, author: string): Promise<unknown> {
-  return post(`/api/v1/tools/masc_board_post`, {
+export function createPost(
+  title: string,
+  content: string,
+  author: string,
+  options: { hearth?: string } = {},
+): Promise<unknown> {
+  const body: Record<string, string> = {
     title,
     content,
     author,
-  })
+  }
+  const hearth = options.hearth?.trim()
+  if (hearth) body.hearth = hearth
+  return post(`/api/v1/tools/masc_board_post`, body)
 }
 
 export function commentPost(postId: string, author: string, content: string, parentId?: string): Promise<unknown> {

@@ -167,6 +167,7 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.sessions).toEqual([])
     expect(result.keepers).toEqual([])
     expect(result.persistent_agents).toEqual([])
+    expect(result.admission_queue).toBeNull()
     expect(result.recent_messages).toEqual([])
     expect(result.pending_confirms).toEqual([])
     expect(result.available_actions).toEqual([])
@@ -430,6 +431,27 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.operator_judge_runtime).not.toBeNull()
     expect(result.operator_judge_runtime!.enabled).toBe(true)
+  })
+
+  it('normalizes admission queue ownership metadata', () => {
+    const result = normalizeOperatorSnapshot({
+      admission_queue: {
+        mode: 'passthrough',
+        throttle_owner: 'oas_cascade',
+        max_concurrent: 3,
+        active: 1,
+        available: 2,
+        queue_depth: 0,
+      },
+    })
+    expect(result.admission_queue).toEqual({
+      mode: 'passthrough',
+      throttle_owner: 'oas_cascade',
+      max_concurrent: 3,
+      active: 1,
+      available: 2,
+      queue_depth: 0,
+    })
   })
 
   it('extracts persistent_agents using same keeper normalizer', () => {

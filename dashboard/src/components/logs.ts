@@ -75,7 +75,7 @@ function latestLogSeq(entries: LogEntry[]): number | null {
   return entries.reduce((max, entry) => Math.max(max, entry.seq), entries[0]?.seq ?? 0)
 }
 
-export function mergeLogEntries(
+function mergeLogEntries(
   current: LogEntry[],
   incoming: LogEntry[],
   maxEntries: number,
@@ -140,7 +140,7 @@ function nestedString(value: unknown): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-export function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
+function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const details = entryDetails(entry)
   const envelope = nestedRecord(details?.failure_envelope)
   if (!envelope) return null
@@ -169,7 +169,7 @@ export function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   }
 }
 
-export function renderLogMessage(entry: LogEntry): string {
+function renderLogMessage(entry: LogEntry): string {
   const details = entryDetails(entry)
   const message = interpolateStructuredMessage(entry.message, details)
   const failure = failureEnvelope(entry)
@@ -228,7 +228,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
   }
 }
 
-export function renderLogRow(entry: LogEntry) {
+function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
   const rawLevelChanged = entry.raw_level && entry.raw_level !== level
   const source = entry.source || 'structured'

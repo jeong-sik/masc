@@ -53,14 +53,14 @@ import {
 
 type StatusFilter = 'all' | RuntimeBand
 
-export function runtimeBadgeClass(band: RuntimeBand): string {
+function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'active') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
   if (band === 'attention') return 'border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)]'
   if (band === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
 }
 
-export function stageBadgeClass(stageKey: string): string {
+function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
   if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
   if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
@@ -69,7 +69,7 @@ export function stageBadgeClass(stageKey: string): string {
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
 }
 
-export function compactModelLabel(model: string | null | undefined): string | null {
+function compactModelLabel(model: string | null | undefined): string | null {
   const value = model?.trim()
   if (!value) return null
   const separator = value.indexOf(':')
@@ -83,7 +83,7 @@ export function compactModelLabel(model: string | null | undefined): string | nu
   return value
 }
 
-export function rosterModelMeta(
+function rosterModelMeta(
   source: {
     last_model_used_label?: string | null
     last_model_used?: string | null
@@ -97,7 +97,7 @@ export function rosterModelMeta(
   return keeperDisplayModel(source)
 }
 
-export function rosterContextMeta(
+function rosterContextMeta(
   source: {
     context_ratio?: number | null
     context_tokens?: number | null
@@ -120,7 +120,7 @@ export function rosterContextMeta(
   return { pct, detail }
 }
 
-export function rosterStateNote(
+function rosterStateNote(
   keeper: {
     runtime_blocker_summary?: string | null
     diagnostic?: { last_error?: string | null } | null
@@ -181,7 +181,7 @@ function findKeeperRuntimeForAgent(
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 
-export function isRuntimeBackedKeeper(keeper: Pick<Keeper, 'paused' | 'registered' | 'keepalive_running'>): boolean {
+function isRuntimeBackedKeeper(keeper: Pick<Keeper, 'paused' | 'registered' | 'keepalive_running'>): boolean {
   if (keeper.registered === false && keeper.keepalive_running === false) return false
   if (keeper.paused === true && keeper.registered !== true && keeper.keepalive_running !== true) return false
   return true
@@ -236,7 +236,7 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
  *
  * Input is never mutated; `Agent` is treated as readonly.
  */
-export function filterAgentRoster(
+function filterAgentRoster(
   rows: readonly Agent[],
   query: string,
 ): readonly Agent[] {
@@ -251,7 +251,7 @@ export function filterAgentRoster(
   })
 }
 
-export function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
+function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
   const seen = new Set<string>()
   const names: string[] = []
   for (const group of groups) {
@@ -285,7 +285,7 @@ function scopeAgentsByKeeperFilter(
     matchesKeeperFilter(agent, keeperLookup, keeperFilter))
 }
 
-export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string {
+function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string {
   const runtimeName = source.agent_name?.trim()
   return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
 }
@@ -323,7 +323,7 @@ function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
   }
 }
 
-export function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
+function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
   if (!existing) return next
   return {
     ...existing,

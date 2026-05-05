@@ -2,13 +2,18 @@
     gen window stats, history summary, and helper utilities.
 
     {b Note for code auditors}: this module does {b not} access a SQL
-    database — keeper telemetry flows through in-memory projections
-    assembled by [Dashboard_mission_assembly], not a relational store.
-    Proposals to "use a single SQL batch query" against keeper metrics
-    are a stack mismatch.  Per-keeper sub-op fan-out (the N+1 shape on
-    [snapshot_json]) is real and {b not yet fixed}; the proposed
-    remediation is fiber-batched aggregation rather than SQL — RFC-0029
-    candidate, tracked in #10710.  *)
+    database — the helpers here are pure parsers / aggregators over
+    JSONL lines.  The actual feed lives in [Dashboard_http_keeper]:
+    [Dated_jsonl.read_recent_lines] (current-day metrics window) with
+    [Keeper_memory.read_file_tail_lines] as a tail fallback when the
+    dated store is empty (see [dashboard_http_keeper.ml], e.g.
+    around lines 591 / 1717 / 1839 / 1952 / 2054).  No relational
+    store sits on this path, so proposals to "use a single SQL batch
+    query" against keeper metrics are a stack mismatch.  Per-keeper
+    sub-op fan-out (the N+1 shape on [snapshot_json]) is real and
+    {b not yet fixed}; the proposed remediation is fiber-batched
+    aggregation over those same JSONL reads rather than SQL —
+    RFC-0029 candidate, tracked in #10710.  *)
 
 
 let normalize_model_name s =

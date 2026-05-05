@@ -255,25 +255,7 @@ let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
           items
       in
       if !changed then `List sanitized_items else json
-  | `Tuple items ->
-      let changed = ref false in
-      let sanitized_items =
-        List.map
-          (fun item ->
-             let sanitized = sanitize_json_utf8 item in
-             if sanitized != item then changed := true;
-             sanitized)
-          items
-      in
-      if !changed then `Tuple sanitized_items else json
-  | `Variant (name, payload) ->
-      let sanitized_name = sanitize_text_utf8 name in
-      let sanitized_payload = Option.map sanitize_json_utf8 payload in
-      if sanitized_name != name || sanitized_payload != payload then
-        `Variant (sanitized_name, sanitized_payload)
-      else
-        json
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _) as other -> other
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
 
 let count_invalid_utf8_bytes s =
   let len = String.length s in

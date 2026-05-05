@@ -402,6 +402,9 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
+let metric_keeper_slot_yield_total =
+  "masc_keeper_slot_yield_total"
+
 let metric_timeout_policy_overshoot =
   "masc_timeout_policy_overshoot_total"
 
@@ -1240,6 +1243,10 @@ let init () =
   register_histogram ~name:metric_keeper_provider_block_duration_sec
     ~help:"Duration in seconds for which a provider is placed into cooldown \
            (observed each time a cooldown is applied or extended). Labels: provider." ();
+  add metric_keeper_slot_yield_total
+    "Total autonomous turn slot yields (successfully yielded and reacquired). \
+     Labels: keeper."
+    Counter;
   add metric_timeout_policy_overshoot
     "Total cooperative-cancel timeout overshoots \
      (labels: layer, origin)"

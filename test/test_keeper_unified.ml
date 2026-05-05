@@ -6004,6 +6004,16 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        check bool "reason mentions typed no-work proof" true
          (contains_substring reason "typed no-work proof")
    | None -> fail "expected stay_silent actionable violation");
+  check (option string) "execution plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
+  check (option string) "owned-task progress plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
   check (option string) "non-actionable stay_silent remains allowed" None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true

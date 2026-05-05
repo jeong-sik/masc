@@ -78,3 +78,25 @@ val to_string : t -> string
 val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val code : t -> int
+
+val is_retryable : t -> bool
+(** [is_retryable err] — would replaying the same operation, without
+    additional caller action, have a chance of succeeding?
+
+    Mirrors the [Error.is_retryable] helper that OAS exposes on
+    its [sdk_error]. Conservative: when in doubt the result is
+    [false] so callers don't loop on deterministic failures.
+
+    {ul
+    {- [Task _], [Agent _], [Portal _]: [false] (domain-state
+       errors — replaying changes nothing).}
+    {- [Auth (TokenExpired _)]: [true] (clears once
+       [masc_auth_refresh] runs); other [Auth] variants: [false].}
+    {- [System (IoError _ | StorageError _)]: [true] (transient
+       FS / backend); other [System] variants: [false]
+       (caller-provided invariants).}
+    {- [RateLimitExceeded _]: [true] (replays after the
+       advertised wait).}
+    {- [CacheError (CacheReadFailed _ | CacheWriteFailed _
+       | CacheExpired _)]: [true]; [CacheCorrupted _]: [false]
+       (persisted-data invariant violation).} } *)

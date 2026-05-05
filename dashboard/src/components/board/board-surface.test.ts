@@ -1,42 +1,43 @@
 import { h } from 'preact'
-import { render, screen } from '@testing-library/preact'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Memory } from './memory'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../store'
-import { route } from '../router'
-import { contentCategory } from './memory-state'
-import type { BoardPost } from '../types'
+import { fireEvent, render, screen } from '@testing-library/preact'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { BoardSurface } from './board-surface'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
+import { route } from '../../router'
+import { boardHearths, contentCategory, newPostHearth } from './board-state'
+import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
 
-vi.mock('../store', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../store')>()
+vi.mock('../../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store')>()
   return {
     ...actual,
     refreshBoard: vi.fn(),
   }
 })
 
-vi.mock('../router', () => ({
+vi.mock('../../router', () => ({
   route: { value: { params: {} } },
   navigate: vi.fn(),
   navigateToPost: vi.fn(),
 }))
 
-vi.mock('../api', () => ({
+vi.mock('../../api', () => ({
   fetchBoardPost: vi.fn(),
   votePost: vi.fn(),
+  fetchBoardHearths: vi.fn().mockResolvedValue([]),
   commentPost: vi.fn(),
   createPost: vi.fn(),
 }))
 
-vi.mock('../api/actions', () => ({
+vi.mock('../../api/actions', () => ({
   deleteBoardPost: vi.fn(),
 }))
 
-vi.mock('./memory-state', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('./memory-state')
-  const store = await vi.importMock<typeof import('../store')>('../store')
+vi.mock('./board-state', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('./board-state')
+  const store = await vi.importMock<typeof import('../../store')>('../../store')
   return {
     ...actual,
     ...store,
@@ -45,6 +46,7 @@ vi.mock('./memory-state', async () => {
     fetchBoardPost: vi.fn(),
     commentPost: vi.fn(),
     createPost: vi.fn(),
+    refreshBoardHearths: vi.fn(),
   }
 })
 
@@ -121,10 +123,23 @@ describe('contentCategory', () => {
   })
 })
 
-// ── Memory component rendering tests ──────────────────────────────
-describe('Memory Component', () => {
+// ── Board component rendering tests ───────────────────────────────
+describe('BoardSurface Component', () => {
+  // PR #13152 review: vi.stubGlobal('fetch') in beforeEach without a matching
+  // unstub leaks the mocked fetch into later tests in the same worker.  Add
+  // an explicit afterEach that restores all stubbed globals.
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ posts: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
     boardPosts.value = []
     boardLoading.value = false
     boardSortMode.value = 'recent'
@@ -132,18 +147,21 @@ describe('Memory Component', () => {
     boardExcludeAutomation.value = false
     boardHiddenCategories.value = new Set(['system'])
     boardAuthorFilter.value = ''
+    boardHearthFilter.value = ''
+    boardHearths.value = [{ name: 'ops', count: 0 }]
+    newPostHearth.value = ''
     route.value = { params: {} } as any
   })
 
   it('renders empty state when there are no posts', () => {
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
   it('renders loading state when loading', () => {
     boardLoading.value = true
-    render(h(Memory, null))
-    expect(screen.getByText(/메모리 피드 불러오는 중/)).toBeInTheDocument()
+    render(h(BoardSurface, null))
+    expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
   })
 
   it('renders article category for a tech exploration post', () => {
@@ -155,8 +173,23 @@ describe('Memory Component', () => {
         author: 'ani1999',
       }),
     ]
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
+  })
+
+  it('renders post authors as keyboard-discoverable links', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-1',
+        title: 'Accessible author link',
+        body: 'content',
+        author: 'ani1999',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
   })
 
   it('hides system posts by default', () => {
@@ -169,8 +202,36 @@ describe('Memory Component', () => {
         post_kind: 'system',
       }),
     ]
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
   })
-})
 
+  it('applies a hearth filter from the server hearth list', () => {
+    boardHearths.value = [{ name: 'ops', count: 2 }]
+    boardPosts.value = [
+      makePost({
+        id: 'post-ops',
+        title: 'Ops note',
+        body: 'ops content',
+        author: 'keeper',
+        hearth: 'ops',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByRole('button', { name: 'hearth ops 2 posts' }))
+
+    expect(boardHearthFilter.value).toBe('ops')
+    expect(screen.getByRole('button', { name: 'hearth ops 2 posts' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('prefills the compose hearth from the active hearth filter', () => {
+    boardHearthFilter.value = 'ops'
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByRole('button', { name: '+ 새 글 작성' }))
+
+    expect(screen.getByLabelText('새 글 hearth')).toHaveValue('ops')
+    expect(newPostHearth.value).toBe('ops')
+  })
+})

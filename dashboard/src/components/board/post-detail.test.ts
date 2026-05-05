@@ -3,40 +3,40 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
-vi.mock('../router', () => ({
+vi.mock('../../router', () => ({
   navigate: vi.fn(),
 }))
 
-vi.mock('../keeper-message', () => ({
+vi.mock('../../keeper-message', () => ({
   stripStateBlocks: (value: string) => value,
 }))
 
-vi.mock('./common/card', () => ({
+vi.mock('../common/card', () => ({
   Card: ({ children }: { children?: any }) => h('div', {}, children),
 }))
 
-vi.mock('./common/time-ago', () => ({
+vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
 
-vi.mock('./common/markdown', () => ({
+vi.mock('../common/markdown', () => ({
   Markdown: ({ text }: { text: string }) => h('div', {}, text),
 }))
 
-vi.mock('./common/toast', () => ({
+vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('./common/empty-state', () => ({
+vi.mock('../common/empty-state', () => ({
   EmptyState: ({ message }: { message: string }) => h('div', {}, message),
 }))
 
-vi.mock('./common/input', () => ({
+vi.mock('../common/input', () => ({
   TextInput: (props: Record<string, unknown>) => h('input', props),
   TextArea: (props: Record<string, unknown>) => h('textarea', props),
 }))
 
-vi.mock('./memory-state', () => ({
+vi.mock('./board-state', () => ({
   detailComments: { value: [] },
   detailLoading: { value: false },
   detailPostId: { value: null },
@@ -56,9 +56,15 @@ vi.mock('./memory-state', () => ({
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread, PostDetail, countCommentDescendants, filterCommentTree } from './memory-post-detail'
-import { voteComment } from './memory-state'
-import type { BoardComment } from '../types/core'
+import {
+  CommentThread,
+  PostDetail,
+  buildCommentDescendantCounts,
+  countCommentDescendants,
+  filterCommentTree,
+} from './post-detail'
+import { voteComment } from './board-state'
+import type { BoardComment } from '../../types/core'
 
 afterEach(() => {
   cleanup()
@@ -128,6 +134,28 @@ describe('CommentThread', () => {
     expect(screen.getByText('level 6 hidden')).toBeInTheDocument()
   })
 
+  it('surfaces deep matching replies while the comment filter is active', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'agent', content: 'level 0', created_at: '2026-04-02T00:00:00Z' },
+      { id: 'c2', post_id: 'post-1', parent_id: 'c1', author: 'agent', content: 'level 1', created_at: '2026-04-02T00:01:00Z' },
+      { id: 'c3', post_id: 'post-1', parent_id: 'c2', author: 'agent', content: 'level 2', created_at: '2026-04-02T00:02:00Z' },
+      { id: 'c4', post_id: 'post-1', parent_id: 'c3', author: 'agent', content: 'level 3', created_at: '2026-04-02T00:03:00Z' },
+      { id: 'c5', post_id: 'post-1', parent_id: 'c4', author: 'agent', content: 'level 4', created_at: '2026-04-02T00:04:00Z' },
+      { id: 'c6', post_id: 'post-1', parent_id: 'c5', author: 'agent', content: 'level 5', created_at: '2026-04-02T00:05:00Z' },
+      { id: 'c7', post_id: 'post-1', parent_id: 'c6', author: 'agent', content: 'needle at level 6', created_at: '2026-04-02T00:06:00Z' },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.queryByText('needle at level 6')).not.toBeInTheDocument()
+    fireEvent.input(screen.getByPlaceholderText('댓글 내용 검색'), {
+      target: { value: 'needle' },
+    })
+
+    expect(screen.getByText('needle at level 6')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /스레드 계속 펼치기/ })).not.toBeInTheDocument()
+  })
+
   it('sends comment votes through the board comment vote tool', async () => {
     const comments = [
       {
@@ -188,6 +216,15 @@ describe('filterCommentTree', () => {
     expect(countCommentDescendants('r1', childrenMap)).toBe(2)
     expect(countCommentDescendants('r2', childrenMap)).toBe(1)
     expect(countCommentDescendants('missing', childrenMap)).toBe(0)
+  })
+
+  it('precomputes descendant counts for O(1) render lookups', () => {
+    const counts = buildCommentDescendantCounts(childrenMap)
+    expect(counts.get('r1')).toBe(2)
+    expect(counts.get('c11')).toBe(1)
+    expect(counts.get('c111')).toBe(0)
+    expect(counts.get('r2')).toBe(1)
+    expect(counts.get('c21')).toBe(0)
   })
 
   it('returns original references on empty query (ref-equal)', () => {

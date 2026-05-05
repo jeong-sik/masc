@@ -536,6 +536,77 @@ let write_memory_bank_rows
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
 
+let drop_memory_rows n rows =
+  let rec go remaining rest =
+    if remaining <= 0 then rest
+    else
+      match rest with
+      | [] -> []
+      | _ :: tl -> go (remaining - 1) tl
+  in
+  go n rows
+
+let consolidation_metric_source source =
+  match source with
+  | "progress_consolidation" | "cross_trace_recurrence" -> source
+  | _ -> "other"
+
+let memory_row_identity (row : keeper_memory_row_raw) =
+  Yojson.Safe.to_string row.json
+
+let count_rows_by_consolidation_source rows =
+  rows
+  |> List.fold_left
+       (fun acc (row : keeper_memory_row_raw) ->
+         let source = consolidation_metric_source row.source in
+         let cur = Option.value ~default:0 (List.assoc_opt source acc) in
+         (source, cur + 1) :: List.remove_assoc source acc)
+       []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let record_memory_consolidation_metrics ~keeper_name ~outcome rows =
+  count_rows_by_consolidation_source rows
+  |> List.iter (fun (source, count) ->
+       if count > 0 then
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_memory_consolidations
+           ~labels:
+             [
+               ("keeper", keeper_name);
+               ("source", source);
+               ("outcome", outcome);
+             ]
+           ~delta:(float_of_int count)
+           ())
+
+let retained_generated_rows ~generated selected =
+  let ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (row : keeper_memory_row_raw) ->
+      Hashtbl.replace ids (memory_row_identity row) ())
+    generated;
+  List.filter
+    (fun (row : keeper_memory_row_raw) ->
+      Hashtbl.mem ids (memory_row_identity row))
+    selected
+
+let evicted_generated_rows ~generated ~retained =
+  let retained_ids : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (row : keeper_memory_row_raw) ->
+      let id = memory_row_identity row in
+      let cur = Option.value ~default:0 (Hashtbl.find_opt retained_ids id) in
+      Hashtbl.replace retained_ids id (cur + 1))
+    retained;
+  generated
+  |> List.filter (fun (row : keeper_memory_row_raw) ->
+       let id = memory_row_identity row in
+       match Hashtbl.find_opt retained_ids id with
+       | Some n when n > 0 ->
+           Hashtbl.replace retained_ids id (n - 1);
+           false
+       | _ -> true)
+
 let compact_memory_bank_if_needed
     (config : Coord.config)
     (meta : keeper_meta) : memory_bank_compaction =
@@ -591,7 +662,14 @@ let compact_memory_bank_if_needed
             let (consolidated_parsed, consolidated_count) =
               consolidate_memory_notes parsed
             in
-            let _ = consolidated_count in
+            let generated_consolidated =
+              drop_memory_rows before_notes consolidated_parsed
+            in
+            if consolidated_count > 0 then
+              record_memory_consolidation_metrics
+                ~keeper_name:meta.name
+                ~outcome:"generated"
+                generated_consolidated;
             let current_generation = meta.runtime.generation in
             let by_recency =
               List.sort
@@ -699,6 +777,10 @@ let compact_memory_bank_if_needed
               else
                 match write_memory_bank_rows path selected with
                 | Error _ ->
+                    record_memory_consolidation_metrics
+                      ~keeper_name:meta.name
+                      ~outcome:"write_failed"
+                      generated_consolidated;
                     { no_memory_bank_compaction with
                       target_notes;
                       before_notes;
@@ -708,6 +790,24 @@ let compact_memory_bank_if_needed
                       reason = Some "write_failed";
                     }
                 | Ok () ->
+                    let retained =
+                      retained_generated_rows
+                        ~generated:generated_consolidated
+                        selected
+                    in
+                    let evicted =
+                      evicted_generated_rows
+                        ~generated:generated_consolidated
+                        ~retained
+                    in
+                    record_memory_consolidation_metrics
+                      ~keeper_name:meta.name
+                      ~outcome:"persisted"
+                      retained;
+                    record_memory_consolidation_metrics
+                      ~keeper_name:meta.name
+                      ~outcome:"evicted"
+                      evicted;
                     {
                       performed = true;
                       reason = Some "compacted";

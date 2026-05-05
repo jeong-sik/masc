@@ -679,6 +679,8 @@ let metric_keeper_checkpoint_failures =
   "masc_keeper_checkpoint_failures_total"
 let metric_keeper_memory_write_failures =
   "masc_keeper_memory_write_failures_total"
+let metric_keeper_memory_consolidations =
+  "masc_keeper_memory_consolidations_total"
 let metric_keeper_write_meta_cycle_failures =
   "masc_keeper_write_meta_cycle_failures_total"
 let metric_keeper_alert_persist_failures =
@@ -1859,6 +1861,11 @@ let init () =
   add metric_keeper_memory_write_failures
     "Total memory write failures (notes/kinds) in keeper_agent_run. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_memory_consolidations
+    "Total keeper memory-bank consolidation rows. \
+     Labels: keeper, source=progress_consolidation|cross_trace_recurrence|other, \
+     outcome=generated|persisted|evicted|write_failed."
     Counter;
   add metric_keeper_write_meta_cycle_failures
     "Total write_meta failures after turn/cycle in keeper_unified_turn. \

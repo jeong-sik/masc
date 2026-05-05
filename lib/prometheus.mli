@@ -308,6 +308,7 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 val metric_keeper_memory_write_failures : string
+val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string
 val metric_keeper_alert_persist_failures : string
 val metric_keeper_metrics_sse_failures : string

@@ -195,8 +195,7 @@ let () =
             test_of_json_enriched_with_source_path;
           Alcotest.test_case "check_source_path_present Ok" `Quick
             test_check_source_path_present_ok;
-          Alcotest.test_case
-            "check_source_path_present fails when absent (regression guard)" `Quick
+          Alcotest.test_case "check_source_path_present fails when absent (regression guard)" `Quick
             test_check_source_path_present_fails_when_absent;
           Alcotest.test_case "of_json_list_enriched array" `Quick
             test_of_json_list_enriched;

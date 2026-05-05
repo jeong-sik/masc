@@ -25,7 +25,13 @@ let of_json (json : Yojson.Safe.t) : t =
       | _ -> None
     in
     { source_path; source_line }
-  with Eio.Cancel.Cancelled _ as e -> raise e | _exn -> empty
+  with Eio.Cancel.Cancelled _ as e -> raise e
+     | _exn ->
+       (* JSON shape mismatch (e.g. wrong type for a field) — treat as no
+          evidence rather than propagating a parse failure, since source-path
+          fields are optional enrichment on top of the mandatory base fields
+          that are validated separately in [Violation_record.of_json]. *)
+       empty
 
 let to_json_fields (ev : t) : (string * Yojson.Safe.t) list =
   let fields = [] in

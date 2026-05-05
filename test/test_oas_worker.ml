@@ -2226,6 +2226,78 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
     [ "claude_code:fallback-0"; "claude_code:fallback-1" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
+(* RFC-0027 PR-9c: per-secondary accounting. Successful and failed
+   dual-track swaps must label the [masc_fallback_triggered_total]
+   counter with the secondary's [provider_kind] so dashboards can
+   split CLI-vs-DirectAPI fallback volume. *)
+let count_swap_metric ~detail =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_fallback_triggered
+    ~labels:[ ("kind", "dual_track_swap"); ("detail", detail) ]
+    ()
+
+let test_dual_track_swap_emits_secondary_kind_label_on_success () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let before = count_swap_metric ~detail:"swapped:claude_code" in
+  let _ =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~secondary_resolver:
+        (fun _ provider_cfg ->
+           if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+           then Some (make_claude_code_provider_cfg ())
+           else None)
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg () ]
+  in
+  let after = count_swap_metric ~detail:"swapped:claude_code" in
+  Alcotest.(check (float 0.0001))
+    "successful swap bumps swapped:<secondary_kind>"
+    (before +. 1.0) after
+
+let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  (* Rejected primary, secondary that *also* fails the gate (another
+     codex_cli with bound-actor tools). Detail format is
+     [rejected:<secondary_kind>:<rejection_reason_label>]. *)
+  let detail = "rejected:codex_cli:codex_keeper_bound_actor_required" in
+  let before = count_swap_metric ~detail in
+  let _ =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~secondary_resolver:
+        (fun _ provider_cfg ->
+           if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+           then Some (make_codex_cli_provider_cfg ())
+           else None)
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg () ]
+  in
+  let after = count_swap_metric ~detail in
+  Alcotest.(check (float 0.0001))
+    "doubly-rejected swap bumps rejected:<secondary_kind>:<reason>"
+    (before +. 1.0) after
+
 (* #10681: filter rejection diagnostics. When [filter_*] empties the
    cascade, the WARN log now lists each rejected provider with its
    classification — these tests pin the classifier to its 3-stage
@@ -4209,6 +4281,14 @@ let () =
         "provider-normalized secondary resolver receives candidate index"
         `Quick
         test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_index;
+      Alcotest.test_case
+        "RFC-0027 PR-9c: successful swap labels metric with secondary kind"
+        `Quick
+        test_dual_track_swap_emits_secondary_kind_label_on_success;
+      Alcotest.test_case
+        "RFC-0027 PR-9c: rejected secondary labels metric with kind+reason"
+        `Quick
+        test_dual_track_swap_emits_secondary_kind_label_on_rejection;
       Alcotest.test_case
         "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
         `Quick test_classify_filter_rejection_codex_keeper_bound_actor;

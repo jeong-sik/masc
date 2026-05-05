@@ -260,6 +260,22 @@ let attempt_secondary_swap
   match secondary_resolver provider_index primary with
   | None -> Either.Right (primary, primary_reason)
   | Some secondary -> (
+      (* RFC-0027 PR-9c: per-secondary accounting label.
+         The secondary's [provider_kind] is a closed enum from
+         [Llm_provider.Provider_config.string_of_provider_kind] so
+         label cardinality stays bounded (≤ kind count). This lets
+         dashboards split [dual_track_swap] swap volume by which
+         backend the cascade is actually leaning on (CLI vs Direct
+         API), without inflating the [detail] axis. The lookup of
+         the matching [Keeper_provider_token_bucket] for the
+         secondary continues to flow through the keeper admission
+         router, which is provider-name keyed and lazy-creates a
+         distinct bucket per concrete provider — so accounting
+         already separates primary and secondary draws as a
+         consequence of [provider_kind] differing. *)
+      let secondary_kind_label =
+        Llm_provider.Provider_config.string_of_provider_kind secondary.kind
+      in
       match
         classify_filter_rejection
           ~keeper_name ?runtime_mcp_policy ~tools
@@ -268,17 +284,23 @@ let attempt_secondary_swap
       with
       | None ->
           Llm_metric_bridge.emit_fallback_triggered
-            ~kind:"dual_track_swap" ~detail:"swapped";
+            ~kind:"dual_track_swap"
+            ~detail:(Printf.sprintf "swapped:%s" secondary_kind_label);
           Either.Left secondary
       | Some secondary_reason ->
           (* Both primary and secondary rejected: keep the primary in
              rejected so the cascade-empty WARN signature stays anchored
              on the user-declared model. The secondary's rejection is
              surfaced as a separate metric so operators can audit which
-             dual-track entries are uselessly configured. *)
+             dual-track entries are uselessly configured. The kind label
+             rides on the rejection detail too, so the same
+             [secondary_kind] series is queryable across swap success /
+             swap failure outcomes. *)
           Llm_metric_bridge.emit_fallback_triggered
             ~kind:"dual_track_swap"
-            ~detail:(filter_rejection_reason_label secondary_reason);
+            ~detail:(Printf.sprintf "rejected:%s:%s"
+                       secondary_kind_label
+                       (filter_rejection_reason_label secondary_reason));
           Either.Right (primary, primary_reason))
 
 let filter_candidate_providers_for_tool_support

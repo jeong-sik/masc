@@ -6,11 +6,23 @@
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level
 
+(* Stable djb2-style hash for the autoboot warmup jitter.
+
+   The 0x3FFF_FFFF mask (30 bits) is intentional — using OCaml's
+   [max_int] would tie the result to the platform [int] width
+   (31-bit on 32-bit OCaml, 63-bit on 64-bit OCaml), so the same
+   keeper name would warm up at different offsets depending on
+   architecture.  The 30-bit mask gives ~1G distinct buckets, far
+   more than any realistic [stagger_window_sec], and is identical
+   on every supported runtime. *)
+let stable_keeper_name_hash_mask = 0x3FFF_FFFF
+
 let stable_keeper_name_hash name =
   let acc = ref 5381 in
   String.iter
     (fun ch ->
-      acc := (((!acc lsl 5) + !acc) + Char.code ch) land max_int)
+      acc :=
+        (((!acc lsl 5) + !acc) + Char.code ch) land stable_keeper_name_hash_mask)
     name;
   !acc
 

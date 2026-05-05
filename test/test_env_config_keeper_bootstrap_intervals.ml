@@ -97,11 +97,46 @@ let test_autoboot_warmup_is_order_independent () =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:60 ~stagger_window_sec:15
       ~keeper_name:name
   in
+  (* PR #13119 review: previously this test called [warmup "verifier"]
+     twice with identical inputs, which would still pass even if the
+     implementation depended on list position.  The actual invariant
+     is "permuting the keeper boot list does not change any individual
+     keeper's warmup".  Compute warmups for an ordered name list and
+     for its reverse, then assert per-name equality. *)
+  let names = [
+    "verifier"; "designer"; "developer"; "operator"; "supervisor";
+    "tester"; "auditor"; "researcher"; "writer"; "scheduler";
+  ] in
+  let warmups_forward = List.map (fun n -> (n, warmup n)) names in
+  let warmups_reverse = List.map (fun n -> (n, warmup n)) (List.rev names) in
+  List.iter
+    (fun (name, w_fwd) ->
+      let w_rev = List.assoc name warmups_reverse in
+      check int
+        (Printf.sprintf "%s gets identical warmup regardless of list position"
+           name)
+        w_fwd w_rev)
+    warmups_forward;
   check int "same keeper gets same warmup independent of boot order"
     (warmup "verifier") (warmup "verifier");
   check int "zero jitter keeps exact base warmup" 60
     (Boot.autoboot_proactive_warmup_sec ~base_warmup:60
-       ~stagger_window_sec:0 ~keeper_name:"verifier")
+       ~stagger_window_sec:0 ~keeper_name:"verifier");
+  (* Coverage smoke: the test assumes the hash actually distributes
+     names across the stagger window — if every name collapsed to
+     a single offset the previous "no list-position dependency"
+     check would degenerate to a tautology.  Assert ≥3 distinct
+     warmup values across the 10-name list (with stagger=15 the
+     hash buckets collide naturally; ≥3 still proves the hash is
+     producing a non-trivial distribution). *)
+  let distinct =
+    warmups_forward
+    |> List.map snd
+    |> List.sort_uniq compare
+    |> List.length
+  in
+  check bool "stagger produces ≥3 distinct warmups across 10 names" true
+    (distinct >= 3)
 
 let () =
   run "env_config_keeper_bootstrap_intervals"

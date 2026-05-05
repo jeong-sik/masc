@@ -19,6 +19,16 @@ let fresh_test_base_path () =
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
 (** Run [f] inside an Eio runtime with an isolated JSONL board *)
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -89,6 +99,39 @@ let test_downvote_no_event () =
   let events = Board_dispatch.get_karma_ledger () in
   Alcotest.(check int) "downvote → no karma event" 0 (List.length events)
 
+(** {1 Self-upvotes do NOT produce karma} *)
+
+let test_self_post_upvote_no_karma () =
+  let post = create_post_exn ~author:"alice" ~content:"self vote" in
+  let pid = Board.Post_id.to_string post.id in
+  vote_exn ~voter:"alice" ~post_id:pid ~direction:Board.Up;
+  let events = Board_dispatch.get_karma_ledger () in
+  Alcotest.(check int) "self post upvote → no karma event" 0 (List.length events);
+  Alcotest.(check int) "self post upvote excluded from agent karma" 0
+    (Board_dispatch.get_agent_karma ~agent_name:"alice");
+  Alcotest.(check (list (pair string int))) "self post upvote excluded from all karma"
+    [] (Board_dispatch.get_all_karma ());
+  match Board_dispatch.get_post ~post_id:pid with
+  | Ok updated ->
+      Alcotest.(check int) "self vote still affects board score" 1 updated.votes_up
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_self_post_upvote_no_economy_credit () =
+  with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
+    Agent_economy.reset_cache ();
+    let base_path = Sys.getenv "MASC_BASE_PATH" in
+    let post = create_post_exn ~author:"alice" ~content:"economy self vote" in
+    let pid = Board.Post_id.to_string post.id in
+    let before =
+      Agent_economy.get_balance ~base_path ~agent_name:"alice"
+    in
+    vote_exn ~voter:"alice" ~post_id:pid ~direction:Board.Up;
+    let after_self_vote =
+      Agent_economy.get_balance ~base_path ~agent_name:"alice"
+    in
+    Alcotest.(check (float 0.0001)) "self upvote does not earn economy credit"
+      before after_self_vote)
+
 (** {1 Comment upvote produces an event} *)
 
 let test_comment_upvote_produces_event () =
@@ -110,6 +153,26 @@ let test_comment_upvote_produces_event () =
   Alcotest.(check string) "recipient is comment author" "charlie" ev.recipient;
   Alcotest.(check string) "target_kind is comment" "comment" ev.target_kind;
   Alcotest.(check string) "target_id matches comment" cid ev.target_id
+
+(** {1 Comment self-upvotes do NOT produce karma} *)
+
+let test_self_comment_upvote_no_karma () =
+  let post = create_post_exn ~author:"alice" ~content:"parent post" in
+  let pid = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id:pid ~author:"charlie"
+        ~content:"self-voted comment" ()
+    with
+    | Ok c -> c
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let cid = Board.Comment_id.to_string comment.id in
+  vote_comment_exn ~voter:"charlie" ~comment_id:cid ~direction:Board.Up;
+  let events = Board_dispatch.get_karma_ledger () in
+  Alcotest.(check int) "self comment upvote → no karma event" 0 (List.length events);
+  Alcotest.(check int) "self comment upvote excluded from agent karma" 0
+    (Board_dispatch.get_agent_karma ~agent_name:"charlie")
 
 (** {1 Multiple voters each produce distinct events} *)
 
@@ -240,8 +303,14 @@ let () =
         (with_eio test_upvote_produces_one_event);
       Alcotest.test_case "downvote no event" `Quick
         (with_eio test_downvote_no_event);
+      Alcotest.test_case "self post upvote no karma" `Quick
+        (with_eio test_self_post_upvote_no_karma);
+      Alcotest.test_case "self post upvote no economy credit" `Quick
+        (with_eio test_self_post_upvote_no_economy_credit);
       Alcotest.test_case "comment upvote event" `Quick
         (with_eio test_comment_upvote_produces_event);
+      Alcotest.test_case "self comment upvote no karma" `Quick
+        (with_eio test_self_comment_upvote_no_karma);
       Alcotest.test_case "multiple voters" `Quick
         (with_eio test_multiple_voters);
       Alcotest.test_case "events sorted oldest first" `Quick

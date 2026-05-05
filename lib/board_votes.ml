@@ -107,9 +107,9 @@ let rewrite_vote_log store =
 
 (* [vote_outcome] carries the information needed to run the post-lock
    [Agent_economy.earn] call.  [earn_upvote_for] is [Some author] only
-   on the fresh-upvote path — a vote flip does not earn credits
-   (prevents down/up alternation abuse), and a downvote does not earn
-   at all. *)
+   on the fresh peer-upvote path — a self-upvote is not reputation, a
+   vote flip does not earn credits (prevents down/up alternation abuse),
+   and a downvote does not earn at all. *)
 type vote_outcome = {
   delta : int;
   earn_upvote_for : string option;
@@ -200,7 +200,9 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
                   let earn =
-                    if (=) direction Up then Some author_name else None
+                    if (=) direction Up && not (String.equal voter author_name)
+                    then Some author_name
+                    else None
                   in
                   Ok { delta = updated.votes_up - updated.votes_down;
                        earn_upvote_for = earn;
@@ -902,6 +904,10 @@ let build_karma_ledger store =
                in
                (match recipient_opt with
                 | None -> acc
+                | Some recipient when String.equal recipient voter ->
+                    (* Content score still records the vote, but karma is
+                       peer recognition; self-upvotes do not mint reputation. *)
+                    acc
                 | Some recipient ->
                     { recipient; voter; target_kind = kind;
                       target_id; delta; ts } :: acc))
@@ -951,42 +957,20 @@ let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
     ("ts_iso",      `String ts_iso);
   ]
 
-(** Calculate karma (total upvotes) for an agent *)
-let get_agent_karma store ~agent_name =
-  let all_posts = list_posts store () in
-  let post_karma =
-    List.fold_left (fun acc (p : post) ->
-      if String.equal (Agent_id.to_string p.author) agent_name then acc + p.votes_up
-      else acc
-    ) 0 all_posts
-  in
-  let comment_karma =
-    Hashtbl.fold (fun _ (c : comment) acc ->
-      if String.equal (Agent_id.to_string c.author) agent_name then acc + c.votes_up
-      else acc
-    ) store.comments 0
-  in
-  post_karma + comment_karma
-
 (** Get karma for all agents (cached) *)
 let get_all_karma store =
   match store.karma_cache with
   | Some cached -> cached
   | None ->
-      let karma_map = Hashtbl.create 64 in
-      Hashtbl.iter (fun _ (p : post) ->
-        let author = Agent_id.to_string p.author in
-        let current = Hashtbl.find_opt karma_map author |> Option.value ~default:0 in
-        Hashtbl.replace karma_map author (current + p.votes_up)
-      ) store.posts;
-      Hashtbl.iter (fun _ (c : comment) ->
-        let author = Agent_id.to_string c.author in
-        let current = Hashtbl.find_opt karma_map author |> Option.value ~default:0 in
-        Hashtbl.replace karma_map author (current + c.votes_up)
-      ) store.comments;
-      let result = Hashtbl.fold (fun k v acc -> (k, v) :: acc) karma_map [] in
+      let result = build_karma_ledger store |> totals_of_karma_ledger in
       store.karma_cache <- Some result;
       result
+
+(** Calculate karma (total peer upvotes) for an agent *)
+let get_agent_karma store ~agent_name =
+  get_all_karma store
+  |> List.assoc_opt agent_name
+  |> Option.value ~default:0
 
 (** Available flairs *)
 let available_flairs = [

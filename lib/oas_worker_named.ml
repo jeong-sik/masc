@@ -774,7 +774,10 @@ let run_named
            Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
            Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
              ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
-           try_cascade ?resume_checkpoint:next_resume rest new_err
+           (* The rejected response is not trusted progress.  Resuming
+              from its checkpoint can turn a fallback provider into a
+              replay of the rejected empty/schema-invalid turn. *)
+           try_cascade ?resume_checkpoint rest new_err
          | Cascade_fsm.Exhausted _ ->
            let observation =
              Oas_worker_cascade.cascade_observation_with_metrics

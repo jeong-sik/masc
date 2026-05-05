@@ -80,6 +80,36 @@ let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
   check int "both repairs counted" 2 stats.repaired_reads;
   check int "duplicate repair warning suppressed" 1 (List.length logs)
 
+let test_sanitize_json_utf8_covers_safe_constructors () =
+  let open Safe_ops in
+  let replacement = "\xEF\xBF\xBD" in
+  let sanitized =
+    sanitize_json_utf8
+      (`Assoc
+        [
+          ("bad\xffkey",
+             `List
+             [
+               `String "bad\xfflist";
+               `Float 1.25;
+               `Assoc [ ("nested\xffkey", `String "bad\xffvalue") ];
+             ]);
+        ])
+  in
+  match sanitized with
+  | `Assoc [ (key, `List [ `String list_value; `Float 1.25; `Assoc fields ]) ] ->
+      check string "assoc key repaired" ("bad" ^ replacement ^ "key") key;
+      check string "list string repaired" ("bad" ^ replacement ^ "list") list_value;
+      let key, value =
+        match fields with
+        | [ field ] -> field
+        | _ -> fail "expected one assoc field"
+      in
+      check string "nested key repaired" ("nested" ^ replacement ^ "key") key;
+      check string "assoc value repaired" ("bad" ^ replacement ^ "value")
+        (Yojson.Safe.Util.to_string value)
+  | _ -> fail "unexpected sanitized JSON shape"
+
 let test_utf8_repair_log_rate_limit_table_is_bounded () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -442,6 +472,8 @@ let () =
         test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair;
       test_case "rate limits repeated utf8 repair logs" `Quick
         test_parse_json_safe_rate_limits_repeated_utf8_repair_logs;
+      test_case "sanitizes safe constructors" `Quick
+        test_sanitize_json_utf8_covers_safe_constructors;
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;

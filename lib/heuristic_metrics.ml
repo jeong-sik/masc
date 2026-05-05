@@ -37,6 +37,8 @@ type coverage_site = {
 type coverage_report = {
   total_events : int;
   sites : coverage_site list;
+  decision_shape_count : int;
+  mixed_outcome_sites : int;
   unique_decision_tuples : int;
 }
 
@@ -293,7 +295,7 @@ let coverage_report_of_events events =
   let site_counts : ((string * string), (int * int) ref) Hashtbl.t =
     Hashtbl.create 16
   in
-  let unique_tuples : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let decision_shapes : (string, unit) Hashtbl.t = Hashtbl.create 16 in
   let json_string_field name json = Json_util.get_string json name in
   let json_float_field name json = Json_util.get_float json name in
   let json_bool_field name json = Json_util.get_bool json name in
@@ -316,17 +318,15 @@ let coverage_report_of_events events =
            let count, triggered_count = !slot in
            slot :=
              (count + 1, triggered_count + if triggered then 1 else 0);
-           let tuple_key =
-             Printf.sprintf "%s\000%s\000%.12g\000%.12g\000%b"
+           let shape_key =
+             Printf.sprintf "%s\000%s\000%.12g\000%b"
                module_name
                site
-               (Option.value ~default:Float.nan
-                  (json_float_field "raw_value" json))
                (Option.value ~default:Float.nan
                   (json_float_field "threshold" json))
                triggered
            in
-           Hashtbl.replace unique_tuples tuple_key ()
+           Hashtbl.replace decision_shapes shape_key ()
        | _ -> ())
     events;
   let sites =
@@ -340,10 +340,21 @@ let coverage_report_of_events events =
            let c = String.compare a.module_name b.module_name in
            if c <> 0 then c else String.compare a.site b.site)
   in
+  let mixed_outcome_sites =
+    List.fold_left
+      (fun acc site ->
+         if site.triggered_count > 0 && site.triggered_count < site.count then
+           acc + 1
+         else acc)
+      0 sites
+  in
+  let decision_shape_count = Hashtbl.length decision_shapes in
   {
     total_events = List.length events;
     sites;
-    unique_decision_tuples = Hashtbl.length unique_tuples;
+    decision_shape_count;
+    mixed_outcome_sites;
+    unique_decision_tuples = decision_shape_count;
   }
 
 let recent_coverage n =
@@ -362,6 +373,8 @@ let coverage_report_to_json report =
   `Assoc
     [
       ("total_events", `Int report.total_events);
+      ("decision_shape_count", `Int report.decision_shape_count);
+      ("mixed_outcome_sites", `Int report.mixed_outcome_sites);
       ("unique_decision_tuples", `Int report.unique_decision_tuples);
       ("sites", `List (List.map coverage_site_to_json report.sites));
     ]

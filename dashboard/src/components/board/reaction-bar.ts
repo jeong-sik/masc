@@ -31,6 +31,7 @@ export function ReactionBar({
   useEffect(() => {
     let cancelled = false
     const refresh = () => {
+      setStatusMessage('')
       void fetchBoardReactions(targetType, targetId)
         .then(next => {
           if (!cancelled) {
@@ -106,9 +107,7 @@ export function ReactionBar({
           </button>
         `
       })}
-      ${statusMessage
-        ? html`<span class="sr-only" role="status" aria-live="polite" aria-atomic="true">${statusMessage}</span>`
-        : null}
+      <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">${statusMessage}</span>
     </div>
   `
 }

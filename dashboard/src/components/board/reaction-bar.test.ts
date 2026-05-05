@@ -30,6 +30,7 @@ describe('ReactionBar', () => {
     for (const emoji of ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥']) {
       expect(screen.getByRole('button', { name: `${emoji} 리액션 0개` })).toBeInTheDocument()
     }
+    expect(screen.getByRole('status')).toHaveTextContent('')
   })
 
   it('uses embedded initial summaries without an initial fetch', async () => {
@@ -91,6 +92,36 @@ describe('ReactionBar', () => {
       expect(fetchBoardReactions).toHaveBeenCalledTimes(2)
       expect(screen.getByRole('button', { name: '🔥 리액션 3개' })).toBeInTheDocument()
     })
+  })
+
+  it('clears the live status before retrying reaction summary refreshes', async () => {
+    vi.mocked(fetchBoardReactions).mockRejectedValueOnce(new Error('offline'))
+
+    render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('리액션 요약을 불러오지 못했습니다')
+    })
+
+    let resolveRefresh: (value: []) => void = () => {}
+    vi.mocked(fetchBoardReactions).mockImplementationOnce(() => new Promise(resolve => {
+      resolveRefresh = resolve
+    }))
+
+    lastEvent.value = {
+      type: 'reaction_changed',
+      target_type: 'post',
+      target_id: 'post-1',
+      user_id: 'agent-a',
+      emoji: '🔥',
+      reacted: true,
+    }
+
+    await waitFor(() => {
+      expect(fetchBoardReactions).toHaveBeenCalledTimes(2)
+      expect(screen.getByRole('status')).toHaveTextContent('')
+    })
+    resolveRefresh([])
   })
 
   it('announces and toasts failed reaction toggles', async () => {

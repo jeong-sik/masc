@@ -1594,6 +1594,14 @@ let view_tombstrip ?(states = keeper_fsm_states) () =
 
 (* hhmmss_of_iso → Hud.hhmmss_of_iso (shell 추출 Phase 2.A) *)
 
+let logs_fetch_tone (status : Logs_types.fetch_status) : Hud.v_class =
+  match status with
+  | Logs_types.Fetch_pending -> `Neutral
+  | Logs_types.Fetch_fresh -> `Ok
+  | Logs_types.Fetch_stale { consecutive_failures; _ } ->
+    if consecutive_failures >= 3 then `Bad else `Warn
+;;
+
 let view_hud
       ?(keepers : Keepers_types.response = Keepers_types.fixture)
       (response : Logs_types.response) =
@@ -1619,8 +1627,9 @@ let view_hud
     | "" -> "—"
     | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
   in
-  let fetch_v = Keepers_types.fetch_status_label keepers.fetch_status in
-  let fetch_cls : Hud.v_class =
+  let logs_fetch_v = Logs_types.fetch_status_label response.fetch_status in
+  let keepers_fetch_v = Keepers_types.fetch_status_label keepers.fetch_status in
+  let keepers_fetch_cls : Hud.v_class =
     match keepers.fetch_status with
     | Keepers_types.Fetch_pending -> `Neutral
     | Keepers_types.Fetch_fresh -> `Ok
@@ -1632,8 +1641,12 @@ let view_hud
     ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
     ; Hud.cell ~k:"Level" ~v:"INFO+" ()
     ; Hud.cell ~v_class:`Ok ~k:"Refresh" ~v:"poll · 3s" ()
-    ; Hud.cell ~k:"Limit" ~v:"200" ()
-    ; Hud.cell ~v_class:fetch_cls ~k:"Link" ~v:fetch_v ()
+    ; Hud.cell
+        ~v_class:(logs_fetch_tone response.fetch_status)
+        ~k:"Logs"
+        ~v:logs_fetch_v
+        ()
+    ; Hud.cell ~v_class:keepers_fetch_cls ~k:"Keepers" ~v:keepers_fetch_v ()
     ; Hud.cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
     ; Hud.cell ~k:"Synced" ~v:sync_v ()
     ]

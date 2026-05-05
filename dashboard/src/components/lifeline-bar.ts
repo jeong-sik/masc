@@ -49,7 +49,7 @@ export function heartbeatPoints(
   return points.join(' ')
 }
 
-export interface HeartbeatProps {
+interface HeartbeatProps {
   /** 0..1 — animates the trace. Caller drives via setInterval / signal. */
   phase?: number
   width?: number
@@ -121,7 +121,7 @@ const captionStyle = {
   fontWeight: 500,
 }
 
-export interface LifelineBarProps {
+interface LifelineBarProps {
   /** Short slug rendered on the left, e.g. "LIFELINE". */
   label?: string
   /** 0..1 — driven by the caller. */

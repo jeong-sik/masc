@@ -62,7 +62,7 @@ import {
 
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---
 
-export interface ShellCounts {
+interface ShellCounts {
   agents: number
   tasks: number
   keepers: number

@@ -299,6 +299,38 @@ let test_stale_current_task_id_is_cleared_from_backlog () =
       check (option string) "stale current_task_id cleared" None
         (current_task_id_string synced)))
 
+let test_heartbeat_current_task_id_reconciles_terminal_backlog () =
+  with_room (fun config ->
+    let meta = make_test_meta ~name:"heartbeat-keeper" () in
+    with_registered_keeper config meta (fun () ->
+      let _ =
+        Coord.add_task config ~title:"Heartbeat stale task" ~priority:1
+          ~description:"desc"
+      in
+      let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+      let json = parse_json result in
+      let task_id =
+        Yojson.Safe.Util.(
+          json |> member "claimed_task" |> member "task_id" |> to_string)
+      in
+      (match
+         Coord.force_done_task_r config ~agent_name:meta.agent_name ~task_id
+           ~notes:"terminal in backlog" ()
+       with
+       | Ok _ -> ()
+       | Error msg -> fail (Masc_domain.masc_error_to_string msg));
+      let current_task_id =
+        Keeper_keepalive.current_task_id_for_agent ~config meta.agent_name
+      in
+      check string "heartbeat task id cleared" "" current_task_id;
+      let registry_meta =
+        match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
+        | Some entry -> entry.meta
+        | None -> fail "expected keeper registry entry"
+      in
+      check (option string) "registry current_task_id cleared" None
+        (current_task_id_string registry_meta)))
+
 let test_claim_empty_room () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -990,6 +1022,8 @@ let () =
         test_release_clears_keeper_current_task_id;
       test_case "stale current_task_id clears from backlog" `Quick
         test_stale_current_task_id_is_cleared_from_backlog;
+      test_case "heartbeat current_task_id reconciles terminal backlog" `Quick
+        test_heartbeat_current_task_id_reconciles_terminal_backlog;
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;

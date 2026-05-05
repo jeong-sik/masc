@@ -149,7 +149,11 @@ export function IdeShell() {
         }}
       >
         <div class="ide-plane-tree">
-          <${IdeExplorer} fileTreeStore=${coordinator.fileTreeStore} />
+          <${IdeExplorer}
+            fileTreeStore=${coordinator.fileTreeStore}
+            workspaceSource=${coordinator.workspaceSource}
+            subscribeWorkspaceSource=${coordinator.subscribeWorkspaceSource}
+          />
         </div>
         <div
           class="ide-plane-editor"

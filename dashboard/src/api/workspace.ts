@@ -1,5 +1,13 @@
-import { get, type GetOptions } from './core'
+import { get, getWithResponse, type GetOptions } from './core'
 import type { FileTreeNode } from '../components/ide/file-tree-store'
+import { parseWorkspaceSource, type WorkspaceSource } from './workspace-source'
+
+export type { WorkspaceSource } from './workspace-source'
+
+export interface WorkspaceTreeResult {
+  readonly nodes: ReadonlyArray<FileTreeNode>
+  readonly source: WorkspaceSource
+}
 
 // --- Blame ---
 
@@ -41,15 +49,19 @@ function keeperParam(keeper: string | undefined): string {
   return keeper ? `&keeper=${encodeURIComponent(keeper)}` : ''
 }
 
-export function fetchWorkspaceTree(
+export async function fetchWorkspaceTree(
   depth: number,
   opts: WorkspaceApiOptions = {},
-): Promise<ReadonlyArray<FileTreeNode>> {
+): Promise<WorkspaceTreeResult> {
   const keeper = keeperParam(opts.keeper)
-  return get<ReadonlyArray<FileTreeNode>>(
+  const { data, headers } = await getWithResponse<ReadonlyArray<FileTreeNode>>(
     `/api/v1/workspace/tree?depth=${depth}${keeper}`,
     opts,
   )
+  return {
+    nodes: data,
+    source: parseWorkspaceSource(headers.get('X-Workspace-Source')),
+  }
 }
 
 export function fetchWorkspaceFile(

@@ -72,7 +72,7 @@ let test_force_release_drops_reactive_holder () =
 
         (* Post-condition: holder table no longer mentions us. *)
         let now2 = Time_compat.now () in
-        let post = List.map fst (KK.reactive_slot_holders ~now2) in
+        let post = List.map fst (KK.reactive_slot_holders ~now:now2) in
         if List.mem "zombie-reactive" post then
           failwith
             (Printf.sprintf "force-release left holder behind: [%s]"

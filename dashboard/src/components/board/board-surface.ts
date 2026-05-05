@@ -16,6 +16,7 @@ import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { PostDetail } from './post-detail'
+import { ReactionBar } from './reaction-bar'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -507,6 +508,7 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
+  const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -636,6 +638,20 @@ function PostCard({ post }: { post: BoardPost }) {
             ${isDeleting ? '삭제 중...' : '삭제'}
           <//>
         </div>
+        ${reactionPreview ? html`
+          <div
+            class="mt-2"
+            onClick=${(event: Event) => event.stopPropagation()}
+            onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}
+          >
+            <${ReactionBar}
+              targetType="post"
+              targetId=${post.id}
+              compact
+              initialSummaries=${post.reactions}
+            />
+          </div>
+        ` : null}
       </div>
     </article>
   `

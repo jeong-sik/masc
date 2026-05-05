@@ -371,6 +371,11 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const tags = Array.isArray(raw.tags)
     ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
     : []
+  const reactions = Array.isArray(raw.reactions)
+    ? raw.reactions
+        .map(normalizeBoardReactionSummary)
+        .filter((row): row is BoardReactionSummary => row !== null)
+    : undefined
 
   return {
     id,
@@ -405,6 +410,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
+    ...(reactions !== undefined ? { reactions } : {}),
   }
 }
 
@@ -421,6 +427,11 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const reactions = Array.isArray(raw.reactions)
+    ? raw.reactions
+        .map(normalizeBoardReactionSummary)
+        .filter((row): row is BoardReactionSummary => row !== null)
+    : undefined
   return {
     id,
     post_id: postId,
@@ -435,6 +446,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     votes_down: votesDown,
     current_vote: currentVote,
     has_voted: hasVoted,
+    ...(reactions !== undefined ? { reactions } : {}),
   }
 }
 

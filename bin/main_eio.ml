@@ -32,7 +32,7 @@ module Config_doctor = Masc_mcp.Config_doctor
 module Auth_doctor = Masc_mcp.Auth_doctor
 module Auth_login = Masc_mcp.Auth_login
 module Graphql_api = Masc_mcp.Graphql_api
-module Types = Types
+module Types = Masc_domain
 module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
@@ -361,17 +361,17 @@ let doctor_json =
   Arg.(value & flag & info ["json"] ~doc)
 
 let parse_login_role value =
-  match Types.agent_role_of_string (String.lowercase_ascii value) with
+  match Masc_domain.agent_role_of_string (String.lowercase_ascii value) with
   | Ok role -> Ok role
   | Error msg -> Error (`Msg msg)
 
 let login_role =
   let doc = "Role for the minted bearer token: admin or worker" in
   let role_printer fmt role =
-    Format.pp_print_string fmt (Types.agent_role_to_string role)
+    Format.pp_print_string fmt (Masc_domain.agent_role_to_string role)
   in
   let role_conv = Arg.conv (parse_login_role, role_printer) in
-  Arg.(value & opt role_conv Types.Admin & info ["role"] ~docv:"ROLE" ~doc)
+  Arg.(value & opt role_conv Masc_domain.Admin & info ["role"] ~docv:"ROLE" ~doc)
 
 let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
@@ -969,7 +969,7 @@ let login_cmd_exit base_path host port agent role as_json as_shell =
     Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role ()
   with
   | Error err ->
-      Printf.eprintf "login failed: %s\n" (Types.masc_error_to_string err);
+      Printf.eprintf "login failed: %s\n" (Masc_domain.masc_error_to_string err);
       1
   | Ok report ->
       let output =

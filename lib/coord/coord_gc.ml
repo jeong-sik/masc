@@ -3,7 +3,7 @@
     Extracted from room.ml for modularity.
     Contains: heartbeat, cleanup_zombies, gc. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 
@@ -131,8 +131,8 @@ let cleanup_zombies
       let backlog = read_backlog config in
       List.iter (fun (task : task) ->
         match task.task_status with
-        | Types.Claimed { assignee; _ }
-        | Types.InProgress { assignee; _ }
+        | Masc_domain.Claimed { assignee; _ }
+        | Masc_domain.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
             (match (Atomic.get Coord_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
@@ -143,10 +143,10 @@ let cleanup_zombies
                    ("type", `String "zombie_cascade_error");
                    ("task_id", `String task.id);
                    ("agent", `String assignee);
-                   ("error", `String (Types.masc_error_to_string e));
+                   ("error", `String (Masc_domain.masc_error_to_string e));
                    ("ts", `String (now_iso ()));
                  ]))
-        | Types.Claimed _ | Types.InProgress _
+        | Masc_domain.Claimed _ | Masc_domain.InProgress _
         | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
       ) backlog.tasks;
 
@@ -220,7 +220,7 @@ let gc config ?(days=7) () =
   let stale_count = ref 0 in
   let archived_tasks = ref [] in
   let kept_tasks = List.filter (fun task ->
-    let is_done = Types.task_status_is_done task.task_status in
+    let is_done = Masc_domain.task_status_is_done task.task_status in
     let is_old = task.created_at < cutoff_iso in
     if is_old && not is_done then begin
       incr stale_count;
@@ -250,7 +250,7 @@ let gc config ?(days=7) () =
   (* Get open task IDs (not Done or Cancelled) *)
   let open_task_ids =
     List.filter_map (fun task ->
-      if Types.task_status_is_terminal task.task_status then None
+      if Masc_domain.task_status_is_terminal task.task_status then None
       else Some task.id
     ) backlog.tasks
   in

@@ -182,7 +182,7 @@ val run_named_with_masc_tools :
   goal:string ->
   ?priority:Llm_provider.Request_priority.t ->
   ?system_prompt:string ->
-  masc_tools:Types.tool_schema list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
   ?stream_idle_timeout_s:float ->
@@ -216,7 +216,7 @@ val run_model_with_masc_tools :
   model_label:string ->
   goal:string ->
   ?system_prompt:string ->
-  masc_tools:Types.tool_schema list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
   ?stream_idle_timeout_s:float ->

@@ -88,7 +88,7 @@ let ensure_run_dir config task_id =
   let dir = run_dir config task_id in
   if not (Sys.file_exists dir) then mkdir_p dir
 
-let now_iso () = Types.now_iso ()
+let now_iso () = Masc_domain.now_iso ()
 
 let read_text_file path =
   if Sys.file_exists path then

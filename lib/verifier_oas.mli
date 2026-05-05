@@ -24,7 +24,7 @@ type verdict = Verifier_core.verdict =
 val should_skip : action_description:string -> bool
 val verdict_to_string : verdict -> string
 val parse_verdict : string -> (verdict, string) result
-val report_verdict_schema : Types.tool_schema
+val report_verdict_schema : Masc_domain.tool_schema
 val parse_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
 (** {1 Verification Prompt} *)

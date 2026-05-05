@@ -41,15 +41,15 @@ val publish_task_transition :
   Agent_sdk.Event_bus.t ->
   agent_name:string ->
   task_id:string ->
-  transition:Types.task_action ->
+  transition:Masc_domain.task_action ->
   unit
 (** Publishes [masc.task_transition] with payload
     [{agent_name, task_id, transition, timestamp}].
 
-    [transition] is the canonical {!Types.task_action} variant
+    [transition] is the canonical {!Masc_domain.task_action} variant
     (#8605 family) — typos at call sites fail to compile.
     Wire format ([["claim"]] / [["start"]] / [["done"]] / ...)
-    preserved via {!Types.task_action_to_string}.  Sibling
+    preserved via {!Masc_domain.task_action_to_string}.  Sibling
     refactor of #8846 (Coord-side hook for the same transition
     vocabulary). *)
 

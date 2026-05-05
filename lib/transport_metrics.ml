@@ -533,5 +533,5 @@ let transport_health_json ~config =
       ("lifecycle_dispatch_rejections_total",
        `Int lifecycle_dispatch_rejections);
     ]);
-    ("generated_at", `String (Types.now_iso ()));
+    ("generated_at", `String (Masc_domain.now_iso ()));
   ]

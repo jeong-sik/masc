@@ -114,13 +114,13 @@ let of_yojson json =
           (match json |> member "generated_at_unix" with
           | `Float value -> value
           | `Int value -> float_of_int value
-          | _ -> Types.parse_iso8601 (json |> member "generated_at" |> to_string));
+          | _ -> Masc_domain.parse_iso8601 (json |> member "generated_at" |> to_string));
         fresh_until = json |> member "fresh_until" |> to_string;
         fresh_until_unix =
           (match json |> member "fresh_until_unix" with
           | `Float value -> value
           | `Int value -> float_of_int value
-          | _ -> Types.parse_iso8601 (json |> member "fresh_until" |> to_string));
+          | _ -> Masc_domain.parse_iso8601 (json |> member "fresh_until" |> to_string));
         keeper_name =
           json |> member "keeper_name" |> to_string_option
           |> Option.value ~default:"operator-judge";
@@ -215,7 +215,7 @@ let record config ~surface ~target_type ~target_id ~summary ~confidence
   let fresh_until_unix =
     match fresh_until_unix with
     | Some value -> value
-    | None -> Types.parse_iso8601 fresh_until
+    | None -> Masc_domain.parse_iso8601 fresh_until
   in
   let value =
     {

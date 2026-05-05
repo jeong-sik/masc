@@ -38,14 +38,14 @@ val make_config :
 (** Determine if a heartbeat should be emitted
 
     @param config Smart heartbeat configuration
-    @param agent_status Current agent status (from Types.agent_status)
+    @param agent_status Current agent status (from Masc_domain.agent_status)
     @param last_activity Unix timestamp of last agent activity
     @param last_heartbeat Unix timestamp of last heartbeat emission
     @return Decision indicating whether to emit or skip
 *)
 val should_emit :
   config:config ->
-  agent_status:Types.agent_status ->
+  agent_status:Masc_domain.agent_status ->
   last_activity:float ->
   last_heartbeat:float ->
   decision

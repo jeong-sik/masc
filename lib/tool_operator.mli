@@ -72,7 +72,7 @@ val dispatch :
     safe-to-expose subset.  The full {!schemas} is consumed inside
     the keeper-bound dispatcher only. *)
 
-val remote_schemas : Types.tool_schema list
+val remote_schemas : Masc_domain.tool_schema list
 (** Operator-remote tool schemas — the subset advertised to remote
     MCP clients.  Pinned at the .mli seam so dashboard / SDK
     consumers see a stable list ordering. *)

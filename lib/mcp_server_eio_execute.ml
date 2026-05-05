@@ -80,9 +80,9 @@ let is_transient_agent_name name =
   || Nickname.is_dictionary_generated_nickname name
 
 let silent_auth_token_error_kind = function
-  | Types.Auth (Types.Auth_error.InvalidToken _) -> "token_mismatch"
-  | Types.Auth (Types.Auth_error.TokenExpired _) -> "token_expired"
-  | Types.Auth (Types.Auth_error.Unauthorized _) -> "unauthorized"
+  | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> "token_mismatch"
+  | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> "token_expired"
+  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _) -> "unauthorized"
   | _ -> "other"
 
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
@@ -293,7 +293,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         | Ok owner_name -> resolve_owner_keeper_identity owner_name
         | Error msg ->
             Log.Auth.routine "owner_keeper_identity: token resolve failed: %s"
-              (Types.masc_error_to_string msg);
+              (Masc_domain.masc_error_to_string msg);
             None)
   in
 
@@ -477,7 +477,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   match auth_result with
   | Error err ->
       with_system_internal_audit ~agent_name
-        (false, Types.masc_error_to_string err)
+        (false, Masc_domain.masc_error_to_string err)
   | Ok () ->
   let dedupe_string_list values =
     values
@@ -496,7 +496,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
   let profile_tool_names =
     Mcp_server_eio_tool_profile.tool_schemas_for_profile state profile
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> List.filter (fun tool_name ->
            Tool_catalog.allow_direct_call tool_name
            && Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile

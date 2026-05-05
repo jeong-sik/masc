@@ -495,6 +495,7 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
         ~context_reducer:config.context_reducer
         ~tiered_memory:None
         ~turn_params:Agent_sdk.Hooks.default_turn_params
+        ()
     in
     let req_config =
       match String.trim config.system_prompt with

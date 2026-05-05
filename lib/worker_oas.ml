@@ -16,7 +16,7 @@ open Printf
 open Result.Syntax
 
 (* ================================================================ *)
-(* worker_container_meta -> OAS Types.model                          *)
+(* worker_container_meta -> OAS Masc_domain.model                          *)
 (* ================================================================ *)
 
 (** Convert an effective_model string to an OAS model identifier.
@@ -26,7 +26,7 @@ let oas_model_of_effective_model (model_id : string) : string =
   model_id
 
 (* ================================================================ *)
-(* worker_container_meta -> OAS Types.agent_config                   *)
+(* worker_container_meta -> OAS Masc_domain.agent_config                   *)
 (* ================================================================ *)
 
 let proof_result_status_to_string =

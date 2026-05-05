@@ -58,14 +58,14 @@ val set_tempo :
 (** Alias for {!load_state}. *)
 val get_tempo : Coord_utils.config -> tempo_state
 
-val is_pending_task : Types.task -> bool
+val is_pending_task : Masc_domain.task -> bool
 
 (** [(interval, reason)] derived from priority mix:
     - any task with [priority <= 2] → [min_interval_s]
     - else any task with [priority = 3] → [default_interval_s]
     - else → [max_interval_s]
     - empty list → [max_interval_s] with ["idle - no pending tasks"]. *)
-val calculate_adaptive_tempo : Types.task list -> float * string
+val calculate_adaptive_tempo : Masc_domain.task list -> float * string
 
 (** Adjusts tempo from [Coord.get_tasks_raw config] via
     {!calculate_adaptive_tempo} and persists. *)

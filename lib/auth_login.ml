@@ -1,4 +1,4 @@
-open Types
+open Masc_domain
 
 type auth_change =
   | Auth_already_required

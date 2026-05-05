@@ -28,7 +28,7 @@ let recent_tool_host_failures ~now () =
     | [] -> List.rev acc
     | (entry : Log.Ring.entry) :: rest ->
         let fresh =
-          match Types.parse_iso8601_opt entry.ts with
+          match Masc_domain.parse_iso8601_opt entry.ts with
           | Some ts -> now -. ts <= tool_host_attention_window_sec
           | None -> false
         in

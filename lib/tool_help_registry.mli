@@ -1,7 +1,7 @@
 
 (** Tool_help_registry — derived per-tool help entries.
 
-    Generates {!help_entry} records from {!Types.tool_schema} via
+    Generates {!help_entry} records from {!Masc_domain.tool_schema} via
     a layered pipeline:
 
     + Manual override table (curated entries for prominent tools).
@@ -40,7 +40,7 @@ type help_entry = {
 
 (** {1 Lookup} *)
 
-val entry_of_schema : Types.tool_schema -> help_entry
+val entry_of_schema : Masc_domain.tool_schema -> help_entry
 (** [entry_of_schema schema] returns the help entry for [schema].
     Resolution priority:
 
@@ -54,7 +54,7 @@ val entry_of_schema : Types.tool_schema -> help_entry
     with empty [details_markdown] / [prompt_hints]. *)
 
 val find_entry :
-  Types.tool_schema list -> string -> help_entry option
+  Masc_domain.tool_schema list -> string -> help_entry option
 (** [find_entry schemas name] returns the {!help_entry} for the
     named tool by composing
     [List.find_opt] over [schemas] with {!entry_of_schema}.  Returns
@@ -63,7 +63,7 @@ val find_entry :
 (** {1 Schema canonicalization} *)
 
 val canonicalize_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 (** [canonicalize_schemas schemas] applies the canonicalization
     pass to every schema (description normalisation, constraint
     de-duplication).  Used by {!Capability_registry} during
@@ -85,7 +85,7 @@ val entry_markdown : help_entry -> string
     doc-refs sections.  Used by the
     [masc://tool-help/<name>] resource handler. *)
 
-val index_markdown : Types.tool_schema list -> string
+val index_markdown : Masc_domain.tool_schema list -> string
 (** [index_markdown schemas] renders a Markdown index of every
     [(name, short_description)] pair in [schemas].  Used by the
     [masc://tool-help] root resource. *)

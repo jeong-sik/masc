@@ -644,7 +644,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         target_id = request.target_id;
         payload = request.payload;
         delegated_tool;
-        created_at = Types.now_iso ();
+        created_at = Masc_domain.now_iso ();
         expires_at = Some expires_at;
       }
     in
@@ -662,7 +662,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         confirmation_state = Preview;
         result_status = ActionOk;
         latency_ms = 0;
-        created_at = Types.now_iso ();
+        created_at = Masc_domain.now_iso ();
       };
     Ok
       (json_ok
@@ -690,7 +690,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         confirmation_state = Immediate;
         result_status = ActionOk;
         latency_ms;
-        created_at = Types.now_iso ();
+        created_at = Masc_domain.now_iso ();
       };
     Ok
       (json_ok
@@ -734,7 +734,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               confirmation_state = Expired;
               result_status = ActionError;
               latency_ms = 0;
-              created_at = Types.now_iso ();
+              created_at = Masc_domain.now_iso ();
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
@@ -755,7 +755,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               confirmation_state = Denied;
               result_status = ActionError;
               latency_ms = 0;
-              created_at = Types.now_iso ();
+              created_at = Masc_domain.now_iso ();
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
@@ -778,7 +778,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 confirmation_state = Denied;
                 result_status = ActionOk;
                 latency_ms = 0;
-                created_at = Types.now_iso ();
+                created_at = Masc_domain.now_iso ();
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:actor ~trace_id:entry.trace_id
@@ -819,7 +819,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 confirmation_state = Confirmed;
                 result_status = ActionOk;
                 latency_ms;
-                created_at = Types.now_iso ();
+                created_at = Masc_domain.now_iso ();
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:entry.actor ~trace_id:entry.trace_id

@@ -6,7 +6,7 @@ let iso_of_unix unix_ts =
 
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (
-      try Some (Types.parse_iso8601 raw) with Failure _ -> None)
+      try Some (Masc_domain.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
 let first_some a b = match a with Some _ as v -> v | None -> b

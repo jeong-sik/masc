@@ -112,7 +112,7 @@ let handle_worktree_create ctx args =
   in
   match Coord.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
-  | Error e -> (false, Types.masc_error_to_string e)
+  | Error e -> (false, Masc_domain.masc_error_to_string e)
 
 let handle_worktree_remove ctx args =
   let task_id = get_string args "task_id" "" in
@@ -121,7 +121,7 @@ let handle_worktree_remove ctx args =
   else
   match Coord.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with
   | Ok msg -> (true, msg)
-  | Error e -> (false, Types.masc_error_to_string e)
+  | Error e -> (false, Masc_domain.masc_error_to_string e)
 
 let handle_worktree_list ctx _args =
   let json = Coord.worktree_list ctx.config in
@@ -145,14 +145,14 @@ let _tool_spec_read_only = [ "masc_worktree_list" ]
 let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]
 
 let tool_required_permission = function
-  | "masc_worktree_list" -> Some Types.CanReadState
-  | "masc_worktree_create" -> Some Types.CanCreateWorktree
-  | "masc_worktree_remove" -> Some Types.CanRemoveWorktree
+  | "masc_worktree_list" -> Some Masc_domain.CanReadState
+  | "masc_worktree_create" -> Some Masc_domain.CanCreateWorktree
+  | "masc_worktree_remove" -> Some Masc_domain.CanRemoveWorktree
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

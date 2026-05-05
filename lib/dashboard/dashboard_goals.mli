@@ -38,7 +38,7 @@
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Types.task * string) list;
+  tasks : (Masc_domain.task * string) list;
   convergence : float;
       (** 0.0 .. 1.0 completion ratio. *)
   health : string;
@@ -70,7 +70,7 @@ type tree_node = {
 val build_forest :
   config:Coord.config ->
   goals:Goal_store.goal list ->
-  tasks:Types.task list ->
+  tasks:Masc_domain.task list ->
   tree_node list
 (** Assembles the goal forest from [goals] / [tasks].
     Every root goal (no parent or parent outside [goals])

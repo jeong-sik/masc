@@ -51,7 +51,7 @@ val origin_head_branch : string -> string option
     - returns [Error _] when no candidate exists. *)
 val resolve_base_branch :
   string -> string ->
-  (string * string option, Types.masc_error) result
+  (string * string option, Masc_domain.masc_error) result
 
 (** [create ~base_path ~agent_name ~task_id ~base_branch] adds a new
     worktree at [<root>/.worktrees/<agent>-<task>] tracking a fresh
@@ -64,7 +64,7 @@ val create :
   agent_name:string ->
   task_id:string ->
   base_branch:string ->
-  string Types.masc_result
+  string Masc_domain.masc_result
 
 (** [remove ~base_path ~agent_name ~task_id] removes the worktree and
     deletes its tracking branch.  Returns success with any non-fatal
@@ -74,7 +74,7 @@ val remove :
   base_path:string ->
   agent_name:string ->
   task_id:string ->
-  string Types.masc_result
+  string Masc_domain.masc_result
 
 (** [list ~base_path] returns a JSON object describing every worktree
     in the repository:

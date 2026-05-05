@@ -39,17 +39,17 @@ let all_surface_tools () =
   |> List.sort_uniq String.compare
 
 let required_role_of_permission = function
-  | Types.CanInit | Types.CanReset | Types.CanAdmin -> Admin_role
-  | Types.CanReadState | Types.CanJoin | Types.CanLeave
-  | Types.CanAddTask
-  | Types.CanClaimTask
-  | Types.CanCompleteTask
-  | Types.CanBroadcast
-  | Types.CanOpenPortal
-  | Types.CanSendPortal
-  | Types.CanCreateWorktree
-  | Types.CanRemoveWorktree
-  | Types.CanVote ->
+  | Masc_domain.CanInit | Masc_domain.CanReset | Masc_domain.CanAdmin -> Admin_role
+  | Masc_domain.CanReadState | Masc_domain.CanJoin | Masc_domain.CanLeave
+  | Masc_domain.CanAddTask
+  | Masc_domain.CanClaimTask
+  | Masc_domain.CanCompleteTask
+  | Masc_domain.CanBroadcast
+  | Masc_domain.CanOpenPortal
+  | Masc_domain.CanSendPortal
+  | Masc_domain.CanCreateWorktree
+  | Masc_domain.CanRemoveWorktree
+  | Masc_domain.CanVote ->
       Worker_role
 
 let tools_for_required_role required_role =
@@ -78,7 +78,7 @@ let worker_only_tools () = tools_for_required_role Worker_role
 (* Role → Policy                                                     *)
 (* ================================================================ *)
 
-let policy_for_role : Types.agent_role -> Tool_access_policy.t = function
+let policy_for_role : Masc_domain.agent_role -> Tool_access_policy.t = function
   | Admin ->
       { Tool_access_policy.allow = All; deny = Empty }
   | Worker ->

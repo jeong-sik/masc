@@ -571,7 +571,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
                ();
              Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
-               agent_name (Types.show_masc_error err));
+               agent_name (Masc_domain.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;

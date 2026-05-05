@@ -179,7 +179,7 @@ val runtime_status : string -> runtime_snapshot
 val refresh_once :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  masc_tools:Types.tool_schema list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   base_path:string ->
   build_facts:(unit -> Yojson.Safe.t) ->
@@ -194,7 +194,7 @@ val start :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   base_path:string ->
-  masc_tools:Types.tool_schema list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   build_facts:(unit -> Yojson.Safe.t) ->
   unit ->

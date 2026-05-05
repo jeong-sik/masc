@@ -265,7 +265,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
         let words = String.split_on_char ' ' query |> List.filter (fun w -> String.length w > 0) in
         let matches =
           all_schemas
-          |> List.filter (fun (schema : Types.tool_schema) ->
+          |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  let name_l = String.lowercase_ascii schema.name in
                  let desc_l = String.lowercase_ascii schema.description in
                  let haystack = name_l ^ " " ^ desc_l in
@@ -273,7 +273,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
                    String_util.contains_substring haystack w))
           |> List.filteri (fun i _ -> i < limit)
         in
-        let results = List.map (fun (schema : Types.tool_schema) ->
+        let results = List.map (fun (schema : Masc_domain.tool_schema) ->
           `Assoc [
             ("name", `String schema.name);
             ("description", `String schema.description);

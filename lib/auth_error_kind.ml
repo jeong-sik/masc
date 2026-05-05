@@ -1,4 +1,4 @@
-(** Closed-enum classification of [Types.t] for auth-related logging
+(** Closed-enum classification of [Masc_domain.t] for auth-related logging
     and prometheus metric labels.
 
     Replaces inline string-label matching at:
@@ -7,7 +7,7 @@
 
     The string labels are stable contract for prometheus dashboards and
     must round-trip through [to_string] / [of_string]. The variant is
-    closed so that any new auth-relevant [Types.t] constructor that
+    closed so that any new auth-relevant [Masc_domain.t] constructor that
     needs its own label requires an explicit code change here, not a
     silent fall-through to ["other"]. *)
 
@@ -42,14 +42,14 @@ let of_string = function
   | "other" -> Some Other
   | _ -> None
 
-let classify : Types.t -> t = function
-  | Types.Auth (Types.Auth_error.InvalidToken _) -> Token_mismatch
-  | Types.Auth (Types.Auth_error.TokenExpired _) -> Token_expired
-  | Types.Auth (Types.Auth_error.Unauthorized _) -> Unauthorized
-  | Types.Auth (Types.Auth_error.Forbidden _) -> Forbidden
-  | Types.Agent (Types.Agent_error.NotFound _) -> Agent_not_found
-  | Types.System (Types.System_error.IoError _) -> Io_error
-  | Types.System (Types.System_error.InvalidJson _) -> Invalid_json
+let classify : Masc_domain.t -> t = function
+  | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Token_mismatch
+  | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Token_expired
+  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _) -> Unauthorized
+  | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Forbidden
+  | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> Agent_not_found
+  | Masc_domain.System (Masc_domain.System_error.IoError _) -> Io_error
+  | Masc_domain.System (Masc_domain.System_error.InvalidJson _) -> Invalid_json
   | _ -> Other
 
 let all =

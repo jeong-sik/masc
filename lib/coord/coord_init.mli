@@ -4,7 +4,7 @@
     agent claims, and a destructive [reset] hook used by the
     [masc_reset] tool. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 open Coord_broadcast

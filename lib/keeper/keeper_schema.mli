@@ -33,8 +33,8 @@ val tool_access_schema : string -> Yojson.Safe.t
     parameterised on the property description so create vs update tools
     can vary the surface without duplicating the body. *)
 
-val keeper_schemas : Types.tool_schema list
+val keeper_schemas : Masc_domain.tool_schema list
 (** Per-tool schemas for the keeper authoring surface. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** Alias for [keeper_schemas] used by the catalogue registry. *)

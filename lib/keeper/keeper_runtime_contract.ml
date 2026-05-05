@@ -13,14 +13,14 @@ let backend_of_meta (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
 
-let task_is_linked_to_keeper_goals goal_ids (task : Types.task) =
+let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
   List.exists
     (fun goal_id -> Convergence.task_matches_goal ~goal_id task)
     goal_ids
 
-let task_is_blocked (task : Types.task) =
+let task_is_blocked (task : Masc_domain.task) =
   match task.task_status with
-  | Types.AwaitingVerification _ -> true
+  | Masc_domain.AwaitingVerification _ -> true
   | _ -> false
 
 let goal_progress_json ?config (meta : keeper_meta) =
@@ -43,19 +43,19 @@ let goal_progress_json ?config (meta : keeper_meta) =
       let linked_task_count = List.length tasks in
       let done_task_count =
         List.fold_left
-          (fun acc (task : Types.task) ->
-            if Types.task_status_is_done task.task_status then acc + 1 else acc)
+          (fun acc (task : Masc_domain.task) ->
+            if Masc_domain.task_status_is_done task.task_status then acc + 1 else acc)
           0 tasks
       in
       let open_task_count =
         List.fold_left
-          (fun acc (task : Types.task) ->
-            if Types.task_status_is_terminal task.task_status then acc else acc + 1)
+          (fun acc (task : Masc_domain.task) ->
+            if Masc_domain.task_status_is_terminal task.task_status then acc else acc + 1)
           0 tasks
       in
       let blocked_task_count =
         List.fold_left
-          (fun acc (task : Types.task) ->
+          (fun acc (task : Masc_domain.task) ->
             if task_is_blocked task then acc + 1 else acc)
           0 tasks
       in

@@ -50,7 +50,7 @@ let add_routes router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/cascade/config/raw" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              let response status message =

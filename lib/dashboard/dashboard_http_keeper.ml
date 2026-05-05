@@ -415,7 +415,7 @@ let latest_receipt_ts_of_keeper_rows rows =
            |> Yojson.Safe.Util.member "last_receipt_at"
          with
          | `String iso -> (
-             match Types.parse_iso8601_opt iso with
+             match Masc_domain.parse_iso8601_opt iso with
              | Some ts -> max_ts_opt acc ts
              | None -> acc)
          | _ -> acc)
@@ -426,7 +426,7 @@ let freshness_fields ~now latest_ts =
   | Some ts ->
     [
       ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
       ("latest_age_s", `Float (max 0.0 (now -. ts)));
     ]
   | None ->
@@ -1322,7 +1322,7 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
       ("freshness_slo_s", `Float execution_trust_freshness_slo_s);
       ("entry_count", `Int entry_count);
       ("exists", `Bool exists);
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("keepers", `List keepers);
       ("total", `Int (List.length keepers));
       ("coverage_gaps", `List coverage_gaps);

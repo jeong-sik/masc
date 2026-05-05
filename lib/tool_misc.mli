@@ -12,7 +12,7 @@ type context = {
   agent_name : string;
 }
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 
 val looks_like_rss_payload : string -> bool
 val parse_bing_rss_items : string -> (string * string * string) list

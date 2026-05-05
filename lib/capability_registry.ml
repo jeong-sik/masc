@@ -5,7 +5,7 @@
     tool name with a narrower schema (for example local worker projections).
 *)
 
-open Types
+open Masc_domain
 
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
@@ -66,10 +66,10 @@ let max_risk left right =
 
 let unique_preserve_order = Json_util.dedupe_keep_order
 
-let dedupe_schemas (schemas : Types.tool_schema list) =
+let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let _, results =
     List.fold_left
-      (fun (seen, acc) (schema : Types.tool_schema) ->
+      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
         if StringSet.mem schema.name seen then (seen, acc)
         else (StringSet.add schema.name seen, schema :: acc))
       (StringSet.empty, []) schemas
@@ -126,9 +126,9 @@ let audience_to_string = function
   | Keeper_agent -> "keeper_agent"
   | Privileged_executor -> "privileged_executor"
 
-let projection_to_schema (projection : projection) : Types.tool_schema =
+let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
   {
-    Types.name = projection.tool_name;
+    Masc_domain.name = projection.tool_name;
     description = projection.description;
     input_schema = projection.input_schema;
   }
@@ -136,7 +136,7 @@ let projection_to_schema (projection : projection) : Types.tool_schema =
 let make_seed ?capability_id ?(risk_class = Safe)
     ?(audiences = [ External_mcp_client ]) ?(supports_audit_evidence = false)
     ?(supports_direct_user_discovery = true) ~surface ?backend_tool_name
-    (schema : Types.tool_schema) : capability_seed =
+    (schema : Masc_domain.tool_schema) : capability_seed =
   let backend_tool_name = Option.value ~default:schema.name backend_tool_name in
   {
     capability_id =
@@ -165,7 +165,7 @@ let spawned_agent_prefixed_tools : string list =
 let local_worker_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
-let local_worker_internal_schemas : Types.tool_schema list =
+let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Agent_tool_surfaces.local_worker_internal_schemas
 
 let privileged_public_tool_names : string list =
@@ -182,13 +182,13 @@ let keeper_backend_tool_name name =
   | Some masc_name -> masc_name
   | None -> name
 
-let public_projection_seeds_from (public_tool_source_schemas : Types.tool_schema list) :
+let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
     Tool_help_registry.canonicalize_schemas public_tool_source_schemas
   in
   let make_public_seed schema =
-    let name = schema.Types.name in
+    let name = schema.Masc_domain.name in
     let risk_class =
       if List.mem name privileged_public_tool_names then
         Privileged
@@ -253,7 +253,7 @@ let local_worker_internal_seeds : capability_seed list =
 
 let keeper_projection_seeds : capability_seed list =
   Tool_shard.keeper_model_tools
-  |> List.concat_map (fun (tool : Types.tool_schema) ->
+  |> List.concat_map (fun (tool : Masc_domain.tool_schema) ->
          let schema = tool in
          let backend_tool_name = keeper_backend_tool_name tool.name in
          let privileged = List.mem tool.name privileged_keeper_tool_names in
@@ -285,12 +285,12 @@ let keeper_projection_seeds : capability_seed list =
          else
            [ primary_seed ])
 
-let all_projection_seeds_from (public_tool_source_schemas : Types.tool_schema list) :
+let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   public_projection_seeds_from public_tool_source_schemas
   @ local_worker_internal_seeds @ keeper_projection_seeds
 
-let all_capabilities_from (public_tool_source_schemas : Types.tool_schema list) :
+let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_def list =
   let seeds = all_projection_seeds_from public_tool_source_schemas in
   let tbl, ordered_ids =
@@ -331,13 +331,13 @@ let all_capabilities_from (public_tool_source_schemas : Types.tool_schema list) 
   in
   List.rev ordered_ids |> List.filter_map (fun id -> StringMap.find_opt id tbl)
 
-let surface_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list)
-    surface : Types.tool_schema list =
+let surface_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list)
+    surface : Masc_domain.tool_schema list =
   match surface with
   | Public_mcp ->
       public_tool_source_schemas
       |> Tool_help_registry.canonicalize_schemas
-      |> List.filter (fun (schema : Types.tool_schema) ->
+      |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              Tool_catalog.is_public_mcp schema.name)
       |> dedupe_schemas
   | _ ->
@@ -346,13 +346,13 @@ let surface_tool_schemas_from (public_tool_source_schemas : Types.tool_schema li
       |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
       |> dedupe_schemas
 
-let surface_tool_names_from (public_tool_source_schemas : Types.tool_schema list)
+let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schema list)
     surface : string list =
   surface_tool_schemas_from public_tool_source_schemas surface
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-let public_raw_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list) :
-    Types.tool_schema list =
+let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
+    Masc_domain.tool_schema list =
   dedupe_schemas public_tool_source_schemas
 
 (* Surface filtering at this layer removed in #1961 — all registered tools pass
@@ -360,30 +360,30 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Types.tool_schema
    level: [Mcp_server_eio_tool_profile.tool_schemas_for_profile] applies
    [Tool_catalog.is_public_mcp] to the Full profile, reducing tools/list to ~34.
    Internal dispatch ([Tool_dispatch.dispatch]) remains unrestricted. *)
-let public_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list) :
-    Types.tool_schema list =
+let public_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
+    Masc_domain.tool_schema list =
   dedupe_schemas public_tool_source_schemas
   |> Tool_help_registry.canonicalize_schemas
 
 let visible_public_tool_schemas_from
     ?(include_hidden = false) ?(include_deprecated = false)
-    (public_tool_source_schemas : Types.tool_schema list) : Types.tool_schema list =
+    (public_tool_source_schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
   public_tool_schemas_from public_tool_source_schemas
-  |> List.filter (fun (schema : Types.tool_schema) ->
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
 
 let local_worker_tool_schemas ?names () :
-    (Types.tool_schema list, string) result =
+    (Masc_domain.tool_schema list, string) result =
   Agent_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Types.name)
+  |> List.map (fun tool -> tool.Masc_domain.name)
   |> unique_preserve_order
 
 let keeper_safe_tool_names : string list =
   Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Types.name)
+  |> List.map (fun tool -> tool.Masc_domain.name)
   |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
   |> unique_preserve_order
 
@@ -401,7 +401,7 @@ let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names
 
 let surface_snapshot_json
-    (public_tool_source_schemas : Types.tool_schema list) =
+    (public_tool_source_schemas : Masc_domain.tool_schema list) =
   let surface_json surface =
     let names = surface_tool_names_from public_tool_source_schemas surface in
     `Assoc

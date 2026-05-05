@@ -470,7 +470,7 @@ let run_turn
        (match trajectory_acc with
         | Some acc ->
           let now = Time_compat.now () in
-          let now_iso = Types.now_iso () in
+          let now_iso = Masc_domain.now_iso () in
           List.iter
             (function
               | Agent_sdk.Types.Thinking { content; _ } ->
@@ -1185,7 +1185,7 @@ let run_turn
          ~error_message:(Agent_sdk.Error.to_string err)
          ())
     ;
-    let receipt_ended_at = Types.now_iso () in
+    let receipt_ended_at = Masc_domain.now_iso () in
     let error_kind, error_message =
       match turn_result with
       | Ok _ -> None, None

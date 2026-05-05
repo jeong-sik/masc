@@ -10,5 +10,5 @@ type tool_result = bool * string
 
 (** {1 API} *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 val dispatch : name:string -> args:Yojson.Safe.t -> tool_result option

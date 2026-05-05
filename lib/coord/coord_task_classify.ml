@@ -5,7 +5,7 @@
     from task CRUD, claiming, and transitions.  All bindings are re-exported
     by [Coord_task] via [include Coord_task_classify]. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
@@ -26,7 +26,7 @@ let drift_variant_label = function
 (* #10449: classify a task's contract surface so the completion-path
    metric can split bypass-rate by creation-side data presence.
    Three states: missing field, present-but-empty, populated. *)
-let classify_contract_state (contract : Types.task_contract option) =
+let classify_contract_state (contract : Masc_domain.task_contract option) =
   match contract with
   | None -> "no_contract"
   | Some c when c.completion_contract = [] && c.required_evidence = [] ->
@@ -42,11 +42,11 @@ let classify_contract_state (contract : Types.task_contract option) =
    and consensual claimed→done jumps, so the [force] flag is the
    only distinguisher. *)
 let classify_completion_path
-    ~(action : Types.task_action)
+    ~(action : Masc_domain.task_action)
     ~(drift : Coord_task_lifecycle.drift option)
     ~(force : bool) =
   match action, drift, force with
-  | Types.Approve_verification, _, _ -> "via_verification"
+  | Masc_domain.Approve_verification, _, _ -> "via_verification"
   | _, _, true -> "forced_done"
   | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false ->
     "claimed_to_done_skip"
@@ -137,14 +137,14 @@ let resolve_agent_name_strict config agent_name =
   else normalized
 ;;
 
-let normalize_execution_links (links : Types.task_execution_links) =
+let normalize_execution_links (links : Masc_domain.task_execution_links) =
   { operation_id = trim_opt links.operation_id
   ; session_id = trim_opt links.session_id
   ; autoresearch_loop_id = trim_opt links.autoresearch_loop_id
   }
 ;;
 
-let normalize_task_contract (contract : Types.task_contract) =
+let normalize_task_contract (contract : Masc_domain.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
   ; required_tools = normalized_string_list contract.required_tools
@@ -166,7 +166,7 @@ let empty_task_contract =
   }
 ;;
 
-let task_required_tools (task : Types.task) =
+let task_required_tools (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> normalized_string_list contract.required_tools
   | None -> []
@@ -210,7 +210,7 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
            ; "ts", `String (now_iso ())
            ]);
       Error
-        (Types.Task (Types.Task_error.InvalidState
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
               "Task %s requires tool(s) unavailable to %s: %s"
               task.id
@@ -269,7 +269,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
 ;;
 
 let merge_execution_links
-      (existing : Types.task_execution_links)
+      (existing : Masc_domain.task_execution_links)
       ?session_id
       ?operation_id
       ?autoresearch_loop_id
@@ -331,11 +331,11 @@ let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind
       (Printexc.to_string exn)
 ;;
 
-(* Issue #8354: was a verbatim duplicate of [Types.task_status_to_string].
+(* Issue #8354: was a verbatim duplicate of [Masc_domain.task_status_to_string].
    Folded to a single-line alias so adding a 7th task_status constructor
    only requires updating [Types]. The local name is kept so caller
    sites (224, 269, 863, 870, 1019, 1020) need no churn. *)
-let task_status_to_string = Types.task_status_to_string
+let task_status_to_string = Masc_domain.task_status_to_string
 
 (** Current assignee from the task status, for error messages.
     LLMs that see "Invalid transition: claimed -> release" have no way
@@ -346,34 +346,34 @@ let task_status_to_string = Types.task_status_to_string
     Evidence: 2026-04-16 /loop iter 4 — 12+/15 masc_transition failures
     are "Invalid transition: claimed -> release" from keepers trying to
     release tasks owned by a different keeper. *)
-let task_assignee_of_status = Types.task_assignee_of_status
+let task_assignee_of_status = Masc_domain.task_assignee_of_status
 
 (** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
     fails for a reason other than ownership mismatch, surface what
     actions ARE legal from the current state so the LLM stops
     guess-retrying.
 
-    Exhaustive [match] over [Types.task_status]: adding a 7th constructor
+    Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
     in sync if you add new transitions there. Verifier-FSM transitions
     require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
     unconditionally so the hint stays accurate when the flag is on; the
     flag-off case still rejects them and produces a more specific error. *)
-let valid_next_actions_for_status : Types.task_status -> Types.task_action list = function
-  | Types.Todo -> [ Types.Claim; Types.Cancel ]
-  | Types.Claimed _ ->
-    [ Types.Start
-    ; Types.Done_action
-    ; Types.Submit_for_verification
-    ; Types.Release
-    ; Types.Cancel
+let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_action list = function
+  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel ]
+  | Masc_domain.Claimed _ ->
+    [ Masc_domain.Start
+    ; Masc_domain.Done_action
+    ; Masc_domain.Submit_for_verification
+    ; Masc_domain.Release
+    ; Masc_domain.Cancel
     ]
-  | Types.InProgress _ ->
-    [ Types.Done_action; Types.Submit_for_verification; Types.Release; Types.Cancel ]
-  | Types.AwaitingVerification _ ->
-    [ Types.Approve_verification; Types.Reject_verification ]
-  | Types.Done _ | Types.Cancelled _ -> [] (* terminal *)
+  | Masc_domain.InProgress _ ->
+    [ Masc_domain.Done_action; Masc_domain.Submit_for_verification; Masc_domain.Release; Masc_domain.Cancel ]
+  | Masc_domain.AwaitingVerification _ ->
+    [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
 ;;
 
 let next_actions_hint status =
@@ -382,15 +382,15 @@ let next_actions_hint status =
   | xs ->
     Printf.sprintf
       ", valid_next_actions=[%s]"
-      (String.concat ";" (List.map Types.task_action_to_string xs))
+      (String.concat ";" (List.map Masc_domain.task_action_to_string xs))
 ;;
 
 let task_started_at_unix status =
   let default_time = Time_compat.now () in
   match status with
-  | Types.Claimed { claimed_at; _ } -> Types.parse_iso8601 ~default_time claimed_at
-  | Types.InProgress { started_at; _ } -> Types.parse_iso8601 ~default_time started_at
-  | Types.Todo | Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _ ->
+  | Masc_domain.Claimed { claimed_at; _ } -> Masc_domain.parse_iso8601 ~default_time claimed_at
+  | Masc_domain.InProgress { started_at; _ } -> Masc_domain.parse_iso8601 ~default_time started_at
+  | Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
     default_time
 ;;
 
@@ -421,7 +421,7 @@ let observe_task_transition
       config
       ~agent_name
       ~task_id
-      ~(transition : Types.task_action)
+      ~(transition : Masc_domain.task_action)
       ~details
   =
   (Atomic.get Coord_hooks.observe_task_transition_fn)
@@ -486,5 +486,5 @@ let transition_log_event
      @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
      @ optional_field
          "handoff_context"
-         (Option.map Types.task_handoff_context_to_yojson handoff_context))
+         (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context))
 ;;

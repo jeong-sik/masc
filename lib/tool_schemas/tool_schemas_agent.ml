@@ -1,4 +1,4 @@
-open Types
+open Masc_domain
 
 (** Issue #8501: hand-mirrored from
     [Tool_agent.valid_agent_card_action_strings] and
@@ -34,12 +34,12 @@ let schemas : tool_schema list = [
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
-          (* Issue #8372: derived from Types.agent_status Variant SSOT.
+          (* Issue #8372: derived from Masc_domain.agent_status Variant SSOT.
              Hand-rolled enum risks dropping a constructor on extension. *)
-          ("enum", `List (List.map (fun s -> `String s) Types.valid_agent_status_strings));
+          ("enum", `List (List.map (fun s -> `String s) Masc_domain.valid_agent_status_strings));
           ("description", `String
             (Printf.sprintf "Optional status: %s"
-               (String.concat " | " Types.valid_agent_status_strings)));
+               (String.concat " | " Masc_domain.valid_agent_status_strings)));
         ]);
         ("capabilities", `Assoc [
           ("type", `String "array");

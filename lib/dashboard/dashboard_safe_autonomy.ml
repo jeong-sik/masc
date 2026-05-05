@@ -872,7 +872,7 @@ let timeline_entries_json
         (`Assoc
           [
             ("ts", `Float item.created_at);
-            ("ts_iso", `String (Types.iso8601_of_unix_seconds item.created_at));
+            ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds item.created_at));
             ("kind", `String item.kind);
             ("keeper_name", string_opt_to_json keeper_name);
             ("actor", `String item.agent_name);
@@ -888,7 +888,7 @@ let timeline_entries_json
             (`Assoc
               [
                 ("ts", `Float requested_at);
-                ("ts_iso", `String (Types.iso8601_of_unix_seconds requested_at));
+                ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds requested_at));
                 ("kind", `String "approval_pending");
                 ("keeper_name", `String keeper_name);
                 ("actor", `String keeper_name);
@@ -915,7 +915,7 @@ let timeline_entries_json
               (`Assoc
                 [
                   ("ts", `Float ts);
-                  ("ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+                  ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
                   ("kind", `String "runtime_blocker");
                   ("keeper_name", `String snapshot.meta.name);
                   ("actor", `String snapshot.meta.name);
@@ -1186,7 +1186,7 @@ let json ~(config : Coord.config) () =
   let payload =
     `Assoc
       [
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ("generated_at_unix", `Float (Unix.gettimeofday ()));
         ( "summary",
           `Assoc

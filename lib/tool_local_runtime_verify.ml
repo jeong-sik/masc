@@ -373,7 +373,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
   in
   `Assoc
     [
-      ("checked_at", `String (Types.now_iso ()));
+      ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", string_opt_to_json runtime_pool);
       ("source", `String "oas_discovery");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
@@ -574,7 +574,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
   in
   `Assoc
     [
-      ("checked_at", `String (Types.now_iso ()));
+      ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", string_opt_to_json runtime_pool);
       ("provider_base_url", `String Env_config.Llama.server_url);
       ("slot_url", `String Env_config.Llama.server_url);

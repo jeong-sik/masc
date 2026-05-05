@@ -20,7 +20,7 @@
     strings are part of the public contract because the agent
     SDK's tool-routing tables grep them at startup. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** The six run-tracking schemas in the surface order documented
     above. List length and [name] strings are pinned at the
     contract seam — a rename of [masc_run_log] to

@@ -4,7 +4,7 @@
     creation, and transitions.  All bindings are re-exported by [Coord_task]
     via [include Coord_task_claim]. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
@@ -37,7 +37,7 @@ let do_not_reclaim_reason_blocks_claim = function
   | None -> None
 ;;
 
-let clear_soft_do_not_reclaim_reason (task : Types.task) =
+let clear_soft_do_not_reclaim_reason (task : Masc_domain.task) =
   match task.do_not_reclaim_reason with
   | Some reason when is_legacy_auto_cycle_do_not_reclaim_reason reason ->
     { task with do_not_reclaim_reason = None }
@@ -133,12 +133,12 @@ let claim_task config ~agent_name ~task_id =
                     config
                     ~agent_name
                     ~task_id
-                    ~transition:Types.Claim
+                    ~transition:Masc_domain.Claim
                     ~details:
                       (Coord_task_classify.task_transition_details
-                         ~from_status:Types.Todo
+                         ~from_status:Masc_domain.Todo
                          ~to_status:
-                           (Types.Claimed
+                           (Masc_domain.Claimed
                               { assignee = agent_name; claimed_at = now_iso () })
                          ());
                   Printf.sprintf "%s claimed %s" agent_name task_id))
@@ -149,10 +149,10 @@ let claim_task config ~agent_name ~task_id =
 
 (** Result-returning version of claim_task for type-safe error handling. *)
 let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
-  : string Types.masc_result
+  : string Masc_domain.masc_result
   =
   let open Result.Syntax in
-  let* () = if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized) else Ok () in
+  let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -165,19 +165,19 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
   let agent_path = Filename.concat (agents_dir config) filename in
   let agent_joined = path_exists config agent_path in
   let* () =
-    if not agent_joined then Error (Types.Agent (Types.Agent_error.NotJoined actual_name)) else Ok ()
+    if not agent_joined then Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined actual_name)) else Ok ()
   in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with
-    | Error msg -> Error (Types.System (Types.System_error.IoError msg))
+    | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
     | Ok backlog ->
       (try
          (* Check role constraint before attempting claim *)
          let target_task = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
          let* task =
            match target_task with
-           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
+           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task -> Ok task
          in
          let* () =
@@ -191,7 +191,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
            | None -> Ok ()
            | Some r ->
              Error
-               (Types.Task (Types.Task_error.InvalidState
+               (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
          in
          (* fold_left to find+transform in a single pass without mutable refs.
@@ -227,8 +227,8 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          in
          let new_tasks = List.rev new_tasks in
          match claim_state with
-         | `Not_found -> Error (Types.Task (Types.Task_error.NotFound task_id))
-         | `Claimed_by other -> Error (Types.Task (Types.Task_error.AlreadyClaimed { task_id; by = other }))
+         | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+         | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
            Ok (Printf.sprintf "Task %s is already claimed by you" task_id)
          | `Claimed_ok ->
@@ -266,12 +266,12 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
              config
              ~agent_name
              ~task_id
-             ~transition:Types.Claim
+             ~transition:Masc_domain.Claim
              ~details:
                (Coord_task_classify.task_transition_details
-                  ~from_status:Types.Todo
+                  ~from_status:Masc_domain.Todo
                   ~to_status:
-                    (Types.Claimed { assignee = agent_name; claimed_at = now_iso () })
+                    (Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
                   ());
            (* task-103: best-effort auto-provision a sandbox worktree for
               docker keepers. The hook itself decides whether to act based
@@ -286,7 +286,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
            Ok (Printf.sprintf "%s claimed %s" agent_name task_id)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
+       | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
 ;;
 
 (** Unified task transition (single entrypoint).
@@ -338,7 +338,7 @@ let release_should_block_reclaim handoff_context =
     (release_handoff_texts handoff_context)
 ;;
 
-let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
+let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_context =
   match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
   | Some _ as existing -> existing
   | None ->

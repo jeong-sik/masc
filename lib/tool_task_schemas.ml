@@ -21,7 +21,7 @@ module Float = Stdlib.Float
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   {
     name = "masc_add_task";
     description = "Add a new task to the backlog for agents to claim. \

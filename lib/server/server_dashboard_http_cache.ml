@@ -25,7 +25,7 @@ let create_cached_surface json =
 
 let now_cache_stamp () =
   let ts = Unix.gettimeofday () in
-  (ts, Types.now_iso ())
+  (ts, Masc_domain.now_iso ())
 
 let json_of_string_option = function
   | Some value -> `String value
@@ -145,7 +145,7 @@ let projection_diagnostics_json ~surface ~started_at ~extra json =
        ("surface", `String surface);
        ("build_ms", `Int build_ms);
        ("payload_bytes", `Int payload_bytes);
-       ("generated_at", `String (Types.now_iso ()));
+       ("generated_at", `String (Masc_domain.now_iso ()));
      ]
     @ extra)
 

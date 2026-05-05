@@ -68,7 +68,7 @@ let on_agent_leave ~leaving_agent ~active_agents =
   if peers <> [] then
     record_collaborations_async
       ~tag:"collab"
-      ~context:(Printf.sprintf "co-present in MASC room at %s" (Types.now_iso ()))
+      ~context:(Printf.sprintf "co-present in MASC room at %s" (Masc_domain.now_iso ()))
       ~agent:leaving_agent ~peers
 
 (** {1 Task completion} *)
@@ -81,5 +81,5 @@ let on_task_done ~assignee ~active_agents =
   if peers <> [] then
     record_collaborations_async
       ~tag:"task-collab"
-      ~context:(Printf.sprintf "task collaboration at %s" (Types.now_iso ()))
+      ~context:(Printf.sprintf "task collaboration at %s" (Masc_domain.now_iso ()))
       ~agent:assignee ~peers

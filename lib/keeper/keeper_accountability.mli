@@ -21,7 +21,7 @@ val record_task_transition :
   Coord_query.config ->
   agent_name:string ->
   task_id:string ->
-  transition:Types.task_action ->
+  transition:Masc_domain.task_action ->
   details:Yojson.Safe.t ->
   unit
 

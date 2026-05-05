@@ -396,21 +396,21 @@ let add_routes router =
   |> Http.Router.prefix_get repositories_prefix (fun request reqd ->
        with_public_read handle_get_repository_path request reqd)
   |> Http.Router.post "/api/v1/repositories" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          handle_add_repository request reqd)
   |> Http.Router.post "/api/v1/repositories/discover" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          handle_discover_repositories request reqd)
   |> Http.Router.add ~path:("PREFIX:" ^ repositories_prefix)
        ~methods:[`DELETE]
        ~handler:(fun request reqd ->
-         with_token_permission_auth ~permission:Types.CanAdmin
+         with_token_permission_auth ~permission:Masc_domain.CanAdmin
            handle_remove_repository request reqd)
   |> Http.Router.add ~path:("PREFIX:" ^ repositories_prefix)
        ~methods:[`PUT]
        ~handler:(fun request reqd ->
-         with_token_permission_auth ~permission:Types.CanAdmin
+         with_token_permission_auth ~permission:Masc_domain.CanAdmin
            handle_update_repository request reqd)
   |> Http.Router.prefix_post repositories_prefix (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          handle_sync_repository request reqd)

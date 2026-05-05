@@ -67,7 +67,7 @@ let observation_has_question (message : string) =
 let keeper_policy_observation_of_room_message
     ~(meta : keeper_meta)
     ~(room_id : string)
-    (msg : Types.message) : keeper_policy_observation =
+    (msg : Masc_domain.message) : keeper_policy_observation =
   let now_ts = Time_compat.now () in
   let mention_targets =
     if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]

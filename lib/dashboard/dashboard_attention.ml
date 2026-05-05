@@ -3,7 +3,7 @@
     Pure functions. Scans room snapshots to produce a sorted list
     of items the operator should act on. Each item includes a suggested MCP tool. *)
 
-(* ===== Types ===== *)
+(* ===== Masc_domain ===== *)
 
 type severity = Critical | Warning | Info
 
@@ -41,7 +41,7 @@ let detect_stuck_agents ~(now : float)
     List.concat_map (fun (s : Dashboard_labels.room_snapshot) -> s.agents) snapshots
   in
   all_agents
-  |> List.filter_map (fun (agent : Types.agent) ->
+  |> List.filter_map (fun (agent : Masc_domain.agent) ->
          match Dashboard_labels.classify_agent ~now agent with
          | Dashboard_labels.Stuck ->
              let task_info =
@@ -86,7 +86,7 @@ let detect_idle_with_pending ~(now : float)
   let pending_count =
     List.length
       (List.filter
-         (fun (t : Types.task) -> t.task_status = Types.Todo)
+         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
          all_tasks)
   in
   if idle_count > 0 && pending_count > 0 then

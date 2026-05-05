@@ -22,23 +22,23 @@ end
 
 (** {1 Brief builders (cascade-visible)} *)
 
-val task_assignee : Types.task -> string option
+val task_assignee : Masc_domain.task -> string option
 (** [task_assignee task] returns [Some assignee] when [task] is in
     a status that carries an assignee ([Claimed] / [InProgress] /
     [AwaitingVerification] / [Done]); else [None].  Pinned at the
     contract seam — adding a new task status that should also
     carry an assignee requires extending this match. *)
 
-val build_operation_contexts : tasks:Types.task list -> operation_context list
+val build_operation_contexts : tasks:Masc_domain.task list -> operation_context list
 (** [build_operation_contexts ~tasks] projects non-terminal tasks into
     operation rows.  Task contracts provide operation/session links when
     present; otherwise the task id is used as a stable operation id. *)
 
 val build_worker_support_briefs :
   now_ts:float ->
-  tasks:Types.task list ->
-  agents:Types.agent list ->
-  messages:Types.message list ->
+  tasks:Masc_domain.task list ->
+  agents:Masc_domain.agent list ->
+  messages:Masc_domain.message list ->
   session_context list ->
   worker_context list
 (** [build_worker_support_briefs ~now_ts ~tasks ~agents ~messages

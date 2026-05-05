@@ -176,13 +176,6 @@ export async function loadPersonas(): Promise<void> {
   })
 }
 
-export const personaSchema = computed(() => getData(personaSchemaResource.state.value) ?? null)
-export const personaSchemaLoading = computed(() => personaSchemaResource.state.value.status === 'loading')
-export const personaSchemaError = computed<string | null>(() => {
-  const s = personaSchemaResource.state.value
-  return s.status === 'error' ? s.message : null
-})
-
 export async function loadPersonaSchema(): Promise<void> {
   await personaSchemaResource.load(async () => {
     const raw = await callMcpTool('masc_persona_schema', {})

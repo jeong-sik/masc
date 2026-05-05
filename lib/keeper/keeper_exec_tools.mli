@@ -5,7 +5,7 @@ val keeper_allowed_tool_names :
   ?phase:Keeper_state_machine.phase ->
   keeper_meta -> string list
 val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Types.tool_schema list
+  ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
@@ -17,7 +17,7 @@ val keeper_internal_candidate_tool_names : string list
 
 (** Universe model tool schemas.  Returns schemas for all universe tools
     so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
-val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
+val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Preset-scoped universe: preset allowlist + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
@@ -25,7 +25,7 @@ val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
 val keeper_preset_universe_tool_names : keeper_meta -> string list
 
 (** Preset-scoped model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
+val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Core tools that bypass preset filtering and seed the disclosure floor.
     Runtime gating/pruning can still narrow their visibility on a given turn. *)
@@ -65,10 +65,10 @@ val has_mutating_side_effect_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Schema for the keeper_tool_search tool. *)
-val keeper_tool_search_schema : Types.tool_schema
+val keeper_tool_search_schema : Masc_domain.tool_schema
 
 (** Injected masc_* tool schemas (populated at startup by [inject_masc_schemas]). *)
-val masc_schemas_ref : Types.tool_schema list ref
+val masc_schemas_ref : Masc_domain.tool_schema list ref
 
 (** Injected masc_* tool names (populated at startup by [inject_masc_schemas]). *)
 val injected_masc_tool_names : unit -> string list
@@ -82,7 +82,7 @@ val dedupe_tool_names : string list -> string list
 (** Inject all masc_* schemas for keeper allowlist/denylist filtering.
     Must be called once during server initialization.
     Keeper_denied tools are excluded at injection time. *)
-val inject_masc_schemas : Types.tool_schema list -> unit
+val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
 (** Load preset definitions from [config/tool_policy.toml].
     Must be called once during server initialization.
@@ -147,7 +147,7 @@ val classify_tool_result_payload : string -> tool_result_payload
 val keeper_masc_tool_names : keeper_meta -> string list
 
 (** masc_* tool schemas available for a keeper (filtered by allowlist/denylist). *)
-val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
+val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Compute the keeper's sender identity for portals and broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)

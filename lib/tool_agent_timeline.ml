@@ -81,8 +81,8 @@ let agent_events (config : Coord.config) ~agent_name :
     timeline_event list =
   let agents = Coord.get_active_agents config in
   agents
-  |> List.filter (fun (a : Types.agent) -> String.equal a.name agent_name)
-  |> List.filter_map (fun (a : Types.agent) ->
+  |> List.filter (fun (a : Masc_domain.agent) -> String.equal a.name agent_name)
+  |> List.filter_map (fun (a : Masc_domain.agent) ->
          match parse_iso_timestamp a.joined_at with
          | Some ts ->
              Some
@@ -95,7 +95,7 @@ let agent_events (config : Coord.config) ~agent_name :
                      [
                        ("room", `String "default");
                        ( "status",
-                         `String (Types.agent_status_to_string a.status) );
+                         `String (Masc_domain.agent_status_to_string a.status) );
                        ( "current_task",
                          match a.current_task with
                          | Some t -> `String t
@@ -109,9 +109,9 @@ let task_events (config : Coord.config) ~agent_name :
     timeline_event list =
   let tasks = Coord.get_tasks_safe config in
   tasks
-  |> List.filter_map (fun (task : Types.task) ->
+  |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
-         | Types.Claimed { assignee; claimed_at }
+         | Masc_domain.Claimed { assignee; claimed_at }
            when String.equal assignee agent_name -> (
              match parse_iso_timestamp claimed_at with
              | Some ts ->
@@ -129,7 +129,7 @@ let task_events (config : Coord.config) ~agent_name :
                          ];
                    }
              | None -> None)
-         | Types.InProgress { assignee; started_at }
+         | Masc_domain.InProgress { assignee; started_at }
            when String.equal assignee agent_name -> (
              match parse_iso_timestamp started_at with
              | Some ts ->
@@ -147,7 +147,7 @@ let task_events (config : Coord.config) ~agent_name :
                          ];
                    }
              | None -> None)
-         | Types.Done { assignee; completed_at; notes }
+         | Masc_domain.Done { assignee; completed_at; notes }
            when String.equal assignee agent_name -> (
              match parse_iso_timestamp completed_at with
              | Some ts ->
@@ -169,7 +169,7 @@ let task_events (config : Coord.config) ~agent_name :
                          ];
                    }
              | None -> None)
-         | Types.Cancelled { cancelled_by; cancelled_at; reason }
+         | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason }
            when String.equal cancelled_by agent_name -> (
              match parse_iso_timestamp cancelled_at with
              | Some ts ->
@@ -199,9 +199,9 @@ let message_events (config : Coord.config) ~agent_name ~limit :
     Coord.get_messages_raw config ~since_seq:0 ~limit
   in
   messages
-  |> List.filter (fun (m : Types.message) ->
+  |> List.filter (fun (m : Masc_domain.message) ->
          String.equal m.from_agent agent_name)
-  |> List.filter_map (fun (m : Types.message) ->
+  |> List.filter_map (fun (m : Masc_domain.message) ->
          match parse_iso_timestamp m.timestamp with
          | Some ts ->
              Some
@@ -534,7 +534,7 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
       (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
       tm.Unix.tm_sec
   in
-  let now_iso = Types.now_iso () in
+  let now_iso = Masc_domain.now_iso () in
   `Assoc
     [
       ("agent", `String agent_name);
@@ -558,7 +558,7 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
     ]
 
 (* Schema for MCP tool registration *)
-let schemas : Types.tool_schema list =
+let schemas : Masc_domain.tool_schema list =
   [
     {
       name = "masc_agent_timeline";
@@ -653,7 +653,7 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

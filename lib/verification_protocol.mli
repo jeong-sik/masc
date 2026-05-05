@@ -26,7 +26,7 @@
 
 val create_submit_request :
   config:Coord.config ->
-  task:Types.task ->
+  task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
   evidence_refs:string list ->
@@ -38,7 +38,7 @@ val create_submit_request :
 
 val notify_submit_for_verification :
   config:Coord.config ->
-  task:Types.task ->
+  task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
   evidence_refs:string list ->
@@ -50,7 +50,7 @@ val notify_submit_for_verification :
 
 val on_submit_for_verification :
   config:Coord.config ->
-  task:Types.task ->
+  task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
   evidence_refs:string list ->

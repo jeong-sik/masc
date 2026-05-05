@@ -164,7 +164,7 @@ let runtime_mcp_current_task_required_tools
             []
       in
       tasks
-      |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+      |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
       |> Option.map Coord.task_required_tools
       |> Option.value ~default:[]
       |> Keeper_types.dedupe_keep_order
@@ -382,7 +382,7 @@ let record_runtime_mcp_keeper_trajectory
   let entry : Trajectory.tool_call_entry =
     {
       ts = now;
-      ts_iso = Types.iso8601_of_unix_seconds now;
+      ts_iso = Masc_domain.iso8601_of_unix_seconds now;
       turn;
       round;
       tool_name;
@@ -628,7 +628,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         (false, Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
+         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
        else
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
           false, Printf.sprintf "Internal error: %s" err_detail)
@@ -940,7 +940,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("tool", `String name);
       ("duration_ms", `Int duration_ms);
       ("attempts", `Int attempts);
-      ("timestamp", `String (Types.now_iso ()));
+      ("timestamp", `String (Masc_domain.now_iso ()));
     ]
     @ (if !timeout_hit then [ ("timeout_hit", `Bool true) ] else [])
   in

@@ -459,7 +459,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~build_facts:(fun () ->
         let base = `Assoc
           [
-            ("generated_at", `String (Types.now_iso ()));
+            ("generated_at", `String (Masc_domain.now_iso ()));
             ("items", `List []);
             ("activity", `List []);
           ]
@@ -586,6 +586,43 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;
+      (* 2026-05-05 — auto-repair active_goal_ids=[] keepers before boot.
+         Newer keepers (created via persona autoboot or
+         masc_keeper_create_from_persona) start with active_goal_ids=[] and
+         have no automatic path to populate it, so they enter a "frozen"
+         state where work_discovery runs but no desire fires (no goal →
+         keeper_stay_silent → completion contract violation, then
+         contract violation was previously class=null per #13055).
+         Keeper_goal_repair was previously only invokable via
+         masc_keeper_persona_audit(repair=true) MCP tool — manual operator
+         action.  Default-on so keepers self-heal on next server restart;
+         opt out with MASC_KEEPER_AUTO_GOAL_REPAIR=false.  Idempotent:
+         skips keepers that already have non-empty active_goal_ids. *)
+      let auto_repair_enabled =
+        match Sys.getenv_opt "MASC_KEEPER_AUTO_GOAL_REPAIR" with
+        | Some ("0" | "false" | "FALSE" | "off" | "OFF") -> false
+        | _ -> true
+      in
+      (if auto_repair_enabled then
+         try
+           let result = Keeper_goal_repair.run config in
+           let action_count = List.length result.actions in
+           let error_count = List.length result.errors in
+           let skipped_count = List.length result.skipped in
+           if action_count > 0 || error_count > 0 then
+             Log.Keeper.info
+               "autoboot: goal_repair created=%d errors=%d skipped=%d \
+                (set MASC_KEEPER_AUTO_GOAL_REPAIR=false to disable)"
+               action_count error_count skipped_count
+           else
+             Log.Keeper.info
+               "autoboot: goal_repair scanned, all keepers have \
+                active_goal_ids (skipped=%d)"
+               skipped_count
+         with exn ->
+           Log.Keeper.warn
+             "autoboot: goal_repair failed (continuing without repair): %s"
+             (Printexc.to_string exn));
       let names = Keeper_runtime.bootable_keeper_names config in
       let keeper_boot_ctx : _ Keeper_types.context = {
         config;

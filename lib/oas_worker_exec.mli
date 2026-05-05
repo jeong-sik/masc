@@ -278,7 +278,7 @@ val run_with_masc_tools :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  masc_tools:Types.tool_schema list ->
+  masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?contract:Agent_sdk.Risk_contract.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->

@@ -419,7 +419,7 @@ let read_event_lines config ~limit =
     [approve_verification], [reject_verification]) are gated at runtime
     by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
     the published schema matches the action enum
-    ([Types.valid_task_action_strings] via #8354).  The regression test
+    ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
     [test_types.ml :: fsm_transition_matrix] asserts every action
     listed by [Coord_task.valid_next_actions_for_status] for any
     reachable status appears here, so adding a 4th verifier action
@@ -431,7 +431,7 @@ let task_fsm_transitions : (string * string list * string * string option) list 
     ("done",                    ["claimed"; "in_progress"],                "done",                   None);
     ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
     ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
-    (* Action names match [Types.task_action_to_string] (SSOT):
+    (* Action names match [Masc_domain.task_action_to_string] (SSOT):
        Approve_verification -> "approve", Reject_verification -> "reject". *)
     ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
     ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
@@ -458,8 +458,8 @@ let schema_json =
      Issue #8474: transitions matrix derived from [task_fsm_transitions]
      (single source of truth) — used to drop the 3 verifier-FSM rows. *)
   `Assoc [
-    ("task_statuses", `List (List.map (fun s -> `String s) Types.valid_task_status_strings));
-    ("actions", `List (List.map (fun s -> `String s) Types.valid_task_action_strings));
+    ("task_statuses", `List (List.map (fun s -> `String s) Masc_domain.valid_task_status_strings));
+    ("actions", `List (List.map (fun s -> `String s) Masc_domain.valid_task_action_strings));
     ("transitions", `List (List.map task_fsm_transition_to_json task_fsm_transitions));
     ("cas", `Assoc [
       ("field", `String "backlog.version");

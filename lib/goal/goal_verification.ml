@@ -430,7 +430,7 @@ let events_path config =
   Filename.concat (Coord.masc_dir config) "goal_events.jsonl"
 
 let default_state () =
-  { version = 1; updated_at = Types.now_iso (); requests = [] }
+  { version = 1; updated_at = Masc_domain.now_iso (); requests = [] }
 
 let read_state config =
   let path = requests_path config in
@@ -532,7 +532,7 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
   let event =
     `Assoc
       [
-        ("ts", `String (Types.now_iso ()));
+        ("ts", `String (Masc_domain.now_iso ()));
         ("goal_id", `String goal_id);
         ("event_type", `String event_type);
         ("payload", payload);
@@ -555,7 +555,7 @@ let gen_request_id () =
 
 let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
     ~(policy_snapshot : policy_snapshot) =
-  let created_at = Types.now_iso () in
+  let created_at = Masc_domain.now_iso () in
   let request =
     {
       id = gen_request_id ();
@@ -624,7 +624,7 @@ let cancel_request config ~(request_id : string) =
       | None -> Error "goal verification request not found"
       | Some request when request.status <> Open -> Ok request
       | Some request ->
-          let resolved_at = Types.now_iso () in
+          let resolved_at = Masc_domain.now_iso () in
           let updated_request =
             {
               request with
@@ -665,7 +665,7 @@ let submit_vote config ~(request_id : string) ~(principal : goal_principal)
                request.votes ->
           Error "principal has already voted on this request"
       | Some request ->
-          let submitted_at = Types.now_iso () in
+          let submitted_at = Masc_domain.now_iso () in
           let votes =
             request.votes
             @ [ { principal; decision; note; evidence_refs; submitted_at } ]

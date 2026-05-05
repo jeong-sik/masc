@@ -7,7 +7,7 @@
 
     Defaults are no-ops or error stubs. *)
 
-open Types
+open Masc_domain
 
 (* ============================================ *)
 (* Types                                        *)
@@ -25,7 +25,7 @@ type activity_entity = { kind: string; id: string }
 let force_release_task_fn
   : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) Atomic.t
   = Atomic.make (fun _config ~agent_name:_ ~task_id:_ () ->
-      Error (Types.Task (Types.Task_error.InvalidState "Coord_hooks: force_release_task_fn not connected")))
+      Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState "Coord_hooks: force_release_task_fn not connected")))
 
 (* ============================================ *)
 (* New callback refs (Phase 4A)                 *)
@@ -108,9 +108,9 @@ let observe_agent_lifecycle_fn
 (** Shared observability hook for task transitions.
     Used by room task modules so every successful state transition is logged
     consistently regardless of which tool or transport triggered it.
-    #8605 family: [transition] is the canonical [Types.task_action]
+    #8605 family: [transition] is the canonical [Masc_domain.task_action]
     variant -- typos at call sites fail to compile and the JSON wire
-    format is centralised in [Types.task_action_to_string]. *)
+    format is centralised in [Masc_domain.task_action_to_string]. *)
 let observe_task_transition_fn
   : (Coord_utils_backend_setup.config ->
      agent_name:string ->

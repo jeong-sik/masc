@@ -64,15 +64,15 @@ val gh_cache_max_output_bytes : unit -> int
 
 (** Filter and inject MASC schemas for keeper tool selection.
     Call once after MASC schemas are registered. *)
-val inject_masc_schemas : Types.tool_schema list -> unit
+val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
 (** Filter raw schemas down to the masc_* subset a keeper can actually see. *)
 val keeper_supported_masc_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 
 (** Return names from [keeper_supported_masc_schemas]. *)
 val keeper_supported_masc_tool_names_from_schemas :
-  Types.tool_schema list -> string list
+  Masc_domain.tool_schema list -> string list
 
 (** Filter names to only those present in the injected MASC set. *)
 val select_existing_masc_tool_names : string list -> string list
@@ -111,13 +111,13 @@ val can_execute : lookup:tool_access_lookup -> string -> bool
 val keeper_masc_tool_names : keeper_meta -> string list
 
 (** Policy-filtered MASC tool schemas for a keeper. *)
-val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
+val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe (policy-independent) MASC tool schemas for BM25 indexing. *)
-val keeper_universe_masc_tool_schemas : keeper_meta -> Types.tool_schema list
+val keeper_universe_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Default model tools (keeper_model_tools + voice + tool_search). *)
-val keeper_default_model_tools : keeper_meta -> Types.tool_schema list
+val keeper_default_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** {1 E6: .masc/ Write Protection} *)
 
@@ -156,21 +156,21 @@ val last_turn_safe_tool_names : unit -> string list
 
 (** Policy-filtered model tool schemas. *)
 val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Types.tool_schema list
+  ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe model tool schemas for Agent.run(). *)
-val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
+val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Preset-scoped universe model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
+val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
 val filter_schemas_by_names :
-  string list -> Types.tool_schema list -> Types.tool_schema list
+  string list -> Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 
 (** Deduplicate tool schemas by name. *)
 val dedupe_tool_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 
 (** {1 Tool Description Lookup} *)
 

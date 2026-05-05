@@ -747,7 +747,7 @@ let resolve_task_repo_context
     let task_id = Keeper_id.Task_id.to_string current_task_id in
     match
          Coord_query.get_tasks_safe config
-      |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+      |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
     with
     | None -> Error (Current_task_not_found task_id)
     | Some task ->

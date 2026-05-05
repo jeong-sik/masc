@@ -443,8 +443,17 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
+              let resilience_handles =
+                Keeper_turn_cascade_budget.post_turn_resilience_handles
+                  ~config:ctx.config ~meta
+              in
               let lifecycle =
-                Keeper_exec_context.apply_post_turn_lifecycle ~base_dir
+                Keeper_exec_context.apply_post_turn_lifecycle_with_resilience_handles
+                  ~resilience_audit_store:
+                    resilience_handles.resilience_audit_store
+                  ~resilience_strategy_executor:
+                    resilience_handles.resilience_strategy_executor
+                  ~base_dir
                   ~on_compaction_started:(fun () ->
                     Keeper_exec_context.dispatch_keeper_phase_event
                       ~config:ctx.config
@@ -460,6 +469,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~primary_model_max_tokens:max_cascade_context
                   ~current_turn_overflow_blocker:None
                   ~checkpoint:result.checkpoint
+                |> resilience_handles.sync_lifecycle_meta
               in
               Keeper_exec_context.dispatch_post_turn_lifecycle_events
                 ~config:ctx.config

@@ -2006,8 +2006,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~model:used_model_id
               result.usage
           in
+          let resilience_handles =
+            post_turn_resilience_handles ~config ~meta
+          in
           let lifecycle =
-            apply_post_turn_lifecycle ~base_dir
+            apply_post_turn_lifecycle_with_resilience_handles ~base_dir
+              ~resilience_audit_store:
+                resilience_handles.resilience_audit_store
+              ~resilience_strategy_executor:
+                resilience_handles.resilience_strategy_executor
               ~on_compaction_started:(fun () ->
                 dispatch_keeper_phase_event
                   ~config
@@ -2023,6 +2030,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:final_execution.max_context
               ~current_turn_overflow_blocker:!current_turn_overflow_blocker
               ~checkpoint:result.checkpoint
+            |> resilience_handles.sync_lifecycle_meta
           in
           dispatch_post_turn_lifecycle_events
             ~config

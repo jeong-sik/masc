@@ -297,15 +297,24 @@ let metric_word_tokens raw =
   flush ();
   List.rev !tokens
 
+(* Post-#13131 review (P1): substring match on "rate"/"ratio"/"pct"
+   gave false positives for metric names like "iteration_rate"-vs-
+   "iterate", "operation"-vs-"ratio".  Match against tokenized words
+   (alphanumerics split on punctuation) so only the actual metric
+   nouns trigger the percent inference.  The literal [%] symbol stays
+   on the substring path because it cannot occur as part of an
+   unrelated word. *)
+let metric_word_implies_percent token =
+  match token with
+  | "percent" | "pct" | "ratio" | "rate" | "completion" -> true
+  | _ -> false
+
 let metric_implies_percent metric =
   match metric with
   | None -> false
   | Some raw ->
-      contains_ci raw "percent"
-      || contains_ci raw "pct"
-      || contains_ci raw "ratio"
-      || contains_ci raw "rate"
-      || contains_ci raw "completion"
+      contains_ci raw "%"
+      || List.exists metric_word_implies_percent (metric_word_tokens raw)
 
 let metric_count_token = function
   | "task" | "tasks" | "todo" | "todos" | "issue" | "issues" | "ticket"
@@ -373,8 +382,13 @@ let parse_first_float raw =
       let stop = token_end index index in
       let token = String.sub raw index (stop - index) in
       match float_of_string_opt (strip_number_group_separators token) with
-      | Some value -> Some value
-      | None -> search stop
+      (* Post-#13131 review: [float_of_string_opt] accepts "nan"/"inf"
+         and yields non-finite floats, which propagate into
+         [pct_of_float] where [int_of_float (floor nan)] is undefined
+         and crashes JSON projection.  Reject non-finite parses and
+         keep scanning for a finite token. *)
+      | Some value when Float.is_finite value -> Some value
+      | Some _ | None -> search stop
     else
       search (index + 1)
   in
@@ -424,9 +438,15 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
       else
         Some (pct_of_float (observed_value /. target_numeric *. 100.0))
     in
+    (* Post-#13131 review: state was derived from the rounded
+       [attainment_pct].  For small-but-nonzero progress (e.g.
+       1/1000 → 0.1%), rounding yields 0% and the state collapsed
+       to "not_started" even though [observed_value] > 0.  Use the
+       unrounded observed_value to disambiguate. *)
     let state =
       match attainment_pct with
       | Some pct when pct >= 100 -> "attained"
+      | Some 0 when observed_value > 0.0 -> "in_progress"
       | Some 0 -> "not_started"
       | Some _ -> "in_progress"
       | None -> "unmeasured"

@@ -398,7 +398,15 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
       keeper_name remaining;
     match Eio_context.get_clock_opt () with
     | Some clock -> Eio.Time.sleep clock remaining
-    | None -> Eio.Fiber.yield ()
+    | None ->
+        (* No Eio clock available: bound the wait with [Unix.sleepf] so the
+           fairness loop does not spin under contention. [Eio.Fiber.yield]
+           imposes no minimum delay — under heavy keeper churn it returns
+           immediately and the caller re-enters the queue with the same
+           [last_autonomous_completion] timestamp, defeating the cooldown.
+           5ms is a fairness hint (not a tunable); production paths always
+           have a clock and take the [Some clock] branch above. *)
+        Unix.sleepf 0.005
   end
 
 let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)

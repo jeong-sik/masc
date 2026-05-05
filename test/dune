@@ -1071,6 +1071,7 @@
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 (include stanzas/test_keeper_admission_policy.inc)
 (include stanzas/test_keeper_admission_router.inc)
+(include stanzas/test_keeper_admission_runtime.inc)
 (include stanzas/test_keeper_alerting_path_norms.inc)
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)

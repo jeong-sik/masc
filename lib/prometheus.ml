@@ -470,6 +470,16 @@ let metric_keeper_tool_emission_pushes =
 let metric_keeper_path_rejection =
   "masc_keeper_path_rejection_total"
 
+(* RFC-0026 PR-E-1.6 admission router shadow observation
+   (keeper_admission_runtime.ml). Labels:
+     - keeper:  keeper_id
+     - outcome: legacy | dispatch | wait | surface
+
+   "legacy" dominates until PR-E-1.7 wires the registry + bucket
+   lookups via [Keeper_admission_runtime.set_*_lookup]. *)
+let metric_keeper_admission_shadow_outcome =
+  "masc_keeper_admission_shadow_outcome_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
@@ -1296,6 +1306,14 @@ let init () =
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
   add metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
+  (* RFC-0026 PR-E-1.6 admission router shadow observation.
+     Emitted by keeper_admission_runtime.observe before the existing
+     [Keeper_turn_slot.with_keeper_turn_slot] call. *)
+  add metric_keeper_admission_shadow_outcome
+    "RFC-0026 PR-E-1.6 admission router shadow observation \
+     (labels: keeper, outcome=legacy|dispatch|wait|surface). \
+     [legacy] dominates until PR-E-1.7 wires registry+bucket lookups."
+    Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
   add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;

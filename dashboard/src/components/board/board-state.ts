@@ -71,6 +71,7 @@ export const detailPostId = signal<string | null>(null)
 // ── Signals: hearth filters ───────────────────────────────────────
 export const boardHearths = signal<BoardHearth[]>([])
 export const boardHearthsLoading = signal(false)
+export const boardHearthsError = signal(false)
 
 // ── Signals: comments ──────────────────────────────────────────────
 export const commentText = signal('')
@@ -106,8 +107,10 @@ export async function refreshBoardHearths(): Promise<void> {
   boardHearthsLoading.value = true
   try {
     boardHearths.value = await fetchBoardHearths()
+    boardHearthsError.value = false
   } catch (err) {
     console.warn('[Board] failed to load hearth filters:', err)
+    boardHearthsError.value = true
     showToast('Hearth 목록을 불러오지 못했습니다', 'error')
   } finally {
     boardHearthsLoading.value = false

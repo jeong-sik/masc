@@ -427,6 +427,10 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
   // reconciled through the board endpoint instead of guessing client-side.
   if (boardAuthorFilter.value.trim() !== '') return false
 
+  if (typeof event.post_kind !== 'string' && (boardExcludeSystem.value || boardExcludeAutomation.value)) {
+    return false
+  }
+
   const postKind = boardPostKindFromEvent(event)
   if (postKind === 'system' && boardExcludeSystem.value) return false
   if (postKind === 'automation' && boardExcludeAutomation.value) return false

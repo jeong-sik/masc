@@ -156,6 +156,25 @@ describe('CommentThread', () => {
     expect(screen.queryByRole('button', { name: /스레드 계속 펼치기/ })).not.toBeInTheDocument()
   })
 
+  it('ignores a manual collapsed state while the comment filter is active', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'root-agent', content: 'root comment', created_at: '2026-04-02T00:00:00Z' },
+      { id: 'c2', post_id: 'post-1', parent_id: 'c1', author: 'child-agent', content: 'needle child reply', created_at: '2026-04-02T00:01:00Z' },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '답글 1개 접기' }))
+    expect(screen.queryByText('needle child reply')).not.toBeInTheDocument()
+
+    fireEvent.input(screen.getByPlaceholderText('댓글 내용 검색'), {
+      target: { value: 'needle' },
+    })
+
+    expect(screen.getByText('needle child reply')).toBeInTheDocument()
+    expect(screen.queryByText('답글 1개 접힘')).not.toBeInTheDocument()
+  })
+
   it('sends comment votes through the board comment vote tool', async () => {
     const comments = [
       {

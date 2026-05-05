@@ -315,6 +315,29 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
+  it('falls back to board refresh when post_kind is missing under kind exclusions', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshHearths = vi.fn()
+    sseStore.registerBoardHearthsRefresh(refreshHearths)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeAutomation.value = true
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Unknown kind note',
+      content: 'body',
+      author: 'agent-a',
+      hearth: 'ops',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value).toEqual([])
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+    expect(refreshHearths).toHaveBeenCalledTimes(1)
+  })
+
   it('does not refresh hearth chips for comment-only board events', async () => {
     const { sseStore } = await loadSseStore()
     const refreshHearths = vi.fn()

@@ -194,7 +194,9 @@ val provider_label : Llm_provider.Provider_config.t -> string
     - [Error sdk_error] — provider supports neither lane.
 
     Codex_cli + keeper-bound actor tools trigger the [#10097] omission
-    counter/log path; the resulting policy excludes those tools. *)
+    counter/log path. Required turns reject because the omitted tools cannot
+    satisfy the tool contract; optional turns keep the prior degraded
+    discovery path and exclude those tools from the resulting policy. *)
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
   ?tool_requirement:[ `Required | `Optional ] ->

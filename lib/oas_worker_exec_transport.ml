@@ -641,86 +641,96 @@ let resolve_tool_lane_for_oas_tools
      per-tool counter.  See [record_codex_cli_omission] docs. *)
   record_codex_cli_omission_for_agent ~agent_name:requested_agent_name
     ~tools:codex_keeper_bound_actor_tools;
-  let public_tool_names =
-    if codex_keeper_bound_actor_tools = [] then
-      public_tool_names
-    else
-      List.filter
-        (fun tool_name -> not (public_mcp_tool_requires_bound_actor tool_name))
+  if tool_requirement = `Required && codex_keeper_bound_actor_tools <> [] then
+    let detail =
+      Printf.sprintf
+        "%s cannot satisfy required keeper-bound runtime MCP tools omitted by \
+         codex_cli: %s"
+        (provider_label provider_cfg)
+        (String.concat ", "
+           (List.sort String.compare codex_keeper_bound_actor_tools))
+    in
+    Error (invalid_runtime_config "tool_support" detail)
+  else
+    let public_tool_names =
+      if codex_keeper_bound_actor_tools = [] then
         public_tool_names
-  in
-  let keeper_internal_tool_names =
-    if codex_keeper_bound_actor_tools = [] then
-      keeper_internal_tool_names
-    else
-      List.filter
-        (fun tool_name ->
-          not (runtime_mcp_tool_requires_bound_actor tool_name))
+      else
+        List.filter
+          (fun tool_name -> not (public_mcp_tool_requires_bound_actor tool_name))
+          public_tool_names
+    in
+    let keeper_internal_tool_names =
+      if codex_keeper_bound_actor_tools = [] then
         keeper_internal_tool_names
-  in
-  let runtime_tool_names =
-    dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
-  in
-  (* #12676: When all tools were bound-actor and got stripped for codex_cli,
-     runtime_tool_names is empty. The keeper still needs an MCP connection so
-     it can discover and call non-bound tools dynamically. Build a minimal
-     connect-only policy with the server URL and auth but no allowed_tool_names
-     — codex_cli will see the MCP server without per-tool approval overrides. *)
-  let runtime_mcp_policy =
-    if runtime_tool_names = [] && codex_keeper_bound_actor_tools <> [] then
-      (* Minimal connect-only policy: server + auth, empty allowed_tool_names.
-         Codex_cli will connect to MCP but have no pre-approved tools. *)
-      let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
-      let per_keeper_token =
-        match env_token, requested_agent_name with
-        | None, Some name ->
-            let base_path = Env_config_core.base_path () in
-            Auth.load_raw_token base_path ~agent_name:name
-        | _ -> None
-      in
-      let auth_headers =
-        match env_token, per_keeper_token with
-        | Some raw, _ -> [ ("Authorization", "Bearer " ^ raw) ]
-        | None, Some raw -> [ ("Authorization", "Bearer " ^ raw) ]
-        | None, None -> []
-      in
-      Some
-        { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
-          servers =
-            [
-              Llm_provider.Llm_transport.Http_server
-                { name = "masc";
-                  url = Env_config_runtime.Local_runtime.mcp_url ();
-                  headers = auth_headers;
-                };
-            ];
-          allowed_server_names = [ "masc" ];
-          allowed_tool_names = [];
-          strict = false;
-          disable_builtin_tools = false;
-        }
-      |> runtime_mcp_policy_for_provider ~provider_cfg
-           ~agent_name:(Option.value ~default:"" requested_agent_name)
-    else
-      runtime_mcp_policy_of_tool_names
-        ?agent_name:requested_agent_name
-        ~allow_keeper_internal:(keeper_internal_tool_names <> [])
-        runtime_tool_names
-      |> runtime_mcp_policy_for_provider ~provider_cfg
-           ~agent_name:(Option.value ~default:"" requested_agent_name)
-  in
-  match runtime_mcp_policy with
-  | Some runtime_mcp_policy
-    when Provider_tool_support.provider_supports_runtime_mcp_policy
-           provider_cfg runtime_mcp_policy ->
-      Ok ([], Some runtime_mcp_policy)
-  | _ when tools = [] ->
-      Ok (tools, None)
-  | _ when provider_supports_inline_tools provider_cfg ->
-      Ok (tools, None)
-  | _ when tool_requirement = `Optional ->
-      Ok ([], None)
-  | _ ->
+      else
+        List.filter
+          (fun tool_name ->
+            not (runtime_mcp_tool_requires_bound_actor tool_name))
+          keeper_internal_tool_names
+    in
+    let runtime_tool_names =
+      dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
+    in
+    (* #12676: When all tools were bound-actor and got stripped for codex_cli
+       on an optional turn, runtime_tool_names is empty. The keeper may still
+       use an MCP connection for discovery, so build a minimal connect-only
+       policy with the server URL and auth but no allowed_tool_names. Required
+       turns reject above because a zero-tool policy cannot satisfy the tool
+       contract. *)
+    let runtime_mcp_policy =
+      if runtime_tool_names = [] && codex_keeper_bound_actor_tools <> [] then
+        let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
+        let per_keeper_token =
+          match env_token, requested_agent_name with
+          | None, Some name ->
+              let base_path = Env_config_core.base_path () in
+              Auth.load_raw_token base_path ~agent_name:name
+          | _ -> None
+        in
+        let auth_headers =
+          match env_token, per_keeper_token with
+          | Some raw, _ -> [ ("Authorization", "Bearer " ^ raw) ]
+          | None, Some raw -> [ ("Authorization", "Bearer " ^ raw) ]
+          | None, None -> []
+        in
+        Some
+          { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+            servers =
+              [
+                Llm_provider.Llm_transport.Http_server
+                  { name = "masc";
+                    url = Env_config_runtime.Local_runtime.mcp_url ();
+                    headers = auth_headers;
+                  };
+              ];
+            allowed_server_names = [ "masc" ];
+            allowed_tool_names = [];
+            strict = false;
+            disable_builtin_tools = false;
+          }
+        |> runtime_mcp_policy_for_provider ~provider_cfg
+             ~agent_name:(Option.value ~default:"" requested_agent_name)
+      else
+        runtime_mcp_policy_of_tool_names
+          ?agent_name:requested_agent_name
+          ~allow_keeper_internal:(keeper_internal_tool_names <> [])
+          runtime_tool_names
+        |> runtime_mcp_policy_for_provider ~provider_cfg
+             ~agent_name:(Option.value ~default:"" requested_agent_name)
+    in
+    match runtime_mcp_policy with
+    | Some runtime_mcp_policy
+      when Provider_tool_support.provider_supports_runtime_mcp_policy
+             provider_cfg runtime_mcp_policy ->
+        Ok ([], Some runtime_mcp_policy)
+    | _ when tools = [] ->
+        Ok (tools, None)
+    | _ when provider_supports_inline_tools provider_cfg ->
+        Ok (tools, None)
+    | _ when tool_requirement = `Optional ->
+        Ok ([], None)
+    | _ ->
       let detail =
         let runtime_mcp_requires_http_headers =
           match runtime_mcp_policy with

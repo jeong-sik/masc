@@ -103,6 +103,34 @@ let purge_expired_force_released_holders_locked ~now =
        else Some marked_at)
     force_released_holders
 
+let force_released_marker_ttl_sec_for_test = force_release_marker_ttl_sec
+
+let force_released_marker_count_for_test () =
+  with_holder_lock (fun () ->
+    Hashtbl.length force_released_holders)
+
+let add_force_released_marker_for_test
+    ~label
+    ~keeper_name
+    ~acquisition_id
+    ~marked_at =
+  with_holder_lock (fun () ->
+    Hashtbl.replace force_released_holders
+      {
+        holder_label = label;
+        holder_keeper_name = keeper_name;
+        holder_acquisition_id = acquisition_id;
+      }
+      marked_at)
+
+let purge_force_released_markers_for_test ~now =
+  with_holder_lock (fun () ->
+    purge_expired_force_released_holders_locked ~now)
+
+let clear_force_released_markers_for_test () =
+  with_holder_lock (fun () ->
+    Hashtbl.reset force_released_holders)
+
 let record_holder ~label ~keeper_name ~acquired_at =
   with_holder_lock (fun () ->
     incr next_holder_acquisition_id;
@@ -139,7 +167,6 @@ let mark_holder_force_released ~label ~keeper_name =
 
 let consume_force_release ~label ~keeper_name ~acquisition_id =
   with_holder_lock (fun () ->
-    purge_expired_force_released_holders_locked ~now:(Time_compat.now ());
     let key =
       {
         holder_label = label;

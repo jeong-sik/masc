@@ -71,6 +71,29 @@ val reactive_slot_holders : now:float -> (string * float) list
     predecessor's marker. *)
 val force_release_stale_holder : keeper_name:string -> string list
 
+(** Test-only: TTL used to bound orphaned force-release markers left behind
+    when a cancelled stale fiber never reaches its finalizer. *)
+val force_released_marker_ttl_sec_for_test : float
+
+(** Test-only: count force-release markers still awaiting finalizer
+    consumption or expiry pruning. *)
+val force_released_marker_count_for_test : unit -> int
+
+(** Test-only: inject a marker without touching semaphores, so marker-retention
+    behavior can be exercised without creating a double-release path. *)
+val add_force_released_marker_for_test :
+  label:string ->
+  keeper_name:string ->
+  acquisition_id:int ->
+  marked_at:float ->
+  unit
+
+(** Test-only: prune expired force-release markers using an injected clock. *)
+val purge_force_released_markers_for_test : now:float -> unit
+
+(** Test-only: clear force-release markers between tests. *)
+val clear_force_released_markers_for_test : unit -> unit
+
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)

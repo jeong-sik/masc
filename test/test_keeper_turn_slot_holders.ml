@@ -16,6 +16,7 @@ exception After_flag_injected
 let with_fresh_state body () =
   Eio_main.run @@ fun _env ->
     KK.set_after_acquire_flag_hook_for_test None;
+    KK.clear_force_released_markers_for_test ();
     KK.reset_autonomous_completion_for_test ();
     KK.reset_autonomous_turn_queue_for_test ();
     body ()
@@ -377,13 +378,32 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
     ~expected:autonomous_before
     ~actual:(KK.autonomous_turn_semaphore_value_for_test ());
   let delay =
-    KK.fairness_delay_sec_at ~keeper_name ~now:(Time_compat.now ())
+    let ticket = KK.enqueue_autonomous_waiter_for_test "diag-waiting-peer" in
+    Fun.protect
+      ~finally:(fun () -> KK.drop_autonomous_waiter_for_test ticket)
+      (fun () ->
+         KK.fairness_delay_sec_at ~keeper_name ~now:(Time_compat.now ()))
   in
   if delay <> 0.0 then
     failwith
       (Printf.sprintf
          "force-released autonomous holder stamped normal completion: delay=%.3f"
          delay)
+
+let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
+  KK.clear_force_released_markers_for_test ();
+  let marked_at = 1_000.0 in
+  KK.add_force_released_marker_for_test
+    ~label:"turn"
+    ~keeper_name:"diag-orphan-marker"
+    ~acquisition_id:42
+    ~marked_at;
+  assert_eq ~msg:"orphan marker recorded" ~expected:1
+    ~actual:(KK.force_released_marker_count_for_test ());
+  KK.purge_force_released_markers_for_test
+    ~now:(marked_at +. KK.force_released_marker_ttl_sec_for_test +. 1.0);
+  assert_eq ~msg:"expired orphan marker purged" ~expected:0
+    ~actual:(KK.force_released_marker_count_for_test ())
 
 let () =
   let cases =
@@ -412,6 +432,8 @@ let () =
         test_force_release_marker_does_not_leak_to_replacement;
       "force released autonomous holder skips completion stamp",
         test_force_released_autonomous_holder_does_not_stamp_completion;
+      "force release marker ttl bounds unfinalized fibers",
+        test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]
   in
   List.iter

@@ -946,7 +946,7 @@ let append_memory_notes_from_tool_results
         when String.trim artifact_id <> ""
              && not (Hashtbl.mem seen_artifacts artifact_id) ->
           Hashtbl.add seen_artifacts artifact_id ();
-          let kind = Artifact.kind_tag_to_string kind_tag in
+          let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
           let payload_preview = tool_result_payload_preview result in
           let text =
             tool_result_memory_text ~kind ~artifact_id ~payload_preview

@@ -885,7 +885,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "12 tool schemas" 12 (List.length Tool_board.tools)
+  Alcotest.(check int) "13 tool schemas" 13 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->

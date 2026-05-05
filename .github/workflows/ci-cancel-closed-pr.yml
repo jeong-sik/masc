@@ -27,7 +27,7 @@ jobs:
           for status in queued in_progress pending; do
             gh run list \
               --repo "$GITHUB_REPOSITORY" \
-              --workflow CI \
+              --workflow ci.yml \
               --event pull_request \
               --branch "$PR_HEAD_REF" \
               --status "$status" \

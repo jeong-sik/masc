@@ -12,16 +12,6 @@ import {
   refreshGitGraph,
 } from './git-graph-store'
 
-function StatCell({ label, value }: { label: string; value: number }) {
-  return html`
-    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-      <div class="text-2xs font-medium uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">${label}</div>
-      <div class="mt-1 text-xl font-semibold tabular-nums text-[var(--color-fg-primary)]">${value}</div>
-    </div>
-  `
-}
-
-
 export function GitGraphPanel() {
   const state = gitGraphResource.state.value
   const graph = state.data

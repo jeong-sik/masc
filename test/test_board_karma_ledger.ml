@@ -104,7 +104,7 @@ let test_downvote_no_event () =
 let test_self_post_upvote_no_karma () =
   let post = create_post_exn ~author:"alice" ~content:"self vote" in
   let pid = Board.Post_id.to_string post.id in
-  vote_exn ~voter:"alice" ~post_id:pid ~direction:Board.Up;
+  vote_exn ~voter:" alice " ~post_id:pid ~direction:Board.Up;
   let events = Board_dispatch.get_karma_ledger () in
   Alcotest.(check int) "self post upvote → no karma event" 0 (List.length events);
   Alcotest.(check int) "self post upvote excluded from agent karma" 0
@@ -125,7 +125,7 @@ let test_self_post_upvote_no_economy_credit () =
     let before =
       Agent_economy.get_balance ~base_path ~agent_name:"alice"
     in
-    vote_exn ~voter:"alice" ~post_id:pid ~direction:Board.Up;
+    vote_exn ~voter:" alice " ~post_id:pid ~direction:Board.Up;
     let after_self_vote =
       Agent_economy.get_balance ~base_path ~agent_name:"alice"
     in
@@ -168,7 +168,7 @@ let test_self_comment_upvote_no_karma () =
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
   let cid = Board.Comment_id.to_string comment.id in
-  vote_comment_exn ~voter:"charlie" ~comment_id:cid ~direction:Board.Up;
+  vote_comment_exn ~voter:" charlie " ~comment_id:cid ~direction:Board.Up;
   let events = Board_dispatch.get_karma_ledger () in
   Alcotest.(check int) "self comment upvote → no karma event" 0 (List.length events);
   Alcotest.(check int) "self comment upvote excluded from agent karma" 0

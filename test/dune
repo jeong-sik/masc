@@ -1008,6 +1008,7 @@
 (include stanzas/test_auth_token_uniqueness_audit.inc)
 (include stanzas/test_base_path_prod_guard.inc)
 (include stanzas/test_board_api_e2e.inc)
+(include stanzas/test_briefing_json_helpers.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)
 (include stanzas/test_cascade_config_validity.inc)

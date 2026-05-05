@@ -8,23 +8,28 @@ let install_tooling ~governance_level (state : Mcp_server.server_state) =
 
 (* Stable djb2-style hash for the autoboot warmup jitter.
 
-   The 0x3FFF_FFFF mask (30 bits) is intentional — using OCaml's
-   [max_int] would tie the result to the platform [int] width
-   (31-bit on 32-bit OCaml, 63-bit on 64-bit OCaml), so the same
-   keeper name would warm up at different offsets depending on
-   architecture.  The 30-bit mask gives ~1G distinct buckets, far
-   more than any realistic [stagger_window_sec], and is identical
-   on every supported runtime. *)
-let stable_keeper_name_hash_mask = 0x3FFF_FFFF
+   Post-#13119 follow-up: the previous implementation used native
+   [int] arithmetic with a final [land 0x3FFF_FFFF] mask.  That is
+   NOT actually platform-stable: on 31-bit OCaml the intermediate
+   [acc lsl 5] overflow wraps differently than on 63-bit OCaml
+   before the mask is applied, so the same keeper name can hash to
+   different buckets depending on architecture.
+
+   Fix: do all arithmetic in [Int32], whose wrap-around behavior is
+   identical on every supported runtime.  Mask to 30 bits and convert
+   back to [int].  30 bits ≈ 1G distinct buckets, far more than any
+   realistic [stagger_window_sec]. *)
+let stable_keeper_name_hash_mask_i32 = 0x3FFF_FFFFl
 
 let stable_keeper_name_hash name =
-  let acc = ref 5381 in
+  let acc = ref 5381l in
   String.iter
     (fun ch ->
-      acc :=
-        (((!acc lsl 5) + !acc) + Char.code ch) land stable_keeper_name_hash_mask)
+      let shifted = Int32.shift_left !acc 5 in
+      let summed = Int32.add (Int32.add shifted !acc) (Int32.of_int (Char.code ch)) in
+      acc := Int32.logand summed stable_keeper_name_hash_mask_i32)
     name;
-  !acc
+  Int32.to_int !acc
 
 let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name =
   let base_warmup = max 0 base_warmup in

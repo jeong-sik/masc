@@ -23,6 +23,9 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
   { id: 'blame', label: 'BLAME' },
 ]
 
+const TOOLBAR_BUTTON_BASE =
+  'h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
+
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
@@ -98,17 +101,15 @@ export function IdeToolbar({
       class="ide-toolbar"
       role="toolbar"
       aria-label="IDE editor toolbar"
-      style=${{
-        display: 'grid',
-        gridTemplateColumns: 'auto minmax(180px, 320px) 1fr auto',
-        alignItems: 'center',
-        gap: 'var(--sp-3)',
-        padding: 'var(--sp-2) var(--sp-3)',
-        borderBottom: '1px solid var(--color-border-divider)',
-        background: 'var(--color-bg-surface)',
-      }}
+      data-testid="ide-toolbar"
+      class="grid min-w-0 grid-cols-1 items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3 py-2 lg:grid-cols-[minmax(0,max-content)_minmax(12rem,16rem)_minmax(0,1fr)]"
     >
-      <div class="ide-toolbar-tabs" role="tablist" aria-label="View mode" style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div
+        class="ide-toolbar-tabs flex min-w-0 gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]"
+        role="tablist"
+        aria-label="View mode"
+        data-testid="ide-toolbar-tabs"
+      >
         ${VIEW_TABS.map(tab => html`
           <button
             type="button"
@@ -116,14 +117,12 @@ export function IdeToolbar({
             aria-selected=${tab.id === activeView ? 'true' : 'false'}
             tabIndex=${tab.id === activeView ? 0 : -1}
             onClick=${() => onViewChange(tab.id)}
+            class=${TOOLBAR_BUTTON_BASE}
             style=${{
-              padding: '4px 10px',
               background: 'transparent',
               color: tab.id === activeView ? 'var(--color-fg-primary)' : 'var(--color-fg-muted)',
-              border: 'none',
+              border: '1px solid transparent',
               borderBottom: tab.id === activeView ? '2px solid var(--color-accent-fg)' : '2px solid transparent',
-              font: 'var(--type-eyebrow)',
-              cursor: 'pointer',
             }}
           >${tab.label}</button>
         `)}
@@ -135,27 +134,21 @@ export function IdeToolbar({
         className="min-w-0"
         inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
       />
-      <span class="ide-toolbar-spacer" aria-hidden="true" />
       <div
         class="ide-toolbar-layers"
         aria-label="Layers (multi-select)"
-        style=${{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sp-2)',
-          color: 'var(--color-fg-muted)',
-          font: 'var(--type-eyebrow)',
-        }}
+        data-testid="ide-toolbar-layers"
+        class="flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] [scrollbar-width:none]"
       >
-        <span>LAYERS</span>
+        <span class="shrink-0">LAYERS</span>
         ${IDE_LAYERS.map(layer => html`
           <button
             type="button"
             aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
             onClick=${() => handleLayerToggle(layer.kind)}
             title=${layer.description}
+            class=${TOOLBAR_BUTTON_BASE}
             style=${{
-              padding: '2px 8px',
               background: isActive(layer.kind)
                 ? 'var(--color-bg-elevated)'
                 : 'transparent',
@@ -168,14 +161,11 @@ export function IdeToolbar({
                   ? 'var(--color-status-warn)'
                   : 'var(--color-accent-fg)'
                 : 'var(--color-border-default)',
-              borderRadius: 'var(--r-1)',
-              font: 'var(--type-body)',
-              cursor: 'pointer',
             }}
           >${layer.label}</button>
         `)}
         ${active.size > 0
-          ? html`<span style=${{ color: 'var(--color-fg-disabled)', font: 'var(--fs-11)' }}>${active.size} active</span>`
+          ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${active.size} active</span>`
           : null}
       </div>
     </div>

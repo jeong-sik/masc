@@ -96,6 +96,26 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('Approve')
   })
 
+  it('renders toolbar lanes that can collapse independently on narrow screens', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const toolbar = container.querySelector('[data-testid="ide-toolbar"]')
+    const tabs = container.querySelector('[data-testid="ide-toolbar-tabs"]')
+    const layers = container.querySelector('[data-testid="ide-toolbar-layers"]')
+
+    expect(toolbar?.className).toContain('grid-cols-1')
+    expect(toolbar?.className).toContain('lg:grid-cols-')
+    expect(tabs?.className).toContain('overflow-x-auto')
+    expect(layers?.className).toContain('overflow-x-auto')
+    expect(container.querySelector('.ide-toolbar-spacer')).toBeNull()
+  })
+
   it('persists layer toggles back to the route', () => {
     route.value = {
       tab: 'code',

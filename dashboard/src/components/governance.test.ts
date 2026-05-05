@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import * as Vitest from 'vitest'
-import type { DashboardGovernanceResponse, GovernanceCaseBundle, KeeperApprovalQueueItem } from '../types'
+import type { DashboardGovernanceResponse, GovernanceCaseBundle } from '../types'
 import { KpiStrip } from './kpi-strip'
 import { KpiCell } from './kpi-cell'
 

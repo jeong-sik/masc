@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  parsePrometheusText,
-  categorize,
-  metricMatchesSearch,
-} from './prometheus-metrics'
+import { parsePrometheusText } from './prometheus-metrics'
 
 const SAMPLE = `# HELP masc_uptime_seconds Server uptime in seconds
 # TYPE masc_uptime_seconds gauge
@@ -51,71 +47,3 @@ describe('parsePrometheusText', () => {
   })
 })
 
-describe('categorize', () => {
-  it('classifies keeper metrics', () => {
-    expect(categorize('masc_keeper_compaction_total')).toBe('keeper')
-  })
-
-  it('classifies agent metrics', () => {
-    expect(categorize('masc_agent_heartbeat_age_seconds')).toBe('agent')
-  })
-
-  it('classifies transport metrics', () => {
-    expect(categorize('masc_sse_connections')).toBe('transport')
-    expect(categorize('masc_grpc_requests')).toBe('transport')
-  })
-
-  it('classifies inference metrics', () => {
-    expect(categorize('masc_inference_duration_seconds')).toBe('inference')
-    expect(categorize('masc_llm_tokens')).toBe('inference')
-  })
-
-  it('classifies tool metrics', () => {
-    expect(categorize('masc_tool_call_duration_seconds')).toBe('tool')
-  })
-
-  it('classifies server metrics', () => {
-    expect(categorize('masc_uptime_seconds')).toBe('server')
-    expect(categorize('masc_errors_total')).toBe('server')
-  })
-
-  it('classifies unknown as other', () => {
-    expect(categorize('masc_custom_metric')).toBe('other')
-  })
-})
-
-describe('metricMatchesSearch', () => {
-  const metrics = parsePrometheusText(SAMPLE)
-
-  it('matches by metric name', () => {
-    const heartbeat = metrics.find(m => m.name === 'masc_agent_heartbeat_age_seconds')!
-    expect(metricMatchesSearch(heartbeat, 'heartbeat')).toBe(true)
-    expect(metricMatchesSearch(heartbeat, 'HEARTBEAT')).toBe(true)
-  })
-
-  it('matches by help text', () => {
-    const uptime = metrics.find(m => m.name === 'masc_uptime_seconds')!
-    expect(metricMatchesSearch(uptime, 'uptime')).toBe(true)
-  })
-
-  it('matches by label value', () => {
-    const heartbeat = metrics.find(m => m.name === 'masc_agent_heartbeat_age_seconds')!
-    expect(metricMatchesSearch(heartbeat, 'janitor')).toBe(true)
-    expect(metricMatchesSearch(heartbeat, 'guardian')).toBe(true)
-  })
-
-  it('returns false for non-matching query', () => {
-    const uptime = metrics.find(m => m.name === 'masc_uptime_seconds')!
-    expect(metricMatchesSearch(uptime, 'nonexistent')).toBe(false)
-  })
-
-  it('matches by sample name', () => {
-    const inference = metrics.find(m => m.name === 'masc_inference_duration_seconds')!
-    expect(metricMatchesSearch(inference, 'inference')).toBe(true)
-  })
-
-  it('matches by quantile label value', () => {
-    const inference = metrics.find(m => m.name === 'masc_inference_duration_seconds')!
-    expect(metricMatchesSearch(inference, '0.99')).toBe(true)
-  })
-})

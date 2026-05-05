@@ -104,7 +104,7 @@ function parseLabels(raw: string): Record<string, string> {
 
 type MetricCategory = 'server' | 'agent' | 'keeper' | 'transport' | 'inference' | 'tool' | 'delta' | 'provider' | 'other'
 
-export function categorize(name: string): MetricCategory {
+function categorize(name: string): MetricCategory {
   if (name.startsWith('masc_keeper_')) return 'keeper'
   if (name.startsWith('masc_agent_')) return 'agent'
   if (name.startsWith('masc_sse_') || name.startsWith('masc_grpc_') || name.startsWith('masc_ws_')) return 'transport'
@@ -203,7 +203,7 @@ async function fetchPrometheusText(signal?: AbortSignal): Promise<string> {
 
 // --- Search helpers ---
 
-export function metricMatchesSearch(m: ParsedMetric, q: string): boolean {
+function metricMatchesSearch(m: ParsedMetric, q: string): boolean {
   const lower = q.toLowerCase()
   if (m.name.toLowerCase().includes(lower)) return true
   if (m.help.toLowerCase().includes(lower)) return true

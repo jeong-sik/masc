@@ -31,7 +31,7 @@ const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
 
 /** Render an OasAgentEvent into a single-line summary.
  *  Exposed for unit testing. */
-export function describeAgentEvent(evt: OasAgentEvent): string {
+function describeAgentEvent(evt: OasAgentEvent): string {
   const label = EVENT_TYPE_LABELS[evt.type]
   switch (evt.type) {
     case 'selected':
@@ -60,7 +60,7 @@ export function describeAgentEvent(evt: OasAgentEvent): string {
 
 /** Pick the N most recently updated keepers from a snapshot map.
  *  Exposed for unit testing. */
-export function topKeepers(
+function topKeepers(
   snapshots: Map<string, OasKeeperSnapshot>,
   limit: number,
 ): OasKeeperSnapshot[] {
@@ -69,7 +69,7 @@ export function topKeepers(
     .slice(0, limit)
 }
 
-export function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
+function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
   'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated' | 'totalEvents'
 >): string {
   if (summary.replayTruncated) {
@@ -81,7 +81,7 @@ export function describeTotalEventsDetail(summary: Pick<OasHealthSummary,
   return 'durable replay + live'
 }
 
-export function describeSampleWindow(summary: Pick<OasHealthSummary,
+function describeSampleWindow(summary: Pick<OasHealthSummary,
   'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'
 >): string | null {
   if (!summary.replayTruncated) return null

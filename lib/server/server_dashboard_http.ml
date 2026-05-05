@@ -144,6 +144,67 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
     String.length needle = 0
     || String_util.contains_substring_ci haystack needle
   in
+  let memory_entry_to_json
+      (keeper : string)
+      (row : Keeper_memory_policy.keeper_memory_line) : Yojson.Safe.t =
+    `Assoc
+      [
+        ("keeper", `String keeper);
+        ("kind", `String row.kind);
+        ("text", `String row.text);
+        ("priority", `Int row.priority);
+        ("ts_unix", `Float row.ts_unix);
+      ]
+  in
+  let all_memory_entries =
+    try
+      Keeper_types.keeper_names config
+      |> List.concat_map (fun keeper ->
+             try
+               let summary =
+                 Keeper_memory_recall.read_keeper_memory_summary config
+                   ~name:keeper ~max_bytes:120000 ~max_lines:180
+                   ~recent_limit:30
+               in
+               List.map
+                 (fun (row : Keeper_memory_policy.keeper_memory_line) ->
+                   (keeper, row))
+                 summary.recent_notes
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ -> [])
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
+  in
+  let memory_total = List.length all_memory_entries in
+  let memory_filtered =
+    all_memory_entries
+    |> List.filter (fun (keeper, (row : Keeper_memory_policy.keeper_memory_line)) ->
+           let keeper_ok =
+             match keeper_filter with
+             | None -> true
+             | Some k -> String.equal keeper k
+           in
+           let search_ok =
+             match search with
+             | None -> true
+             | Some q ->
+               contains_ci keeper q || contains_ci row.kind q
+               || contains_ci row.text q
+           in
+           keeper_ok && search_ok)
+  in
+  let memory_filtered_total = List.length memory_filtered in
+  let memory_entries =
+    memory_filtered
+    |> List.sort
+         (fun
+           (_, (a : Keeper_memory_policy.keeper_memory_line))
+           (_, (b : Keeper_memory_policy.keeper_memory_line)) ->
+           compare b.ts_unix a.ts_unix)
+    |> take limit
+  in
   let filtered =
     all_episodes
     |> List.filter (fun (e : Institution_eio.episode) ->
@@ -182,8 +243,18 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
     else drop (filtered_total - limit) filtered
   in
   let known_keepers =
-    all_episodes
-    |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
+    let episode_keepers =
+      all_episodes
+      |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
+    in
+    let memory_keepers = List.map fst all_memory_entries in
+    episode_keepers @ memory_keepers
+    |> List.sort_uniq String.compare
+  in
+  let known_memory_kinds =
+    all_memory_entries
+    |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) ->
+           row.kind)
     |> List.sort_uniq String.compare
   in
   `Assoc
@@ -201,12 +272,27 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
               `List
                 (List.map Institution_eio.episode_to_json episodes) );
           ] );
+      ( "memory_entries",
+        `Assoc
+          [
+            ("total", `Int memory_total);
+            ("filtered", `Int memory_filtered_total);
+            ("shown", `Int (List.length memory_entries));
+            ("limit", `Int limit);
+            ( "items",
+              `List
+                (List.map
+                   (fun (keeper, row) -> memory_entry_to_json keeper row)
+                   memory_entries) );
+          ] );
       ( "filters",
         `Assoc
           [
             ( "keepers",
               `List (List.map (fun k -> `String k) known_keepers) );
             ("outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]);
+            ( "memory_kinds",
+              `List (List.map (fun k -> `String k) known_memory_kinds) );
           ] );
     ]
 

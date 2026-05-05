@@ -2741,6 +2741,14 @@ export interface MemorySubsystemsEpisode {
   context: Record<string, string>
 }
 
+export interface MemorySubsystemsMemoryEntry {
+  keeper: string
+  kind: string
+  text: string
+  priority: number
+  ts_unix: number
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -2754,9 +2762,17 @@ export interface MemorySubsystemsResponse {
     limit: number
     items: MemorySubsystemsEpisode[]
   }
+  memory_entries?: {
+    total: number
+    filtered: number
+    shown: number
+    limit: number
+    items: MemorySubsystemsMemoryEntry[]
+  }
   filters: {
     keepers: string[]
     outcomes: string[]
+    memory_kinds?: string[]
   }
 }
 

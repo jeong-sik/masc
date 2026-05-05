@@ -31,7 +31,8 @@ async function loadPlane() {
     KeeperTokenStats: () => html`<div data-testid="keeper-token-stats">KeeperTokenStats</div>`,
   }))
   vi.doMock('./memory-subsystems', () => ({
-    MemorySubsystems: () => html`<div data-testid="memory-subsystems">MemorySubsystems</div>`,
+    MemorySubsystems: ({ focus }: { focus?: string }) =>
+      html`<div data-testid="memory-subsystems" data-focus=${focus ?? ''}>MemorySubsystems</div>`,
   }))
   return import('./cognition-plane')
 }
@@ -80,5 +81,25 @@ describe('CognitionPlane', () => {
 
     expect(container.querySelector('[data-testid="keeper-decisions-stream"]')).not.toBeNull()
     expect(container.textContent).not.toContain('backend-blocked')
+  })
+
+  it('routes memory focus into the memory subsystem entries surface', async () => {
+    route.value.params = { section: 'cognition', view: 'memory', focus: 'entries' }
+    const { CognitionPlane } = await loadPlane()
+
+    render(html`<${CognitionPlane} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="memory-subsystems"]')?.getAttribute('data-focus')).toBe('entries')
+  })
+
+  it('uses the episodes focus for the episodes view', async () => {
+    route.value.params = { section: 'cognition', view: 'episodes' }
+    const { CognitionPlane } = await loadPlane()
+
+    render(html`<${CognitionPlane} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="memory-subsystems"]')?.getAttribute('data-focus')).toBe('episodes')
   })
 })

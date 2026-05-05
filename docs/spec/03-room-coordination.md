@@ -348,12 +348,18 @@ type decision =
 - 작업 중 에이전트: 100% skip
 - 5분+ idle 에이전트: 33% emission (3x interval)
 
-### 5.3 Zombie Detection (`resilience.mli`)
+### 5.3 Zombie Detection (`lib/coord/coord_resilience.mli`)
 
 ```ocaml
 module Zombie : sig
   val is_zombie : ?threshold:float -> string -> bool
-  val is_zombie_for_agent : agent_name:string -> string -> bool
+  val is_zombie_for_agent :
+    ?keeper_threshold_sec:float ->
+    ?agent_threshold_sec:float ->
+    ?agent_type:string ->
+    agent_name:string ->
+    string ->
+    bool
   val is_keeper : name:string -> agent_type:string -> bool
 end
 ```

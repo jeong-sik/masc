@@ -47,18 +47,24 @@ module Zombie = struct
     Time.is_stale ~threshold last_seen_iso
 
   (** Check if agent is a keeper by name pattern AND/OR agent_type field.
-      Name-only matching is insufficient: any agent named "keeper-*-agent"
-      would get the extended 7-day threshold without this check. *)
+      Name-only matching is insufficient: agents with [agent_type="keeper"]
+      but no keeper-shaped name still need the keeper threshold, while
+      legacy keeper-named agents keep the same behavior. *)
   let is_keeper ~name ~agent_type =
     is_keeper_name name
     || String.lowercase_ascii (String.trim agent_type) = "keeper"
 
   (** Check if an agent is a zombie, using keeper threshold for keeper agents *)
-  let is_zombie_for_agent ~agent_name last_seen_iso =
+  let is_zombie_for_agent
+      ?(keeper_threshold_sec = Env_config_runtime.Zombie.keeper_threshold_seconds)
+      ?(agent_threshold_sec = default_zombie_threshold)
+      ?(agent_type = "")
+      ~agent_name
+      last_seen_iso =
     let threshold =
-      if is_keeper_name agent_name
-      then Env_config_runtime.Zombie.keeper_threshold_seconds
-      else default_zombie_threshold
+      if is_keeper ~name:agent_name ~agent_type
+      then keeper_threshold_sec
+      else agent_threshold_sec
     in
     is_zombie ~threshold last_seen_iso
 end

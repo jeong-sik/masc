@@ -60,12 +60,12 @@ let cleanup_zombies
           match read_agent_with_repair config path with
           | Ok agent
             when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
-                 (let threshold =
-                    if Coord_resilience.Zombie.is_keeper ~name:agent.name ~agent_type:agent.agent_type
-                    then keeper_threshold_sec
-                    else agent_threshold_sec
-                  in
-                  Coord_resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
+                 Coord_resilience.Zombie.is_zombie_for_agent
+                   ~keeper_threshold_sec
+                   ~agent_threshold_sec
+                   ~agent_type:agent.agent_type
+                   ~agent_name:agent.name
+                   agent.last_seen ->
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
           | Error err ->

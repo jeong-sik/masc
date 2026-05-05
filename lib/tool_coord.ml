@@ -208,8 +208,8 @@ let safe_read_backlog (ctx : context) =
         version = 1;
       }
 
-let safe_is_zombie_agent ~agent_name last_seen =
-  try Coord.is_zombie_agent ~agent_name last_seen
+let safe_is_zombie_agent ?agent_type ~agent_name last_seen =
+  try Coord.is_zombie_agent ?agent_type ~agent_name last_seen
   with
   | Sys_error _ | Yojson.Json_error _ -> false
   | exn ->
@@ -374,7 +374,10 @@ let status_summary_string (ctx : context) =
       (fun (agent : Masc_domain.agent) ->
         Coord_query.safe_yield ();
         let is_zombie =
-          safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
+          safe_is_zombie_agent
+            ~agent_type:agent.agent_type
+            ~agent_name:agent.name
+            agent.last_seen
         in
         (agent, is_zombie))
       agents

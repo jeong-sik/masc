@@ -69,17 +69,25 @@ module Zombie : sig
       - [name] matches the keeper-name convention, OR
       - [agent_type] equals ["keeper"] (case-insensitive, trimmed)
 
-      Name-only matching is insufficient because any agent named
-      [keeper-*-agent] would otherwise get the extended 7-day
-      threshold without the type field check. *)
+      Name-only matching is insufficient because non-pattern keeper
+      agents still need the keeper threshold, while legacy
+      [keeper-*-agent] names keep the same behavior. *)
 
   val is_zombie_for_agent :
-    agent_name:string -> string -> bool
-  (** [is_zombie_for_agent ~agent_name last_seen_iso] uses
+    ?keeper_threshold_sec:float ->
+    ?agent_threshold_sec:float ->
+    ?agent_type:string ->
+    agent_name:string ->
+    string ->
+    bool
+  (** [is_zombie_for_agent ?keeper_threshold_sec ?agent_threshold_sec
+      ?agent_type ~agent_name last_seen_iso] uses
       {!Env_config_runtime.Zombie.keeper_threshold_seconds} when
-      [agent_name] matches {!is_keeper_name}, otherwise falls
-      back to {!default_zombie_threshold}.  This is the canonical
-      "should I evict this agent" predicate for the gc loop. *)
+      {!is_keeper} matches the name or type, otherwise falls back to
+      {!default_zombie_threshold}.  Callers may override both
+      thresholds for deterministic tests or one-off cleanup windows.
+      This is the canonical "should I evict this agent" predicate for
+      the gc loop. *)
 end
 
 (** {1 Zero-Zombie protocol}

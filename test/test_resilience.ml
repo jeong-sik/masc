@@ -192,6 +192,15 @@ let test_zombie_for_agent_keeper_600s () =
   check bool "600s old keeper agent is not zombie" false
     (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
+let test_zombie_for_agent_keeper_type_600s () =
+  (* Non-pattern keeper agents must also get the keeper threshold. *)
+  let ts = make_iso_seconds_ago 600.0 in
+  check bool "600s old agent_type=keeper is not zombie" false
+    (Coord_resilience.Zombie.is_zombie_for_agent
+       ~agent_type:"keeper"
+       ~agent_name:"regular-bot"
+       ts)
+
 let test_zombie_for_agent_keeper_4000s () =
   (* 4000s old keeper agent: should be zombie (exceeds keeper threshold 3600s) *)
   let ts = make_iso_seconds_ago 4000.0 in
@@ -244,6 +253,7 @@ let () =
     "Zombie.is_zombie_for_agent", [
       test_case "regular 600s" `Quick test_zombie_for_agent_regular_600s;
       test_case "keeper 600s" `Quick test_zombie_for_agent_keeper_600s;
+      test_case "keeper type 600s" `Quick test_zombie_for_agent_keeper_type_600s;
       test_case "keeper 4000s" `Quick test_zombie_for_agent_keeper_4000s;
       test_case "keeper recent" `Quick test_zombie_for_agent_keeper_recent;
     ];

@@ -53,6 +53,25 @@ val source_header :
     testing. *)
 val rel_under : string -> string -> string
 
+(** [tree_node_limit_of_query value] applies the workspace tree route's
+    [limit] query parameter defaulting and [1, max_tree_node_limit] clamp.
+    Invalid or missing values fall back to the route default. Exposed for
+    unit testing. *)
+val tree_node_limit_of_query : string option -> int
+
+(** [scan_dir ~base ~depth ~max_depth ~max_nodes acc dir] returns at most
+    [max_nodes] tree nodes. The cap prevents a dashboard file-tree request
+    against a large workspace root from monopolizing the server event loop.
+    Exposed for regression testing. *)
+val scan_dir :
+  base:string ->
+  depth:int ->
+  max_depth:int ->
+  max_nodes:int ->
+  Yojson.Safe.t list ->
+  string ->
+  Yojson.Safe.t list
+
 (** [valid_git_ref s] is [true] iff [s] is a non-empty, ≤256-char string
     drawn from the conservative ref/SHA charset and not starting with
     ["-"]. Used to refuse query-string values that could be parsed as

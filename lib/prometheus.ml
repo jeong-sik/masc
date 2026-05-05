@@ -853,6 +853,14 @@ let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
 let metric_llm_provider_capability_drops =
   "masc_llm_provider_capability_drops_total"
+let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
+let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"
+let metric_llm_provider_requests_started =
+  "masc_llm_provider_requests_started_total"
+let metric_llm_provider_errors = "masc_llm_provider_errors_total"
+let metric_llm_provider_retries = "masc_llm_provider_retries_total"
+let metric_llm_provider_input_tokens = "masc_llm_provider_input_tokens_total"
+let metric_llm_provider_output_tokens = "masc_llm_provider_output_tokens_total"
 let metric_fallback_triggered =
   "masc_fallback_triggered_total"
 
@@ -1405,6 +1413,27 @@ let init () =
     Counter;
   add metric_llm_provider_capability_drops
     "Total OAS capability drops from LLM providers, labeled by model and field"
+    Counter;
+  add metric_llm_provider_cache_hits
+    "Total OAS LLM cache hits, labeled by model"
+    Counter;
+  add metric_llm_provider_cache_misses
+    "Total OAS LLM cache misses, labeled by model"
+    Counter;
+  add metric_llm_provider_requests_started
+    "Total OAS LLM requests started, labeled by model"
+    Counter;
+  add metric_llm_provider_errors
+    "Total OAS LLM request errors, labeled by model"
+    Counter;
+  add metric_llm_provider_retries
+    "Total OAS LLM retries, labeled by provider, model, and attempt"
+    Counter;
+  add metric_llm_provider_input_tokens
+    "Total OAS LLM input tokens, labeled by provider and model"
+    Counter;
+  add metric_llm_provider_output_tokens
+    "Total OAS LLM output tokens, labeled by provider and model"
     Counter;
   add metric_fallback_triggered
     "Total fallback events across the LLM cascade pipeline, labeled by kind \

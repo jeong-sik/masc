@@ -413,6 +413,13 @@ val metric_tool_call_duration : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string
 val metric_llm_provider_capability_drops : string
+val metric_llm_provider_cache_hits : string
+val metric_llm_provider_cache_misses : string
+val metric_llm_provider_requests_started : string
+val metric_llm_provider_errors : string
+val metric_llm_provider_retries : string
+val metric_llm_provider_input_tokens : string
+val metric_llm_provider_output_tokens : string
 val metric_fallback_triggered : string
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
     fallback event across the cascade pipeline. Labels: [kind] enumerates

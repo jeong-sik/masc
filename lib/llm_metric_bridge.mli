@@ -31,6 +31,21 @@ val emit_request_latency : model_id:string -> latency_ms:int -> unit
 (** Emit a capability drop observation to the Prometheus counter. *)
 val emit_capability_drop : model_id:string -> field:string -> unit
 
+(** Emit cache hit/miss observations from OAS metrics callbacks. *)
+val emit_cache_hit : model_id:string -> unit
+val emit_cache_miss : model_id:string -> unit
+
+(** Emit request lifecycle observations from OAS metrics callbacks. *)
+val emit_request_start : model_id:string -> unit
+val emit_error : model_id:string -> unit
+val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
+val emit_token_usage :
+  provider:string ->
+  model_id:string ->
+  input_tokens:int ->
+  output_tokens:int ->
+  unit
+
 (** Canonical metric name for the §7.3.2 unified fallback counter. *)
 val fallback_triggered_metric : string
 

@@ -57,6 +57,7 @@
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
         test_keeper_usage_trust_counter
+        test_llm_metric_bridge
         test_cost_usd_source_attribution_10318
         test_cost_ledger_pricing_model_10318
         test_response_model_empty_10083
@@ -264,6 +265,7 @@
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
           test_keeper_usage_trust_counter
+          test_llm_metric_bridge
           test_cost_usd_source_attribution_10318
           test_cost_ledger_pricing_model_10318
           test_response_model_empty_10083

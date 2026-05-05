@@ -28,10 +28,17 @@
     Upper bound ≈ 6 × 10 × 10 = 600 series.  No runtime cardinality
     guard; if a deployment introduces unbounded custom model ids,
     revisit with an allowlist or drop the [model] label. *)
-let http_status_metric = "masc_llm_provider_http_status_total"
+let http_status_metric = Prometheus.metric_llm_provider_http_status
 
 (** Canonical metric name for silent capability drops. *)
 let capability_drop_metric = Prometheus.metric_llm_provider_capability_drops
+let cache_hit_metric = Prometheus.metric_llm_provider_cache_hits
+let cache_miss_metric = Prometheus.metric_llm_provider_cache_misses
+let request_start_metric = Prometheus.metric_llm_provider_requests_started
+let error_metric = Prometheus.metric_llm_provider_errors
+let retry_metric = Prometheus.metric_llm_provider_retries
+let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
+let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
 
 (** Emit a single HTTP status observation to the Prometheus counter.
 
@@ -54,6 +61,48 @@ let emit_capability_drop ~model_id ~field =
   Prometheus.inc_counter capability_drop_metric
     ~labels:[("model", model_id); ("field", field)]
     ()
+
+let emit_cache_hit ~model_id =
+  Prometheus.inc_counter cache_hit_metric
+    ~labels:[("model", model_id)]
+    ()
+
+let emit_cache_miss ~model_id =
+  Prometheus.inc_counter cache_miss_metric
+    ~labels:[("model", model_id)]
+    ()
+
+let emit_request_start ~model_id =
+  Prometheus.inc_counter request_start_metric
+    ~labels:[("model", model_id)]
+    ()
+
+let emit_error ~model_id =
+  Prometheus.inc_counter error_metric
+    ~labels:[("model", model_id)]
+    ()
+
+let emit_retry ~provider ~model_id ~attempt =
+  Prometheus.inc_counter retry_metric
+    ~labels:
+      [
+        ("provider", provider);
+        ("model", model_id);
+        ("attempt", string_of_int attempt);
+      ]
+    ()
+
+let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
+  if input_tokens > 0 then
+    Prometheus.inc_counter input_tokens_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      ~delta:(Float.of_int input_tokens)
+      ();
+  if output_tokens > 0 then
+    Prometheus.inc_counter output_tokens_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      ~delta:(Float.of_int output_tokens)
+      ()
 
 (** Canonical metric name for the unified fallback counter (§7.3.2 Zero
     Silent Failure). Per-class counters (capability_drops,
@@ -80,7 +129,7 @@ let emit_fallback_triggered ~kind ~detail =
     which fires for every completed HTTP request regardless of whether
     the AfterTurn hook later runs.  Provides redundant latency
     observability so a broken hook does not blank out the dashboard. *)
-let request_latency_metric = "masc_llm_provider_request_latency_seconds"
+let request_latency_metric = Prometheus.metric_llm_provider_request_latency
 
 (** Emit a single latency observation to the Prometheus histogram.
 
@@ -96,17 +145,19 @@ let emit_request_latency ~model_id ~latency_ms =
 (** Build the OAS Metrics.t sink.
 
     Currently wired through:
+    - [on_cache_hit]    → masc_llm_provider_cache_hits_total
+    - [on_cache_miss]   → masc_llm_provider_cache_misses_total
+    - [on_request_start] → masc_llm_provider_requests_started_total
     - [on_http_status]   → masc_llm_provider_http_status_total
     - [on_request_end]   → masc_llm_provider_request_latency_seconds
-
-    Other callbacks ([on_cache_hit/miss], [on_request_start], [on_error],
-    transport-independent extras) inherit the default no-op from
-    [Llm_provider.Metrics.noop].  Add more relays here as their
-    consuming dashboards land. *)
+    - [on_error]        → masc_llm_provider_errors_total
+    - [on_retry]        → masc_llm_provider_retries_total
+    - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total *)
 let make_sink () : Llm_provider.Metrics.t =
-  let open Llm_provider.Metrics in
   {
-    noop with
+    on_cache_hit = emit_cache_hit;
+    on_cache_miss = emit_cache_miss;
+    on_request_start = emit_request_start;
     on_http_status =
       (fun ~provider ~model_id ~status ->
         emit_http_status ~provider ~model_id ~status);
@@ -116,6 +167,9 @@ let make_sink () : Llm_provider.Metrics.t =
     on_capability_drop =
       (fun ~model_id ~field ->
         emit_capability_drop ~model_id ~field);
+    on_error = (fun ~model_id ~error:_ -> emit_error ~model_id);
+    on_retry = emit_retry;
+    on_token_usage = emit_token_usage;
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

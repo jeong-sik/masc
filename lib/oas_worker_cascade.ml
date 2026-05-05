@@ -395,8 +395,13 @@ let cascade_metrics_for_candidates
   in
   let metrics =
     Oas_compat.Metrics.make
+      ~on_cache_hit:(fun ~model_id ->
+        Llm_metric_bridge.emit_cache_hit ~model_id)
+      ~on_cache_miss:(fun ~model_id ->
+        Llm_metric_bridge.emit_cache_miss ~model_id)
       ~on_request_start:(fun ~model_id ->
-        record_attempt_start capture ~candidate_cfgs ~model_id)
+        record_attempt_start capture ~candidate_cfgs ~model_id;
+        Llm_metric_bridge.emit_request_start ~model_id)
       ~on_request_end:(fun ~model_id ~latency_ms ->
         ensure_terminal_attempt capture ~candidate_cfgs ~model_id
           ~latency_ms:(Some latency_ms) ~error:None;
@@ -408,7 +413,8 @@ let cascade_metrics_for_candidates
         Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms)
       ~on_error:(fun ~model_id ~error ->
         ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-          ~latency_ms:None ~error:(Some error))
+          ~latency_ms:None ~error:(Some error);
+        Llm_metric_bridge.emit_error ~model_id)
       ~on_capability_drop:(fun ~model_id ~field ->
         (* The explicit cascade metrics object bypasses the global
            Llm_metric_bridge sink, so capability-drop telemetry must be
@@ -423,6 +429,11 @@ let cascade_metrics_for_candidates
            Delegating to [Llm_metric_bridge.emit_http_status] keeps
            the label shape a single source of truth. *)
         Llm_metric_bridge.emit_http_status ~provider ~model_id ~status)
+      ~on_retry:(fun ~provider ~model_id ~attempt ->
+        Llm_metric_bridge.emit_retry ~provider ~model_id ~attempt)
+      ~on_token_usage:(fun ~provider ~model_id ~input_tokens ~output_tokens ->
+        Llm_metric_bridge.emit_token_usage
+          ~provider ~model_id ~input_tokens ~output_tokens)
       ()
   in
   (capture, metrics)

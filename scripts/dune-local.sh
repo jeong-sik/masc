@@ -120,6 +120,7 @@ _needs_opam_lock() {
   [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 1
   [[ "${_subcommand}" != "clean" ]] || return 1
   [[ "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]] || return 1
+  command -v opam >/dev/null 2>&1 || return 1
   return 0
 }
 

@@ -58,15 +58,24 @@ let json_response ~status req reqd json =
   Http.Response.json ~status ~request:req
     (Yojson.Safe.to_string json) reqd
 
+(* Strip CR/LF and other control characters from a value before placing
+   it into an HTTP response header. RFC 7230 §3.2.4 prohibits CR/LF in
+   field-value, and an unsanitized name with "\r\nSet-Cookie: ..." would
+   let an attacker inject arbitrary headers via the keeper query param. *)
+let sanitize_header_value s =
+  String.map (fun c ->
+    let code = Char.code c in
+    if code < 0x20 || code = 0x7f then '_' else c) s
+
 (* Encode the workspace source tag as a single header value so the
    frontend can render hints ("Playground 없음 — 프로젝트로 fallback")
    without parsing the JSON body. *)
 let source_header source =
   let v = match source with
     | `Project -> "project"
-    | `Playground name -> "playground:" ^ name
-    | `PlaygroundMissing name -> "playground_missing:" ^ name
-    | `KeeperUnknown name -> "keeper_unknown:" ^ name
+    | `Playground name -> "playground:" ^ sanitize_header_value name
+    | `PlaygroundMissing name -> "playground_missing:" ^ sanitize_header_value name
+    | `KeeperUnknown name -> "keeper_unknown:" ^ sanitize_header_value name
   in
   [("X-Workspace-Source", v)]
 
@@ -349,12 +358,14 @@ let add_routes router =
              else if not (Sys.file_exists safe) then
                json_response ~status:`Not_found request reqd (json_error "File not found")
              else
-               match git_run_lines ~cwd:base ["blame"; "--porcelain"; file_path] with
+               let rel = String.sub safe (String.length base + 1)
+                 (String.length safe - String.length base - 1) in
+               match git_run_lines ~cwd:base ["blame"; "--porcelain"; rel] with
                | [] ->
                  json_response_with_source ~status:`OK ~source request reqd (`List [])
                | lines ->
                  let entries = parse_blame_porcelain lines in
-                 let grouped = group_blame_entries file_path entries in
+                 let grouped = group_blame_entries rel entries in
                  json_response_with_source ~status:`OK ~source request reqd (`List grouped))
          request reqd)
 
@@ -380,7 +391,9 @@ let add_routes router =
              if safe = base then
                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
              else
-               match git_run_lines ~cwd:base ["diff"; base_ref; "--"; file_path] with
+               let rel = String.sub safe (String.length base + 1)
+                 (String.length safe - String.length base - 1) in
+               match git_run_lines ~cwd:base ["diff"; base_ref; "--"; rel] with
                | [] ->
                  json_response_with_source ~status:`OK ~source request reqd
                    (`Assoc [("unified", `List []); ("has_changes", `Bool false)])

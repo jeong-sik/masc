@@ -1125,6 +1125,7 @@
 (include stanzas/test_local_review_script.inc)
 (include stanzas/test_magentic_ledger_cap.inc)
 (include stanzas/test_masc_dirname_ssot.inc)
+(include stanzas/test_masc_error_is_retryable.inc)
 (include stanzas/test_mcp_post_sse_e2e.inc)
 (include stanzas/test_mcp_tool_matrix.inc)
 (include stanzas/test_meta_cognition_snapshot.inc)

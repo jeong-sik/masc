@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [0.19.11] - 2026-05-06
+
+### Added
+- `scripts/verify_audit_claim.sh`: deterministic verifier for audit count claims (`<expected> <pattern> <path...>`). Forces measurement against the working tree before count claims are acted on. Origin: 2026-05-06 hallucinated audit cascade where a "16 silent-empty antipatterns" claim cross-cited by 4 keepers measured as 2 against actual code (8x overstated). Exit 0 on match, 1 on mismatch with overstatement ratio.
+
 ## [0.19.10] - 2026-05-05
 
 ### Added

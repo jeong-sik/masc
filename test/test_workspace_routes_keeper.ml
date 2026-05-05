@@ -175,6 +175,18 @@ let test_valid_ref_path_form () =
 let test_valid_ref_caret () =
   Alcotest.(check bool) "HEAD^ is valid" true (W.valid_git_ref "HEAD^")
 
+let test_valid_ref_plus () =
+  Alcotest.(check bool) "feature+v2 (branch with '+') is valid"
+    true (W.valid_git_ref "feature+v2")
+
+let test_valid_ref_upstream_brace () =
+  Alcotest.(check bool) "@{upstream} revision is valid"
+    true (W.valid_git_ref "@{upstream}")
+
+let test_valid_ref_reflog_brace () =
+  Alcotest.(check bool) "HEAD@{1} reflog revision is valid"
+    true (W.valid_git_ref "HEAD@{1}")
+
 let test_valid_ref_rejects_leading_dash () =
   Alcotest.(check bool) "leading dash refused"
     false (W.valid_git_ref "-L1,9999")
@@ -226,6 +238,9 @@ let () =
         ; Alcotest.test_case "40-char SHA"       `Quick test_valid_ref_sha
         ; Alcotest.test_case "origin/main"       `Quick test_valid_ref_path_form
         ; Alcotest.test_case "HEAD^"             `Quick test_valid_ref_caret
+        ; Alcotest.test_case "feature+v2"        `Quick test_valid_ref_plus
+        ; Alcotest.test_case "@{upstream}"       `Quick test_valid_ref_upstream_brace
+        ; Alcotest.test_case "HEAD@{1}"          `Quick test_valid_ref_reflog_brace
         ; Alcotest.test_case "rejects -L1,9999"  `Quick test_valid_ref_rejects_leading_dash
         ; Alcotest.test_case "rejects empty"     `Quick test_valid_ref_rejects_empty
         ; Alcotest.test_case "rejects whitespace" `Quick test_valid_ref_rejects_whitespace

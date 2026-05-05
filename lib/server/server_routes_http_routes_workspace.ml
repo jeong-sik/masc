@@ -116,9 +116,17 @@ let rel_under base safe =
     else safe
 
 (* Reject anything that could be parsed by git as an option (leading
-   "-") or that contains separators outside the conservative ref/SHA
-   charset. Defense against `?base_ref=-L1,9999` style injection
-   even on git versions that lack [--end-of-options]. *)
+   "-") or that contains separators outside the conservative ref/SHA +
+   revision-syntax charset. Defense against `?base_ref=-L1,9999` style
+   injection even on git versions that lack [--end-of-options].
+
+   Charset rationale:
+   - alphanumerics + [._/-]: ordinary ref/branch/tag names
+   - [~^@]: revision-syntax suffix operators (HEAD~1, HEAD^, @{u})
+   - [+]: valid in branch names per [git check-ref-format]
+   - [{}]: needed for [@{upstream}] / [HEAD@{1}] expressions
+   Excluded: [: ! ? * \ space NUL] — separators with shell or git
+   pathspec semantics that callers should not need in [base_ref]. *)
 let valid_git_ref s =
   let n = String.length s in
   n > 0 && n <= 256 && s.[0] <> '-'
@@ -126,7 +134,8 @@ let valid_git_ref s =
        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
        || (c >= '0' && c <= '9')
        || c = '/' || c = '.' || c = '_' || c = '-'
-       || c = '~' || c = '^' || c = '@')
+       || c = '~' || c = '^' || c = '@' || c = '+'
+       || c = '{' || c = '}')
        s
 
 (* --- Recursive file tree --- *)
@@ -398,15 +407,18 @@ let add_routes router =
                json_response ~status:`Not_found request reqd (json_error "File not found")
              else
                let rel = rel_under base safe in
-               match git_run_lines_or_error ~cwd:base
+               (* Blame keeps the original silent-empty contract: a file
+                  that exists in the working tree but is not yet tracked
+                  in HEAD (newly added, .gitignore'd, etc.) is a valid
+                  caller scenario, and surfacing git's non-zero exit as
+                  4xx would break it. The end-of-options separator still
+                  blocks `-L1,9999`-style argv injection. *)
+               match git_run_lines ~cwd:base
                        ["blame"; "--porcelain"; "--"; rel]
                with
-               | Error _ ->
-                 json_response ~status:`Bad_request request reqd
-                   (json_error "git blame failed")
-               | Ok [] ->
+               | [] ->
                  json_response_with_source ~status:`OK ~source request reqd (`List [])
-               | Ok lines ->
+               | lines ->
                  let entries = parse_blame_porcelain lines in
                  let grouped = group_blame_entries rel entries in
                  json_response_with_source ~status:`OK ~source request reqd (`List grouped))

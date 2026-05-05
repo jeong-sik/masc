@@ -29,6 +29,9 @@ let with_env name value f =
 let check_float label expected actual =
   Alcotest.(check (float 0.001)) label expected actual
 
+let check_bool label expected actual =
+  Alcotest.(check bool) label expected actual
+
 (* ── happy path: in-range parses ─────────────────────────────────── *)
 
 let test_in_range_zero () =
@@ -103,6 +106,41 @@ let test_default_above_one_clamped () =
     (C.get_ratio
        ~default:1.7 "MASC_TEST_RATIO_DEFAULT_GT1_XYZ123")
 
+let test_default_nan_sanitised () =
+  (* [Float.min nan 1.0] propagates NaN, so a naive clamp would
+     return NaN when default = NaN.  Pin the contract that the
+     helper must always return a finite [0, 1] value. *)
+  let r =
+    C.get_ratio
+      ~default:Float.nan "MASC_TEST_RATIO_DEFAULT_NAN_XYZ123"
+  in
+  check_bool "NaN default sanitised to finite" true
+    (Float.is_finite r);
+  check_bool "NaN default sanitised within [0, 1]" true
+    (r >= 0.0 && r <= 1.0)
+
+let test_default_pos_inf_sanitised () =
+  let r =
+    C.get_ratio
+      ~default:Float.infinity
+      "MASC_TEST_RATIO_DEFAULT_PINF_XYZ123"
+  in
+  check_bool "+inf default sanitised to finite" true
+    (Float.is_finite r);
+  check_bool "+inf default sanitised within [0, 1]" true
+    (r >= 0.0 && r <= 1.0)
+
+let test_default_neg_inf_sanitised () =
+  let r =
+    C.get_ratio
+      ~default:Float.neg_infinity
+      "MASC_TEST_RATIO_DEFAULT_NINF_XYZ123"
+  in
+  check_bool "-inf default sanitised to finite" true
+    (Float.is_finite r);
+  check_bool "-inf default sanitised within [0, 1]" true
+    (r >= 0.0 && r <= 1.0)
+
 (* ── runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -141,5 +179,11 @@ let () =
             test_default_below_zero_clamped;
           Alcotest.test_case "default >1 clamped to 1.0" `Quick
             test_default_above_one_clamped;
+          Alcotest.test_case "default NaN sanitised to finite [0,1]"
+            `Quick test_default_nan_sanitised;
+          Alcotest.test_case "default +inf sanitised to finite [0,1]"
+            `Quick test_default_pos_inf_sanitised;
+          Alcotest.test_case "default -inf sanitised to finite [0,1]"
+            `Quick test_default_neg_inf_sanitised;
         ] );
     ]

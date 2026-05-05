@@ -70,10 +70,18 @@ let get_float_nonneg ~default name =
     parses ([< 0.0], [> 1.0], or non-finite) fall back to
     [default].  The default itself is also clamped to
     [\[0.0, 1.0\]] as defense-in-depth so a future caller cannot
-    accidentally introduce an out-of-range default. *)
+    accidentally introduce an out-of-range default.
+
+    NaN-safety note: [Float.min nan 1.0] / [Float.max nan 0.0]
+    propagate NaN, so a naive [Float.max 0.0 (Float.min 1.0 v)]
+    would still return NaN when [v] is NaN.  We sanitise non-
+    finite [default] inputs to [0.0] before clamping. *)
 let get_ratio ~default name =
-  let clamp01 v = Float.max 0.0 (Float.min 1.0 v) in
-  let safe_default = clamp01 default in
+  let sanitise v =
+    if not (Float.is_finite v) then 0.0
+    else Float.max 0.0 (Float.min 1.0 v)
+  in
+  let safe_default = sanitise default in
   let parsed = get_float ~default:safe_default name in
   if (not (Float.is_finite parsed)) || parsed < 0.0 || parsed > 1.0
   then safe_default

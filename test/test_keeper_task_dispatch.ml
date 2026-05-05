@@ -55,6 +55,22 @@ let task_by_title config title =
   | Some task -> task
   | None -> failwith (Printf.sprintf "task not found: %s" title)
 
+let set_task_created_at_by_title config ~title ~created_at =
+  let backlog = Coord.read_backlog config in
+  let seen = ref false in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         if String.equal task.title title
+         then (
+           seen := true;
+           { task with created_at })
+         else task)
+      backlog.tasks
+  in
+  if not !seen then failwith (Printf.sprintf "task not found: %s" title);
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+
 let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
   {
     strict = true;
@@ -311,6 +327,25 @@ let test_claim_empty_room () =
       match Yojson.Safe.Util.member "error" json with
       | `String _ -> () (* also ok *)
       | _ -> fail "expected result or error in empty room claim")
+
+let test_claim_prefers_oldest_same_priority_task () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    ignore
+      (Coord.add_task config ~title:"Fresh P0" ~priority:1
+         ~description:"newer high-priority work");
+    ignore
+      (Coord.add_task config ~title:"Stale P0" ~priority:1
+         ~description:"older high-priority work");
+    set_task_created_at_by_title config ~title:"Fresh P0"
+      ~created_at:"2026-05-05T12:00:00Z";
+    set_task_created_at_by_title config ~title:"Stale P0"
+      ~created_at:"2026-05-04T12:00:00Z";
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    check string "oldest same-priority task claimed first" "Stale P0"
+      Yojson.Safe.Util.(
+        json |> member "claimed_task" |> member "title" |> to_string))
 
 let test_claim_respects_active_goal_ids () =
   with_room (fun config ->
@@ -991,6 +1026,8 @@ let () =
       test_case "stale current_task_id clears from backlog" `Quick
         test_stale_current_task_id_is_cleared_from_backlog;
       test_case "claim empty room" `Quick test_claim_empty_room;
+      test_case "claim prefers oldest same-priority task" `Quick
+        test_claim_prefers_oldest_same_priority_task;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
       test_case "claim falls back from empty auto goal scope" `Quick

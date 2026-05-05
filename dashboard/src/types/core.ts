@@ -116,6 +116,8 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
+export type BoardVoteDirection = 'up' | 'down'
+
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -139,6 +141,8 @@ export interface BoardPost {
   tags: string[]
   votes: number
   vote_balance?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
   comment_count: number
   created_at: string
   updated_at: string
@@ -161,6 +165,8 @@ export interface BoardComment {
   vote_balance?: number
   votes_up?: number
   votes_down?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
 }
 
 export type BoardReactionTargetType = 'post' | 'comment'

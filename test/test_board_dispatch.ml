@@ -434,6 +434,53 @@ let test_vote_flip () =
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
 
+let test_current_vote_lookup () =
+  let vote_label = Option.map Board.vote_direction_to_string in
+  match
+    Board_dispatch.create_post ~author:"state-test" ~content:"state vote"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok vote ->
+           Alcotest.(check (option string)) "post vote starts empty" None
+             (vote_label vote));
+      ignore (Board_dispatch.vote ~voter:"reader" ~post_id:pid ~direction:Board.Up);
+      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok vote ->
+           Alcotest.(check (option string)) "post vote state" (Some "up")
+             (vote_label vote));
+      (match
+         Board_dispatch.add_comment ~post_id:pid ~author:"commenter"
+           ~content:"vote this comment" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok comment ->
+           let cid = Board.Comment_id.to_string comment.id in
+           (match
+              Board_dispatch.current_vote_for_comment ~voter:"reader"
+                ~comment_id:cid
+            with
+            | Error e -> Alcotest.fail (Board.show_board_error e)
+            | Ok vote ->
+                Alcotest.(check (option string)) "comment vote starts empty" None
+                  (vote_label vote));
+           ignore
+             (Board_dispatch.vote_comment ~voter:"reader" ~comment_id:cid
+                ~direction:Board.Down);
+           match
+             Board_dispatch.current_vote_for_comment ~voter:"reader"
+               ~comment_id:cid
+           with
+           | Error e -> Alcotest.fail (Board.show_board_error e)
+           | Ok vote ->
+               Alcotest.(check (option string)) "comment vote state"
+                 (Some "down") (vote_label vote))
+
 let test_vote_persisted_by_flusher_actor () =
   try
     Eio_main.run @@ fun env ->
@@ -779,6 +826,8 @@ let () =
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
       Alcotest.test_case "dedup" `Quick (with_eio test_vote_dedup);
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
+      Alcotest.test_case "current vote lookup" `Quick
+        (with_eio test_current_vote_lookup);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
     ];

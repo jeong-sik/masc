@@ -142,15 +142,32 @@ val board_actor_author_for_write : string -> string
     the keeper's canonical name regardless of which alias the
     write request used. *)
 
+val board_voter_query : Httpun.Request.t -> string option
+(** Reads and canonicalizes the board [voter] query parameter. *)
+
+val board_current_vote_for_post :
+  voter:string option -> post_id:string -> Board.vote_direction option option
+(** [None] means no voter was supplied; [Some None] means a voter was
+    supplied but has not voted on this post. *)
+
+val board_current_vote_for_comment :
+  voter:string option -> comment_id:string -> Board.vote_direction option option
+
 (** {1 Dashboard helpers} *)
 
-val board_comment_dashboard_json : Board.comment -> Yojson.Safe.t
+val board_comment_dashboard_json :
+  ?current_vote:Board.vote_direction option ->
+  Board.comment ->
+  Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
     [author_identity] field appended via
     {!board_actor_identity_json}. *)
 
 val board_post_dashboard_json :
-  author_karma:int -> Board.post -> Yojson.Safe.t
+  ?current_vote:Board.vote_direction option ->
+  author_karma:int ->
+  Board.post ->
+  Yojson.Safe.t
 (** [board_post_dashboard_json ~author_karma p] renders a post
     with explicit operator-visible fields:
 

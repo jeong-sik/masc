@@ -237,7 +237,7 @@ let readiness_handler _request reqd =
             ]))
       reqd
 
-let board_post_detail_json ~response_format ~post_id =
+let board_post_detail_json ~voter ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
@@ -253,8 +253,15 @@ let board_post_detail_json ~response_format ~post_id =
               post_id (Board_types.show_board_error err);
             []
       in
-      let post_json = board_post_dashboard_json ~author_karma post in
-      let comments_json = `List (List.map board_comment_dashboard_json comments) in
+      let current_vote = board_current_vote_for_post ~voter ~post_id in
+      let post_json = board_post_dashboard_json ?current_vote ~author_karma post in
+      let comments_json =
+        `List (List.map (fun (comment : Board.comment) ->
+          let comment_id = Board.Comment_id.to_string comment.id in
+          let current_vote = board_current_vote_for_comment ~voter ~comment_id in
+          board_comment_dashboard_json ?current_vote comment
+        ) comments)
+      in
       let json =
         if String.equal (String.lowercase_ascii (String.trim response_format)) "flat" then
           match post_json with

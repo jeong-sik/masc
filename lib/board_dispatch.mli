@@ -187,11 +187,21 @@ val list_comments : ?limit:int -> unit -> Board.comment list
 
 (** {1 Votes} *)
 
+val current_vote_for_post :
+  voter:string ->
+  post_id:string ->
+  (Board.vote_direction option, Board.board_error) Result.t
+
 val vote :
   voter:string ->
   post_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
+
+val current_vote_for_comment :
+  voter:string ->
+  comment_id:string ->
+  (Board.vote_direction option, Board.board_error) Result.t
 
 val vote_comment :
   voter:string ->

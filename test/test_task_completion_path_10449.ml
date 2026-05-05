@@ -7,7 +7,7 @@
 open Alcotest
 module CT = Masc_mcp.Coord
 module L = Coord_task_lifecycle
-module T = Types
+module T = Masc_domain
 
 let empty_links : T.task_execution_links = {
   operation_id = None;

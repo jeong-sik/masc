@@ -605,8 +605,24 @@ let classify_recommendation (info : Health.provider_info) :
       | Some (fingerprint, count) -> Some fingerprint, count
       | None -> None, 0
     in
+    (* Reviewer #13194: [same_fingerprint_count] is accumulated across the
+       provider's lifetime via [provider_info.top_fingerprints], not the
+       rolling [events_in_window].  A busy provider that once accumulated
+       5+ identical failures would otherwise gate [Investigate] forever
+       even when the recent window is healthy.  Couple the gate with a
+       rolling-window floor (the recent window must have seen at least
+       as many events as the fingerprint count we are reacting to) AND
+       a low trust-score check (so a healthy window overrides the
+       lifetime artifact).  The two extra conditions keep the
+       recommendation responsive to the live signal without losing
+       the stuck-fingerprint detection it was built for. *)
+    let stuck_fingerprint =
+      same_fingerprint_count >= 5
+      && info.events_in_window >= 5
+      && trust_score < 0.50
+    in
     let action =
-      if same_fingerprint_count >= 5 then Some Investigate
+      if stuck_fingerprint then Some Investigate
       else if trust_score < 0.10 && info.events_in_window >= 30 then
         Some Investigate
       else if trust_score < 0.10 then Some Disable

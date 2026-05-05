@@ -100,6 +100,7 @@ let buffer_cap = 64
    30 s default stand. *)
 let flush_interval_sec_ref = ref 30.0
 let last_flush_ref = ref 0.0
+let uninitialized_record_warned_ref = ref false
 
 let set_flush_interval_for_test sec = flush_interval_sec_ref := sec
 
@@ -108,6 +109,7 @@ let set_flush_interval_for_test sec = flush_interval_sec_ref := sec
 let reset_for_test () =
   Stdlib.Mutex.protect mu (fun () ->
     store_path_ref := None;
+    uninitialized_record_warned_ref := false;
     Queue.clear buffer;
     (* Initialize the clock to "now" rather than 0.0 so tests that pin a
        large flush interval can verify batching without the [now -.
@@ -149,6 +151,14 @@ let do_flush () =
   (* #10348: bump last_flush even on no-op / failed open so the time-based
      re-evaluation in [record] doesn't hammer this path on every event. *)
   last_flush_ref := Unix.gettimeofday ()
+
+let warn_uninitialized_record_once () =
+  if not !uninitialized_record_warned_ref then begin
+    uninitialized_record_warned_ref := true;
+    Log.warn ~ctx:"heuristic_metrics"
+      "record called before init; buffering metric events until init \
+       installs a base_path"
+  end
 
 (* #9919: the pre-fix emit at [keeper_hooks_oas.post_tool_use_failure]
    produced an exact tuple [(site="post_tool_use_failure", raw=1.0,
@@ -232,10 +242,12 @@ let init ~base_path =
       let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
       let path = Filename.concat masc_dir "heuristic_metrics.jsonl" in
       let _ = scrub_legacy_degenerate_rows path in
-      store_path_ref := Some path)
+      store_path_ref := Some path;
+      if not (Queue.is_empty buffer) then do_flush ())
 
 let record (e : event) =
   Stdlib.Mutex.protect mu (fun () ->
+    if !store_path_ref = None then warn_uninitialized_record_once ();
     let json = event_to_json e in
     Queue.add json buffer;
     let now = Unix.gettimeofday () in

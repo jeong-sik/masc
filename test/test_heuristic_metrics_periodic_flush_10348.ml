@@ -85,6 +85,21 @@ let test_large_interval_still_batches () =
   HM.flush ();
   Alcotest.(check int) "explicit flush still works" 1 (count_lines path)
 
+(* Audit regression: [record] before [init] used to leave data only in the
+   volatile in-memory buffer, with no warning and no flush when [init] finally
+   installed the store path.  Late init must make already-buffered rows durable. *)
+let test_late_init_flushes_preinit_buffer () =
+  let base = tmp_base () in
+  HM.reset_for_test ();
+  HM.set_flush_interval_for_test 1e9;
+  HM.record (make_event ~site:"preinit");
+  let path = ledger_path base in
+  Alcotest.(check int) "pre-init record is not durable yet" 0
+    (count_lines path);
+  HM.init ~base_path:base;
+  Alcotest.(check int) "late init flushes buffered record" 1
+    (count_lines path)
+
 let () =
   Random.self_init ();
   Alcotest.run "heuristic_metrics_periodic_flush_10348" [
@@ -95,5 +110,7 @@ let () =
         `Quick test_multiple_records_below_cap;
       Alcotest.test_case "large interval batches; explicit flush works"
         `Quick test_large_interval_still_batches;
+      Alcotest.test_case "late init flushes pre-init buffer"
+        `Quick test_late_init_flushes_preinit_buffer;
     ];
   ]

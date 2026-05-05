@@ -3,9 +3,9 @@
     Replaces seven hardcoded [Masc_oas_bridge.run_safe ~timeout_s:N.N]
     literals scattered across the lib tree. Each caller is named so
     its hardcoded default is preserved (compute-heavy budgets at
-    120/180s) or raised (fantasy 60s budgets at 300s), while the
-    operator can tune any single caller via env without touching the
-    others.
+    120/180s), raised (old fantasy worker budgets at 300s), or bounded
+    for advisory dashboard judges, while the operator can tune any
+    single caller via env without touching the others.
 
     Lookup order in {!timeout_sec} (top wins):
     1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC].
@@ -58,7 +58,12 @@ val known_callers : unit -> caller list
 
 val global_default_sec : float
 (** Hardcoded final fallback (seconds) — also reused as the typed
-    default for compute-heavy callers ({!Auto_responder} /
-    {!Dashboard_provider_runs} / {!Governance_judge} /
-    {!Operator_judge}). Exposed so tests can pin the per-caller
-    table without hardcoding the literal. *)
+    default for worker-style callers ({!Auto_responder} /
+    {!Dashboard_provider_runs}). Exposed so tests can pin the
+    per-caller table without hardcoding the literal. *)
+
+val dashboard_judge_default_sec : float
+(** Default timeout for advisory dashboard judge callers
+    ({!Governance_judge} / {!Operator_judge}). Kept below the default
+    judge refresh interval so a slow CLI-backed judge degrades instead
+    of pinning the dashboard for minutes. *)

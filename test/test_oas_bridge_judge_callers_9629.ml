@@ -10,11 +10,17 @@
    issue.  Governance_judge had a 300s default but lived outside the
    per-caller Prometheus counter.
 
+   #13113 follow-up: live /Users/dancer/me evidence showed the opposite
+   failure mode once both judges shared the 300s worker default: a dashboard
+   governance judge can pin a CLI-backed child for minutes and make operator
+   surfaces / health checks stale.  Dashboard judges are advisory, so their
+   checked-in default is now bounded separately while env overrides stay
+   available.
+
    This test pins:
 
-     1. Both judges resolve to [global_default_sec] (300s) by default,
-        matching the other LLM-via-OAS-worker callers
-        (Auto_responder / Dashboard_provider_runs).
+     1. Both judges resolve to [dashboard_judge_default_sec] by default,
+        instead of inheriting the generic 300s worker budget.
      2. The legacy per-caller env vars
         ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
         [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) are still
@@ -50,15 +56,15 @@ let clear_all_envs () =
     (Cfg.known_callers ());
   List.iter (fun name -> Unix.putenv name "") legacy_envs
 
-let test_judge_defaults_match_global () =
+let test_judge_defaults_are_bounded () =
   clear_all_envs ();
   Alcotest.(check (float 0.0001))
-    "Governance_judge defaults to global_default_sec"
-    Cfg.global_default_sec
+    "Governance_judge defaults to dashboard_judge_default_sec"
+    Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
   Alcotest.(check (float 0.0001))
-    "Operator_judge defaults to global_default_sec"
-    Cfg.global_default_sec
+    "Operator_judge defaults to dashboard_judge_default_sec"
+    Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
 
 let test_legacy_env_honoured_as_fallback () =
@@ -118,8 +124,8 @@ let () =
     [
       ( "defaults",
         [
-          Alcotest.test_case "judge defaults match global default"
-            `Quick test_judge_defaults_match_global;
+          Alcotest.test_case "judge defaults are bounded"
+            `Quick test_judge_defaults_are_bounded;
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );

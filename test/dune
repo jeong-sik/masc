@@ -1058,6 +1058,7 @@
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
+(include stanzas/test_dune_local_script.inc)
 (include stanzas/test_env_config_coord_git_local_timeout.inc)
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 (include stanzas/test_env_config_dashboard_execution_timeouts.inc)

@@ -28,6 +28,7 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'tools', label: 'Tools', description: 'MCP tool 호출' },
   { kind: 'approve', label: 'Approve', description: 'APPROVE thread 마커' },
   { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
+  { kind: 'cascade', label: 'Cascade', description: 'provider/model/cost/latency gutter chip' },
   { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]
 

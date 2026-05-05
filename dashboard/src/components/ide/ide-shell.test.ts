@@ -61,4 +61,39 @@ describe('IdeShell', () => {
     fireEvent.click(buttonByText(container, 'EXPLODE'))
     expect(route.value.params.layers).toBe('explode')
   })
+
+  it('renders the Cascade layer button and toggles it via URL', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const btn = buttonByText(container, 'Cascade')
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(btn)
+    expect(route.value.params.layers).toBe('cascade')
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(btn)
+    expect(route.value.params.layers).toBeUndefined()
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('hydrates cascade layer button from the ?layers=cascade URL param', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', layers: 'cascade' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(container.textContent).toContain('Active overlays')
+    expect(container.textContent).toContain('Cascade')
+  })
 })

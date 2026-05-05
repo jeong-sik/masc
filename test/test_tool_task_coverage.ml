@@ -110,6 +110,13 @@ let assert_task_claimed_by ctx agent_name =
   | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
   | _ -> failwith "expected task to be claimed"
 
+let assert_task_awaiting_verification_by ctx agent_name =
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+      assert (assignee = agent_name);
+      assert (verification_id <> "")
+  | _ -> failwith "expected task to be awaiting verification"
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -1002,6 +1009,41 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
   assert (not success);
   assert (str_contains result "requires tool(s) unavailable");
   assert_task_todo ctx;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "transition_submit_for_verification_accepts_todo_pr_evidence_without_required_tool" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+  let claim_success, claim_result =
+    Tool_task.handle_transition
+      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+        ])
+  in
+  assert (not claim_success);
+  assert (str_contains claim_result "requires tool(s) unavailable");
+  assert_task_todo ctx;
+  let submit_success, submit_result =
+    Tool_task.handle_transition
+      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "submit_for_verification");
+          ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+          ( "notes",
+            `String
+              "Implementation is already merged; submit PR evidence for independent verification." );
+        ])
+  in
+  if not submit_success then failwith submit_result;
+  assert_task_awaiting_verification_by ctx "codex-mcp-client";
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 

@@ -61,6 +61,16 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 | §3.2 `snapshot()` 항상 `0/0/max`, `insert_sorted`/`waiter`/`global.waiters` dead code | **C** | 코드는 클레임대로 동작. 그러나 dead code는 **의도된 RFC-0026 admission router 관측 scaffolding** — 삭제하면 cascade-layer router 도입 시 재구현 비용. | 코드 코멘트에 "observability scaffolding; do not delete" 추가 (PR-B). |
 | §3.3 metric `inflight` ↔ 실제 concurrency 불일치 (`wait_ms:0` 항상) | B | passthrough 의도이므로 wait_ms:0이 정확한 표현. 단 Prometheus histogram의 외부 관찰자가 "passthrough mode" label을 못 보기 때문에 misread 위험. | follow-up: dashboard label + RFC-0026 cascade router 도입 시 같이 정리. |
 
+> **2026-05-05 보충 (PR #13219, post-audit)**: §3.1 분류는 *release-side passthrough*에 한해 정확하지만, audit이 보지 못한 별도의 **acquire-side cancel race** 가 존재했음. 적용 범위는 admission_queue 가 아니라 sister 모듈 `lib/keeper/keeper_turn_slot.ml` 의 `acquire_bounded` 였지만, "B intentional passthrough" 라는 광범위 분류가 같은 keeper-turn 영역의 acquire path 점검을 가렸다는 점에서 본 매트릭스의 sibling 항목이다.
+>
+> 증상: production 2026-05-05 12:00 KST `16 keeper × ~1500s reactive_slot` 잠김. `holder_table` 에 stale entry + `Eio.Semaphore` permit leak (ghost holder).
+>
+> 원인: `acquire_bounded` 가 `record_holder` 를 `Eio.Semaphore.acquire` 직후 호출하고, caller (autonomous/reactive/turn) 가 그 다음 라인에서 `slot_state.acquired_* := true` 를 set 하는 분리 구조. `record_holder` 의 `Eio.Mutex.use_rw` acquire 시점이 cancel point라, cancel 시 ① `holder_table` 에 entry 가 들어가지만 ② `acquired_*` flag 가 false 로 남음. release path 가 flag 가드라 leak.
+>
+> 해소: PR #13219 — `record_holder` 호출을 caller side flag set 직후로 이동 (3 acquire site 모두). `~protect:true` mutex 가 entry 를 보호하므로 release path 가 cleanup 가능.
+>
+> **분류 보충**: §3.1 행의 `with_permit` 자체는 여전히 B (passthrough 의도 정확) 이지만, **acquire-side bookkeeping race** 라는 별도 차원에서 같은 keeper-turn 인접 영역에 **A (cancel-unsafe critical race)** 가 발견된 사례. 미래 audit 의 keeper-turn 영역 점검 시 ① release path passthrough, ② acquire-side cancel race (`record_holder` vs `acquired_*` flag 분리), ③ `Fun.protect ~finally` 가드 조건 의 3축을 분리해서 평가할 것.
+
 ### §4 Resilience
 
 | 클레임 | 분류 | 근거 | 해소 |

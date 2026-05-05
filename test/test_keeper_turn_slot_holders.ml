@@ -287,6 +287,65 @@ let test_force_release_marker_is_acquisition_scoped () =
     ~expected:reactive_before
     ~actual:(KK.reactive_turn_semaphore_value_for_test ())
 
+(* Reviewer #13190: existing tests exercise force_release_stale_holder
+   while the outer fiber's protect-finalizer eventually runs to
+   completion.  The watchdog restart path looks different — the
+   supervisor force-releases the slot from outside the stale fiber,
+   the stale fiber raises before normal cleanup, and a replacement
+   keeper takes the slot under the same keeper_name.  Pin that the
+   replacement's acquire/release cycle is unaffected by any leftover
+   marker from the previous generation: both semaphores must return
+   to baseline even after the outer fiber exits via exception, and a
+   fresh acquisition under the same keeper_name must complete cleanly
+   with semaphores still at baseline. *)
+let test_force_release_marker_does_not_leak_to_replacement () =
+  let keeper_name = "diag-replacement-leak" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
+  let exception Outer_simulated_raise in
+  (try
+     let _ =
+       KK.with_keeper_turn_slot_for_test
+         ~keeper_name
+         ~channel:Masc_mcp.Keeper_world_observation.Reactive
+         (fun ~semaphore_wait_ms:_ ->
+           let released = KK.force_release_stale_holder ~keeper_name in
+           if not (List.mem "turn" released) then
+             failwith "force release did not report turn slot";
+           if not (List.mem "reactive" released) then
+             failwith "force release did not report reactive slot";
+           raise Outer_simulated_raise)
+     in
+     ()
+   with Outer_simulated_raise -> ());
+  assert_eq
+    ~msg:"turn semaphore restored to baseline after outer raise"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq
+    ~msg:"reactive semaphore restored to baseline after outer raise"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ -> ())
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "replacement acquire timed out — leftover force-release \
+                 marker may have skipped the previous release");
+  assert_eq
+    ~msg:"turn semaphore baseline preserved after replacement keeper run"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq
+    ~msg:"reactive semaphore baseline preserved after replacement keeper run"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
+
 let () =
   let cases =
     [
@@ -310,6 +369,8 @@ let () =
         test_force_release_stale_holder_restores_slots_once;
       "force release markers are acquisition scoped",
         test_force_release_marker_is_acquisition_scoped;
+      "force release marker does not leak to replacement",
+        test_force_release_marker_does_not_leak_to_replacement;
     ]
   in
   List.iter

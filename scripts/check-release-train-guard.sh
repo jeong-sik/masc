@@ -59,6 +59,11 @@ latest_tag_for_major() {
   git tag --list "v${major}.*" --sort=-v:refname | head -n1
 }
 
+package_version_from_tag() {
+  local tag_version="${1#v}"
+  printf '%s\n' "$tag_version" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)([-+].*)?$/\1/'
+}
+
 version_gt() {
   local left="$1"
   local right="$2"
@@ -77,9 +82,9 @@ if [[ -z "$base_ref" ]]; then
     exit 0
   fi
 
-  latest_tag_version="${latest_tag#v}"
-  printf 'Release train guard OK: no base ref provided, head=%s latest_tag=%s\n' \
-    "$head_package_version" "$latest_tag_version"
+  latest_tag_version="$(package_version_from_tag "$latest_tag")"
+  printf 'Release train guard OK: no base ref provided, head=%s latest_tag_ref=%s latest_tag_version=%s\n' \
+    "$head_package_version" "$latest_tag" "$latest_tag_version"
   exit 0
 fi
 
@@ -91,9 +96,9 @@ latest_tag="$(latest_tag_for_major "$base_major")"
 if [[ "$head_major" != "$base_major" ]]; then
   head_latest_tag="$(latest_tag_for_major "$head_major")"
   if [[ -n "$head_latest_tag" ]]; then
-    head_latest_tag_version="${head_latest_tag#v}"
+    head_latest_tag_version="$(package_version_from_tag "$head_latest_tag")"
     if version_gt "$head_latest_tag_version" "$head_package_version"; then
-      fail "head ref $head_ref uses package version $head_package_version, which is older than latest tag v$head_latest_tag_version in major $head_major; pick a newer version before crossing release lines"
+      fail "head ref $head_ref uses package version $head_package_version, which is older than latest tag $head_latest_tag in major $head_major (package version $head_latest_tag_version); pick a newer version before crossing release lines"
     fi
   fi
 fi
@@ -110,11 +115,11 @@ if [[ -z "$latest_tag" ]]; then
   fail "base ref $base_ref starts bootstrap release line $base_package_version with no published v${base_major}.* tag, and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release line"
 fi
 
-latest_tag_version="${latest_tag#v}"
+latest_tag_version="$(package_version_from_tag "$latest_tag")"
 
 if [[ "$base_package_version" == "$latest_tag_version" ]]; then
-  printf 'Release train guard OK: base=%s head=%s latest_tag=%s\n' \
-    "$base_package_version" "$head_package_version" "$latest_tag_version"
+  printf 'Release train guard OK: base=%s head=%s latest_tag_ref=%s latest_tag_version=%s\n' \
+    "$base_package_version" "$head_package_version" "$latest_tag" "$latest_tag_version"
   exit 0
 fi
 
@@ -122,13 +127,13 @@ if version_gt "$base_package_version" "$latest_tag_version"; then
   if [[ "$head_package_version" == "$base_package_version" ]]; then
     # PR does not change the package version — allow it through with a warning.
     # The pending release tag is a repo-level concern, not this PR's responsibility.
-    printf '::warning::Release train: base %s is ahead of latest tag v%s. Tag v%s when ready.\n' \
-      "$base_package_version" "$latest_tag_version" "$base_package_version"
-    printf 'Release train guard OK (warn): base=%s head=%s latest_tag=%s (pending release)\n' \
-      "$base_package_version" "$head_package_version" "$latest_tag_version"
+    printf '::warning::Release train: base %s is ahead of latest tag %s (package version %s). Tag v%s when ready.\n' \
+      "$base_package_version" "$latest_tag" "$latest_tag_version" "$base_package_version"
+    printf 'Release train guard OK (warn): base=%s head=%s latest_tag_ref=%s latest_tag_version=%s (pending release)\n' \
+      "$base_package_version" "$head_package_version" "$latest_tag" "$latest_tag_version"
     exit 0
   fi
-  fail "base ref $base_ref advertises unreleased package version $base_package_version while latest tag is v$latest_tag_version, and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release train"
+  fail "base ref $base_ref advertises unreleased package version $base_package_version while latest tag is $latest_tag (package version $latest_tag_version), and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release train"
 fi
 
-fail "base ref $base_ref has package version $base_package_version, which is older than latest tag v$latest_tag_version; sync version truth before merging"
+fail "base ref $base_ref has package version $base_package_version, which is older than latest tag $latest_tag (package version $latest_tag_version); sync version truth before merging"

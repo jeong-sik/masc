@@ -123,7 +123,7 @@ let test_cross_major_reset_ignores_legacy_2x_tags () =
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "uses base major tag lineage" true
         (contains_substring stdout
-           "Release train guard OK: base=2.263.0 head=0.2.0 latest_tag=2.263.0"))
+           "Release train guard OK: base=2.263.0 head=0.2.0 latest_tag_ref=v2.263.0 latest_tag_version=2.263.0"))
 
 let test_cross_major_reset_rejects_older_head_series_version () =
   with_temp_dir "release-train-older-head" (fun dir ->
@@ -142,6 +142,42 @@ let test_cross_major_reset_rejects_older_head_series_version () =
         (contains_substring stderr
            "older than latest tag v0.1.1 in major 0"))
 
+let test_train_build_suffix_tag_matches_package_version () =
+  with_temp_dir "release-train-build-suffix" (fun dir ->
+      ignore (run_shell_ok ~cwd:dir "git init -q");
+      ignore (run_shell_ok ~cwd:dir "git config user.email test@example.com");
+      ignore (run_shell_ok ~cwd:dir "git config user.name tester");
+      ignore (run_shell_ok ~cwd:dir "git checkout -qb main");
+      commit_version ~dir ~version:"0.19.10" ~message:"main release";
+      ignore (run_shell_ok ~cwd:dir "git tag v0.19.10-505");
+      let script = install_script_under_test dir in
+      let cmd =
+        Printf.sprintf "/bin/bash %s --base main --head main" (quote script)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir cmd in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "normalizes train build tag suffix" true
+        (contains_substring stdout
+           "Release train guard OK: base=0.19.10 head=0.19.10 latest_tag_ref=v0.19.10-505 latest_tag_version=0.19.10"))
+
+let test_no_base_logs_raw_suffixed_tag_ref () =
+  with_temp_dir "release-train-no-base-suffix" (fun dir ->
+      ignore (run_shell_ok ~cwd:dir "git init -q");
+      ignore (run_shell_ok ~cwd:dir "git config user.email test@example.com");
+      ignore (run_shell_ok ~cwd:dir "git config user.name tester");
+      ignore (run_shell_ok ~cwd:dir "git checkout -qb main");
+      commit_version ~dir ~version:"0.19.10" ~message:"main release";
+      ignore (run_shell_ok ~cwd:dir "git tag v0.19.10-505");
+      let script = install_script_under_test dir in
+      let cmd = Printf.sprintf "/bin/bash %s --head main" (quote script) in
+      let code, stdout, stderr = run_shell ~cwd:dir cmd in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "prints raw tag ref and normalized version" true
+        (contains_substring stdout
+           "Release train guard OK: no base ref provided, head=0.19.10 latest_tag_ref=v0.19.10-505 latest_tag_version=0.19.10"))
+
 let test_pending_bootstrap_series_warns_without_blocking_same_version () =
   with_temp_dir "release-train-bootstrap" (fun dir ->
       init_repo_with_release_tags dir;
@@ -158,7 +194,7 @@ let test_pending_bootstrap_series_warns_without_blocking_same_version () =
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "warns for pending tag" true
         (contains_substring stdout
-           "Release train guard OK (warn): base=0.2.0 head=0.2.0 latest_tag=0.1.1 (pending release)"))
+           "Release train guard OK (warn): base=0.2.0 head=0.2.0 latest_tag_ref=v0.1.1 latest_tag_version=0.1.1 (pending release)"))
 
 let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
   with_temp_dir "release-train-block-next" (fun dir ->
@@ -189,6 +225,10 @@ let () =
             test_cross_major_reset_ignores_legacy_2x_tags;
           test_case "cross-major reset rejects older head series version" `Quick
             test_cross_major_reset_rejects_older_head_series_version;
+          test_case "train build suffix tag matches package version" `Quick
+            test_train_build_suffix_tag_matches_package_version;
+          test_case "no-base run logs raw suffixed tag ref" `Quick
+            test_no_base_logs_raw_suffixed_tag_ref;
           test_case "pending bootstrap series warns on same version" `Quick
             test_pending_bootstrap_series_warns_without_blocking_same_version;
           test_case "pending bootstrap series blocks next train" `Quick

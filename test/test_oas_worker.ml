@@ -3518,6 +3518,20 @@ let test_keeper_checkpoint_store_writes_oas_history () =
         | latest :: _ -> latest
         | [] -> Alcotest.fail "expected OAS snapshot history file"
       in
+      let canonical_stat =
+        Unix.stat
+          (Keeper_checkpoint_store.oas_checkpoint_path
+             ~session_dir ~session_id:"trace-history")
+      in
+      let latest_snapshot_stat =
+        Unix.stat
+          (Keeper_checkpoint_store.oas_history_path
+             ~session_dir ~snapshot_id:latest_snapshot_id)
+      in
+      Alcotest.(check int) "latest history shares canonical device"
+        canonical_stat.st_dev latest_snapshot_stat.st_dev;
+      Alcotest.(check int) "latest history hardlinks canonical checkpoint"
+        canonical_stat.st_ino latest_snapshot_stat.st_ino;
       match
         Keeper_checkpoint_store.load_oas_history_file
           ~session_dir ~snapshot_id:latest_snapshot_id

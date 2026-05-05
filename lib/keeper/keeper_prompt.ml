@@ -18,6 +18,44 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 let keeper_constitution () =
   Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
+let critical_prompt_anchors =
+  [ ("continuity", "<continuity>");
+    ("pr_merge_rules", "PR merge rules");
+    ("state_block_template", "State block template");
+    ("world", "<world>") ]
+
+let missing_critical_prompt_anchors prompt =
+  List.filter_map
+    (fun (name, needle) ->
+      if String_util.contains_substring prompt needle then None else Some name)
+    critical_prompt_anchors
+
+let critical_prompt_recovery_block =
+  String.concat "\n"
+    [ "<continuity>";
+      "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
+      "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
+      "State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing DONE, NEXT, Goal, and Decisions.";
+      "</continuity>";
+      "";
+      "<world>";
+      "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
+      "</world>" ]
+
+let ensure_critical_prompt_anchors prompt =
+  match missing_critical_prompt_anchors prompt with
+  | [] -> prompt
+  | missing ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_prompt_failures
+        ~labels:[("prompt", "critical_prompt_anchors")]
+        ();
+      Log.Keeper.warn
+        "build_keeper_system_prompt: critical prompt anchors missing (%s); \
+         appending recovery guard"
+        (String.concat "," missing);
+      prompt ^ "\n\n" ^ critical_prompt_recovery_block
+
 (** Format an *allowlist* for prompt rendering.  An empty allowlist means
     the gate is OFF (any account-accessible repo is permitted), so we
     render that intent explicitly — otherwise the LLM sees the literal
@@ -209,6 +247,7 @@ let build_keeper_system_prompt
       active_goals_block;
       "</identity>";
     ]
+  |> ensure_critical_prompt_anchors
 
 (* XML wrapping stays in code — it is structure, not prompt content. *)
 let direct_reply_mode_body () =

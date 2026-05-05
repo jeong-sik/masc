@@ -128,6 +128,13 @@ let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
 let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
 
+(* Wire diagnostic gauges into Prometheus on module load. The Prometheus
+   module pulls via this snapshotter on every /metrics scrape, so there is
+   no extra periodic fiber. Pool name maps directly to [label]. *)
+let () =
+  Prometheus.register_turn_slot_snapshotter
+    (fun ~pool ~now -> snapshot_holders ~label:pool ~now)
+
 type autonomous_waiter =
   {
     ticket : int;

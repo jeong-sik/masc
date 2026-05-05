@@ -405,6 +405,22 @@ let metric_keeper_semaphore_wait_timeout =
 let metric_keeper_slot_yield_total =
   "masc_keeper_slot_yield_total"
 
+(* Diagnostic: longest current hold time per turn-slot pool.
+
+   Operators correlate this with WARN "semaphore wait > 180s" events.
+   When this gauge climbs into the minutes for [pool=turn] while
+   [turn_available=0] (saturation) it isolates fleet-blocker root
+   cause to a long-held turn rather than a release leak.
+
+   Cardinality = 3 (one series per pool: turn / autonomous / reactive). *)
+let metric_keeper_turn_slot_max_held_seconds =
+  "masc_keeper_turn_slot_max_held_seconds"
+
+(* Companion gauge: number of keepers currently holding a slot per pool.
+   At saturation [held_count == capacity] for the relevant pool. *)
+let metric_keeper_turn_slot_held_count =
+  "masc_keeper_turn_slot_held_count"
+
 let metric_timeout_policy_overshoot =
   "masc_timeout_policy_overshoot_total"
 
@@ -1247,6 +1263,15 @@ let init () =
     "Total autonomous turn slot yields (successfully yielded and reacquired). \
      Labels: keeper."
     Counter;
+  add metric_keeper_turn_slot_max_held_seconds
+    "Longest current hold time across all keepers in this slot pool. \
+     Labels: pool (turn | autonomous | reactive). Updated on /metrics scrape."
+    Gauge;
+  add metric_keeper_turn_slot_held_count
+    "Number of keepers currently holding a slot in this pool. \
+     Labels: pool (turn | autonomous | reactive). \
+     [held_count == capacity] indicates saturation."
+    Gauge;
   add metric_timeout_policy_overshoot
     "Total cooperative-cancel timeout overshoots \
      (labels: layer, origin)"
@@ -2105,6 +2130,38 @@ let start_time = Time_compat.now ()
 let update_uptime () =
   set_gauge metric_uptime_seconds (Time_compat.now () -. start_time)
 
+(* Slot holder snapshot emit. Pulled lazily on /metrics scrape so the
+   Prometheus library does not depend on the keeper module at compile
+   time — Keeper_keepalive injects the snapshotter at boot via
+   [register_turn_slot_snapshotter] below. *)
+type slot_pool_snapshotter =
+  pool:string -> now:float -> (string * float) list
+
+let slot_pool_snapshotter : (slot_pool_snapshotter option) ref = ref None
+
+let register_turn_slot_snapshotter f =
+  slot_pool_snapshotter := Some f
+
+let update_turn_slot_holder_gauges () =
+  match !slot_pool_snapshotter with
+  | None -> ()
+  | Some snap ->
+      let now = Time_compat.now () in
+      List.iter
+        (fun pool ->
+          let holders = snap ~pool ~now in
+          let count = List.length holders in
+          let max_held =
+            match holders with
+            | [] -> 0.0
+            | (_, held_for) :: _ -> held_for
+          in
+          set_gauge metric_keeper_turn_slot_max_held_seconds
+            ~labels:[("pool", pool)] max_held;
+          set_gauge metric_keeper_turn_slot_held_count
+            ~labels:[("pool", pool)] (float_of_int count))
+        ["turn"; "autonomous"; "reactive"]
+
 let fd_warn_threshold =
   Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1
 
@@ -2163,6 +2220,7 @@ let labels_to_string = function
 let to_prometheus_text () =
   update_uptime ();
   update_fd_gauges ();
+  update_turn_slot_holder_gauges ();
   (* Snapshot (name, help, metric_type, value, labels) under the mutex so
      the render phase sees a consistent view even when concurrent fibers
      are still updating [metrics].  [m.value] is mutable so we copy it

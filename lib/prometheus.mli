@@ -148,6 +148,25 @@ val metric_keeper_semaphore_wait_timeout : string
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)
 
+val metric_keeper_turn_slot_max_held_seconds : string
+(** Diagnostic gauge: longest current hold time per turn-slot pool.
+    Labels: [pool] with pool in [turn | autonomous | reactive].
+    Updated lazily on every /metrics scrape. *)
+
+val metric_keeper_turn_slot_held_count : string
+(** Diagnostic gauge: number of keepers currently holding a slot per pool.
+    Labels: [pool]. At saturation [held_count == capacity]. *)
+
+(** Snapshot function shape: given a pool name and a wall-clock [now],
+    return [(keeper_name, held_for_sec)] sorted descending by hold time. *)
+type slot_pool_snapshotter =
+  pool:string -> now:float -> (string * float) list
+
+(** Inject the slot-holder snapshot source at boot so [Prometheus] can emit
+    holder-derived gauges without compile-time dependency on the keeper
+    module. Idempotent on later calls; last writer wins. *)
+val register_turn_slot_snapshotter : slot_pool_snapshotter -> unit
+
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: gauge for keeper turn wait queue depth.
     Labels: [channel] with [autonomous_queue] for the explicit autonomous

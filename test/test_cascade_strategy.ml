@@ -62,8 +62,10 @@ let mk_ctx ?(health = H.create ())
 let mk_t ?(cycle = S.default_cycle_policy)
          ?(tiers = [])
          ?(sticky_ttl_ms = 0)
+         ?(scoring = S.default_scoring_params)
          kind : S.t =
-  { kind; cycle; tiers; sticky_ttl_ms }
+<<<<<<< HEAD
+  { kind; cycle; tiers; sticky_ttl_ms; scoring }
 
 (* ── S1 Failover ─────────────────────────────────────────────── *)
 

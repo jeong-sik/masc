@@ -90,7 +90,6 @@
         test_keeper_contract_classifier_pure
         test_keeper_compact_policy_pure
         test_heartbeat_smart
-        test_env_config_nonneg
         test_keeper_allowed_paths
         test_keeper_repo_readiness
         test_keeper_tool_surface_guard
@@ -294,7 +293,6 @@
           test_keeper_contract_classifier_pure
           test_keeper_compact_policy_pure
           test_heartbeat_smart
-          test_env_config_nonneg
           test_keeper_allowed_paths
           test_keeper_repo_readiness
           test_keeper_tool_surface_guard
@@ -1008,6 +1006,7 @@
 (include stanzas/test_auth_token_uniqueness_audit.inc)
 (include stanzas/test_base_path_prod_guard.inc)
 (include stanzas/test_board_api_e2e.inc)
+(include stanzas/test_briefing_gaps.inc)
 (include stanzas/test_briefing_json_helpers.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)
@@ -1031,6 +1030,7 @@
 (include stanzas/test_codex_cli_omission_dedup_10097.inc)
 (include stanzas/test_context_max_observed_9953.inc)
 (include stanzas/test_continuity_forward_filter.inc)
+(include stanzas/test_dashboard_feature_health.inc)
 (include stanzas/test_dashboard_goals.inc)
 (include stanzas/test_dashboard_governance_metrics.inc)
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
@@ -1045,12 +1045,15 @@
 (include stanzas/test_env_config_dashboard_execution_timeouts.inc)
 (include stanzas/test_env_config_dashboard_shell_prewarm.inc)
 (include stanzas/test_env_config_exec_timeout_10426.inc)
+(include stanzas/test_env_config_get_ratio.inc)
 (include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
+(include stanzas/test_env_config_nonneg.inc)
 (include stanzas/test_env_config_sandbox.inc)
 (include stanzas/test_env_config_sidecar_timeouts.inc)
 (include stanzas/test_env_config_voice_bridge_timeouts.inc)
 (include stanzas/test_event_kind.inc)
+(include stanzas/test_feature_flag_registry.inc)
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_fsm_drift_per_agent_counter.inc)
@@ -1061,12 +1064,14 @@
 (include stanzas/test_governance_response_model_empty_9880.inc)
 (include stanzas/test_heartbeat_integration.inc)
 (include stanzas/test_heuristic_metrics_diagnostics.inc)
+(include stanzas/test_cascade_toml_materializer_admission.inc)
 (include stanzas/test_heuristic_metrics_scrub.inc)
 (include stanzas/test_join_required_guard_counter.inc)
 (include stanzas/test_k2_pipeline_e2e.inc)
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 (include stanzas/test_keeper_admission_policy.inc)
 (include stanzas/test_keeper_admission_router.inc)
+(include stanzas/test_keeper_alerting_path_norms.inc)
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 (include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
@@ -1110,6 +1115,7 @@
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 (include stanzas/test_keeper_tool_emission_hook.inc)
 (include stanzas/test_keeper_tool_matrix.inc)
+(include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 (include stanzas/test_keeper_turn_up_create_meta_retry.inc)

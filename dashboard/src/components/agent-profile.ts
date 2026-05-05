@@ -80,7 +80,7 @@ const activityQuery = signal('')
  *
  * Input is never mutated; caller may pass a readonly array.
  */
-export function filterRoomActivity(
+function filterRoomActivity(
   lines: readonly string[],
   query: string,
 ): readonly string[] {
@@ -97,7 +97,7 @@ function assignedTasks(name: string): Task[] {
   return tasks.value.filter(t => t.assignee === name)
 }
 
-export function keeperChatTargetName(
+function keeperChatTargetName(
   fallbackName: string,
   keeper: Pick<Keeper, 'name'> | null,
 ): string {

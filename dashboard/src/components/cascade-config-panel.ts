@@ -87,7 +87,7 @@ async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
 }
 
 
-export function candidateTone(c: CascadeCandidate): string {
+function candidateTone(c: CascadeCandidate): string {
   if (c.in_cooldown) return 'bad'
   if (c.effective_weight === 0) return 'bad'
   if (c.success_rate < 0.5) return 'bad'
@@ -95,7 +95,7 @@ export function candidateTone(c: CascadeCandidate): string {
   return 'ok'
 }
 
-export function sourceLabel(source: CascadeProfile['source']): string {
+function sourceLabel(source: CascadeProfile['source']): string {
   switch (source) {
     case 'named': return 'named'
     case 'default_fallback': return 'default'
@@ -104,7 +104,7 @@ export function sourceLabel(source: CascadeProfile['source']): string {
   }
 }
 
-export function sourceTone(source: CascadeProfile['source']): string {
+function sourceTone(source: CascadeProfile['source']): string {
   switch (source) {
     case 'named': return 'ok'
     case 'default_fallback': return 'warn'
@@ -113,7 +113,7 @@ export function sourceTone(source: CascadeProfile['source']): string {
   }
 }
 
-export function catalogSourceSummary(config: CascadeConfigResponse): string {
+function catalogSourceSummary(config: CascadeConfigResponse): string {
   if (config.source_kind === 'toml') {
     const sourcePath = config.source_path ?? 'cascade.toml'
     const jsonPath = config.config_path ?? 'cascade.json'
@@ -131,7 +131,7 @@ interface RawConfigModeSummary {
   previewTitle: string | null
 }
 
-export function rawConfigModeSummary(
+function rawConfigModeSummary(
   raw: Pick<
     CascadeRawConfigResponse,
     'source_kind' | 'source_path' | 'config_path'
@@ -163,7 +163,7 @@ export function rawConfigModeSummary(
   }
 }
 
-export function profileSummaryText(
+function profileSummaryText(
   profile: CascadeProfile,
   keepers: readonly KeeperCascadeRow[],
 ): string {
@@ -176,7 +176,7 @@ export function profileSummaryText(
   return parts.join(' · ')
 }
 
-export function profileKeeperAssignmentNote(
+function profileKeeperAssignmentNote(
   profile: CascadeProfile,
   keepers: readonly KeeperCascadeRow[],
 ): string | null {
@@ -189,7 +189,7 @@ export function profileKeeperAssignmentNote(
   return null
 }
 
-export function availableKeeperAssignments(
+function availableKeeperAssignments(
   keeperNames: readonly string[],
   keepers: readonly KeeperCascadeRow[],
 ): string[] {
@@ -204,7 +204,7 @@ export function availableKeeperAssignments(
   ).sort((left, right) => left.localeCompare(right))
 }
 
-export function validateSourceConfigText(
+function validateSourceConfigText(
   raw: Pick<CascadeRawConfigResponse, 'source_kind'> | null,
   sourceText: string,
 ): string | null {
@@ -277,7 +277,7 @@ interface KeeperCascadeRow {
  * canonical name does not match any declared profile still get a
  * bucket — callers decide how to surface the orphan case.
  */
-export function groupKeepersByCanonicalCascade(
+function groupKeepersByCanonicalCascade(
   keepers: readonly CascadeKeeperProfile[],
 ): Map<string, KeeperCascadeRow[]> {
   const map = new Map<string, KeeperCascadeRow[]>()
@@ -304,7 +304,7 @@ export function groupKeepersByCanonicalCascade(
  * Pure.  Uses a Set for O(1) membership checks against the (small)
  * declared profile list.
  */
-export function keepersWithUnknownCanonical(
+function keepersWithUnknownCanonical(
   profiles: readonly CascadeProfile[],
   keepers: readonly CascadeKeeperProfile[],
 ): CascadeKeeperProfile[] {
@@ -593,7 +593,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
   `
 }
 
-export function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
+function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
   if (p.in_cooldown) return 'bad'
   if (p.success_rate < 0.7) return 'bad'
   if (p.success_rate < 0.9) return 'warn'
@@ -609,7 +609,7 @@ export function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
  *   explicitly answers "why is this provider not being used?" in a way
  *   that the previous "row is absent" encoding could not.
  */
-export function providerStatusTone(
+function providerStatusTone(
   status?: CascadeProviderStatus,
 ): 'ok' | 'warn' | 'bad' | 'neutral' {
   switch (status) {
@@ -631,7 +631,7 @@ export function providerStatusTone(
  *
  * Zero is rendered as `0.0`, not collapsed to a dash.
  */
-export function fmtPerfTokPerSec(
+function fmtPerfTokPerSec(
   value: number | null | undefined,
 ): string {
   if (value === undefined) return '—'
@@ -647,7 +647,7 @@ function NumCell({ children }: { children: unknown }) {
   return html`<td class="py-1 text-right tabular-nums">${children}</td>`
 }
 
-export function fmtPerfLatencyPair(
+function fmtPerfLatencyPair(
   p50: number | null | undefined,
   p95: number | null | undefined,
 ): string {
@@ -671,7 +671,7 @@ export function fmtPerfLatencyPair(
  *
  * Input is never mutated.
  */
-export function filterHealthProviders(
+function filterHealthProviders(
   providers: readonly CascadeHealthProvider[],
   query: string,
 ): readonly CascadeHealthProvider[] {
@@ -801,7 +801,7 @@ function HealthTable({
   `
 }
 
-export function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' {
+function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' {
   if (entry.total === 0) return 'bad'
   if (entry.available === 0) return 'warn'
   return 'ok'
@@ -817,7 +817,7 @@ function fmtRelativeTime(tsSec: number): string {
   return `${Math.floor(deltaSec / 86400)}일 전`
 }
 
-export function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
+function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
   switch (kind) {
     case 'acquired': return 'ok'
     case 'released': return 'neutral'
@@ -825,7 +825,7 @@ export function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' 
   }
 }
 
-export function eventKindLabel(kind: CascadeCapacityEventKind): string {
+function eventKindLabel(kind: CascadeCapacityEventKind): string {
   switch (kind) {
     case 'acquired': return 'acquired'
     case 'released': return 'released'
@@ -833,7 +833,7 @@ export function eventKindLabel(kind: CascadeCapacityEventKind): string {
   }
 }
 
-export function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
+function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
   switch (kind) {
     case 'cli': return 'CLI'
     case 'ollama': return 'Ollama'
@@ -841,7 +841,7 @@ export function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): str
   }
 }
 
-export function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
+function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
   switch (k) {
     case 'ordered': return 'ok'
     case 'filtered_empty': return 'warn'
@@ -849,7 +849,7 @@ export function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad
   }
 }
 
-export function traceKindLabel(k: CascadeStrategyTraceKind): string {
+function traceKindLabel(k: CascadeStrategyTraceKind): string {
   switch (k) {
     case 'ordered': return '정렬'
     case 'filtered_empty': return '전부 차단'
@@ -857,7 +857,7 @@ export function traceKindLabel(k: CascadeStrategyTraceKind): string {
   }
 }
 
-export function traceEventMatchesSearch(
+function traceEventMatchesSearch(
   e: CascadeStrategyTraceEvent,
   query: string,
 ): boolean {

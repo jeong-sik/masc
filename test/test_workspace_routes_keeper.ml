@@ -118,6 +118,29 @@ let test_keeper_name_trimmed () =
     Alcotest.(check string) "name is trimmed" "alpha" name
   | _ -> Alcotest.fail "expected `Playground after trim"
 
+(* ─── source_header ─────────────────────────────────────────────── *)
+
+let header_value headers =
+  match headers with
+  | [(k, v)] when k = "X-Workspace-Source" -> v
+  | _ -> Alcotest.fail "expected single X-Workspace-Source header"
+
+let test_header_project () =
+  let v = header_value (W.source_header `Project) in
+  Alcotest.(check string) "project" "project" v
+
+let test_header_playground () =
+  let v = header_value (W.source_header (`Playground "alpha")) in
+  Alcotest.(check string) "playground encoding" "playground:alpha" v
+
+let test_header_playground_missing () =
+  let v = header_value (W.source_header (`PlaygroundMissing "alpha")) in
+  Alcotest.(check string) "missing encoding" "playground_missing:alpha" v
+
+let test_header_keeper_unknown () =
+  let v = header_value (W.source_header (`KeeperUnknown "ghost")) in
+  Alcotest.(check string) "unknown encoding" "keeper_unknown:ghost" v
+
 let () =
   Alcotest.run "workspace_routes_keeper"
     [ ( "classify_keeper_query"
@@ -128,5 +151,11 @@ let () =
         ; Alcotest.test_case "playground exists" `Quick test_playground_resolved
         ; Alcotest.test_case "playground missing" `Quick test_playground_missing
         ; Alcotest.test_case "name trimmed"      `Quick test_keeper_name_trimmed
+        ] )
+    ; ( "source_header"
+      , [ Alcotest.test_case "project"           `Quick test_header_project
+        ; Alcotest.test_case "playground"        `Quick test_header_playground
+        ; Alcotest.test_case "playground missing" `Quick test_header_playground_missing
+        ; Alcotest.test_case "keeper unknown"    `Quick test_header_keeper_unknown
         ] )
     ]

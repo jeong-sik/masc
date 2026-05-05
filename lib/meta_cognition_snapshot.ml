@@ -210,14 +210,10 @@ let belief_json ~limit (rule : belief_rule) sources =
         "emerging"
     in
     let confidence =
-      let support_strength =
-        (float_of_int (List.length support_agents) /. 4.0)
-        +. (float_of_int (List.length support_sources) /. 12.0)
-      in
-      let challenge_penalty =
-        float_of_int (List.length challenge_agents) /. 6.0
-      in
-      clamp ~min_v:0.05 ~max_v:0.99 (support_strength -. (0.25 *. challenge_penalty))
+      (* Beta(1 + support, 1 + challenge) expected value *)
+      let alpha = 1.0 +. Float.of_int (List.length support_agents) in
+      let beta = 1.0 +. Float.of_int (List.length challenge_agents) in
+      clamp ~min_v:0.05 ~max_v:0.99 (alpha /. (alpha +. beta))
     in
     let hearths =
       support_sources
@@ -326,9 +322,10 @@ let desire_json ~limit (rule : desire_rule) sources =
       matching |> List.map (fun source -> source.author) |> unique_non_empty
     in
     let strength =
-      clamp ~min_v:0.05 ~max_v:0.99
-        ((float_of_int (List.length source_agents) /. 4.0)
-        +. (float_of_int (List.length matching) /. 12.0))
+      (* Beta(1 + source_agents, 1) expected value — desires are not challenged *)
+      let alpha = 1.0 +. Float.of_int (List.length source_agents) in
+      let beta = 1.0 in
+      clamp ~min_v:0.05 ~max_v:0.99 (alpha /. (alpha +. beta))
     in
     Some
       (`Assoc
@@ -420,12 +417,34 @@ let active_task_count tasks =
 
 let stagnation_score ~active_agents ~active_tasks ~idle_signal_count
     ~heartbeat_count ~blocker_count =
+  (* Each signal independently normalized to [0, 1], then weighted average *)
+  let w_idle_agents = 0.35
+  and w_idle_signals = 0.20
+  and w_heartbeats   = 0.15
+  and w_blockers     = 0.20
+  and w_active_ratio = 0.10 in
+  (* weights sum to 1.0 *)
+  let idle_agents_signal =
+    if active_agents > 0 && active_tasks = 0 then 1.0 else 0.0
+  in
+  let idle_signals_signal =
+    Float.min 1.0 (Float.of_int idle_signal_count /. 8.0)
+  in
+  let heartbeat_signal =
+    Float.min 1.0 (Float.of_int heartbeat_count /. 10.0)
+  in
+  let blocker_signal =
+    Float.min 1.0 (Float.of_int blocker_count /. 12.0)
+  in
+  let active_ratio_signal =
+    Float.min 1.0 (Float.of_int active_agents /. 10.0)
+  in
   let score =
-    (if active_agents > 0 && active_tasks = 0 then 0.35 else 0.0)
-    +. min 0.25 (float_of_int idle_signal_count /. 8.0)
-    +. min 0.20 (float_of_int heartbeat_count /. 10.0)
-    +. min 0.20 (float_of_int blocker_count /. 12.0)
-    +. min 0.10 (float_of_int active_agents /. 10.0)
+    (w_idle_agents *. idle_agents_signal) +.
+    (w_idle_signals *. idle_signals_signal) +.
+    (w_heartbeats *. heartbeat_signal) +.
+    (w_blockers *. blocker_signal) +.
+    (w_active_ratio *. active_ratio_signal)
   in
   clamp ~min_v:0.0 ~max_v:1.0 score
 

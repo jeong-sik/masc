@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useState, useEffect } from 'preact/hooks'
 import {
   type CodeDocumentStore,
   type CodeDocumentLine,

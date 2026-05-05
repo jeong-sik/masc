@@ -48,7 +48,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 
-export type SurfKind =
+type SurfKind =
   | 'ok'
   | 'warn'
   | 'err'

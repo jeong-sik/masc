@@ -66,7 +66,7 @@ function lazyTabFallback(label: string) {
     opening devtools.
 
     Inputs are all primitives so the helper is trivially testable. */
-export function describeReconnecting(args: {
+function describeReconnecting(args: {
   disconnectedAt: number
   now: number
   reconnects: number
@@ -179,7 +179,7 @@ const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
     link commit hashes out to the source host — operators who land
     on the build identity dropdown usually want the diff, not the
     hash itself. */
-export function githubCommitUrl(commit: string | null | undefined): string | null {
+function githubCommitUrl(commit: string | null | undefined): string | null {
   const value = commit?.trim() ?? ''
   if (value === '') return null
   // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
@@ -193,7 +193,7 @@ export function githubCommitUrl(commit: string | null | undefined): string | nul
     build-identity dropdown. Delegates to formatElapsedCompact ("3s",
     "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
     "Unknown" so the dropdown never prints "NaNs" or "-5s". */
-export function formatUptimeSecondsHuman(
+function formatUptimeSecondsHuman(
   seconds: number | null | undefined,
 ): string {
   if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) {
@@ -209,7 +209,7 @@ export function formatUptimeSecondsHuman(
     deployment pill, Render build badge, Railway service chip — all
     surface the one-glance summary on hover and reserve the click for
     \"deep details\". \n renders verbatim in native tooltips. */
-export function composeBuildBadgeTitle(
+function composeBuildBadgeTitle(
   build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
   fallbackVersion: string | null | undefined,
 ): string {
@@ -302,7 +302,7 @@ export function BuildIdentityBadge() {
     tooltip, Vercel deployment status footer, Gmail "2 unread" with
     sender preview — all reveal the contributing items on hover so the
     operator decides whether to navigate. Exposed for tests. */
-export function summarizeAttentionPreview(
+function summarizeAttentionPreview(
   items: ReadonlyArray<{ summary?: string | null; kind?: string | null }>,
   max = 3,
 ): string[] {
@@ -327,7 +327,7 @@ export function summarizeAttentionPreview(
     indicator — label on the first line, attention previews indented
     under it. Newlines render in native title tooltips on all major
     browsers, so no HTML escaping or markup is needed. */
-export function composeHealthIndicatorTitle(
+function composeHealthIndicatorTitle(
   label: string,
   attentionLines: ReadonlyArray<string>,
 ): string {
@@ -336,7 +336,7 @@ export function composeHealthIndicatorTitle(
   return [label, ...indented].join('\n')
 }
 
-export function dashboardRouteBoundaryKey(routeState: RouteState): string {
+function dashboardRouteBoundaryKey(routeState: RouteState): string {
   const params = routeState.params
   const parts = [
     routeState.tab,
@@ -574,7 +574,7 @@ function TabContent() {
     shows. Returns empty string when window is unavailable
     (SSR/happy-dom without location) so the caller can hide the
     share affordance gracefully. */
-export function currentSectionShareUrl(): string {
+function currentSectionShareUrl(): string {
   if (typeof window === 'undefined' || window.location === undefined) {
     return ''
   }
@@ -598,7 +598,7 @@ interface BreadcrumbCrumb {
   label: string
   navigableTab: string | null
 }
-export function deriveBreadcrumbTrail(
+function deriveBreadcrumbTrail(
   tabLabel: string | null,
   sectionLabel: string | null,
   tabId: string | null,
@@ -629,7 +629,7 @@ export function deriveBreadcrumbTrail(
     Format: \"MASC · {section}\" when drilled into a section,
             \"MASC · {tab}\" when on a tab default,
             \"MASC Dashboard\" on home / unknown (original fallback). */
-export function composeDocumentTitle(
+function composeDocumentTitle(
   tabLabel: string | null,
   sectionLabel: string | null,
 ): string {

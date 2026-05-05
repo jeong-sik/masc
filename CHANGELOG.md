@@ -1,6 +1,65 @@
 # Changelog
 
 
+## [0.19.7] - 2026-05-05
+
+### Added
+- Keeper-aware workspace tree + file routes in Dashboard.
+- Dashboard token system: sp-1h half-step + 5 polish tokens.
+- IDE activity and conversation rail connected to real APIs.
+
+### Fixed
+- Release current_task_id on supervisor auto-pause (Task-138).
+- Annotate intentional non-color CSS literals with inline justification.
+
+### Changed
+- Unexport 27 internal-only helpers across common/ (+ unit test cleanup).
+
+## [0.19.6] - 2026-05-04
+
+### Added
+- Semaphore holder tracking so timeouts can name the blocker.
+- Cycle detection for fallback_cascade at load_catalog time.
+- Per-candidate cascade attempt emitted to system_log.
+- Real workspace/git API endpoints replacing IDE mock data.
+
+### Fixed
+- Reset queue-head wait clock after fairness yield + enqueue.
+- Remove duplicate write_meta_failures counters and normalize phase label.
+- Scope WorldVisualizer to Cockpit/IDE surfaces.
+
+### Changed
+- Drop 14 orphan hooks/utilities (-2001 lines).
+
+## [0.19.5] - 2026-05-03
+
+### Added
+- Alive-but-stuck detector — Prometheus signal only.
+- Keeper cadence gauges (consecutive_idle, last_productive_ts).
+- Unit tests for keeper_alerting_path pure helpers.
+
+### Fixed
+- Replace 4 "unknown" stand-ins with "aggregate" placeholder.
+- Instrument decision record JSONL append failure in unified_metrics.
+
+### Changed
+- Drop 9 orphan components (-2315 lines).
+- Drop deprecated theme-hash exports.
+
+## [0.19.4] - 2026-05-02
+
+### Added
+- Passive loop action injection — nudge keeper to act when stuck in read-only loop.
+- Prometheus counters for tool setup and task load failures.
+- Issue dependency graph: liveness recovery, cascade rotation, lifecycle timeline.
+
+### Fixed
+- Inject stream_idle_timeout default when caller omits option.
+- Data accuracy sweep for Provider Capability Matrix in Dashboard.
+- Unblock main build (printf format + Env_config_keeper rename).
+- Sync stale test defaults with Env_config_exec_timeout.
+- Silent dispatch + timeout_sec SSOT migration.
+
 ## [0.19.3] - 2026-05-02
 
 ### Added

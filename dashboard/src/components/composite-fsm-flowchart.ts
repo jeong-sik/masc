@@ -113,10 +113,14 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kcb_cooling --> kcb_clean
   end
 
-  classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:var(--rose-light)
-  classDef stable   fill:#0f1a0f,stroke:#166534,color:var(--ok-fg)
-  classDef motion   fill:#1a1305,stroke:#a16207,color:var(--amber-bright)
-  classDef error    fill:#1e0a0a,stroke:#b91c1c,color:var(--rose-light)
+  %% Mermaid classDef parser does not support CSS var() — values must be
+  %% literal CSS color tokens. Hex literals below mirror the design-system
+  %% tokens 1:1 (--rose-light=#fb7185, --ok-fg=#8ebc8e, --amber-bright=#f59e0b).
+  %% If those tokens change, sync this block and the snapshot test.
+  classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:#fb7185
+  classDef stable   fill:#0f1a0f,stroke:#166534,color:#8ebc8e
+  classDef motion   fill:#1a1305,stroke:#a16207,color:#f59e0b
+  classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fb7185
 
   class ksm_stopped,ksm_dead,ksm_zombie terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating,kcb_clean stable

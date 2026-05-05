@@ -58,6 +58,22 @@ let json_response ~status req reqd json =
   Http.Response.json ~status ~request:req
     (Yojson.Safe.to_string json) reqd
 
+(* Encode the workspace source tag as a single header value so the
+   frontend can render hints ("Playground 없음 — 프로젝트로 fallback")
+   without parsing the JSON body. *)
+let source_header source =
+  let v = match source with
+    | `Project -> "project"
+    | `Playground name -> "playground:" ^ name
+    | `PlaygroundMissing name -> "playground_missing:" ^ name
+    | `KeeperUnknown name -> "keeper_unknown:" ^ name
+  in
+  [("X-Workspace-Source", v)]
+
+let json_response_with_source ~status ~source req reqd json =
+  Http.Response.json ~status ~extra_headers:(source_header source)
+    ~request:req (Yojson.Safe.to_string json) reqd
+
 (* --- Safe path --- *)
 
 let is_digit c = c >= '0' && c <= '9'
@@ -279,7 +295,7 @@ let add_routes router =
        with_public_read
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
-           let base, _source = resolve_workspace_base ~state ~uri in
+           let base, source = resolve_workspace_base ~state ~uri in
            let depth =
              match Uri.get_query_param uri "depth" with
              | Some d -> (try max 1 (min 5 (int_of_string d)) with _ -> 3)
@@ -290,14 +306,14 @@ let add_routes router =
              else scan_dir ~base ~depth:0 ~max_depth:depth [] base
            in
            let json = `List (List.rev nodes) in
-           json_response ~status:`OK request reqd json)
+           json_response_with_source ~status:`OK ~source request reqd json)
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
-           let base, _source = resolve_workspace_base ~state ~uri in
+           let base, source = resolve_workspace_base ~state ~uri in
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->
@@ -308,7 +324,7 @@ let add_routes router =
                  try
                    let content = Fs_compat.load_file path in
                    let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
-                   json_response ~status:`OK request reqd json
+                   json_response_with_source ~status:`OK ~source request reqd json
                  with _ -> json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
                else
                  json_response ~status:`Not_found request reqd (json_error "File not found"))
@@ -318,7 +334,7 @@ let add_routes router =
        with_public_read
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
-           let base, _source = resolve_workspace_base ~state ~uri in
+           let base, source = resolve_workspace_base ~state ~uri in
            let file_path =
              match Uri.get_query_param uri "path" with
              | Some p -> p
@@ -335,18 +351,18 @@ let add_routes router =
              else
                match git_run_lines ~cwd:base ["blame"; "--porcelain"; file_path] with
                | [] ->
-                 json_response ~status:`OK request reqd (`List [])
+                 json_response_with_source ~status:`OK ~source request reqd (`List [])
                | lines ->
                  let entries = parse_blame_porcelain lines in
                  let grouped = group_blame_entries file_path entries in
-                 json_response ~status:`OK request reqd (`List grouped))
+                 json_response_with_source ~status:`OK ~source request reqd (`List grouped))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->
            let uri = Uri.of_string request.target in
-           let base, _source = resolve_workspace_base ~state ~uri in
+           let base, source = resolve_workspace_base ~state ~uri in
            let file_path =
              match Uri.get_query_param uri "path" with
              | Some p -> p
@@ -366,10 +382,10 @@ let add_routes router =
              else
                match git_run_lines ~cwd:base ["diff"; base_ref; "--"; file_path] with
                | [] ->
-                 json_response ~status:`OK request reqd
+                 json_response_with_source ~status:`OK ~source request reqd
                    (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
                | diff_lines ->
                  let unified = parse_unified_diff diff_lines in
                  let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
-                 json_response ~status:`OK request reqd json)
+                 json_response_with_source ~status:`OK ~source request reqd json)
          request reqd)

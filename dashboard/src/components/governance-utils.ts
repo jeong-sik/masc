@@ -14,7 +14,7 @@ export function getSelectedDecision(
   return items.find(item => itemKey(item) === selectedKey) ?? null
 }
 
-export function isOpenStatus(status: string): boolean {
+function isOpenStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase()
   return normalized !== 'executed' && normalized !== 'blocked' && normalized !== 'closed'
 }

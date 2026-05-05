@@ -118,11 +118,16 @@ let max_collabs metrics_list =
     - speed (0.15): Faster completion is desirable but secondary to correctness.
       Speed is normalized relative to the fastest agent in the pool to avoid
       penalizing agents working on inherently longer tasks.
-    - handoff (0.15): Successful handoffs indicate cooperative capability.
-      Equal weight to speed because coordination is as valuable as individual performance
-      in multi-agent systems.
-    - collaboration (0.10): Number of unique collaborators relative to pool max.
-      Lowest weight because this is a volume metric, not a quality metric.
+    - handoff (0.10): Successful handoffs indicate cooperative capability.
+      Reduced from 0.15 to accommodate the Thompson signal.
+    - thompson (0.15): Beta distribution expected value from Thompson Sampling.
+      Reflects accumulated vote feedback (up/down votes, quality signals,
+      guard penalties). Bridges selection-time exploration data into fitness
+      scoring, so agents with strong Thompson priors get a measurable fitness
+      boost. Alpha/(alpha+beta) is the posterior mean — a Bayesian point
+      estimate of agent quality that converges as evidence accumulates.
+
+    Weights sum to 1.0: 0.35 + 0.25 + 0.15 + 0.10 + 0.15 = 1.0.
 
     These weights are configurable via [fitness_weights]. The defaults were chosen
     to prioritize "finishes correctly" over "finishes fast" based on observed MASC
@@ -135,20 +140,35 @@ type fitness_weights = {
   w_reliability : float;
   w_speed : float;
   w_handoff : float;
-
+  w_thompson : float;
 }
 
 let default_fitness_weights : fitness_weights = {
-  w_completion = 0.40;
-  w_reliability = 0.30;
+  w_completion = 0.35;
+  w_reliability = 0.25;
   w_speed = 0.15;
-  w_handoff = 0.15;
-
+  w_handoff = 0.10;
+  w_thompson = 0.15;
 }
 
+(** Thompson Sampling confidence: Beta distribution expected value.
+
+    alpha/(alpha+beta) is the posterior mean of the Beta distribution,
+    which represents the Bayesian point estimate of agent quality based
+    on accumulated vote feedback. Returns 0.0 for agents with no
+    Thompson stats (no prior selection history). *)
+let thompson_confidence agent_id =
+  let s = Thompson_sampling.get_stats agent_id in
+  let alpha = Float.max 0.0 s.Thompson_sampling.alpha in
+  let beta = Float.max 0.0 s.Thompson_sampling.beta in
+  let sum = alpha +. beta in
+  if Float.compare sum 0.0 = 0 then 0.0
+  else alpha /. sum
+
 (** Score function for fitness calculation.
-    @param weights Optional custom weights (defaults to [default_fitness_weights]) *)
-let score_for ?(weights = default_fitness_weights) ~min_avg metrics =
+    @param weights Optional custom weights (defaults to [default_fitness_weights])
+    @param agent_id Agent name for Thompson Sampling lookup *)
+let score_for ?(weights = default_fitness_weights) ~min_avg ~agent_id metrics =
   let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
   let completion = metrics.Metrics_store_eio.task_completion_rate in
   let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
@@ -158,14 +178,15 @@ let score_for ?(weights = default_fitness_weights) ~min_avg metrics =
       Stdlib.Float.min 1.0 (min_avg /. metrics.Metrics_store_eio.avg_completion_time_s)
     else 0.0
   in
-    let score =
+  let thompson = thompson_confidence agent_id in
+  let score =
     (weights.w_completion *. completion)
     +. (weights.w_reliability *. reliability)
     +. (weights.w_speed *. speed)
     +. (weights.w_handoff *. handoff)
-
+    +. (weights.w_thompson *. thompson)
   in
-  (score, completion, reliability, speed, handoff)
+  (score, completion, reliability, speed, handoff, thompson)
 
 (** Handle masc_agent_fitness *)
 let handle_agent_fitness ctx args =
@@ -200,7 +221,8 @@ let handle_agent_fitness ctx args =
 
     let agents_json =
       List.map (fun (agent_id, metrics) ->
-        let (score, completion, reliability, speed, handoff) = score_for ~min_avg metrics in
+        let (score, completion, reliability, speed, handoff, thompson) = score_for ~min_avg ~agent_id metrics in
+        let ts = Thompson_sampling.get_stats agent_id in
         `Assoc [
           ("agent_id", `String agent_id);
           ("fitness", `Float score);
@@ -209,7 +231,15 @@ let handle_agent_fitness ctx args =
             ("reliability", `Float reliability);
             ("speed", `Float speed);
             ("handoff", `Float handoff);
-
+            ("thompson", `Float thompson);
+          ]);
+          ("thompson_stats", `Assoc [
+            ("alpha", `Float ts.Thompson_sampling.alpha);
+            ("beta", `Float ts.Thompson_sampling.beta);
+            ("selections", `Int ts.Thompson_sampling.selections);
+            ("total_votes_up", `Int ts.Thompson_sampling.total_votes_up);
+            ("total_votes_down", `Int ts.Thompson_sampling.total_votes_down);
+            ("guard_penalties_total", `Int ts.Thompson_sampling.guard_penalties_total);
           ]);
           ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
         ]

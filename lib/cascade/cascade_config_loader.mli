@@ -23,7 +23,8 @@ val invalidate_cache_entry : string -> unit
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified.
     @since 0.137.0
-    @since 0.150.0 [supports_tool_choice] field added *)
+    @since 0.150.0 [supports_tool_choice] field added
+    @since RFC-0027 PR-9a [secondary] dual-track field added *)
 type weighted_entry = {
   model: string;
   weight: int;
@@ -34,6 +35,24 @@ type weighted_entry = {
       declare verified model-side tool_choice support per cascade entry
       (e.g. Qwen3.5 w/ native Jinja chat template) without the SDK
       pattern-matching on [model_id]. *)
+  secondary: string option;
+  (** Optional dual-track fallback model for this entry (RFC-0027 PR-9).
+      When set, the resolver should use [model] as the primary attempt
+      and fall back to [secondary] when [model]'s provider rejects the
+      turn at the capability gate (e.g. CLI runtime missing per-request
+      MCP HTTP headers).  Idiomatic pairing: CLI runtime primary +
+      direct-API secondary, e.g.
+      [{ model = "gemini_cli:auto"; secondary = Some "gemini-api:gemini-3-flash" }].
+      [None] = legacy single-track entry.
+
+      JSON key: ["secondary"] inside the per-entry object.  Whitespace
+      is trimmed.  Unknown / invalid provider schemes in [secondary]
+      are not detected at parse time — the resolver surfaces them as
+      a normal provider-not-found error when fallback fires. *)
+  secondary_supports_tool_choice: bool option;
+  (** Per-entry capability override for [secondary], analogous to
+      [supports_tool_choice].  [None] when [secondary] is [None] or
+      when no explicit override is declared. *)
 }
 
 (** Catalog metadata for one named cascade profile discovered from

@@ -74,8 +74,8 @@ let latest_verification_status_by_task config =
 let verification_blocks_claim latest_status_by_task (task : Masc_domain.task) =
   match Hashtbl.find_opt latest_status_by_task task.id with
   | Some (_, `Pending)
-  | Some (_, `Assigned)
-  | Some (_, `Rejected) -> true
+  | Some (_, `Assigned) -> true
+  | Some (_, `Rejected) -> false
   | Some (_, `Passed)
   | None -> false
 

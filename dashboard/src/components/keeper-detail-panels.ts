@@ -900,17 +900,26 @@ const SPARKLINE_H = 40
 const SPARKLINE_PAD = 2
 const MODEL_NAME_MAX_LEN = 20
 
+function isFiniteMetricValue(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function miniSparkline(
-  data: number[],
+  data: Array<number | null | undefined>,
   maxOverride?: number,
 ): string {
   const W = SPARKLINE_W, H = SPARKLINE_H, pad = SPARKLINE_PAD
   const n = data.length
-  if (n < 2) return ''
-  const maxVal = maxOverride ?? Math.max(...data, 1)
-  return data.map((v, i) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad)
-    const y = H - pad - (v / maxVal) * (H - 2 * pad)
+  const points = data
+    .map((value, index) => ({ value, index }))
+    .filter((point): point is { value: number; index: number } =>
+      isFiniteMetricValue(point.value),
+    )
+  if (points.length < 2) return ''
+  const maxVal = maxOverride ?? Math.max(...points.map(point => point.value), 1)
+  return points.map(({ value, index }) => {
+    const x = pad + (index / Math.max(n - 1, 1)) * (W - 2 * pad)
+    const y = H - pad - (value / maxVal) * (H - 2 * pad)
     return `${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 }
@@ -928,9 +937,10 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const hwTokPerSec = telemetryPoints
     .map((p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second)
     .filter((value): value is number => value != null)
-  const latencies = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? 0,
+  const latencySeries = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? null,
   )
+  const latencies = latencySeries.filter(isFiniteMetricValue)
   const cacheNs = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.cache_n ?? 0,
   )
@@ -955,7 +965,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
   const wallTpsLine = wallTokPerSec.length > 1 ? miniSparkline(wallTokPerSec) : ''
   const hwTpsLine = hwTokPerSec.length > 1 ? miniSparkline(hwTokPerSec) : ''
-  const latencyLine = miniSparkline(latencies)
+  const latencyLine = miniSparkline(latencySeries)
 
   const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
 
@@ -1026,7 +1036,8 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) return null
 
-  const latencies = series.map((p: KeeperMetricPoint) => p.latency_ms ?? 0)
+  const latencySeries = series.map((p: KeeperMetricPoint) => p.latency_ms)
+  const latencies = latencySeries.filter(isFiniteMetricValue)
   const costs = series.map((p: KeeperMetricPoint) => p.cost_usd ?? 0)
   const W = SPARKLINE_W, H = SPARKLINE_H
 
@@ -1040,7 +1051,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const latencyLine = miniSparkline(latencies)
+  const latencyLine = miniSparkline(latencySeries)
   const costLine = miniSparkline(costs)
 
   // Fallback markers on latency chart

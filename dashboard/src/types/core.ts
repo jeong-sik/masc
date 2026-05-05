@@ -220,7 +220,7 @@ export interface InferenceTelemetry {
   } | null
   reasoning_tokens: number | null
   peak_memory_gb: number | null
-  request_latency_ms: number
+  request_latency_ms: number | null
 }
 
 export interface PromptSegmentTelemetry {
@@ -258,7 +258,7 @@ export interface KeeperMetricPoint {
   context_ratio: number
   context_tokens: number
   context_max: number
-  latency_ms: number
+  latency_ms: number | null
   generation: number
   channel: string
   is_handoff: boolean

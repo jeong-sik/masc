@@ -42,7 +42,12 @@ let mk_cascade_exhausted () =
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
-       { cascade_name = cascade_name "test"; configured_labels = [] })
+       {
+         cascade_name = cascade_name "test";
+         configured_labels = [];
+         required_tool_names = [];
+         provider_rejections = [];
+       })
 
 let mk_accept_rejected () =
   Owne.sdk_error_of_masc_internal_error

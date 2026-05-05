@@ -1037,6 +1037,31 @@ let test_memory_search_bank_empty () =
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check int "match_count is 0" 0 match_count)
 
+let test_memory_search_decision_log_failure_is_observable () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let keeper_name = "memory-search-log-failure" in
+    let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
+    Keeper_types.mkdir_p (Keeper_types.keeper_decision_log_path config keeper_name);
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let before =
+      Masc_mcp.Prometheus.metric_total
+        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+    in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "anything") ])
+      () in
+    let after =
+      Masc_mcp.Prometheus.metric_total
+        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+    in
+    let json = Yojson.Safe.from_string result in
+    let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in
+    check bool "memory search still returns result" true no_match;
+    check bool "decision-log append failure increments counter" true (after > before))
+
 (** Test: query with no matching text returns no_match: true *)
 let test_memory_search_bank_no_match () =
   let dir = test_tmpdir () in
@@ -1488,6 +1513,8 @@ let () =
             test_memory_search_bank_prefers_long_term_over_stale_short_term;
           test_case "empty bank returns no_match" `Quick
             test_memory_search_bank_empty;
+          test_case "decision log append failure is observable" `Quick
+            test_memory_search_decision_log_failure_is_observable;
           test_case "no matching query returns no_match" `Quick
             test_memory_search_bank_no_match;
           test_case "source=history uses legacy search" `Quick

@@ -62,6 +62,22 @@ module System_error : sig
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
+    | WorktreeNotFound of { worktree : string; searched_in : string }
+        (** Distinguishes the metadata-vs-disk drift case
+            ([task.worktree = Some _] but no matching git worktree exists
+            under the sandbox repo clones) from generic IO failures.
+
+            Best-effort cleanup callers (release / cancel / done
+            transitions in [Coord_task]) demote this condition to INFO
+            since "already absent" is the desired end state. Explicit-
+            deletion callers (MCP [worktree_remove] tool) still surface
+            it as actionable feedback.
+
+            #13304 originally implemented the demotion via a
+            [String.starts_with ~prefix:"Worktree "] match on the
+            [IoError] message, which is fragile (silently regresses if
+            the format string changes). This typed variant replaces the
+            string match. See umbrella issue #13302 P2-1. *)
   val to_string : t -> string
 end
 

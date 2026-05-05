@@ -1463,8 +1463,6 @@ let should_attempt_liveness_recovery ~now
     (entry : Keeper_registry.registry_entry) : bool =
   (* Only Dead keepers, not Zombie (terminal_failure_latched = structural) *)
   if entry.phase <> Keeper_state_machine.Dead then false
-  (* Credential-archived Dead: non-recoverable — credential must be re-issued *)
-  else if entry.conditions.credential_archived then false
   (* Zombie timeout reached: structural terminal — skip *)
   else if entry.conditions.zombie_timeout_reached then false
   else
@@ -1476,6 +1474,38 @@ let should_attempt_liveness_recovery ~now
     match entry.dead_since_ts with
     | None -> false
     | Some dead_since -> now -. dead_since >= min_dead_sec
+
+type credential_recovery_outcome =
+  | Credential_recovery_not_needed
+  | Credential_recovery_reissued of string
+  | Credential_recovery_failed of string
+
+let has_prefix s prefix =
+  let plen = String.length prefix in
+  String.length s >= plen && String.equal (String.sub s 0 plen) prefix
+
+let has_suffix s suffix =
+  let slen = String.length suffix in
+  let len = String.length s in
+  len >= slen && String.equal (String.sub s (len - slen) slen) suffix
+
+let canonical_keeper_agent_name name =
+  if has_prefix name "keeper-" && has_suffix name "-agent" then name
+  else Keeper_types_profile.keeper_agent_name name
+
+let credential_recovery_before_restart ~base_path
+    (entry : Keeper_registry.registry_entry) =
+  if not entry.conditions.credential_archived then
+    Credential_recovery_not_needed
+  else
+    let agent_name = canonical_keeper_agent_name entry.name in
+    match Auth.ensure_keeper_credential base_path ~agent_name with
+    | Ok _ -> Credential_recovery_reissued agent_name
+    | Error err ->
+        Credential_recovery_failed (Masc_domain.masc_error_to_string err)
+
+let credential_recovery_before_restart_for_test =
+  credential_recovery_before_restart
 
 let liveness_recovery_scan (ctx : _ context) =
   if not Env_config.KeeperSupervisor.liveness_recovery_enabled then ()
@@ -1506,13 +1536,40 @@ let liveness_recovery_scan (ctx : _ context) =
             Prometheus.inc_counter
               Prometheus.metric_keeper_liveness_recovery_attempts
               ~labels:[("keeper", entry.name)] ();
-            (* Step 1: unregister the dead tombstone *)
-            Keeper_registry.unregister ~base_path entry.name;
-            Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-            Keeper_stay_silent_loop_detector.reset ~keeper_name:entry.name;
-            Keeper_passive_loop_detector.reset ~keeper_name:entry.name;
-            (* Step 2: clear paused and last_blocker from meta *)
-            (match read_meta ctx.config entry.name with
+            let credential_recovered =
+              match credential_recovery_before_restart ~base_path entry with
+              | Credential_recovery_failed reason ->
+                Eio.Mutex.use_rw ~protect:true liveness_recovery_table_mu
+                  (fun () ->
+                     rs.attempt_count <- rs.attempt_count + 1;
+                     rs.last_attempt_ts <- now);
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_liveness_recovery_outcomes
+                  ~labels:[("keeper", entry.name);
+                           ("outcome", "credential_reissue_failed")] ();
+                Log.Keeper.error
+                  "%s: liveness recovery credential self-heal failed: %s"
+                  entry.name reason;
+                false
+              | Credential_recovery_not_needed -> true
+              | Credential_recovery_reissued agent_name ->
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_liveness_recovery_outcomes
+                    ~labels:[("keeper", entry.name);
+                             ("outcome", "credential_reissued")] ();
+                  Log.Keeper.warn
+                    "%s: credential_archived self-healed via %s; relaunching keeper"
+                    entry.name agent_name;
+                  true
+            in
+            if credential_recovered then begin
+              (* Step 1: unregister the dead tombstone *)
+              Keeper_registry.unregister ~base_path entry.name;
+              Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+              Keeper_stay_silent_loop_detector.reset ~keeper_name:entry.name;
+              Keeper_passive_loop_detector.reset ~keeper_name:entry.name;
+              (* Step 2: clear paused and last_blocker from meta *)
+              (match read_meta ctx.config entry.name with
              | Ok (Some meta) ->
                  let recovery_meta =
                    { meta with
@@ -1581,6 +1638,7 @@ let liveness_recovery_scan (ctx : _ context) =
                    ~labels:[("keeper", entry.name); ("outcome", "meta_read_failed")] ();
                  Log.Keeper.error
                    "%s: liveness recovery read_meta failed: %s" entry.name err)
+            end
           end
         end
       end
@@ -1591,8 +1649,8 @@ let liveness_recovery_scan (ctx : _ context) =
    #12838 Alive-but-stuck detector
 
    Liveness Recovery Supervisor (#12801, [liveness_recovery_scan]
-   above) handles keepers in terminal phases (Dead, with carve-outs
-   for credential_archived and zombie_timeout_reached).  It does not
+   above) handles Dead keepers, including credential_archived self-heal,
+   while still treating zombie_timeout_reached as structural. It does not
    handle a separate failure mode observed in production on
    2026-05-04: keepers that are alive in every metric the supervisor
    checks but have a flat [proactive_rt.last_ts] for days because

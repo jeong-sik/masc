@@ -11,7 +11,6 @@ import { IdeInterjectMock } from './ide-interject-mock'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { WorldVisualizer } from '../world-visualizer'
-import { COCKPIT_FRAME_SRC, shouldLoadCockpitFrame } from '../cockpit/cockpit-frame'
 import { navigate, route } from '../../router'
 import {
   parseActive,
@@ -49,35 +48,6 @@ function paramsWithLayers(
     delete next.layers
   }
   return next
-}
-
-function CockpitPreview() {
-  if (!shouldLoadCockpitFrame()) {
-    return html`
-      <section
-        aria-label="MASC Cockpit preview"
-        class="min-h-0 border-t border-solid border-[var(--color-border-divider)] bg-black"
-      />
-    `
-  }
-
-  return html`
-    <section
-      aria-label="MASC Cockpit preview"
-      class="grid min-h-0 grid-rows-[auto_1fr] border-t border-solid border-[var(--color-border-divider)] bg-black"
-    >
-      <div
-        class="border-b border-solid border-[rgba(255,255,255,0.12)] px-[var(--sp-3)] py-[var(--sp-2)] [font:var(--type-eyebrow)] text-[rgba(255,255,255,0.68)]"
-      >
-        MASC Cockpit
-      </div>
-      <iframe
-        src=${COCKPIT_FRAME_SRC}
-        class="h-full min-h-0 w-full border-0"
-        title="MASC Cockpit"
-      />
-    </section>
-  `
 }
 
 export function IdeShell() {
@@ -170,7 +140,6 @@ export function IdeShell() {
             ownershipStore=${coordinator.ownershipStore}
             diffRows=${coordinator.diffRows}
           />
-          <${CockpitPreview} />
         </div>
         <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>
           <${IdeConversationRailMock} />

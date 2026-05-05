@@ -133,6 +133,31 @@ describe('CommentThread', () => {
     expect(screen.getByText('child reply')).toBeInTheDocument()
   })
 
+  it('paginates sibling replies inside a busy branch', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'root-agent', content: 'root comment', created_at: '2026-04-02T00:00:00Z' },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `c${index + 2}`,
+        post_id: 'post-1',
+        parent_id: 'c1',
+        author: 'child-agent',
+        content: `sibling reply ${index + 1}`,
+        created_at: `2026-04-02T00:0${index + 1}:00Z`,
+      })),
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByText('sibling reply 1')).toBeInTheDocument()
+    expect(screen.getByText('sibling reply 5')).toBeInTheDocument()
+    expect(screen.queryByText('sibling reply 6')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '답글 2개 더 보기' }))
+
+    expect(screen.getByText('sibling reply 6')).toBeInTheDocument()
+    expect(screen.getByText('sibling reply 7')).toBeInTheDocument()
+  })
+
   it('keeps replies past depth five behind an explicit continue control', () => {
     const comments = [
       { id: 'c1', post_id: 'post-1', parent_id: null, author: 'agent', content: 'level 0', created_at: '2026-04-02T00:00:00Z' },

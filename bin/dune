@@ -31,6 +31,14 @@
  (modules cascade_materialize)
  (libraries masc_mcp))
 
+;; Env knob catalog generator (#10733):
+;;   regenerates docs/runtime-tunables.md from lib/config/env_config_*.ml.
+;;   CI gate ensures the catalog stays in sync with the source.
+(executable
+ (name env_knob_catalog)
+ (modules env_knob_catalog)
+ (libraries str))
+
 ;; Compaction audit CLI: inspect .masc/data/harness-compact/ JSONL
 (executable
  (name masc_compaction_audit)

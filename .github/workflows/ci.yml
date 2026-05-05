@@ -531,6 +531,23 @@ config/cascade.json' locally and commit the result."
             exit 1
           fi
 
+      - name: Env knob catalog drift gate
+        # Detects when lib/config/env_config_*.ml has been edited
+        # (new MASC_* env var added, doc reworded, knob removed) but
+        # docs/runtime-tunables.md was not regenerated. The catalog
+        # is purely derivative and should never drift from source.
+        # See: bin/env_knob_catalog.ml, issue #10733.
+        run: |
+          opam exec -- dune exec ./bin/env_knob_catalog.exe -- \
+            docs/runtime-tunables.md
+          if ! git diff --exit-code docs/runtime-tunables.md; then
+            echo "::error::docs/runtime-tunables.md is stale relative \
+to lib/config/env_config_*.ml. Run 'dune exec \
+./bin/env_knob_catalog.exe -- docs/runtime-tunables.md' locally and \
+commit the result."
+            exit 1
+          fi
+
       - name: Install eio-trace
         run: |
           opam install -y eio-trace || echo "eio-trace install skipped"

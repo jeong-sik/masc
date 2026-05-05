@@ -415,7 +415,7 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
 }
 
 function boardPostKindFromEvent(event: SSEEvent): BoardPost['post_kind'] {
-  const rawKind = (event.post_kind ?? 'direct').toLowerCase()
+  const rawKind = (typeof event.post_kind === 'string' ? event.post_kind : 'direct').toLowerCase()
   return rawKind === 'system' || rawKind === 'automation' ? rawKind : 'direct'
 }
 

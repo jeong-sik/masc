@@ -338,6 +338,32 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
+  it('normalizes malformed post_kind to direct when hydrating optimistic board posts', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshHearths = vi.fn()
+    sseStore.registerBoardHearthsRefresh(refreshHearths)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardExcludeAutomation.value = false
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Malformed kind note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 1 as unknown as string,
+      hearth: 'ops',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value[0]?.id).toBe('post-1')
+    expect(boardPosts.value[0]?.post_kind).toBe('direct')
+    expect(refreshBoard).not.toHaveBeenCalled()
+    expect(refreshHearths).toHaveBeenCalledTimes(1)
+  })
+
   it('does not refresh hearth chips for comment-only board events', async () => {
     const { sseStore } = await loadSseStore()
     const refreshHearths = vi.fn()

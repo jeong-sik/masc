@@ -18,6 +18,8 @@ export interface AnchoredThreadRailStore {
   readonly seed: (threads: ReadonlyArray<AnchoredThread>) => void
   readonly addThread: (thread: AnchoredThread) => void
   readonly resolveThread: (id: string, resolved?: boolean) => boolean
+  readonly replayUntilMs: () => number | null
+  readonly setReplayUntilMs: (untilMs: number | null) => void
   readonly visibleThreads: () => ReadonlyArray<AnchoredThread>
   readonly threadsForLine: (line: number) => ReadonlyArray<AnchoredThread>
   readonly focusedThreadId: () => string | null
@@ -36,6 +38,7 @@ export function createAnchoredThreadRailStore(
   const visibleThreadsSignal = signal<ReadonlyArray<AnchoredThread>>([])
   const focusedThreadIdSignal = signal<string | null>(null)
   const authorsSignal = signal<ReadonlyArray<string>>([])
+  const replayUntilMsSignal = signal<number | null>(null)
 
   const controller = createAnchoredThreadRail({
     filePath: () => activeFilePath.value,
@@ -43,9 +46,10 @@ export function createAnchoredThreadRailStore(
   })
 
   const publish = (): void => {
-    const visible = controller.visibleThreads()
+    const visible = controller.visibleThreads().filter(threadVisibleAtReplayTime)
     visibleThreadsSignal.value = visible
-    focusedThreadIdSignal.value = controller.focusedThreadId()
+    const focusedId = controller.focusedThreadId()
+    focusedThreadIdSignal.value = visible.some(thread => thread.id === focusedId) ? focusedId : null
     authorsSignal.value = sortedAuthors(visible)
   }
 
@@ -75,6 +79,18 @@ export function createAnchoredThreadRailStore(
     })
     if (found) publish()
     return found
+  }
+
+  const threadVisibleAtReplayTime = (thread: AnchoredThread): boolean => {
+    const untilMs = replayUntilMsSignal.value
+    return untilMs === null || thread.created_ms <= untilMs
+  }
+
+  const setReplayUntilMs = (untilMs: number | null): void => {
+    const next = untilMs === null || !Number.isFinite(untilMs) ? null : untilMs
+    if (replayUntilMsSignal.value === next) return
+    replayUntilMsSignal.value = next
+    publish()
   }
 
   const focusThread = (id: string): boolean => controller.focusThread(id)
@@ -107,8 +123,10 @@ export function createAnchoredThreadRailStore(
     seed,
     addThread,
     resolveThread,
+    replayUntilMs: () => replayUntilMsSignal.value,
+    setReplayUntilMs,
     visibleThreads: () => visibleThreadsSignal.value,
-    threadsForLine: controller.threadsForLine,
+    threadsForLine: (line: number) => controller.threadsForLine(line).filter(threadVisibleAtReplayTime),
     focusedThreadId: () => focusedThreadIdSignal.value,
     focusThread,
     clearFocus,

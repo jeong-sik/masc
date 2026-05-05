@@ -2,6 +2,11 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { ThreadKind } from './anchored-thread-rail-store'
+import {
+  AuditReplaySlider,
+  filterReplayEvents,
+  type AuditReplayEvent,
+} from './audit-replay-slider'
 
 interface BoardPost {
   readonly id: string
@@ -62,12 +67,19 @@ function boardKindFromPost(post: BoardPost): ThreadKind {
 export function IdeConversationRailMock() {
   const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [replayUntilMs, setReplayUntilMs] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     fetchBoardPosts().then(data => { if (!cancelled) setPosts(data) })
     return () => { cancelled = true }
   }, [])
+
+  const replayEvents = replayEventsForPosts(posts)
+  const visiblePostIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))
+  const visiblePosts = replayUntilMs === null || replayEvents.length === 0
+    ? posts
+    : posts.filter(post => visiblePostIds.has(post.id))
 
   return html`
     <div
@@ -92,8 +104,13 @@ export function IdeConversationRailMock() {
         }}
       >
         <span>CONVERSATION</span>
-        <span>${posts.length}</span>
+        <span>${visiblePosts.length}/${posts.length}</span>
       </div>
+      <${AuditReplaySlider}
+        events=${replayEvents}
+        value=${replayUntilMs}
+        onChange=${setReplayUntilMs}
+      />
       <ol
         style=${{
           listStyle: 'none',
@@ -105,7 +122,7 @@ export function IdeConversationRailMock() {
           overflow: 'auto',
         }}
       >
-        ${posts.map(post => PostCard(
+        ${visiblePosts.map(post => PostCard(
           post,
           focusedId === post.id,
           () => setFocusedId(focusedId === post.id ? null : post.id),
@@ -113,6 +130,12 @@ export function IdeConversationRailMock() {
       </ol>
     </div>
   `
+}
+
+function replayEventsForPosts(posts: ReadonlyArray<BoardPost>): AuditReplayEvent[] {
+  return posts
+    .map(post => ({ id: post.id, timestamp_ms: parseIsoToMs(post.created_at_iso) }))
+    .filter(event => Number.isFinite(event.timestamp_ms))
 }
 
 function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {

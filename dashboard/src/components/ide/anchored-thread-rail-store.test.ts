@@ -66,4 +66,22 @@ describe('createAnchoredThreadRailStore', () => {
     expect(s.focusedThreadId()).toBe(null)
     expect(s.visibleThreads()).toEqual([])
   })
+
+  it('filters visible thread snapshots by replay timestamp', () => {
+    const s = createAnchoredThreadRailStore(file)
+    s.seed([
+      thread({ id: 'older', created_ms: 1_000, anchor: { file_path: file, line_start: 10, line_end: 12 } }),
+      thread({ id: 'newer', created_ms: 2_000, anchor: { file_path: file, line_start: 10, line_end: 12 } }),
+    ])
+
+    expect(s.visibleThreads().map(item => item.id)).toEqual(['newer', 'older'])
+    s.setReplayUntilMs(1_500)
+
+    expect(s.replayUntilMs()).toBe(1_500)
+    expect(s.visibleThreads().map(item => item.id)).toEqual(['older'])
+    expect(s.threadsForLine(11).map(item => item.id)).toEqual(['older'])
+
+    s.setReplayUntilMs(null)
+    expect(s.visibleThreads().map(item => item.id)).toEqual(['newer', 'older'])
+  })
 })

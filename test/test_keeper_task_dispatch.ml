@@ -48,6 +48,13 @@ let only_task config =
     failwith
       (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
 
+let task_by_title config title =
+  Coord.get_tasks_raw config
+  |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.title title)
+  |> function
+  | Some task -> task
+  | None -> failwith (Printf.sprintf "task not found: %s" title)
+
 let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
   {
     strict = true;
@@ -79,6 +86,20 @@ let contract_requiring_tools required_tools : Masc_domain.task_contract =
         autoresearch_loop_id = None;
       };
   }
+
+let create_pending_verification_request config ~task_id =
+  match
+    Verification.create_request
+      ~base_path:config.Coord.base_path
+      ~task_id
+      ~output:`Null
+      ~criteria:[]
+      ~worker:"test-worker"
+      ~request_id:(Printf.sprintf "vrf-%s" task_id)
+      ()
+  with
+  | Ok _ -> ()
+  | Error msg -> failwith (Printf.sprintf "create_request failed: %s" msg)
 
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
    Force filesystem backend by unsetting PG env vars. *)
@@ -377,6 +398,139 @@ let test_claim_falls_back_from_empty_auto_goal_scope () =
           scope |> member "fallback_reason" |> to_string |> fun s ->
           String.length s > 0)
     | None -> fail "expected fallback to claim a product task")
+
+let test_claim_falls_back_from_empty_persisted_goal_scope () =
+  with_room (fun config ->
+    let keeper_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Masc improver" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_test_meta ~name:"masc-improver" ()) with
+        active_goal_ids = [ keeper_goal.id ];
+      }
+    in
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product task" ~priority:1 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let claimed_task =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed_task with
+    | Some task ->
+      check string "claimed product task" "Product task" task.title;
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope mode" "empty_goal_scope_fallback_all_tasks"
+        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+      check int "effective goal ids cleared" 0
+        Yojson.Safe.Util.(
+          scope |> member "effective_goal_ids" |> to_list |> List.length);
+      check string "claim scope matched product goal" product_goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string);
+      check bool "fallback reason present" true
+        Yojson.Safe.Util.(
+          scope |> member "fallback_reason" |> to_string |> fun s ->
+          String.length s > 0)
+    | None -> fail "expected fallback to claim a product task")
+
+let test_claim_falls_back_when_scoped_task_requires_missing_tool () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+        active_goal_ids = [ scoped_goal.id ];
+      }
+    in
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~goal_id:scoped_goal.id
+        config
+        ~title:"Scoped task needing bash"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product fallback task" ~priority:2 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let claimed_task =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed_task with
+    | Some task ->
+      check string "claimed fallback task" "Product fallback task" task.title;
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope mode" "empty_goal_scope_fallback_all_tasks"
+        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+      check string "claim scope matched product goal" product_goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string)
+    | None -> fail "expected fallback to claim product task")
+
+let test_claim_falls_back_when_scoped_task_is_verification_blocked () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped verification goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ scoped_goal.id ] in
+    let _ =
+      Coord_task.add_task ~goal_id:scoped_goal.id config
+        ~title:"Scoped task pending verification" ~priority:1
+        ~description:"verification pending"
+    in
+    let scoped_task = task_by_title config "Scoped task pending verification" in
+    create_pending_verification_request config ~task_id:scoped_task.id;
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product fallback task" ~priority:2 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let claimed_task =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed_task with
+    | Some task ->
+      check string "claimed fallback task" "Product fallback task" task.title;
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope mode" "empty_goal_scope_fallback_all_tasks"
+        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+      check string "claim scope matched product goal" product_goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string)
+    | None -> fail "expected fallback to claim product task")
 
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
@@ -841,6 +995,12 @@ let () =
         test_claim_respects_active_goal_ids;
       test_case "claim falls back from empty auto goal scope" `Quick
         test_claim_falls_back_from_empty_auto_goal_scope;
+      test_case "claim falls back from empty persisted goal scope" `Quick
+        test_claim_falls_back_from_empty_persisted_goal_scope;
+      test_case "claim falls back when scoped task requires missing tool" `Quick
+        test_claim_falls_back_when_scoped_task_requires_missing_tool;
+      test_case "claim falls back when scoped task is verification blocked" `Quick
+        test_claim_falls_back_when_scoped_task_is_verification_blocked;
       test_case "claim skips tasks requiring missing tools" `Quick
         test_claim_skips_required_tools_without_access;
       test_case "claim allows tasks requiring available tools" `Quick

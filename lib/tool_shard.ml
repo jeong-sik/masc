@@ -737,7 +737,9 @@ Use for status updates, announcements, warnings, or coordination.";
     name = "keeper_task_claim";
     description = "Claim the next unclaimed todo task that matches your capabilities. \
 Returns claimed task details (task_id, title, description) or empty if none available. \
-If the keeper has active_goal_ids configured, only goal-linked tasks are eligible.";
+If active_goal_ids are configured, goal-linked tasks are preferred; when that scoped \
+pool has no claimable task for your current capabilities, the claim falls back to all \
+claimable tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

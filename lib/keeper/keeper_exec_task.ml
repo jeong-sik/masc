@@ -85,65 +85,6 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
   `Assoc fields
 ;;
 
-type claim_goal_scope = {
-  task_filter : Masc_domain.task -> bool;
-  mode : string;
-  effective_goal_ids : string list;
-  fallback_reason : string option;
-}
-
-let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
-  String.equal goal.Goal_store.title
-    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
-;;
-
-let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
-  goal_ids <> []
-  && List.for_all
-       (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         | Some goal -> goal_title_matches_keeper_purpose ~meta goal
-         | None -> false)
-       goal_ids
-;;
-
-let active_goal_ids_have_claim_pool_task config goal_ids =
-  Coord.get_tasks_safe config
-  |> List.exists (fun task ->
-       Coord.task_is_claim_pool_candidate task
-       && Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task)
-;;
-
-let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
-  match meta.active_goal_ids with
-  | [] ->
-    { task_filter = (fun (_task : Masc_domain.task) -> true);
-      mode = "all_tasks";
-      effective_goal_ids = [];
-      fallback_reason = None;
-    }
-  | goal_ids ->
-    let scoped_filter task =
-      Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
-    in
-    if active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-       && not (active_goal_ids_have_claim_pool_task config goal_ids)
-    then
-      { task_filter = (fun (_task : Masc_domain.task) -> true);
-        mode = "auto_goal_fallback_all_tasks";
-        effective_goal_ids = [];
-        fallback_reason =
-          Some
-            "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks";
-      }
-    else
-      { task_filter = scoped_filter;
-        mode = "active_goal_ids";
-        effective_goal_ids = goal_ids;
-        fallback_reason = None;
-      }
-;;
-
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
   |> List.find_map (fun (task : Masc_domain.task) ->
@@ -300,8 +241,13 @@ let handle_keeper_task_tool
                     "goal_id", Json_util.string_opt_to_json goal_id;
                   ])))
   | "keeper_task_claim" ->
-    let claim_goal_scope = resolve_claim_goal_scope ~config ~meta in
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+    let claim_goal_scope =
+      Keeper_runtime_contract.resolve_claim_goal_scope
+        ~agent_tool_names
+        ~config
+        ~meta
+    in
     let result =
       Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
         ~task_filter:claim_goal_scope.task_filter ()

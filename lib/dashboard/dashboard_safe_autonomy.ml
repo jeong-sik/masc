@@ -768,8 +768,16 @@ let build_keeper_snapshot
 (* The safe-autonomy screen renders one row per keeper.  This probe is
    intentionally much shorter than interactive sandbox-status calls; otherwise
    a slow Docker daemon costs [timeout * keeper_count] before the dashboard can
-   return any bytes. *)
-let sandbox_live_probe_timeout_sec = 0.25
+   return any bytes.
+
+   Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
+   through [Log.warn]-style sites that format duration with [%.0f],
+   which would render the 0.25s budget as "0s" and confuse operators
+   reading "command timed out after 0s".  1.0s keeps the per-row
+   ceiling tight enough that 50 keepers render in <60s while
+   producing a self-explanatory diagnostic when Docker is genuinely
+   slow.  See PR #13113 review. *)
+let sandbox_live_probe_timeout_sec = 1.0
 
 let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let meta = snapshot.meta in

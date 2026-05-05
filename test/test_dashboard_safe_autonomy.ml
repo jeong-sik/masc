@@ -62,7 +62,12 @@ let make_meta ?(name = "bench-analyst") ?(trace_id = "trace-safe-autonomy") () =
           ("cascade_name", `String Keeper_config.default_cascade_name);
           ("last_model_used", `String "openai:gpt-5.4");
           ("sandbox_profile", `String "local");
-          ("network_mode", `String "inherit");
+          (* PR #13113 review: align with the canonical local-keeper
+             default — the seed config sets [network_mode = "none"]
+             when [sandbox_profile = "local"].  The previous
+             "inherit" value would render confusing dashboard rows
+             during fixture-driven tests of the safe-autonomy screen. *)
+          ("network_mode", `String "none");
           ("goal", `String "Keep autonomy safe and observable");
           ("short_goal", `String "Handle code work with approval and sandbox guardrails");
           ("mid_goal", `String "Keep the keeper queue healthy");
@@ -218,7 +223,14 @@ let test_sandbox_live_probe_is_bounded_per_keeper () =
     let started_at = Unix.gettimeofday () in
     let json = Dashboard_safe_autonomy.json ~config () in
     let elapsed_sec = Unix.gettimeofday () -. started_at in
-    check bool "slow docker probe is bounded" true (elapsed_sec < 1.5);
+    (* PR #13113: per-keeper probe timeout is 1.0s (raised from
+       0.25s so [Process_eio]'s [%.0f] log formatter prints "1s"
+       instead of the misleading "0s").  With 2 stalled docker
+       keepers serialised through the screen, the worst-case is
+       roughly 2 * 1.0s + scheduler / I-O overhead.  Bound at 3.5s
+       to keep the regression test alarm narrow without flaking on
+       slow CI runners. *)
+    check bool "slow docker probe is bounded" true (elapsed_sec < 3.5);
     let per_keeper = Yojson.Safe.Util.(json |> member "per_keeper" |> to_list) in
     check int "docker keeper count" 2 (List.length per_keeper))
 

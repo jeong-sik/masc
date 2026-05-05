@@ -200,6 +200,7 @@ export interface SubBoard {
   name: string
   description: string
   owner: string
+  members: string[]
   access: SubBoardAccess
   created_at: string
   post_count: number

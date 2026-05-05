@@ -282,6 +282,7 @@ val create_sub_board :
   name:string ->
   description:string ->
   owner:string ->
+  ?members:string list ->
   ?access:Board.sub_board_access ->
   unit ->
   (Board.sub_board, Board.board_error) Result.t

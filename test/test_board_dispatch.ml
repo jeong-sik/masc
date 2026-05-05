@@ -881,6 +881,66 @@ let test_sub_board_access_default_open () =
       Alcotest.(check bool) "default access is Open"
         true (sb.Board.access = Board.Open))
 
+let test_sub_board_members_include_owner () =
+  (match Board_dispatch.create_sub_board ~slug:"member-board" ~name:"Members"
+           ~description:"" ~owner:"agent-owner"
+           ~members:[" member-a "; "agent-owner"; "member-a"]
+           ~access:Board.Members_only () with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+       let members = List.map Board.Agent_id.to_string sb.Board.members in
+       Alcotest.(check (list string)) "owner first, members deduped"
+         ["agent-owner"; "member-a"] members)
+
+let test_sub_board_members_only_post_policy () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"policy-team" ~name:"Policy"
+       ~description:"" ~owner:"agent-owner" ~members:["agent-member"]
+       ~access:Board.Members_only ());
+  (match
+     Board_dispatch.create_post ~author:"agent-outsider" ~content:"nope"
+       ~post_kind:Board.Human_post ~hearth:"policy-team" ()
+   with
+   | Error (Board.Validation_error _) -> ()
+   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Ok _ -> Alcotest.fail "expected members-only sub-board to reject outsider");
+  (match
+     Board_dispatch.create_post ~author:"agent-member" ~content:"allowed"
+       ~post_kind:Board.Human_post ~hearth:" POLICY-TEAM " ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match
+     Board_dispatch.create_post ~author:"agent-owner" ~content:"owner allowed"
+       ~post_kind:Board.Human_post ~hearth:"policy-team" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ())
+
+let test_sub_board_post_count_projection () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"counted" ~name:"Counted"
+       ~description:"" ~owner:"agent-owner" ());
+  ignore
+    (Board_dispatch.create_post ~author:"agent-a" ~content:"one"
+       ~post_kind:Board.Human_post ~hearth:"counted" ());
+  ignore
+    (Board_dispatch.create_post ~author:"agent-b" ~content:"two"
+       ~post_kind:Board.Human_post ~hearth:"COUNTED" ());
+  ignore
+    (Board_dispatch.create_post ~author:"agent-c" ~content:"other"
+       ~post_kind:Board.Human_post ~hearth:"other" ());
+  (match Board_dispatch.get_sub_board ~sub_board_id:"counted" with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb -> Alcotest.(check int) "derived post_count" 2 sb.Board.post_count);
+  let listed =
+    Board_dispatch.list_sub_boards ()
+    |> List.find_opt (fun sb -> String.equal sb.Board.slug "counted")
+  in
+  match listed with
+  | None -> Alcotest.fail "counted sub-board missing from list"
+  | Some sb -> Alcotest.(check int) "listed post_count" 2 sb.Board.post_count
+
 (** {1 Test Runner} *)
 
 let () =
@@ -965,5 +1025,8 @@ let () =
       Alcotest.test_case "slug conflict" `Quick (with_eio test_sub_board_slug_conflict);
       Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
+      Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
+      Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
+      Alcotest.test_case "derived post count" `Quick (with_eio test_sub_board_post_count_projection);
     ];
   ]

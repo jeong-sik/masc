@@ -632,9 +632,10 @@ let backend_name () =
 
 (** {1 SubBoard operations} *)
 
-let create_sub_board ~slug ~name ~description ~owner ?access () =
+let create_sub_board ~slug ~name ~description ~owner ?members ?access () =
   match backend () with
-  | Jsonl store -> Board.create_sub_board store ~slug ~name ~description ~owner ?access ()
+  | Jsonl store ->
+      Board.create_sub_board store ~slug ~name ~description ~owner ?members ?access ()
 
 let get_sub_board ~sub_board_id =
   match backend () with

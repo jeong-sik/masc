@@ -330,10 +330,12 @@ val create_sub_board :
   name:string ->
   description:string ->
   owner:string ->
+  ?members:string list ->
   ?access:sub_board_access ->
   unit ->
   (sub_board, board_error) Result.t
 (** Creates a new sub-board with the given slug (unique, lowercase).
+    [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid or already taken,
     [Capacity_exceeded] when the sub-board limit is reached. *)
 

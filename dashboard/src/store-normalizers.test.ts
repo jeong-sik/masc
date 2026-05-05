@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeExecutionQueueItem, normalizeExecutionSessionBrief } from './store-normalizers'
+import { normalizeExecutionQueueItem, normalizeExecutionSessionBrief, normalizeMessage } from './store-normalizers'
 
 describe('normalizeExecutionSessionBrief', () => {
   it('promotes legacy room-only payloads to namespace while keeping the room alias', () => {
@@ -75,6 +75,22 @@ describe('normalizeExecutionQueueItem', () => {
           severity: 'bad',
         },
       },
+    })
+  })
+})
+
+describe('normalizeMessage', () => {
+  it('preserves room metadata for board message room timelines', () => {
+    expect(normalizeMessage({
+      id: 'm-1',
+      from_agent: 'sangsu',
+      content: 'handoff ready',
+      room_id: 'keeper-room',
+    })).toMatchObject({
+      id: 'm-1',
+      from: 'sangsu',
+      content: 'handoff ready',
+      room: 'keeper-room',
     })
   })
 })

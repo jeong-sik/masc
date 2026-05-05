@@ -244,6 +244,16 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
+  it('routes the message room focus to the room timeline surface', () => {
+    route.value = { params: { focus: 'messages-room' } } as any
+    messages.value = [{ id: 'm-room', from: 'sangsu', room: 'ops', content: 'room update' }]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('heading', { name: 'Room timeline' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
   it('routes the state-block focus to the message surface', () => {
     route.value = { params: { focus: 'state-block' } } as any
     messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]' }]

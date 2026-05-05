@@ -16,6 +16,7 @@ import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
+import { MessageRoomTimeline } from './message-room-timeline'
 import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
@@ -735,6 +736,15 @@ export function BoardSurface() {
       <div>
         <${BoardSummary} />
         <${MentionInbox} />
+      </div>
+    `
+  }
+
+  if (focus === 'messages-room') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${MessageRoomTimeline} />
       </div>
     `
   }

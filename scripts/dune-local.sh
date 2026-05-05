@@ -15,6 +15,7 @@ Local Dune wrapper for multi-agent development:
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
+Set MASC_DUNE_SKIP_OAS_PIN_CHECK=1 to bypass the local agent_sdk pin preflight.
 USAGE
 }
 
@@ -66,6 +67,16 @@ printf '\n' >&2
 
 if [[ "${MASC_DUNE_DRY_RUN:-0}" = "1" ]]; then
   exit 0
+fi
+
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_DUNE_SKIP_OAS_PIN_CHECK:-0}" != "1" \
+      && -x "$repo_root/scripts/check-oas-pin.sh" ]]; then
+  printf '[dune-local] checking local OAS/agent_sdk pin\n' >&2
+  if ! "$repo_root/scripts/check-oas-pin.sh" --local-only; then
+    printf '[dune-local] local OAS/agent_sdk pin drift detected; repair: bash scripts/opam-pin-external-deps.sh --install\n' >&2
+    exit 1
+  fi
 fi
 
 if [[ "${GITHUB_ACTIONS:-}" = "true" || "${MASC_DUNE_THROTTLE:-1}" = "0" ]]; then

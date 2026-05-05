@@ -464,6 +464,15 @@ let test_oas_pin_source_contracts () =
     (file_contains_pattern "scripts/check-oas-pin.sh" "llm_provider.cmxa");
   check bool "oas pin check gives rebuild guidance" true
     (file_contains_pattern "scripts/check-oas-pin.sh"
+       "scripts/opam-pin-external-deps.sh --install");
+  check bool "local dune wrapper preflights local OAS pin" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "scripts/check-oas-pin.sh\" --local-only");
+  check bool "local dune wrapper documents pin preflight bypass" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "MASC_DUNE_SKIP_OAS_PIN_CHECK");
+  check bool "local dune wrapper pin failure points at install repair" true
+    (file_contains_pattern "scripts/dune-local.sh"
        "scripts/opam-pin-external-deps.sh --install")
 
 let test_doc_truth_guard_contracts () =

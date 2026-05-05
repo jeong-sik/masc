@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { authHeaders, post } from '../api/core'
 import {
+  discoverRepositories,
   fetchRepositoriesList,
   type Repository,
   type RepoStatus,
@@ -12,10 +13,11 @@ import {
 import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { showToast } from './common/toast'
-import { Plus, GitBranch, AlertCircle, PauseCircle, CheckCircle2 } from 'lucide-preact'
+import { Plus, GitBranch, AlertCircle, PauseCircle, CheckCircle2, Search } from 'lucide-preact'
 
 export type { Repository, RepoStatus } from '../api/repositories'
 export {
+  discoverRepositories,
   normalizeRepoStatus,
   repositoryRows,
   normalizeRepository,
@@ -27,6 +29,7 @@ const reposResource = createAsyncResource<Repository[]>()
 const reposState = reposResource.state
 export const selectedRepoId = signal<string | null>(null)
 export const showAddRepoDialog = signal(false)
+export const isScanningRepositories = signal(false)
 
 // ── API ──────────────────────────────────────────────────
 
@@ -66,6 +69,27 @@ export async function deleteRepository(id: string): Promise<void> {
     const msg = err instanceof Error ? err.message : '삭제 실패'
     showToast(msg, 'error')
     throw err
+  }
+}
+
+export async function scanRepositories(): Promise<void> {
+  if (isScanningRepositories.value) return
+  isScanningRepositories.value = true
+  try {
+    const registered = await discoverRepositories()
+    await fetchRepositories()
+    showToast(
+      registered.length > 0
+        ? `${registered.length}개 저장소 등록 완료`
+        : '새 저장소 없음',
+      'success',
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '저장소 스캔 실패'
+    showToast(msg, 'error')
+    throw err
+  } finally {
+    isScanningRepositories.value = false
   }
 }
 
@@ -151,14 +175,27 @@ export function RepoSidebar() {
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">
           저장소 <span class="text-[var(--color-fg-muted)] font-normal">(${repos.length})</span>
         </span>
-        <button
-          type="button"
-          class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
-          onClick=${() => { showAddRepoDialog.value = true }}
-        >
-          <${Plus} size=${12} aria-hidden="true" />
-          추가
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            title="base path 아래 git 저장소 스캔"
+            aria-label="base path 아래 git 저장소 스캔"
+            disabled=${isScanningRepositories.value}
+            class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            onClick=${() => { void scanRepositories() }}
+          >
+            <${Search} size=${12} aria-hidden="true" />
+            ${isScanningRepositories.value ? '스캔 중' : '스캔'}
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
+            onClick=${() => { showAddRepoDialog.value = true }}
+          >
+            <${Plus} size=${12} aria-hidden="true" />
+            추가
+          </button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-y-auto py-1">

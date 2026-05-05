@@ -375,7 +375,7 @@ let handle_sync_repository state _agent_name req reqd =
 
 let handle_discover_repositories state _agent_name req reqd =
   let base_path = base_path_of_state state in
-  match Repo_store.discover_repositories ~base_path with
+  match Repo_store.register_discovered ~base_path with
   | Error msg ->
       json_response ~status:`Internal_server_error req reqd (json_error msg)
   | Ok repos ->
@@ -385,6 +385,7 @@ let handle_discover_repositories state _agent_name req reqd =
             ("repositories", `List (List.map repository_json repos));
             ("total", `Int (List.length repos));
             ("discovered", `Bool true);
+            ("registered", `Bool true);
           ]
       in
       Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd

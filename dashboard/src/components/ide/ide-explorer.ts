@@ -1,10 +1,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
 import { activeIdeFile } from './ide-shell'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
+import { showToast } from '../common/toast'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -19,6 +21,7 @@ interface IdeExplorerProps {
   readonly repositories?: () => ReadonlyArray<Repository>
   readonly activeRepositoryId?: () => string | null
   readonly onRepositoryChange?: (repoId: string | null) => void
+  readonly onRepositoryScan?: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories?: (listener: () => void) => () => void
 }
 
@@ -29,6 +32,7 @@ export function IdeExplorer({
   repositories,
   activeRepositoryId,
   onRepositoryChange,
+  onRepositoryScan,
   subscribeRepositories,
 }: IdeExplorerProps) {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
@@ -63,6 +67,27 @@ export function IdeExplorer({
   }, [store])
 
   const [filter, setFilter] = useState('')
+  const [isScanningRepositories, setIsScanningRepositories] = useState(false)
+
+  const handleRepositoryScan = async (): Promise<void> => {
+    if (!onRepositoryScan || isScanningRepositories) return
+    setIsScanningRepositories(true)
+    try {
+      const registered = await onRepositoryScan()
+      showToast(
+        registered.length > 0
+          ? `${registered.length}개 저장소 등록 완료`
+          : '새 저장소 없음',
+        'success',
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '저장소 스캔 실패'
+      showToast(msg, 'error')
+      throw err
+    } finally {
+      setIsScanningRepositories(false)
+    }
+  }
 
   // useMemo over `tick` so the visibleNodes call re-runs when the
   // store's expansion state changes; tick reference is intentional.
@@ -102,8 +127,8 @@ export function IdeExplorer({
         <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
         <span>${fileCount} FILES</span>
       </header>
-      ${repoList.length > 0 ? html`
-        <label
+      ${repoList.length > 0 || onRepositoryScan ? html`
+        <div
           style=${{
             display: 'grid',
             gap: 'var(--sp-1)',
@@ -111,33 +136,82 @@ export function IdeExplorer({
             font: 'var(--type-eyebrow)',
           }}
         >
-          Repository
-          <select
-            aria-label="IDE repository"
-            value=${selectedRepoId ?? repoList[0]?.id ?? ''}
-            onChange=${(event: Event) => {
-              const next = (event.currentTarget as HTMLSelectElement).value || null
-              setSelectedRepoId(next)
-              onRepositoryChange?.(next)
-            }}
+          <div
             style=${{
-              width: '100%',
-              font: 'var(--type-body)',
-              fontSize: 'var(--fs-11)',
-              color: 'var(--color-fg-primary)',
-              background: 'var(--color-bg-elevated)',
-              border: '1px solid var(--color-border-default)',
-              borderRadius: 'var(--r-1)',
-              padding: 'var(--sp-1) var(--sp-2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-2)',
             }}
           >
-            ${repoList.map(repository => html`
-              <option key=${repository.id} value=${repository.id}>
-                ${repository.name} · ${repository.local_path}
-              </option>
-            `)}
-          </select>
-        </label>
+            <span>Repository</span>
+            ${onRepositoryScan ? html`
+              <button
+                type="button"
+                title="base path 아래 git 저장소 스캔"
+                aria-label="base path 아래 git 저장소 스캔"
+                disabled=${isScanningRepositories}
+                onClick=${() => { void handleRepositoryScan() }}
+                style=${{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--sp-1)',
+                  height: '22px',
+                  padding: '0 var(--sp-2)',
+                  color: isScanningRepositories ? 'var(--color-fg-muted)' : 'var(--color-accent-fg)',
+                  background: 'var(--color-bg-elevated)',
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--r-1)',
+                  cursor: isScanningRepositories ? 'not-allowed' : 'pointer',
+                  opacity: isScanningRepositories ? 0.65 : 1,
+                  font: 'var(--type-eyebrow)',
+                }}
+              >
+                <${Search} size=${12} aria-hidden="true" />
+                ${isScanningRepositories ? '스캔 중' : '스캔'}
+              </button>
+            ` : null}
+          </div>
+          ${repoList.length > 0 ? html`
+            <select
+              aria-label="IDE repository"
+              value=${selectedRepoId ?? repoList[0]?.id ?? ''}
+              onChange=${(event: Event) => {
+                const next = (event.currentTarget as HTMLSelectElement).value || null
+                setSelectedRepoId(next)
+                onRepositoryChange?.(next)
+              }}
+              style=${{
+                width: '100%',
+                font: 'var(--type-body)',
+                fontSize: 'var(--fs-11)',
+                color: 'var(--color-fg-primary)',
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border-default)',
+                borderRadius: 'var(--r-1)',
+                padding: 'var(--sp-1) var(--sp-2)',
+              }}
+            >
+              ${repoList.map(repository => html`
+                <option key=${repository.id} value=${repository.id}>
+                  ${repository.name} · ${repository.local_path}
+                </option>
+              `)}
+            </select>
+          ` : html`
+            <div
+              role="status"
+              style=${{
+                font: 'var(--type-body)',
+                fontSize: 'var(--fs-11)',
+                color: 'var(--color-fg-muted)',
+                background: 'var(--color-bg-muted)',
+                borderRadius: 'var(--r-1)',
+                padding: 'var(--sp-1) var(--sp-2)',
+              }}
+            >저장소 없음</div>
+          `}
+        </div>
       ` : null}
       ${SourceHint(source)}
       <input

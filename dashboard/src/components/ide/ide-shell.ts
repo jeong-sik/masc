@@ -126,6 +126,7 @@ export function IdeShell() {
             repositories=${coordinator.repositories}
             activeRepositoryId=${coordinator.activeRepositoryId}
             onRepositoryChange=${coordinator.setActiveRepositoryId}
+            onRepositoryScan=${coordinator.scanRepositories}
             subscribeRepositories=${coordinator.subscribeRepositories}
           />
         </div>

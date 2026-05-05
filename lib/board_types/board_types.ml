@@ -172,6 +172,7 @@ type reaction_summary = {
   emoji: string;
   count: int;
   reacted: bool;
+  recent_user_ids: string list;
 }
 
 type reaction_toggle_result = {

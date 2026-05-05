@@ -502,14 +502,16 @@ let test_reaction_toggle_and_summary () =
             | summary :: _ ->
                 Alcotest.(check string) "summary emoji" "🚀" summary.emoji;
                 Alcotest.(check int) "summary count" 1 summary.count;
-                Alcotest.(check bool) "summary reacted" true summary.reacted
+                Alcotest.(check bool) "summary reacted" true summary.reacted;
+                Alcotest.(check (list string)) "summary recent users"
+                  [ "reactor" ] summary.recent_user_ids
             | [] -> Alcotest.fail "expected reaction summary"));
       (match
          Board_dispatch.list_reactions ~target_type:Board.Reaction_post
            ~target_id:post_id ~user_id:"reactor" ()
        with
-       | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok summaries ->
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok summaries ->
            Alcotest.(check int) "listed summary length" 1
              (List.length summaries));
       (match
@@ -560,8 +562,50 @@ let test_comment_reaction_survives_restart () =
           | summary :: _ ->
               Alcotest.(check string) "restored emoji" "👏" summary.emoji;
               Alcotest.(check int) "restored count" 1 summary.count;
-              Alcotest.(check bool) "restored reacted" true summary.reacted
+              Alcotest.(check bool) "restored reacted" true summary.reacted;
+              Alcotest.(check (list string)) "restored recent users"
+                [ "reactor" ] summary.recent_user_ids
           | [] -> Alcotest.fail "expected restored reaction summary"
+
+let test_reaction_summary_recent_user_ids () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"recent reactors parent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      List.iter
+        (fun user_id ->
+           match
+             Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+               ~target_id:post_id ~user_id ~emoji:"👍"
+           with
+           | Ok _ -> ()
+           | Error e -> Alcotest.fail (Board.show_board_error e))
+        [ "reactor-a"; "reactor-b"; "reactor-c" ];
+      match
+        Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+          ~target_id:post_id ~user_id:"reactor-b" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok summaries ->
+          match summaries with
+          | summary :: _ ->
+              Alcotest.(check string) "summary emoji" "👍" summary.emoji;
+              Alcotest.(check int) "summary count" 3 summary.count;
+              Alcotest.(check bool) "selected user reacted" true
+                summary.reacted;
+              Alcotest.(check int) "recent user cap input length" 3
+                (List.length summary.recent_user_ids);
+              List.iter
+                (fun user_id ->
+                   Alcotest.(check bool)
+                     (Printf.sprintf "recent includes %s" user_id)
+                     true
+                     (List.mem user_id summary.recent_user_ids))
+                [ "reactor-a"; "reactor-b"; "reactor-c" ]
+          | [] -> Alcotest.fail "expected reaction summary"
 
 let test_board_sse_reaction_changed () =
   let post_id =
@@ -743,6 +787,8 @@ let () =
         (with_eio test_reaction_toggle_and_summary);
       Alcotest.test_case "comment reaction survives restart" `Quick
         (with_eio test_comment_reaction_survives_restart);
+      Alcotest.test_case "summary recent user ids" `Quick
+        (with_eio test_reaction_summary_recent_user_ids);
       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "unsupported emoji rejected" `Quick

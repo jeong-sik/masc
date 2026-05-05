@@ -613,7 +613,14 @@ describe('board reactions', () => {
   it('fetches reaction summaries with the dashboard voter', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ reactions: [{ emoji: '👍', count: 2, reacted: true }] }), {
+      new Response(JSON.stringify({
+        reactions: [{
+          emoji: '👍',
+          count: 2,
+          has_reacted: true,
+          recent_user_ids: ['agent-b', 'agent-a'],
+        }],
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -622,7 +629,13 @@ describe('board reactions', () => {
 
     const result = await fetchBoardReactions('post', 'post-1')
 
-    expect(result).toEqual([{ emoji: '👍', count: 2, reacted: true }])
+    expect(result).toEqual([{
+      emoji: '👍',
+      count: 2,
+      reacted: true,
+      has_reacted: true,
+      recent_user_ids: ['agent-b', 'agent-a'],
+    }])
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/board/reactions?')
     expect(url).toContain('target_type=post')
@@ -639,7 +652,12 @@ describe('board reactions', () => {
         user_id: 'dashboard-reviewer',
         emoji: '🚀',
         reacted: true,
-        summary: [{ emoji: '🚀', count: 1, reacted: true }],
+        summary: [{
+          emoji: '🚀',
+          count: 1,
+          has_reacted: true,
+          recent_user_ids: ['dashboard-reviewer'],
+        }],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -649,7 +667,13 @@ describe('board reactions', () => {
 
     const result = await toggleReaction('comment', 'comment-1', '🚀')
 
-    expect(result.summary).toEqual([{ emoji: '🚀', count: 1, reacted: true }])
+    expect(result.summary).toEqual([{
+      emoji: '🚀',
+      count: 1,
+      reacted: true,
+      has_reacted: true,
+      recent_user_ids: ['dashboard-reviewer'],
+    }])
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/board/reactions')
     expect(JSON.parse(String(init.body))).toMatchObject({

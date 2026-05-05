@@ -59,6 +59,22 @@ let () =
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
+let storage_enforcement_fallback_reason ~requested ~effective =
+  let requested = requested |> String.trim |> String.lowercase_ascii in
+  let effective = effective |> String.trim |> String.lowercase_ascii in
+  if requested = "" || String.equal requested effective then
+    None
+  else
+    Some
+      (Printf.sprintf
+         "MASC_STORAGE_TYPE=%s requested; filesystem-only bootstrap enforced as %s"
+         requested effective)
+
+let note_storage_enforcement_fallback ~requested ~effective =
+  match storage_enforcement_fallback_reason ~requested ~effective with
+  | Some reason -> Server_startup_state.note_fallback reason
+  | None -> ()
+
 let ensure_default_oas_cascade_timeout_env () =
   match Sys.getenv_opt "OAS_CASCADE_MODEL_TIMEOUT_SEC" |> Env_config_core.trim_opt with
   | Some _ -> ()
@@ -1428,10 +1444,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+  let requested_backend_mode_before_enforcement = requested_backend_mode () in
   force_jsonl_fallback_env ();
   let initial_backend_mode = requested_backend_mode () in
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
+  note_storage_enforcement_fallback
+    ~requested:requested_backend_mode_before_enforcement
+    ~effective:initial_backend_mode;
 
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->

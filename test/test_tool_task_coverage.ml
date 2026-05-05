@@ -1026,82 +1026,107 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
-let () = test "transition_submit_for_verification_accepts_todo_pr_evidence_without_required_tool" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-  add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
-  let claim_success, claim_result =
-    Tool_task.handle_transition
-      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-      ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "claim");
-        ])
-  in
-  assert (not claim_success);
-  assert (str_contains claim_result "requires tool(s) unavailable");
-  assert_task_todo ctx;
-  let submit_success, submit_result =
-    Tool_task.handle_transition
-      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-      ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "submit_for_verification");
-          ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
-          ( "notes",
-            `String
-              "Implementation is already merged; submit PR evidence for independent verification." );
-        ])
-  in
-  if not submit_success then failwith submit_result;
-  assert_task_awaiting_verification_by ctx "codex-mcp-client";
-  assert (Planning_eio.get_current_task ctx.config = None)
+let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    let success, result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+            ( "notes",
+              `String
+                "Implementation is already merged; submit PR evidence for independent verification." );
+          ])
+    in
+    assert (not success);
+    assert (str_contains result "Invalid transition: todo -> submit_for_verification");
+    assert_task_todo ctx)
 )
 
-let () = test "transition_submit_for_verification_accepts_todo_pr_evidence_with_stale_do_not_reclaim_reason" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-  let success, result =
-    Tool_task.handle_add_task ctx
-      (`Assoc
-        [
-          ("title", `String "Strict accessor PR evidence");
-          ("priority", `Int 1);
-        ])
-  in
-  if not success then failwith result;
-  set_only_task_do_not_reclaim_reason ctx
-    "Auto-claimed via auto_goal_fallback by issue_king without repo write tools";
-  let claim_success, claim_result =
-    Tool_task.handle_transition ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "claim");
-        ])
-  in
-  assert (not claim_success);
-  assert (str_contains claim_result "blocked from re-claim");
-  assert_task_todo ctx;
-  let submit_success, submit_result =
-    Tool_task.handle_transition
-      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-      ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "submit_for_verification");
-          ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13185");
-          ( "notes",
-            `String
-              "A stale do_not_reclaim_reason blocks claim, but merged PR evidence can still enter verification." );
-        ])
-  in
-  if not submit_success then failwith submit_result;
-  assert_task_awaiting_verification_by ctx "codex-mcp-client";
-  assert (Planning_eio.get_current_task ctx.config = None)
+let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    let claim_success, claim_result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    assert (not claim_success);
+    assert (str_contains claim_result "requires tool(s) unavailable");
+    assert_task_todo ctx;
+    let submit_success, submit_result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+            ( "notes",
+              `String
+                "Implementation is already merged; submit PR evidence for independent verification." );
+          ])
+    in
+    if not submit_success then failwith submit_result;
+    assert_task_awaiting_verification_by ctx "codex-mcp-client";
+    assert (Planning_eio.get_current_task ctx.config = None))
+)
+
+let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_with_stale_do_not_reclaim_reason" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let success, result =
+      Tool_task.handle_add_task ctx
+        (`Assoc
+          [
+            ("title", `String "Strict accessor PR evidence");
+            ("priority", `Int 1);
+          ])
+    in
+    if not success then failwith result;
+    set_only_task_do_not_reclaim_reason ctx
+      "Auto-claimed via auto_goal_fallback by issue_king without repo write tools";
+    let claim_success, claim_result =
+      Tool_task.handle_transition ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    assert (not claim_success);
+    assert (str_contains claim_result "blocked from re-claim");
+    assert_task_todo ctx;
+    let submit_success, submit_result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13185");
+            ( "notes",
+              `String
+                "A stale do_not_reclaim_reason blocks claim, but merged PR evidence can still enter verification." );
+          ])
+    in
+    if not submit_success then failwith submit_result;
+    assert_task_awaiting_verification_by ctx "codex-mcp-client";
+    assert (Planning_eio.get_current_task ctx.config = None))
 )
 
 let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun () ->

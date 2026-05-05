@@ -1024,6 +1024,7 @@
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)
+(include stanzas/test_cascade_routes_bigthree_ssot.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
 (include stanzas/test_cascade_trust_persist.inc)

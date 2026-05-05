@@ -26,6 +26,13 @@ type logical_use =
 val logical_use_key : logical_use -> string
 val logical_use_of_string_opt : string -> logical_use option
 
+val keeper_default_last_resort_profile : string
+(** Default fallback profile name applied to every keeper route built via the
+    internal helper [keeper_route].  Equals [Keeper_cascade_profile.default_name]
+    by contract; cross-module drift is guarded by
+    [test/test_cascade_routes_bigthree_ssot.ml].  Exposed so callers and tests
+    can reference the SSOT instead of restating the literal "big_three". *)
+
 val all_logical_uses : logical_use list
 (** Logical call-site uses known by the route registry. *)
 

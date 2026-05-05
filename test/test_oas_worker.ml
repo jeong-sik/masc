@@ -2150,11 +2150,16 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
      first emission would still pass) and forced the helper to be
      part of [Oas_worker_named]'s public API.  Drive the actual
      emission from [filter_candidate_providers_for_tool_support]
-     and observe it via [Log.Ring]. *)
+     and observe it via [Log.Ring].
+
+     [since_seq] is exclusive ([> seq]), so a falsy [Some 0] would
+     skip a fresh entry whose seq is 0 (e.g. when this test runs in
+     isolation against an empty ring).  Pass [None] when the ring
+     is empty so [recent] returns every entry. *)
   let before_seq =
     match Log.Ring.recent ~limit:1 () with
-    | (entry : Log.Ring.entry) :: _ -> entry.seq
-    | [] -> 0
+    | (entry : Log.Ring.entry) :: _ -> Some entry.seq
+    | [] -> None
   in
   let filtered =
     Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
@@ -2166,7 +2171,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       [ codex_provider; make_kimi_cli_provider_cfg () ]
   in
   let codex_skip_entries =
-    Log.Ring.recent ~limit:50 ~module_filter:"Misc" ~since_seq:before_seq ()
+    Log.Ring.recent ~limit:50 ~module_filter:"Misc" ?since_seq:before_seq ()
     |> List.filter (fun (entry : Log.Ring.entry) ->
         contains_substring ~needle:"reason=codex_keeper_bound_actor_required"
           entry.message)
@@ -2175,8 +2180,8 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
    | [] ->
        Alcotest.failf
          "expected at least one codex bound-actor skip log entry; \
-          observed none under module_filter=Misc since seq=%d"
-         before_seq
+          observed none under module_filter=Misc since seq=%s"
+         (match before_seq with Some s -> string_of_int s | None -> "<empty>")
    | (entry : Log.Ring.entry) :: _ ->
        Alcotest.(check bool)
          "skip log mentions cascade tool_use_strict label" true

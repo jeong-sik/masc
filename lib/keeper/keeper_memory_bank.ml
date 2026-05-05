@@ -891,6 +891,97 @@ let append_memory_notes_from_reply
       notes;
     (List.length notes, List.rev !kinds_acc)
 
+let strip_tool_result_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
+  match result with
+  | `Assoc kv ->
+      let reserved =
+        [ Multimodal.Tool_emission.multimodal_kind_key
+        ; Multimodal.Tool_emission.multimodal_id_key
+        ; Multimodal.Tool_emission.multimodal_metadata_key
+        ]
+      in
+      `Assoc (List.filter (fun (key, _) -> not (List.mem key reserved)) kv)
+  | other -> other
+
+let tool_result_metadata (result : Yojson.Safe.t) : Yojson.Safe.t =
+  match result with
+  | `Assoc kv -> (
+      match
+        List.assoc_opt
+          Multimodal.Tool_emission.multimodal_metadata_key
+          kv
+      with
+      | Some (`Assoc _ as metadata) -> metadata
+      | _ -> `Assoc [])
+  | _ -> `Assoc []
+
+let tool_result_payload_preview (result : Yojson.Safe.t) : string =
+  result
+  |> strip_tool_result_reserved_keys
+  |> Yojson.Safe.to_string
+  |> String_util.utf8_safe ~max_bytes:1200 ~suffix:"..."
+  |> String_util.to_string
+
+let tool_result_memory_text ~kind ~artifact_id ~payload_preview : string =
+  Printf.sprintf
+    "ToolResult %s artifact %s: %s"
+    kind artifact_id payload_preview
+
+let append_memory_notes_from_tool_results
+    (config : Coord.config)
+    (meta : keeper_meta)
+    ~(turn : int)
+    ~(results : Yojson.Safe.t list) : int =
+  let now_ts = Time_compat.now () in
+  let path = keeper_memory_bank_path config meta.name in
+  let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let written = ref 0 in
+  List.iter
+    (fun result ->
+      match
+        ( Multimodal.Tool_emission.extract_kind_from_result result,
+          Multimodal.Tool_emission.extract_id_from_result result )
+      with
+      | Some kind_tag, Some artifact_id
+        when String.trim artifact_id <> ""
+             && not (Hashtbl.mem seen_artifacts artifact_id) ->
+          Hashtbl.add seen_artifacts artifact_id ();
+          let kind = Artifact.kind_tag_to_string kind_tag in
+          let payload_preview = tool_result_payload_preview result in
+          let text =
+            tool_result_memory_text ~kind ~artifact_id ~payload_preview
+          in
+          if is_meaningful_memory_text text then begin
+            append_jsonl_line path
+              (`Assoc
+                [ ("ts", `String (now_iso ()))
+                ; ("ts_unix", `Float now_ts)
+                ; ("name", `String meta.name)
+                ; ( "trace_id",
+                    `String
+                      (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+                ; ("generation", `Int meta.runtime.generation)
+                ; ("turn", `Int turn)
+                ; ("kind", `String "long_term")
+                ; ("horizon", `String long_term_horizon)
+                ; ("source", `String "tool_result")
+                ; ("schema_version", `Int keeper_memory_schema_version)
+                ; ( "priority",
+                    `Int
+                      (tuned_priority_for_candidate
+                         ~kind:"long_term" ~text) )
+                ; ("text", `String text)
+                ; ("artifact_id", `String artifact_id)
+                ; ("artifact_kind", `String kind)
+                ; ("payload_preview", `String payload_preview)
+                ; ("metadata", tool_result_metadata result)
+                ]);
+            incr written
+          end
+      | _ -> ())
+    results;
+  !written
+
 let summarize_memory_bank_lines
     (lines : string list)
     ~(recent_limit : int) : keeper_memory_summary =

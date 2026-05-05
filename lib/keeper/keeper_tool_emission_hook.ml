@@ -51,6 +51,12 @@ let drain acc : Yojson.Safe.t list =
   Stdlib.Mutex.unlock acc.mutex;
   items
 
+let snapshot acc : Yojson.Safe.t list =
+  Stdlib.Mutex.lock acc.mutex;
+  let items = List.rev acc.items in
+  Stdlib.Mutex.unlock acc.mutex;
+  items
+
 let accumulator_size acc =
   Stdlib.Mutex.lock acc.mutex;
   let n = List.length acc.items in

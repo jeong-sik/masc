@@ -14,12 +14,14 @@
    crash triggers cycle restart, which in turn re-arms the
    same race — 5+ FATALs/day.
 
-   The fix collapsed the [Cancelled _ as e -> raise e] arm
-   into the catch-all [exn ->] handler.  This test asserts
-   that intent via anchored substrings in the source so a
-   future refactor that re-introduces the re-raise (or removes
-   the explanatory comment) fails CI before it can re-armm
-   the cycle restart loop. *)
+   The fix must never re-raise [Cancelled] from the finally
+   block.  A dedicated [Cancelled] arm is allowed when it
+   swallows the exception; that keeps the cleanup-failure metric
+   reserved for unexpected cleanup exceptions.  This test asserts
+   that intent via anchored substrings in the source so a future
+   refactor that re-introduces the re-raise (or removes the
+   explanatory comment) fails CI before it can re-arm the cycle
+   restart loop. *)
 
 let read_file path =
   let ic = open_in path in
@@ -66,9 +68,9 @@ let () =
      fix.  If a future revert deletes the explanation, this
      fails first and points the next operator at the incident. *)
   assert_contains
-    ~label:"finally swallow comment block"
+    ~label:"cancelled cleanup arm"
     src
-    "Swallow EVERYTHING raised inside this finally block";
+    "supervisor finally cleanup cancelled";
   (* Anchor 2: explicit naming of the wrapping mechanism so
      anyone reading the fix understands the why. *)
   assert_contains

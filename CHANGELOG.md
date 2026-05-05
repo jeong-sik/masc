@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [0.19.8] - 2026-05-05
+
+### Added
+- Nightly health CI workflow with auto-issue creation.
+- Prometheus counter for keeper tool policy drift detection.
+- Admission sub-table passthrough to cascade JSON.
+
+### Fixed
+- Version truth sync (dune-project, opam, ROADMAP) to match v0.19.8 tag.
+
 ## [0.19.7] - 2026-05-05
 
 ### Added

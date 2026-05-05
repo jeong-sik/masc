@@ -75,23 +75,24 @@ let test_metrics_window_exposes_observed_pr_work () =
       ~primary_model_norm:""
       ~primary_model:""
   in
-  check int "review read tools" 1
-    (summary_int "pr_review_read_tool_count" summary);
-  check int "review mutation tools" 2
-    (summary_int "pr_review_mutation_tool_count" summary);
-  check int "review tools" 3
-    (summary_int "pr_review_tool_count" summary);
-  check int "git/preflight tools" 3
-    (summary_int "pr_work_git_tool_count" summary);
-  check int "pr work signal count" 6
-    (summary_int "pr_work_signal_count" summary);
+  check int "review read tool calls" 1
+    (summary_int "pr_review_read_tool_call_count" summary);
+  check int "review mutation tool calls" 2
+    (summary_int "pr_review_mutation_tool_call_count" summary);
+  check int "review tool calls" 3
+    (summary_int "pr_review_tool_call_count" summary);
+  check int "git/preflight tool calls" 3
+    (summary_int "pr_work_git_tool_call_count" summary);
+  check int "pr work tool call count" 6
+    (summary_int "pr_work_tool_call_count" summary);
   check bool "observed review" true
-    (summary_bool "observed_pr_review_work" summary);
+    (summary_bool "observed_pr_review_tool_calls" summary);
   check bool "observed mutation" true
-    (summary_bool "observed_pr_mutation_work" summary);
-  check bool "observed git" true (summary_bool "observed_git_work" summary);
+    (summary_bool "observed_pr_mutation_tool_calls" summary);
+  check bool "observed git" true
+    (summary_bool "observed_git_tool_calls" summary);
   check bool "observed pr work" true
-    (summary_bool "observed_pr_work" summary)
+    (summary_bool "observed_pr_work_tool_calls" summary)
 
 let () =
   run "dashboard_keeper_metrics_10286"

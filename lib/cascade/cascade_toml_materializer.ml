@@ -282,9 +282,19 @@ let profile_field_json ~profile_name ~field_name field_value =
   | "ollama_max_concurrent"
   | "cli_max_concurrent"
   | "sticky_ttl_ms"
-  | "num_ctx" -> (
+  | "num_ctx"
+  | "rate_limit_skip_after"
+  | "server_error_skip_after" -> (
       match int_value ~path:profile_path field_value with
       | Ok value -> Ok [ (profile_name ^ "_" ^ field_name, `Int value) ]
+      | Error _ as err -> err)
+  | "latency_baseline_ms"
+  | "rate_limit_recency_window_s"
+  | "rate_limit_decay_base"
+  | "server_error_recency_window_s"
+  | "server_error_decay_base" -> (
+      match float_value ~path:profile_path field_value with
+      | Ok value -> Ok [ (profile_name ^ "_" ^ field_name, `Float value) ]
       | Error _ as err -> err)
   | "timeout_sec" -> (
       (* Legacy cascade.toml field from pre-route runtime configs. Timeout
@@ -332,7 +342,7 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Error _ as err -> err)
   | other ->
       errorf
-        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, keeper_assignable, fallback_cascade, api_key_env, keep_alive, num_ctx, timeout_sec"
+        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, api_key_env, keep_alive, num_ctx, timeout_sec"
         other profile_name
 
 let profile_table_json_fields ~profile_name value =

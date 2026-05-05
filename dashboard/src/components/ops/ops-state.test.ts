@@ -22,7 +22,13 @@ import {
   hydratedWorkflowId,
   quickTarget,
   quickMessage,
+  quickComposerMode,
+  composerModeForFocus,
+  ensureStateBlockDraft,
+  hasStateBlock,
   persistActorName,
+  stateBlockKeys,
+  STATE_BLOCK_TEMPLATE,
 } from './ops-state'
 
 describe('ops-state', () => {
@@ -36,6 +42,7 @@ describe('ops-state', () => {
     hydratedWorkflowId.value = null
     quickTarget.value = 'namespace'
     quickMessage.value = ''
+    quickComposerMode.value = 'broadcast'
     mockPersistDashboardActorName.mockClear()
     mockResolveDashboardActorName.mockClear()
   })
@@ -57,6 +64,7 @@ describe('ops-state', () => {
     expect(taskPriority.value).toBe('2')
     expect(quickTarget.value).toBe('namespace')
     expect(quickMessage.value).toBe('')
+    expect(quickComposerMode.value).toBe('broadcast')
     expect(hydratedWorkflowId.value).toBeNull()
   })
 
@@ -65,5 +73,26 @@ describe('ops-state', () => {
     persistActorName('new-actor')
     expect(mockPersistDashboardActorName).toHaveBeenCalledWith('new-actor')
     expect(actorName.value).toBe('persisted-actor')
+  })
+
+  it('maps command focus aliases to composer modes', () => {
+    expect(composerModeForFocus('broadcast')).toBe('broadcast')
+    expect(composerModeForFocus('mention')).toBe('dm')
+    expect(composerModeForFocus('dm')).toBe('dm')
+    expect(composerModeForFocus('state')).toBe('state')
+    expect(composerModeForFocus('unknown')).toBeNull()
+  })
+
+  it('extracts structured state block keys', () => {
+    const message = '[STATE]\nGoal: ship\nPhase: review\nNext: watch CI\nBlocker: none\n[/STATE]'
+    expect(stateBlockKeys(message)).toEqual(['Goal', 'Phase', 'Next', 'Blocker'])
+    expect(hasStateBlock(message)).toBe(true)
+    expect(hasStateBlock('Goal: ship')).toBe(false)
+  })
+
+  it('appends the state template without duplicating an existing block', () => {
+    expect(ensureStateBlockDraft('')).toBe(STATE_BLOCK_TEMPLATE)
+    expect(ensureStateBlockDraft('Heads up')).toBe(`Heads up\n\n${STATE_BLOCK_TEMPLATE}`)
+    expect(ensureStateBlockDraft(STATE_BLOCK_TEMPLATE)).toBe(STATE_BLOCK_TEMPLATE)
   })
 })

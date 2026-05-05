@@ -105,6 +105,7 @@ interface TextAreaProps {
       focus, dialog `initialFocusRef`, etc.). */
   inputRef?: { current: HTMLTextAreaElement | null }
   onInput?: (e: Event) => void
+  onKeyDown?: (e: KeyboardEvent) => void
 }
 
 export function TextArea({
@@ -119,6 +120,7 @@ export function TextArea({
   required,
   inputRef,
   onInput,
+  onKeyDown,
 }: TextAreaProps) {
   return html`
     <textarea
@@ -133,6 +135,7 @@ export function TextArea({
       required=${required}
       value=${value}
       onInput=${onInput}
+      onKeyDown=${onKeyDown}
     ></textarea>
   `
 }

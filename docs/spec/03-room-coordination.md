@@ -32,8 +32,8 @@ Room은 MASC의 핵심 조율 단위다. 에이전트가 참여(join)하고, 태
 
 Room 하나가 소유하는 것:
 - **state**: `room_state` 레코드 (protocol version, active agents, message seq, pause flag)
-- **agents**: `.masc/agents/` 디렉토리 내 JSON 파일 (또는 PG `masc_kv`)
-- **tasks**: `.masc/tasks/backlog.json` (또는 PG) -- 태스크 큐와 스케줄링
+- **agents**: `.masc/agents/` 디렉토리 내 JSON 파일
+- **tasks**: `.masc/tasks/backlog.json` -- 태스크 큐와 스케줄링
 - **messages**: `.masc/messages/` -- broadcast 메시지 저장
 - **votes**: `.masc/votes/` -- 투표 데이터
 - **portals**: `.masc/portals/` + `.masc/a2a_tasks/` -- A2A 통신
@@ -85,10 +85,10 @@ graph TB
 |--------|-----|------|
 | `coord_task` | 1486 | 태스크 CRUD + 상태 전이 |
 | `coord_eio` | 670 | Eio 백엔드 구현 (direct-style async I/O) |
-| `coord_utils_ops` | 513 | file lock + PG 공통 연산 |
+| `coord_utils_ops` | 513 | filesystem lock + room 공통 연산 |
 | `coord_gc` | 413 | 좀비 정리, stale 아카이브, 메시지 정리 |
 | `coord_worktree` | 403 | task worktree 관리 |
-| `coord_utils_backend_setup` | 396 | PG 백엔드 설정 |
+| `coord_utils_backend_setup` | 396 | filesystem backend setup |
 | `coord_query` | 373 | 룸 내 에이전트/태스크 카운트 쿼리 |
 | `coord_task_schedule` | 337 | claim_next, starvation prevention |
 | `coord_utils_paths_backend` | 261 | 경로/백엔드 리졸버 |
@@ -555,19 +555,18 @@ val of_string : string -> t option
 
 `with_file_lock config path fn`: 파일 단위 lock으로 원자적 read-modify-write.
 - backlog 갱신, 에이전트 상태 갱신 등 모든 mutation에 적용
-- PG 백엔드 사용 시에도 filesystem lock 유지 (dual-write)
+- filesystem JSON writes are protected by file locks.
 
 ### 13.2 State Persistence
 
-| 대상 | Filesystem | PostgreSQL |
-|------|-----------|-----------|
-| Room state | `.masc/state.json` | `masc_kv[room:state]` |
-| Agent | `.masc/agents/{nick}.json` | `masc_kv[agents:{nick}]` |
-| Backlog | `.masc/tasks/backlog.json` | (filesystem only) |
-| Messages | `.masc/messages/*.json` | (filesystem only) |
+| 대상 | Filesystem |
+|------|-----------|
+| Room state | `.masc/state.json` |
+| Agent | `.masc/agents/{nick}.json` |
+| Backlog | `.masc/tasks/backlog.json` |
+| Messages | `.masc/messages/*.json` |
 
-- PG 백엔드(`is_pg_backend`)가 활성이면 dual-write (file + PG)
-- 읽기: PG 우선, fallback to file
+- PostgreSQL room persistence is not a runtime contract.
 
 ### 13.3 Nickname Generation
 
@@ -674,7 +673,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | INV-ROOM-013 | 투표에서 각 에이전트는 1회만 투표할 수 있다 | `room_vote.vote_cast` |
 | INV-ROOM-014 | Portal은 양방향이다 (reverse portal 자동 생성) | `room_portal.portal_open_r` |
 | INV-ROOM-015 | GC 시 open task를 참조하는 메시지는 보존된다 | `room_gc.gc` (mentions_open_task) |
-| INV-ROOM-016 | PG 백엔드 사용 시 filesystem과 PG에 동시 기록한다 (dual-write) | `room_state.write_state`, `room_lifecycle.join` |
+| INV-ROOM-016 | Room persistence uses filesystem JSON under `.masc/`; PostgreSQL room persistence is not supported | `room_state.write_state`, `room_lifecycle.join` |
 
 ---
 

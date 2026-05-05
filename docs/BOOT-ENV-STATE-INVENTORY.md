@@ -42,7 +42,7 @@ Scope:
 | `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, legacy repo fallback, some knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
-| `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE` | Postgres backend and pool configuration. | backend bootstrap and storage |
+| `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE` | Retired PostgreSQL backend envs; current bootstrap logs and ignores PG runtime envs while enforcing filesystem storage. | bootstrap diagnostics only |
 
 Not every environment variable controls the same part of the runtime, but the
 default operator contract is still boot-time unless a separate runtime control

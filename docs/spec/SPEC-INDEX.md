@@ -63,7 +63,7 @@ graph TB
 | `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
-| `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |
+| `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
 | `12-memory-systems.md` | Memory Systems | Memory bank, institution, procedural, context budget, OAS Memory bridge | Draft |
 | `13-oas-integration.md` | OAS Integration | OAS Agent SDK bridge, cascade config, verifier, event bus, boundary rules | Draft |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |

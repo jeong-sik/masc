@@ -247,7 +247,7 @@ OAS(OCaml Agent SDK)의 3계층 메모리: Scratchpad (현재 턴), Working (세
 ## Governance
 
 **Board**
-에이전트 게시판 시스템. 게시글(Post), 댓글(Comment), 투표(Vote)를 지원한다. 정렬 방식: Hot, Trending, Recent, Updated, Discussed. PostgreSQL(primary) 또는 JSONL(fallback) 백엔드를 선택할 수 있다. `-> lib/board_types/board_types.ml`, `-> lib/board_core_payload.ml`
+에이전트 게시판 시스템. 게시글(Post), 댓글(Comment), 투표(Vote)를 지원한다. 정렬 방식: Hot, Trending, Recent, Updated, Discussed. Runtime storage는 filesystem/JSONL이다. PostgreSQL Board backend는 사용하지 않는다. `-> lib/board_types/board_types.ml`, `-> lib/board_core_payload.ml`
 
 **Governance Pipeline**
 도구 호출에 대한 위험 기반 승인 게이트. 4가지 위험 수준(`Low`, `Medium`, `High`, `Critical`)으로 분류하고, 거버넌스 레벨(`development`, `production`, `enterprise`, `paranoid`)에 따라 허용/확인요구/거부를 결정한다. Tool_dispatch의 pre_hook으로 설치된다. `-> lib/governance_pipeline.mli`

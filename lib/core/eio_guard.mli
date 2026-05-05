@@ -32,7 +32,8 @@ val yield_if_ready : unit -> unit
     currently yield. *)
 
 type yield_meter
-(** Counter for periodic cooperative yields in CPU-heavy loops. *)
+(** Counter for periodic cooperative yields in CPU-heavy loops. Safe to share
+    across fibers or domains. *)
 
 val create_yield_meter : ?interval:int -> unit -> yield_meter
 (** Create a meter that yields every [interval] steps.  Non-positive

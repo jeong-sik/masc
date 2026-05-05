@@ -41,10 +41,34 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int) "one pending entry" 1
     (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
 
+let test_yield_meter_noops_without_runnable_fiber () =
+  let meter = Eio_guard.create_yield_meter ~interval:0 () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable (fun () ->
+      Eio_guard.yield_step meter;
+      Eio_guard.yield_step meter)
+
+let test_yield_meter_can_be_shared_across_fibers () =
+  with_eio_env @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let meter = Eio_guard.create_yield_meter ~interval:2 () in
+  for _ = 1 to 8 do
+    Eio.Fiber.fork ~sw (fun () ->
+        for _ = 1 to 50 do
+          Eio_guard.yield_step meter
+        done)
+  done
+
 let () =
   run "keeper_mutex_coverage"
     [
       "keeper_msg_async", [
         test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip;
+      ];
+      "eio_guard", [
+        test_case "yield meter noops without runnable fiber" `Quick
+          test_yield_meter_noops_without_runnable_fiber;
+        test_case "yield meter can be shared across fibers" `Quick
+          test_yield_meter_can_be_shared_across_fibers;
       ];
     ]

@@ -58,15 +58,16 @@ let yield_if_ready () =
 
 type yield_meter = {
   interval : int;
-  mutable steps : int;
+  steps : int Atomic.t;
 }
 
 let create_yield_meter ?(interval = 1000) () =
-  { interval = max 1 interval; steps = 0 }
+  { interval = max 1 interval; steps = Atomic.make 0 }
 
 let yield_step meter =
-  meter.steps <- meter.steps + 1;
-  if meter.steps >= meter.interval then begin
-    meter.steps <- 0;
-    yield_if_ready ()
-  end
+  let rec bump () =
+    let current = Atomic.get meter.steps in
+    let next = if current + 1 >= meter.interval then 0 else current + 1 in
+    if Atomic.compare_and_set meter.steps current next then next = 0 else bump ()
+  in
+  if bump () then yield_if_ready ()

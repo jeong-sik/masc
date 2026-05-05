@@ -96,9 +96,10 @@ let event_to_chunk_kind (evt : Agent_sdk.Types.sse_event)
 let wire_error_of_event (evt : Agent_sdk.Types.sse_event) : string option =
   match evt with
   | Agent_sdk.Types.SSEError msg -> Some msg
-  | Agent_sdk.Types.SSEParseFailed { reason; _ } -> Some reason
+  | Agent_sdk.Types.SSEParseFailed { reason; _ } ->
+      Some ("sse_parse_failed: " ^ reason)
   | Agent_sdk.Types.SSEUnknownEventType { event_type; _ } ->
-      Some (Printf.sprintf "sse_unknown_event_type: %s" event_type)
+      Some ("sse_unknown_event_type: " ^ event_type)
   | _ -> None
 
 (* -- React to FSM output ------------------------------------------ *)

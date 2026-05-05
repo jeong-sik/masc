@@ -32,6 +32,8 @@ let rec waitpid_no_intr flags pid =
   try Unix.waitpid flags pid
   with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_intr flags pid
 
+let waitpid_status_nointr_for_test pid = snd (waitpid_no_intr [] pid)
+
 let env_key kv =
   match String.index_opt kv '=' with
   | None -> kv
@@ -441,6 +443,7 @@ let provision_via_with_token ?credential_id ?identity_label
                with
                | Sys_error _ ->
                    close_out_noerr oc);
+              let status = snd (waitpid_no_intr [] pid) in
               let status = snd (waitpid_no_intr [] pid) in
               (match status with
                | Unix.WEXITED 0 ->

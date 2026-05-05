@@ -538,6 +538,28 @@ let test_relabel_no_file () =
       Credential_materializer.relabel_hosts_yml
         ~gh_config_dir:dir ~identity_label:"x")
 
+let test_waitpid_status_nointr_reaps_after_signal () =
+  let parent = Unix.getpid () in
+  match Unix.fork () with
+  | 0 ->
+      ignore (Unix.select [] [] [] 0.05);
+      Unix.kill parent Sys.sigusr1;
+      ignore (Unix.select [] [] [] 0.05);
+      exit 0
+  | pid ->
+      let previous = Sys.signal Sys.sigusr1 (Sys.Signal_handle (fun _ -> ())) in
+      Fun.protect
+        ~finally:(fun () -> Sys.set_signal Sys.sigusr1 previous)
+        (fun () ->
+          match Credential_materializer.waitpid_status_nointr_for_test pid with
+          | Unix.WEXITED 0 -> ()
+          | Unix.WEXITED n ->
+              Alcotest.failf "child exited with %d" n
+          | Unix.WSIGNALED n ->
+              Alcotest.failf "child signalled with %d" n
+          | Unix.WSTOPPED n ->
+              Alcotest.failf "child stopped with %d" n)
+
 let () =
   Alcotest.run "credential_materializer"
     [
@@ -562,6 +584,11 @@ let () =
         [
           Alcotest.test_case "add invokes ensure and roundtrips" `Quick
             test_credential_store_add_invokes_ensure;
+        ] );
+      ( "process reaping",
+        [
+          Alcotest.test_case "waitpid retries after signal interruption"
+            `Quick test_waitpid_status_nointr_reaps_after_signal;
         ] );
       ( "provisioner",
         [

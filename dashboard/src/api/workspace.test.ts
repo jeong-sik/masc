@@ -13,11 +13,16 @@ afterEach(() => {
 
 const mockFetch = vi.fn()
 
-function stubFetch(response: unknown, ok = true): void {
+function stubFetch(
+  response: unknown,
+  ok = true,
+  headers: Record<string, string> = {},
+): void {
   mockFetch.mockResolvedValue({
     ok,
     status: ok ? 200 : 500,
     statusText: ok ? 'OK' : 'Internal Server Error',
+    headers: new Headers(headers),
     json: () => Promise.resolve(response),
     text: () => Promise.resolve(JSON.stringify(response)),
     clone() { return this },
@@ -26,13 +31,14 @@ function stubFetch(response: unknown, ok = true): void {
 }
 
 describe('workspace API', () => {
-  it('fetchWorkspaceTree returns file nodes', async () => {
+  it('fetchWorkspaceTree returns file nodes and project source by default', async () => {
     const nodes = [{ path: 'lib/main.ml', label: 'main.ml', depth: 1, parent: 'lib', hasChildren: false, diff: null, keeperId: null, hueIndex: null }]
     stubFetch(nodes)
 
     const result = await fetchWorkspaceTree(2)
-    expect(result).toHaveLength(1)
-    expect(result[0].path).toBe('lib/main.ml')
+    expect(result.nodes).toHaveLength(1)
+    expect(result.nodes[0].path).toBe('lib/main.ml')
+    expect(result.source).toEqual({ kind: 'project' })
 
     expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/workspace/tree?depth=2')
   })
@@ -42,6 +48,23 @@ describe('workspace API', () => {
 
     await fetchWorkspaceTree(1, { keeper: 'sangsu' })
     expect(mockFetch.mock.calls[0][0]).toContain('keeper=sangsu')
+  })
+
+  it('fetchWorkspaceTree decodes X-Workspace-Source playground header', async () => {
+    stubFetch([], true, { 'X-Workspace-Source': 'playground:alpha' })
+
+    const result = await fetchWorkspaceTree(1, { keeper: 'alpha' })
+    expect(result.source).toEqual({ kind: 'playground', keeper: 'alpha' })
+  })
+
+  it('fetchWorkspaceTree decodes X-Workspace-Source fallback variants', async () => {
+    stubFetch([], true, { 'X-Workspace-Source': 'playground_missing:beta' })
+    expect((await fetchWorkspaceTree(1, { keeper: 'beta' })).source)
+      .toEqual({ kind: 'playground_missing', keeper: 'beta' })
+
+    stubFetch([], true, { 'X-Workspace-Source': 'keeper_unknown:ghost' })
+    expect((await fetchWorkspaceTree(1, { keeper: 'ghost' })).source)
+      .toEqual({ kind: 'keeper_unknown', keeper: 'ghost' })
   })
 
   it('fetchWorkspaceFile returns file content', async () => {

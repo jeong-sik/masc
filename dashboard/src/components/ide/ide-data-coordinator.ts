@@ -7,6 +7,7 @@ import {
   fetchGitDiff,
   fetchWorkspaceTree,
   type UnifiedDiffRow,
+  type WorkspaceSource,
 } from '../../api/workspace'
 import {
   createCodeDocumentStore,
@@ -28,6 +29,8 @@ export interface IdeDataCoordinator {
   readonly fileTreeStore: FileTreeStore
   readonly diffRows: () => ReadonlyArray<UnifiedDiffRow>
   readonly subscribeDiffRows: (listener: () => void) => () => void
+  readonly workspaceSource: () => WorkspaceSource
+  readonly subscribeWorkspaceSource: (listener: () => void) => () => void
   readonly dispose: () => void
 }
 
@@ -41,6 +44,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
   const fileTreeStore = createFileTreeStore()
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
+  const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
 
   let abortController = new AbortController()
 
@@ -60,9 +64,10 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     const opts = { keeper: keeperParam, signal }
 
     // Load file tree
-    fetchWorkspaceTree(2, opts).then(nodes => {
+    fetchWorkspaceTree(2, opts).then(({ nodes, source }) => {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
+      workspaceSourceSignal.value = source
     }).catch(() => {})
 
     // Load file content
@@ -105,6 +110,14 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     fileTreeStore,
     diffRows: () => diffRowsSignal.value,
     subscribeDiffRows: diffRowsSignal.subscribe as (listener: () => void) => () => void,
+    workspaceSource: () => workspaceSourceSignal.value,
+    // Wrap [Signal.subscribe] in an arrow so [this] stays bound when
+    // the property is destructured by callers (the [as (listener: () =>
+    // void) => () => void] cast on a method reference loses [this] and
+    // crashes with "Cannot read properties of undefined" inside the
+    // signal core's internal tracking).
+    subscribeWorkspaceSource: (listener: () => void) =>
+      workspaceSourceSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
       disposeEffect()

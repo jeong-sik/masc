@@ -3,14 +3,35 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
 import { activeIdeFile } from './ide-shell'
+import type { WorkspaceSource } from '../../api/workspace-source'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
+  // Optional source-hint wiring: when provided, [SourceHint] renders a
+  // small status block under the EXPLORER header on
+  // [playground_missing] / [keeper_unknown] resolutions. Decoded from
+  // the [X-Workspace-Source] header by the data coordinator. When
+  // omitted (e.g. tests), the hint stays hidden — default is
+  // [{ kind: 'project' }] which renders nothing.
+  readonly workspaceSource?: () => WorkspaceSource
+  readonly subscribeWorkspaceSource?: (listener: () => void) => () => void
 }
 
-export function IdeExplorer({ fileTreeStore: store }: IdeExplorerProps) {
+export function IdeExplorer({
+  fileTreeStore: store,
+  workspaceSource,
+  subscribeWorkspaceSource,
+}: IdeExplorerProps) {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
+
+  const [source, setSource] = useState<WorkspaceSource>(
+    workspaceSource ? workspaceSource() : { kind: 'project' },
+  )
+  useEffect(() => {
+    if (!subscribeWorkspaceSource || !workspaceSource) return
+    return subscribeWorkspaceSource(() => setSource(workspaceSource()))
+  }, [subscribeWorkspaceSource, workspaceSource])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -51,6 +72,7 @@ export function IdeExplorer({ fileTreeStore: store }: IdeExplorerProps) {
         <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
         <span>${fileCount} FILES</span>
       </header>
+      ${SourceHint(source)}
       <ul
         role="tree"
         aria-label="File tree"
@@ -62,6 +84,27 @@ export function IdeExplorer({ fileTreeStore: store }: IdeExplorerProps) {
         }))}
       </ul>
     </div>
+  `
+}
+
+function SourceHint(source: WorkspaceSource) {
+  if (source.kind === 'project' || source.kind === 'playground') return null
+  const message = source.kind === 'playground_missing'
+    ? `@${source.keeper} 의 playground 디렉토리가 아직 없어 프로젝트 트리로 fallback`
+    : `@${source.keeper} 키퍼 메타를 찾지 못해 프로젝트 트리로 fallback`
+  return html`
+    <div
+      role="status"
+      aria-live="polite"
+      style=${{
+        font: 'var(--type-body)',
+        fontSize: 'var(--fs-11)',
+        color: 'var(--color-fg-muted)',
+        background: 'var(--color-bg-muted)',
+        padding: 'var(--sp-1) var(--sp-2)',
+        borderRadius: 'var(--r-1)',
+      }}
+    >${message}</div>
   `
 }
 

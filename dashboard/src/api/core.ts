@@ -528,6 +528,40 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   return data
 }
 
+// Same wire shape as [get<T>] but exposes selected response headers
+// alongside the parsed body. Use when a route returns metadata via
+// header (e.g. [X-Workspace-Source]) so callers can read it without
+// parsing the JSON body or breaking the existing return type.
+//
+// On bootstrap-warm fallback the returned [headers] is empty: warm
+// payloads are synthesized locally and have no upstream response.
+export async function getWithResponse<T>(
+  path: string,
+  opts: GetOptions = {},
+): Promise<{ readonly data: T; readonly headers: Headers }> {
+  const res = await fetchWithTimeout(
+    path,
+    {
+      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      signal: opts.signal,
+    },
+    opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!res.ok) {
+    const warmPayload = await bootstrapWarmPayload(path, res.clone())
+    if (warmPayload !== null) {
+      return { data: warmPayload as T, headers: new Headers() }
+    }
+    throw await apiRequestErrorFromResponse('GET', path, res)
+  }
+  const data = await parseJsonResponse<T>('GET', path, res)
+  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+    const payload = bootstrapInitializingPayload(path)
+    if (payload !== null) return { data: payload as T, headers: new Headers() }
+  }
+  return { data, headers: res.headers }
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }

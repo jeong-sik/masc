@@ -132,14 +132,43 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
 
     summary_raw = orient.get("summary", {})
     summary = summary_raw if isinstance(summary_raw, dict) else {}
+    audit_catalog_raw = orient.get("audit_catalog")
+    audit_catalog = audit_catalog_raw if isinstance(audit_catalog_raw, dict) else None
     critical_present = as_int(summary.get("critical_present"))
     evidence_present = as_int(summary.get("evidence_present"))
     findings_total = as_int(summary.get("findings_total"))
+    audit_catalog_summary: dict[str, Any] | None = None
+    audit_catalog_warning = False
+    if audit_catalog is not None:
+        consistency_raw = audit_catalog.get("consistency_findings", [])
+        consistency_findings = (
+            consistency_raw if isinstance(consistency_raw, list) else []
+        )
+        audit_catalog_summary = {
+            "status": audit_catalog.get("status", "unknown"),
+            "expected_findings_total": audit_catalog.get("expected_findings_total"),
+            "itemized_findings_total": audit_catalog.get("itemized_findings_total"),
+            "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
+            "source_documents_status": audit_catalog.get(
+                "source_documents_status", "unknown"
+            ),
+            "source_documents_covered": audit_catalog.get("source_documents_covered"),
+            "source_documents_expected": audit_catalog.get("source_documents_expected"),
+            "aggregate_claims_total": len(audit_catalog.get("aggregate_claims", []))
+            if isinstance(audit_catalog.get("aggregate_claims"), list)
+            else 0,
+            "consistency_findings_total": len(consistency_findings),
+        }
+        audit_catalog_warning = (
+            audit_catalog_summary["status"] != "COMPLETE"
+            or audit_catalog_summary["source_documents_status"] != "COMPLETE"
+            or audit_catalog_summary["consistency_findings_total"] > 0
+        )
     status = (
         "critical"
         if critical_present > 0
         else "warning"
-        if evidence_present > 0
+        if evidence_present > 0 or audit_catalog_warning
         else "ok"
     )
     present_findings = []
@@ -158,15 +187,15 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
                     "count": as_int(raw.get("count")),
                 }
             )
-    return PhaseStatus(
-        status=status,
-        summary={
-            "evidence_present": evidence_present,
-            "critical_present": critical_present,
-            "findings_total": findings_total,
-            "present_findings": present_findings[:10],
-        },
-    )
+    phase_summary: dict[str, Any] = {
+        "evidence_present": evidence_present,
+        "critical_present": critical_present,
+        "findings_total": findings_total,
+        "present_findings": present_findings[:10],
+    }
+    if audit_catalog_summary is not None:
+        phase_summary["audit_catalog"] = audit_catalog_summary
+    return PhaseStatus(status=status, summary=phase_summary)
 
 
 def decide_next_action(decide: dict[str, Any] | None) -> dict[str, Any] | None:

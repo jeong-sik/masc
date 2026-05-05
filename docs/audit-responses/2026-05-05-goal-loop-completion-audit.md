@@ -271,6 +271,10 @@ system health, next action, and counts.
 - `goal_loop_status.py` emits the compact phase status and next action.
 - Current `goal_loop_status.py` prefers `ACT_MISSING` / `ACT_UNMAPPED`
   decisions over already-linked decisions when choosing `next_action`.
+- When `goal_loop_status.py` receives catalog-enriched Orient JSON, it carries
+  the audit catalog summary into `phases.orient.summary.audit_catalog` and
+  keeps Orient at least `warning` while the catalog is incomplete or has open
+  consistency findings.
 - `docs/examples/goal-loop-fixture.md` documents text and JSON status replay.
 
 **Status**: **PARTIAL**.

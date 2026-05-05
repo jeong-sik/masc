@@ -61,6 +61,11 @@ Replay the external 206-audit claim catalog through Orient:
 python3 scripts/orient_goal_loop_logs.py \
   test/fixtures/goal_loop/observe.startup.json \
   --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  > /tmp/goal-loop-orient-audit.json
+
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
   --format text
 ```
 
@@ -73,3 +78,18 @@ Expected key facts:
   only 18 finding IDs are itemized in the checked artifacts.
 - `--require-complete-catalog` intentionally exits non-zero until the full
   row-level corpus is attached or checked in.
+
+Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
+checking whether the goal can be closed:
+
+```bash
+python3 scripts/goal_loop_status.py \
+  --observe-json test/fixtures/goal_loop/observe.startup.json \
+  --orient-json /tmp/goal-loop-orient-audit.json \
+  --decide-json /tmp/goal-loop-decide.json \
+  --verify-json test/fixtures/goal_loop/verify.fail.json \
+  --loop-iteration "#fixture"
+```
+
+Expected key fact: `phases.orient.summary.audit_catalog` preserves the
+source-document coverage, missing row count, and open consistency finding.

@@ -34,6 +34,7 @@
  dashboard_http_keeper
  dashboard_http_autoresearch
  dashboard_harness_health
+ dashboard_worktree_status
  dashboard_goals
  server_routes_http_common
  server_routes_http_pages

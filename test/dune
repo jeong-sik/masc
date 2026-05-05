@@ -551,6 +551,7 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_dashboard_keeper_cost_aggregates
         test_gh_command_blocked_message_10561
         test_keeper_turn_timeout_default_10456
         test_task_status_label_10421
@@ -747,6 +748,7 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_dashboard_keeper_cost_aggregates
         test_gh_command_blocked_message_10561
         test_keeper_turn_timeout_default_10456
         test_task_status_label_10421

@@ -321,7 +321,11 @@ let wakeup_relevant_keeper_for_board_signal
         signal.post_id)
   in
   let selected, dropped = select_board_wakeup_candidates candidates in
-  selected |> List.iter (fun (meta, reason) -> wake_meta meta reason);
+  let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
+  selected
+  |> List.iter (fun (meta, reason) ->
+         wake_meta meta reason;
+         Eio_guard.yield_step yield_meter);
   if dropped > 0 then begin
     Prometheus.inc_counter
       Prometheus.metric_keeper_keepalive_signal_failures

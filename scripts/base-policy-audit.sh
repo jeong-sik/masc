@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Base Policy Audit — count open Base in .mli files and Stdlib-shadow
-# anti-pattern in .ml files as defined in docs/BASE-POLICY.md.
+# Base Policy Audit — count open Base in lib .mli files and Stdlib-shadow
+# anti-patterns in implementation files as defined in docs/BASE-POLICY.md.
 #
 # Outputs a human-readable summary plus, when --json-out is given,
 # a machine-readable JSON file compatible with health_snapshot.sh.
@@ -98,6 +98,20 @@ count_ml_base_stdlib_shadow() {
   printf '%s' "$count"
 }
 
+count_bin_ml_base_stdlib_shadow() {
+  local count=0
+  if [ ! -d bin ]; then
+    printf '0'
+    return
+  fi
+  while IFS= read -r file; do
+    if rg -q "$STDLIB_LIST_SHADOW_RE" "$file" 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < <(rg -l "$OPEN_BASE_DIRECTIVE_RE" bin/ -g '*.ml' 2>/dev/null)
+  printf '%s' "$count"
+}
+
 # Read a single numeric key from a JSON baseline file.
 extract_baseline_value() {
   local file="$1"
@@ -157,9 +171,11 @@ fi
 
 mli_open_base="$(count_mli_open_base)"
 ml_base_stdlib_shadow="$(count_ml_base_stdlib_shadow)"
+bin_ml_base_stdlib_shadow="$(count_bin_ml_base_stdlib_shadow)"
 
 baseline_mli_open_base="$(extract_baseline_value "$BASELINE_FILE" "mli_open_base" "$mli_open_base")"
 baseline_ml_base_stdlib_shadow="$(extract_baseline_value "$BASELINE_FILE" "ml_base_stdlib_shadow" "$ml_base_stdlib_shadow")"
+baseline_bin_ml_base_stdlib_shadow="$(extract_baseline_value "$BASELINE_FILE" "bin_ml_base_stdlib_shadow" "$bin_ml_base_stdlib_shadow")"
 
 # ── Report ───────────────────────────────────────────────────────────
 
@@ -167,6 +183,7 @@ echo "=== Base Policy Audit ==="
 echo ""
 echo "  mli_open_base          : ${mli_open_base}  (baseline: ${baseline_mli_open_base})"
 echo "  ml_base_stdlib_shadow  : ${ml_base_stdlib_shadow}  (baseline: ${baseline_ml_base_stdlib_shadow})"
+echo "  bin_ml_base_stdlib_shadow: ${bin_ml_base_stdlib_shadow}  (baseline: ${baseline_bin_ml_base_stdlib_shadow})"
 echo ""
 
 regressions=()
@@ -174,6 +191,8 @@ regressions=()
   regressions+=("mli_open_base ${baseline_mli_open_base}->${mli_open_base}")
 [ "${ml_base_stdlib_shadow}" -gt "${baseline_ml_base_stdlib_shadow}" ] && \
   regressions+=("ml_base_stdlib_shadow ${baseline_ml_base_stdlib_shadow}->${ml_base_stdlib_shadow}")
+[ "${bin_ml_base_stdlib_shadow}" -gt "${baseline_bin_ml_base_stdlib_shadow}" ] && \
+  regressions+=("bin_ml_base_stdlib_shadow ${baseline_bin_ml_base_stdlib_shadow}->${bin_ml_base_stdlib_shadow}")
 
 if [ "${#regressions[@]}" -eq 0 ]; then
   echo "  Status: PASS"
@@ -192,9 +211,11 @@ if [ -n "$JSON_OUT" ]; then
 {
   "mli_open_base": ${mli_open_base},
   "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow},
+  "bin_ml_base_stdlib_shadow": ${bin_ml_base_stdlib_shadow},
   "baseline": {
     "mli_open_base": ${baseline_mli_open_base},
-    "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow}
+    "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow},
+    "bin_ml_base_stdlib_shadow": ${baseline_bin_ml_base_stdlib_shadow}
   }
 }
 EOF

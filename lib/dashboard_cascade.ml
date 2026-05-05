@@ -461,6 +461,11 @@ let provider_entry_to_json ~(declared : bool)
     ?(perf : Model_inference_metrics.provider_stats option)
     (info : Health.provider_info) : Yojson.Safe.t =
   let opt_float = function Some f -> `Float f | None -> `Null in
+  let trust_score = Cascade_trust.trust_score info in
+  let health_score =
+    let score = Float.max 0.0 (Float.min 1.0 trust_score) in
+    int_of_float (floor ((score *. 100.0) +. 0.5))
+  in
   let perf_fields =
     match perf with
     | None ->
@@ -508,6 +513,8 @@ let provider_entry_to_json ~(declared : bool)
      | Some t -> `Float t
      | None -> `Null);
     ("events_in_window", `Int info.events_in_window);
+    ("trust_score", `Float trust_score);
+    ("health_score", `Int health_score);
     (* rejected_in_window ⊆ events_in_window: responses that arrived
        but were rejected by the cascade's accept predicate.  Split out
        so dashboards can distinguish "provider down" from "provider
@@ -558,20 +565,85 @@ type recommendation = {
   rec_rationale : string;
 }
 
+let top_failure_fingerprint (info : Health.provider_info) =
+  match info.top_fingerprints with
+  | [] -> None
+  | (fingerprint, count) :: _ -> Some (fingerprint, count)
+
+let recommendation_rationale ~provider_key ~trust_score ~events ~top_count
+    action =
+  match action with
+  | Investigate when top_count >= 5 ->
+    Printf.sprintf
+      "Provider %s has repeated the same failure fingerprint %d times; inspect config/auth before changing weights."
+      provider_key top_count
+  | Investigate ->
+    Printf.sprintf
+      "Provider %s has very low trust %.2f across %d recent events; inspect quota/auth before disabling it."
+      provider_key trust_score events
+  | Disable ->
+    Printf.sprintf
+      "Provider %s trust %.2f is below 0.10 after %d recent events; disable until recovery is confirmed."
+      provider_key trust_score events
+  | Reduce_weight ->
+    Printf.sprintf
+      "Provider %s trust %.2f is below 0.30; reduce its routing weight while monitoring recovery."
+      provider_key trust_score
+
 (* Classifier — see RFC-0009 §"Phase 2a".
 
-   #10441: Phase 1 was reverted in #10412, removing [trust_score] and
-   [same_fingerprint_count] from [Health.provider_info].  This classifier was
-   shipped by #10416 against a base that still had those fields, so its
-   per-provider trust thresholds no longer have any input data.  Stub it to
-   always emit [None] until the trust pipeline is reinstated; the type
-   surface stays alive so consumers ([low_trust_recommendations],
-   [recommendations_json]) keep their signatures.  See #10428 for the
-   redesign discussion. *)
+   The provider_info record no longer stores a raw [trust_score], so this
+   derives it from the live tracker snapshot using [Cascade_trust.trust_score].
+   Recommendations stay observation-only: this module never mutates config. *)
 let classify_recommendation (info : Health.provider_info) :
     recommendation option =
-  let _ = info in
-  None
+  if info.events_in_window <= 0 then None
+  else
+    let trust_score = Cascade_trust.trust_score info in
+    let top_fingerprint, same_fingerprint_count =
+      match top_failure_fingerprint info with
+      | Some (fingerprint, count) -> Some fingerprint, count
+      | None -> None, 0
+    in
+    (* Reviewer #13194: [same_fingerprint_count] is accumulated across the
+       provider's lifetime via [provider_info.top_fingerprints], not the
+       rolling [events_in_window].  A busy provider that once accumulated
+       5+ identical failures would otherwise gate [Investigate] forever
+       even when the recent window is healthy.  Couple the gate with a
+       rolling-window floor (the recent window must have seen at least
+       as many events as the fingerprint count we are reacting to) AND
+       a low trust-score check (so a healthy window overrides the
+       lifetime artifact).  The two extra conditions keep the
+       recommendation responsive to the live signal without losing
+       the stuck-fingerprint detection it was built for. *)
+    let stuck_fingerprint =
+      same_fingerprint_count >= 5
+      && info.events_in_window >= 5
+      && trust_score < 0.50
+    in
+    let action =
+      if stuck_fingerprint then Some Investigate
+      else if trust_score < 0.10 && info.events_in_window >= 30 then
+        Some Investigate
+      else if trust_score < 0.10 then Some Disable
+      else if trust_score < 0.30 then Some Reduce_weight
+      else None
+    in
+    match action with
+    | None -> None
+    | Some rec_action ->
+      Some
+        { rec_provider_key = info.provider_key
+        ; rec_trust_score = trust_score
+        ; rec_same_fingerprint_count = same_fingerprint_count
+        ; rec_events_in_window = info.events_in_window
+        ; rec_top_fingerprint = top_fingerprint
+        ; rec_action
+        ; rec_rationale =
+            recommendation_rationale ~provider_key:info.provider_key
+              ~trust_score ~events:info.events_in_window
+              ~top_count:same_fingerprint_count rec_action
+        }
 
 let low_trust_recommendations (infos : Health.provider_info list) :
     recommendation list =

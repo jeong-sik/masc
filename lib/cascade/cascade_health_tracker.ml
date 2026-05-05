@@ -90,20 +90,14 @@ let cooldown_threshold =
     ()
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
-    skipped (not attempted).  Default: 60s.
-
-    Trade-off vs LiteLLM's 30s default: 60s is 2x more conservative,
-    prioritizing hot-loop avoidance over fast recovery.  A flapping
-    provider that recovers within one cooldown window is re-entered on
-    the next selection tick; at 30s, transient errors on the retry
-    boundary can cause the cascade to thrash between providers.
-    Override via [MASC_CASCADE_COOLDOWN_SEC] if recovery latency matters
-    more than thrashing avoidance in your deployment. *)
+    skipped (not attempted).  Default: 30s, matching the provider
+    circuit-breaker OPEN threshold used by the cascade.  Hard quota and
+    terminal provider errors use separate long cooldowns. *)
 let cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
-    ~default:60.0
+    ~default:30.0
     ()
 
 (** Cooldown duration for provider calls classified as hard-quota exhaustion

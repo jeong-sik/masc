@@ -1232,19 +1232,56 @@ let () =
          | Some entry ->
              let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
              check bool "Offline phase → false" false result));
-      test_case "should_attempt: credential_archived → false" `Quick (fun () ->
+      test_case "should_attempt: credential_archived → true after self-heal change" `Quick (fun () ->
         Reg.clear ();
         let name = "lr-should-attempt-4" in
         let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        Reg.mark_dead ~base_path:bp name ~at:0.0;
-        (* Simulate credential_archived by dispatching event *)
+        (* Simulate production: credential_archived itself forces Dead. *)
         ignore (Reg.dispatch_event ~base_path:bp name
           KSM.Credential_archived);
         (match Reg.get ~base_path:bp name with
          | None -> fail "expected entry"
          | Some entry ->
-             let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
-             check bool "credential_archived → false" false result));
+             let min_dead_sec =
+               Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec
+             in
+             let now = Unix.gettimeofday () +. min_dead_sec +. 1.0 in
+             let result = Sup.should_attempt_liveness_recovery ~now entry in
+             check bool "credential_archived → true" true result));
+      test_case "credential recovery mints canonical keeper credential" `Quick
+        (fun () ->
+          let base_dir = temp_dir () in
+          Fun.protect
+            ~finally:(fun () ->
+              Reg.clear ();
+              cleanup_dir base_dir)
+            (fun () ->
+              Reg.clear ();
+              let config = Masc_mcp.Coord.default_config base_dir in
+              ignore
+                (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+              let name = "keeper-credential-auto-agent" in
+              let _reg = Reg.register ~base_path:base_dir name (make_meta name) in
+              ignore
+                (Reg.dispatch_event ~base_path:base_dir name
+                   KSM.Credential_archived);
+              (match Reg.get ~base_path:base_dir name with
+               | None -> fail "expected entry"
+               | Some entry ->
+                   (match
+                      Sup.credential_recovery_before_restart_for_test
+                        ~base_path:base_dir entry
+                    with
+                    | Sup.Credential_recovery_reissued agent_name ->
+                        check string "reissued canonical agent" name agent_name
+                    | Sup.Credential_recovery_not_needed ->
+                        fail "expected credential recovery"
+                    | Sup.Credential_recovery_failed reason ->
+                        fail ("credential recovery failed: " ^ reason));
+                   match Masc_mcp.Auth.load_credential base_dir name with
+                   | Some cred ->
+                       check string "credential agent_name" name cred.agent_name
+                   | None -> fail "expected recovered keeper credential")));
     ];
     (* #12838 — alive-but-stuck detector. Pure function tests; dedup
        state lives in [Sup.alive_but_stuck_*] and is not exercised here. *)

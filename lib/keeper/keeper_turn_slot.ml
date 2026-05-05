@@ -611,8 +611,15 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       (try
         Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
           Eio.Semaphore.acquire sem);
-        record_holder ~label ~keeper_name
-          ~acquired_at:(Time_compat.now ());
+        (* Cancel-race fix: do NOT [record_holder] here. The caller
+           records the holder AFTER setting the matching [acquired_*]
+           flag in [slot_state]. If a fiber is cancelled between
+           [Eio.Semaphore.acquire] returning and the caller's flag
+           assignment, the release path stays consistent — flag=false
+           means semaphore is treated as not-yet-held and the previous
+           record_holder-here pattern would have left a stale entry
+           visible in [holder_table] (the 16x1500s "ghost holders"
+           symptom of 2026-05-05). *)
         Ok ()
       with Eio.Time.Timeout ->
         (* Routine, not WARN: the keeper-specific heartbeat loop already
@@ -650,7 +657,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
         label;
       Eio.Semaphore.acquire sem;
-      record_holder ~label ~keeper_name ~acquired_at:(Time_compat.now ());
+      (* Cancel-race fix: see comment in the with-clock branch above.
+         record_holder is the caller's responsibility, after flag set. *)
       Ok ()
   in
   Fun.protect
@@ -688,7 +696,17 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
             with
             | Error _ as e -> e
             | Ok () ->
+              (* Cancel-race fix (see acquire_bounded comment): set the
+                 [acquired_*] flag BEFORE [record_holder]. The flag is a
+                 plain ref assignment (no cancel point); record_holder
+                 acquires a [~protect:true] mutex (cancel-safe within
+                 the lock). If a cancel arrives between [acquire] and
+                 here the semaphore is reported as not-held and never
+                 leaks; if it arrives after the flag set, release path
+                 calls drop_holder (no-op when no entry exists). *)
               slot_state.acquired_autonomous := true;
+              record_holder ~label:"autonomous" ~keeper_name
+                ~acquired_at:(Time_compat.now ());
               drop_autonomous_waiter ~ticket;
               slot_state.autonomous_ticket := None;
               Ok ()
@@ -709,7 +727,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
             with
             | Error _ as e -> e
             | Ok () ->
+              (* Cancel-race fix: flag THEN record_holder. *)
               slot_state.acquired_reactive := true;
+              record_holder ~label:"reactive" ~keeper_name
+                ~acquired_at:(Time_compat.now ());
               Ok ()
         in
         match reactive_result with
@@ -718,7 +739,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         match acquire_bounded ~label:"turn" ~phase:Turn_slot turn_semaphore with
         | Error _ as e -> e
         | Ok () ->
+          (* Cancel-race fix: flag THEN record_holder. *)
           slot_state.acquired_turn := true;
+          record_holder ~label:"turn" ~keeper_name
+            ~acquired_at:(Time_compat.now ());
           let semaphore_wait_ms =
             int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
           Ok (f ~semaphore_wait_ms))

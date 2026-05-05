@@ -339,10 +339,39 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   let base_dir = session_base_dir ctx.config in
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
-                  ignore
-                    (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
-                       ~config:ctx.config ~name:p.name
-                       ~sandbox_profile);
+                  let bundle_paths =
+                    try
+                      Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+                        ~config:ctx.config ~name:p.name
+                        ~sandbox_profile
+                    with exn ->
+                      (* Surface masc-improver/sangsu sandbox boot
+                         silent-failure (2026-05-05).  Keeper_fs.ensure_dir
+                         raises on filesystem error; the previous [ignore]
+                         discarded it.  Now we log + emit a Prometheus
+                         counter so the dashboard makes failure visible
+                         without aborting keeper boot. *)
+                      Log.Keeper.error
+                        "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
+                        p.name (Printexc.to_string exn);
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        ~labels:[("keeper", p.name);
+                                 ("event", "sandbox_bundle_init_raised")]
+                        ();
+                      []
+                  in
+                  List.iter (fun bp ->
+                    if not (Sys.file_exists bp) then begin
+                      Log.Keeper.warn
+                        "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
+                        p.name bp;
+                      Prometheus.inc_counter
+                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        ~labels:[("keeper", p.name);
+                                 ("event", "sandbox_bundle_missing_post_init")]
+                        ()
+                    end) bundle_paths;
                   let session =
                     Keeper_exec_context.create_session ~session_id:trace_id
                       ~base_dir

@@ -127,7 +127,7 @@ val keeper_profile_fields :
         "updated_at": "2026-04-15T08:15:00Z",
         "window_sec": 300.0,
         "cooldown_threshold": 3,
-        "cooldown_sec": 60.0,
+        "cooldown_sec": 30.0,
         "hard_quota_cooldown_sec": 3600.0,
         "providers": [
           { "provider_key": "glm-coding",
@@ -136,6 +136,8 @@ val keeper_profile_fields :
             "in_cooldown": false,
             "cooldown_expires_at": null,
             "events_in_window": 42,
+            "trust_score": 0.87,
+            "health_score": 87,
             "rejected_in_window": 0,
             "declared": true,
             "status": "active" },
@@ -145,6 +147,8 @@ val keeper_profile_fields :
             "in_cooldown": false,
             "cooldown_expires_at": null,
             "events_in_window": 0,
+            "trust_score": 1.0,
+            "health_score": 100,
             "rejected_in_window": 0,
             "declared": true,
             "status": "configured" },
@@ -171,7 +175,8 @@ val keeper_profile_fields :
     @since 0.173.0 [declared] and [status] fields added; providers list
                    now merges declared-but-untracked candidates.
     @since 0.173.1 [?base_path] + [?window_minutes] added; per-provider
-                   perf fields are now part of the shape. *)
+                   perf fields are now part of the shape.
+    @since 0.184.0 [trust_score] and [health_score] fields added. *)
 val health_json :
   ?window_minutes:int ->
   ?base_path:string ->
@@ -194,7 +199,9 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
     supplied, populates the seven perf fields (avg_*_tok_per_sec,
     *_latency_ms, request_count) from
     {!Model_inference_metrics.provider_rollup}; otherwise those fields
-    are [null]. *)
+    are [null].  [trust_score] is derived from
+    {!Cascade_trust.trust_score}; [health_score] is the rounded
+    percentage form used by the dashboard. *)
 val provider_entry_to_json :
   declared:bool ->
   ?perf:Model_inference_metrics.provider_stats ->

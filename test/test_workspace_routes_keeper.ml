@@ -255,6 +255,54 @@ let test_rel_under_equal () =
   Alcotest.(check string) "safe = base -> empty"
     "" (W.rel_under "/repo" "/repo")
 
+(* ─── scan_dir (bounded file-tree scan) ──────────────────────────── *)
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
+let with_temp_dir name f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-workspace-routes-%d-%s" (Unix.getpid ()) name)
+  in
+  remove_tree dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
+
+let touch path =
+  let oc = open_out path in
+  close_out oc
+
+let test_scan_dir_respects_max_nodes () =
+  with_temp_dir "wide-tree" (fun dir ->
+    for i = 1 to 80 do
+      touch (Filename.concat dir (Printf.sprintf "file-%03d.txt" i))
+    done;
+    let nodes = W.scan_dir ~base:dir ~depth:0 ~max_depth:1 ~max_nodes:25 [] dir in
+    Alcotest.(check int) "node cap" 25 (List.length nodes))
+
+let test_tree_node_limit_default () =
+  Alcotest.(check int) "default" 750 (W.tree_node_limit_of_query None)
+
+let test_tree_node_limit_invalid_falls_back () =
+  Alcotest.(check int) "invalid" 750 (W.tree_node_limit_of_query (Some "bad"))
+
+let test_tree_node_limit_clamps_low () =
+  Alcotest.(check int) "low" 1 (W.tree_node_limit_of_query (Some "0"))
+
+let test_tree_node_limit_clamps_high () =
+  Alcotest.(check int) "high" 2000 (W.tree_node_limit_of_query (Some "9000"))
+
+let test_tree_node_limit_accepts_valid () =
+  Alcotest.(check int) "valid" 42 (W.tree_node_limit_of_query (Some "42"))
+
 (* ─── valid_git_ref (option-injection guard) ────────────────────── *)
 
 let test_valid_ref_main () =
@@ -338,6 +386,14 @@ let () =
         ; Alcotest.test_case "root base"         `Quick test_rel_under_root_base
         ; Alcotest.test_case "trailing slash"    `Quick test_rel_under_trailing_slash
         ; Alcotest.test_case "safe equals base"  `Quick test_rel_under_equal
+        ] )
+    ; ( "scan_dir"
+      , [ Alcotest.test_case "respects max node cap" `Quick test_scan_dir_respects_max_nodes
+        ; Alcotest.test_case "limit default" `Quick test_tree_node_limit_default
+        ; Alcotest.test_case "limit invalid falls back" `Quick test_tree_node_limit_invalid_falls_back
+        ; Alcotest.test_case "limit clamps low" `Quick test_tree_node_limit_clamps_low
+        ; Alcotest.test_case "limit clamps high" `Quick test_tree_node_limit_clamps_high
+        ; Alcotest.test_case "limit accepts valid" `Quick test_tree_node_limit_accepts_valid
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

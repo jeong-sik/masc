@@ -1702,6 +1702,22 @@ let percentile_sorted_float (sorted : float array) (p : float) : float =
     let frac = rank -. Float.of_int lo in
     sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
 
+let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
+  let field_equals key expected =
+    Safe_ops.json_string_opt key json
+    |> Option.map (fun value ->
+         String.equal
+           (String.lowercase_ascii (String.trim value))
+           expected)
+    |> Option.value ~default:false
+  in
+  (* Heartbeat status rows carry cumulative runtime usage snapshots, not
+     per-call spend samples.  Counting them here inflates dashboard cost. *)
+  not
+    (field_equals "channel" "heartbeat"
+     || field_equals "work_kind" "status_tick"
+     || field_equals "snapshot_source" "keeper_context_status")
+
 let keeper_cost_aggregates_json
     ~(config : Coord.config)
     ~(keepers : Keeper_types.keeper_meta list)
@@ -1754,7 +1770,10 @@ let keeper_cost_aggregates_json
               Safe_ops.json_string ~default:"" "model_used" j
             in
             let model_used_norm = normalize_model_name model_used in
-            if cost > 0.0 || latency_ms > 0 then begin
+            if
+              keeper_cost_metric_row_is_event j
+              && (cost > 0.0 || latency_ms > 0)
+            then begin
               costs_rev := cost :: !costs_rev;
               latencies_rev := float_of_int latency_ms :: !latencies_rev;
               input_tokens := !input_tokens + input_t;

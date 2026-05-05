@@ -82,6 +82,7 @@ const STRING_FIELDS = new Set([
   'status',
   'post_id',
   'comment_id',
+  'post_kind',
   'title',
   'author',
   'voter',

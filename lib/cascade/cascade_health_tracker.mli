@@ -21,7 +21,7 @@ val cooldown_threshold : int
 (** Consecutive failures before cooldown activates.  Default 3. *)
 
 val cooldown_sec : float
-(** Cooldown duration in seconds.  Default 60.0. *)
+(** Cooldown duration in seconds.  Default 30.0. *)
 
 val hard_quota_cooldown_sec : float
 (** Cooldown duration applied immediately on a hard-quota-classified error
@@ -167,7 +167,7 @@ val record_rejected :
     Unlike {!record_failure}, this triggers an immediate long cooldown
     ({!hard_quota_cooldown_sec}, default 1h) with no threshold — a
     provider whose account is out of credit will not recover within the
-    60s [cooldown_sec] window, and weighted_random re-selection just
+    regular [cooldown_sec] window, and weighted_random re-selection just
     wastes cascade turns.
 
     Preserves an already-longer cooldown if one exists (no regression).

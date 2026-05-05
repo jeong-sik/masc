@@ -93,6 +93,20 @@ let add_task_requiring_tools ctx ~title tools =
   in
   if not success then failwith result
 
+let set_only_task_do_not_reclaim_reason ctx reason =
+  let config = ctx.Tool_task.config in
+  let backlog = Coord.read_backlog config in
+  match backlog.Masc_domain.tasks with
+  | [ task ] ->
+      Coord.write_backlog config
+        { Masc_domain.tasks = [ { task with do_not_reclaim_reason = Some reason } ];
+          last_updated = Masc_domain.now_iso ();
+          version = backlog.version + 1;
+        }
+  | tasks ->
+      failwith
+        (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
+
 let only_task ctx =
   match Coord.get_tasks_raw ctx.Tool_task.config with
   | [ task ] -> task
@@ -109,6 +123,13 @@ let assert_task_claimed_by ctx agent_name =
   match (only_task ctx).Masc_domain.task_status with
   | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
   | _ -> failwith "expected task to be claimed"
+
+let assert_task_awaiting_verification_by ctx agent_name =
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+      assert (assignee = agent_name);
+      assert (verification_id <> "")
+  | _ -> failwith "expected task to be awaiting verification"
 
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
@@ -1002,6 +1023,84 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
   assert (not success);
   assert (str_contains result "requires tool(s) unavailable");
   assert_task_todo ctx;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "transition_submit_for_verification_accepts_todo_pr_evidence_without_required_tool" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+  let claim_success, claim_result =
+    Tool_task.handle_transition
+      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+        ])
+  in
+  assert (not claim_success);
+  assert (str_contains claim_result "requires tool(s) unavailable");
+  assert_task_todo ctx;
+  let submit_success, submit_result =
+    Tool_task.handle_transition
+      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "submit_for_verification");
+          ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+          ( "notes",
+            `String
+              "Implementation is already merged; submit PR evidence for independent verification." );
+        ])
+  in
+  if not submit_success then failwith submit_result;
+  assert_task_awaiting_verification_by ctx "codex-mcp-client";
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "transition_submit_for_verification_accepts_todo_pr_evidence_with_stale_do_not_reclaim_reason" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let success, result =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict accessor PR evidence");
+          ("priority", `Int 1);
+        ])
+  in
+  if not success then failwith result;
+  set_only_task_do_not_reclaim_reason ctx
+    "Auto-claimed via auto_goal_fallback by issue_king without repo write tools";
+  let claim_success, claim_result =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+        ])
+  in
+  assert (not claim_success);
+  assert (str_contains claim_result "blocked from re-claim");
+  assert_task_todo ctx;
+  let submit_success, submit_result =
+    Tool_task.handle_transition
+      ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "submit_for_verification");
+          ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13185");
+          ( "notes",
+            `String
+              "A stale do_not_reclaim_reason blocks claim, but merged PR evidence can still enter verification." );
+        ])
+  in
+  if not submit_success then failwith submit_result;
+  assert_task_awaiting_verification_by ctx "codex-mcp-client";
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 

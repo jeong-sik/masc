@@ -274,7 +274,7 @@ class GoalLoopStatusTest(unittest.TestCase):
         payload = json.loads(goal_loop_status.report_to_json(report))
         self.assertEqual(payload, asdict(report))
 
-    def test_fixture_bundle_reports_act_gap_from_decide_output(self) -> None:
+    def test_fixture_bundle_reports_linked_act_from_decide_output(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             decide_path = Path(raw_dir) / "decide.json"
             decide_result = subprocess.run(
@@ -318,9 +318,9 @@ class GoalLoopStatusTest(unittest.TestCase):
         payload = json.loads(status_result.stdout)
         self.assertEqual(payload["overall_status"], "critical")
         self.assertEqual(payload["loop_iteration"], "#fixture")
-        self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 4)
-        self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 1)
-        self.assertEqual(payload["next_action"]["decision_id"], "D-EMERGENCY-1")
+        self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 5)
+        self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 0)
+        self.assertEqual(payload["next_action"]["decision_id"], "D-EMERGENCY-2")
         self.assertEqual(
             payload["system_health_signals"]["keeper_failure_patterns"][
                 "credential_archived_starvation"

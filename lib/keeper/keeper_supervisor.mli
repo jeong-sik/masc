@@ -73,15 +73,30 @@ val apply_self_preservation :
 
 val liveness_recovery_scan : 'a context -> unit
 (** Scan all Dead keepers in [Keeper_registry].  For each Dead keeper whose
-    root cause is not structural ([credential_archived] or
-    [zombie_timeout_reached]) and that has been dead for at least
+    root cause is recoverable and that has been dead for at least
     [MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC], attempt to re-register and
     relaunch the keepalive fiber.  Uses exponential backoff per keeper and a
     per-keeper attempt budget.  Gated behind
     [MASC_KEEPER_LIVENESS_RECOVERY_ENABLED] (default: true).
 
+    [credential_archived] is recoverable through the per-keeper credential
+    self-heal path before relaunch. [zombie_timeout_reached] remains
+    structural and is skipped.
+
     Emits [metric_keeper_liveness_recovery_attempts] and
     [metric_keeper_liveness_recovery_outcomes] Prometheus counters. *)
+
+type credential_recovery_outcome =
+  | Credential_recovery_not_needed
+  | Credential_recovery_reissued of string
+  | Credential_recovery_failed of string
+
+val credential_recovery_before_restart_for_test :
+  base_path:string ->
+  Keeper_registry.registry_entry ->
+  credential_recovery_outcome
+(** Test hook for the credential self-heal step used before liveness recovery
+    relaunches a [credential_archived] keeper. *)
 
 val liveness_recovery_backoff : int -> float
 (** Compute the exponential backoff delay for liveness recovery attempt [n]. *)

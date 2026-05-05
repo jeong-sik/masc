@@ -140,6 +140,23 @@ let test_structured_post_roundtrip () =
           Alcotest.(check string) "roundtrip kind" "automation"
             (Board.post_kind_to_string fetched.post_kind)
 
+let test_board_sse_post_created_includes_post_kind () =
+  let seen = ref None in
+  Board_dispatch.set_board_sse_hook (fun event -> seen := Some event);
+  (match
+     Board_dispatch.create_post ~author:"sse-agent"
+       ~content:"sse post kind payload"
+       ~post_kind:Board.Automation_post ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  match !seen with
+  | Some (Board_dispatch.Post_created { post_kind; _ }) ->
+      Alcotest.(check string) "sse post_kind" "automation"
+        (Board.post_kind_to_string post_kind)
+  | Some _ -> Alcotest.fail "expected post_created SSE event"
+  | None -> Alcotest.fail "expected board SSE event"
+
 let test_list_posts () =
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 1"
             ~post_kind:Board.Human_post ());
@@ -564,6 +581,8 @@ let () =
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
+      Alcotest.test_case "SSE post_created includes post_kind" `Quick
+        (with_eio test_board_sse_post_created_includes_post_kind);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick

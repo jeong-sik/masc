@@ -125,6 +125,15 @@ let excluded_dirs =
   [ ".git"; "node_modules"; "_build"; ".obsidian"; "__pycache__";
     ".masc"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
 
+let default_tree_node_limit = 750
+let max_tree_node_limit = 2000
+
+let tree_node_limit_of_query = function
+  | Some raw -> (
+      try max 1 (min max_tree_node_limit (int_of_string raw))
+      with _ -> default_tree_node_limit)
+  | None -> default_tree_node_limit
+
 let safe_path base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
@@ -180,34 +189,42 @@ let file_tree_node ~path ~label ~depth ~parent ~has_children =
          ; ("hasChildren", `Bool has_children)
          ; ("diff", `Null); ("keeperId", `Null); ("hueIndex", `Null) ]
 
-let rec scan_dir ~base ~depth ~max_depth acc dir =
-  if depth > max_depth then acc
+let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
+  if depth > max_depth || remaining <= 0 then (acc, remaining)
   else
     let entries =
       try Sys.readdir dir |> Array.to_list
       with _ -> []
     in
-    List.fold_left (fun acc f ->
-      if f = "." || f = ".." then acc
-      else if List.mem f excluded_dirs then acc
-      else
-        let full = Filename.concat dir f in
-        let is_dir = try Sys.is_directory full with _ -> false in
-        let base_len = String.length base in
-        let rel =
-          if String.length full > base_len + 1
-          then String.sub full (base_len + 1) (String.length full - base_len - 1)
-          else f
-        in
-        let has_children = is_dir && depth < max_depth in
-        let parent = if depth = 0 then "" else Filename.dirname rel in
-        let node = file_tree_node
-          ~path:rel ~label:f ~depth ~parent ~has_children in
-        let acc' = node :: acc in
-        if is_dir && depth < max_depth then
-          scan_dir ~base ~depth:(depth + 1) ~max_depth acc' full
-        else acc'
-    ) acc entries
+    let rec fold acc remaining = function
+      | [] -> (acc, remaining)
+      | _ when remaining <= 0 -> (acc, 0)
+      | f :: rest ->
+        if f = "." || f = ".." then fold acc remaining rest
+        else if List.mem f excluded_dirs then fold acc remaining rest
+        else
+          let full = Filename.concat dir f in
+          let is_dir = try Sys.is_directory full with _ -> false in
+          let rel = rel_under base full in
+          let has_children = is_dir && depth < max_depth in
+          let parent = if depth = 0 then "" else Filename.dirname rel in
+          let node = file_tree_node
+              ~path:rel ~label:f ~depth ~parent ~has_children in
+          let acc' = node :: acc in
+          let remaining' = remaining - 1 in
+          let acc'', remaining'' =
+            if is_dir && depth < max_depth then
+              scan_dir_bounded
+                ~base ~depth:(depth + 1) ~max_depth ~remaining:remaining'
+                acc' full
+            else (acc', remaining')
+          in
+          fold acc'' remaining'' rest
+    in
+    fold acc remaining entries
+
+let scan_dir ~base ~depth ~max_depth ~max_nodes acc dir =
+  fst (scan_dir_bounded ~base ~depth ~max_depth ~remaining:max_nodes acc dir)
 
 (* --- Git helpers --- *)
 
@@ -392,9 +409,12 @@ let add_routes router =
              | Some d -> (try max 1 (min 5 (int_of_string d)) with _ -> 3)
              | None -> 3
            in
+           let max_nodes =
+             tree_node_limit_of_query (Uri.get_query_param uri "limit")
+           in
            let nodes =
              if not (Sys.file_exists base) then []
-             else scan_dir ~base ~depth:0 ~max_depth:depth [] base
+             else scan_dir ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
            in
            let json = `List (List.rev nodes) in
            json_response_with_source ~status:`OK ~source request reqd json)

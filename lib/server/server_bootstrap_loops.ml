@@ -43,6 +43,23 @@ module For_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
 end
 
+let filteri_with_fair_yield f xs =
+  let meter = Eio_guard.create_yield_meter ~interval:1 () in
+  List.filteri
+    (fun idx item ->
+      let keep = f idx item in
+      Eio_guard.yield_step meter;
+      keep)
+    xs
+
+let iteri_with_fair_yield f xs =
+  let meter = Eio_guard.create_yield_meter ~interval:1 () in
+  List.iteri
+    (fun idx item ->
+      f idx item;
+      Eio_guard.yield_step meter)
+    xs
+
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
@@ -325,7 +342,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = match event with
-      | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
+      | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
           let preview =
             if String.length content > 200 then String.sub content 0 200
             else content
@@ -335,7 +352,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                       ("author", `String author);
                       ("author_identity", Server_utils.board_actor_identity_json author);
                       ("title", `String title);
-                      ("content", `String preview)] in
+                      ("content", `String preview);
+                      ("post_kind", `String (Board.post_kind_to_string post_kind))] in
           `Assoc (match hearth with
                   | Some h -> ("hearth", `String h) :: base
                   | None -> base)
@@ -367,10 +385,11 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     ]);
     (* Emit activity event so Discord/external connectors can detect board posts *)
     let activity_kind, activity_actor, activity_subject, activity_payload = match event with
-      | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
+      | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
           let base = [("post_id", `String post_id); ("title", `String title);
                       ("content", `String content); ("author", `String author);
-                      ("author_identity", Server_utils.board_actor_identity_json author)] in
+                      ("author_identity", Server_utils.board_actor_identity_json author);
+                      ("post_kind", `String (Board.post_kind_to_string post_kind))] in
           let payload_fields = match hearth with
             | Some h -> ("hearth", `String h) :: base
             | None -> base
@@ -735,7 +754,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           false
       in
       (* Initial boot pass *)
-      let booted = List.filteri (fun idx name -> try_boot_one idx name) names in
+      let booted = filteri_with_fair_yield (fun idx name -> try_boot_one idx name) names in
       let booted_count = List.length booted in
       let total = List.length names in
       Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
@@ -761,7 +780,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
             else begin
               Log.Keeper.info "autoboot: retry round %d/%d — %d unbooted: [%s]"
                 round max_retries (List.length unbooted) (String.concat ", " unbooted);
-              List.iteri (fun idx name -> ignore (try_boot_one idx name)) unbooted;
+              iteri_with_fair_yield
+                (fun idx name -> ignore (try_boot_one idx name))
+                unbooted;
               retry_loop (round + 1)
             end
           end

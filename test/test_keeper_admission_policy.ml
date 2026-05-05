@@ -94,7 +94,7 @@ let test_of_fields_min_tier_above_preferred () =
 let test_of_fields_duplicate_provider () =
   let cands =
     [ candidate ~p:"anthropic" ~m:"claude-sonnet-4-6" ~t:KAP.Preferred
-    ; candidate ~p:"anthropic" ~m:"claude-haiku-4-5" ~t:KAP.Acceptable
+    ; candidate ~p:"anthropic" ~m:"claude-sonnet-4-6" ~t:KAP.Acceptable
     ]
   in
   let got =
@@ -104,6 +104,24 @@ let test_of_fields_duplicate_provider () =
   match got with
   | Error (KAP.Duplicate_provider "anthropic") -> ()
   | _ -> Alcotest.fail "expected Duplicate_provider \"anthropic\""
+
+let test_of_fields_same_provider_different_models_allowed () =
+  let cands =
+    [ candidate ~p:"anthropic" ~m:"claude-sonnet-4-6" ~t:KAP.Preferred
+    ; candidate ~p:"anthropic" ~m:"claude-haiku-4-5" ~t:KAP.Acceptable
+    ]
+  in
+  match
+    KAP.of_fields ~keeper_id:"analyst" ~candidates:cands ~weight:1
+      ~min_tier:KAP.Acceptable
+  with
+  | Ok t ->
+      Alcotest.(check int)
+        "same provider can appear for distinct model fallbacks"
+        2 (List.length (KAP.candidates t))
+  | Error _ ->
+      Alcotest.fail
+        "same provider with distinct models should be accepted"
 
 (* ------------------------------------------------------------------ *)
 (* candidates_above_min_tier filtering                                *)
@@ -257,6 +275,8 @@ let () =
             test_of_fields_min_tier_above_preferred
         ; Alcotest.test_case "duplicate provider" `Quick
             test_of_fields_duplicate_provider
+        ; Alcotest.test_case "same provider different models allowed"
+            `Quick test_of_fields_same_provider_different_models_allowed
         ] )
     ; ( "filtering"
       , [ Alcotest.test_case "candidates_above_min_tier filters Survival"

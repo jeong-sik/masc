@@ -84,6 +84,18 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get Server_health_paths.liveness liveness_handler
   |> Http.Router.get Server_health_paths.readiness readiness_handler
+  |> Http.Router.get "/.well-known/agent.json" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Response.json
+           (Yojson.Safe.to_string (Runtime.agent_card_json req))
+           reqd)
+         request reqd)
+  |> Http.Router.get "/.well-known/agent-card.json" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Response.json
+           (Yojson.Safe.to_string (Runtime.agent_card_json req))
+           reqd)
+         request reqd)
   |> Http.Router.get "/ws" websocket_discovery_handler
   |> Http.Router.get "/metrics" (fun request reqd ->
        with_read_auth (fun _state _req reqd ->

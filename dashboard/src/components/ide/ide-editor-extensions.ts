@@ -1,6 +1,8 @@
-import { EditorView, GutterMarker, gutter } from '@codemirror/view'
+import { EditorView, GutterMarker, gutter, lineNumbers, type ViewUpdate } from '@codemirror/view'
 import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import type { LineOwnership } from './keeper-line-ownership-store'
+import { kSigil } from '../keeper-badge'
 
 // ── Read-only lock ────────────────────────────────────────────────
 // Prevents all user input. CM6 6.x uses EditorState.changeFilter.
@@ -25,10 +27,16 @@ export function themeExt(): Extension {
       fontFamily: 'var(--font-mono)',
       fontSize: 'var(--fs-13)',
       lineHeight: '1.6',
+      height: '100%',
+    },
+    '.cm-scroller': {
+      overflow: 'auto',
+      minHeight: '0',
     },
     '.cm-content': {
       caretColor: 'transparent',
       padding: 'var(--sp-2) 0',
+      minHeight: '100%',
     },
     '.cm-line': {
       padding: '0 var(--sp-3)',
@@ -38,11 +46,55 @@ export function themeExt(): Extension {
       color: 'var(--color-fg-disabled)',
       border: 'none',
       fontSize: 'var(--fs-11)',
-      minWidth: '40px',
+      minWidth: '44px',
+      position: 'sticky',
+      left: '0',
+      zIndex: '2',
     },
     '.cm-gutterElement': {
       textAlign: 'right',
       paddingRight: 'var(--sp-2)',
+    },
+    '.cm-lineNumbers': {
+      borderRight: '1px solid var(--color-border-default)',
+    },
+    '.cm-blame-gutter': {
+      minWidth: '78px',
+      borderRight: '1px solid var(--color-border-default)',
+      background: 'var(--color-bg-surface)',
+    },
+    '.cm-blame-gutter .cm-gutterElement': {
+      padding: '0 var(--sp-2)',
+      textAlign: 'left',
+    },
+    '.cm-blame-marker': {
+      display: 'inline-grid',
+      gridTemplateColumns: '18px minmax(0, 1fr)',
+      alignItems: 'center',
+      gap: 'var(--sp-1)',
+      width: '68px',
+      minWidth: '0',
+      color: 'var(--cm-blame-color)',
+      fontSize: 'var(--fs-10)',
+      lineHeight: '1.4',
+    },
+    '.cm-blame-sigil': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '16px',
+      height: '14px',
+      borderRadius: 'var(--r-0)',
+      color: 'var(--color-bg-page)',
+      background: 'var(--cm-blame-color)',
+      fontSize: 'var(--fs-9)',
+      fontWeight: '700',
+      letterSpacing: '0',
+    },
+    '.cm-blame-name': {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
     },
     '&.cm-focused': {
       outline: 'none',
@@ -54,6 +106,10 @@ export function themeExt(): Extension {
       background: 'transparent !important',
     },
   })
+}
+
+export function syntaxHighlightExt(): Extension {
+  return syntaxHighlighting(defaultHighlightStyle, { fallback: true })
 }
 
 // ── Blame gutter ──────────────────────────────────────────────────
@@ -79,15 +135,19 @@ class BlameMarker extends GutterMarker {
       el.style.fontSize = 'var(--fs-11)'
       return el
     }
-    const color = `var(--color-keeper-${this.info.hueIndex}-glow, var(--k-${this.info.hueIndex}))`
-    el.textContent = this.info.keeperId
+    const slot = Math.min(12, Math.max(1, this.info.hueIndex || 1))
+    const color = `var(--color-keeper-${slot}, var(--k-${slot}))`
+    el.className = 'cm-blame-marker'
+    el.style.setProperty('--cm-blame-color', color)
     el.title = `${this.info.keeperId} · ${this.info.editKind}`
-    el.style.color = color
-    el.style.fontSize = 'var(--fs-11)'
-    el.style.maxWidth = '80px'
-    el.style.overflow = 'hidden'
-    el.style.textOverflow = 'ellipsis'
-    el.style.whiteSpace = 'nowrap'
+    const sigil = document.createElement('span')
+    sigil.className = 'cm-blame-sigil'
+    sigil.textContent = kSigil(this.info.keeperId)
+    sigil.setAttribute('aria-hidden', 'true')
+    const name = document.createElement('span')
+    name.className = 'cm-blame-name'
+    name.textContent = this.info.keeperId
+    el.append(sigil, name)
     return el
   }
 
@@ -136,6 +196,9 @@ function blameGutterExt(): Extension {
     blameMarkerField,
     gutter({
       class: 'cm-blame-gutter',
+      lineMarkerChange(update: ViewUpdate) {
+        return update.startState.field(blameMarkerField, false) !== update.state.field(blameMarkerField, false)
+      },
       lineMarker(view, block) {
         const line = view.state.doc.lineAt(block.from)
         const field = view.state.field(blameMarkerField, false)
@@ -204,7 +267,7 @@ export async function languageExt(filePath: string): Promise<Extension> {
 // ── Line number gutter ────────────────────────────────────────────
 
 export function lineNumberExt(): Extension {
-  return []
+  return lineNumbers()
 }
 
 // ── Blame mode extensions bundle ──────────────────────────────────

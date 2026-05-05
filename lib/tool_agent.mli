@@ -9,9 +9,16 @@ type context = {
 (** Issue #8501: Variant SSOT for masc_agent_card.action.  Mirror in
     [Tool_schemas_agent.agent_card_action_enum_strings] (cycle-aware,
     sync regression test catches drift). *)
+type agent_card_action =
+  | Agent_card_get
+  | Agent_card_refresh
+
+val agent_card_action_to_string : agent_card_action -> string
+val valid_agent_card_action_strings : string list
 
 (** Issue #8501: Variant SSOT for masc_collaboration_graph.format.
     Mirror in [Tool_schemas_agent.collaboration_format_enum_strings]. *)
+val valid_collaboration_format_strings : string list
 
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> (bool * string) option
@@ -36,3 +43,4 @@ val handle_agent_fitness : context -> Yojson.Safe.t -> bool * string
 (** Handle masc_collaboration_graph *)
 
 (** Handle masc_agent_card *)
+val handle_agent_card : context -> Yojson.Safe.t -> bool * string

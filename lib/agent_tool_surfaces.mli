@@ -114,7 +114,7 @@ val local_worker_spawn_schemas : Masc_domain.tool_schema list
 val select_public_local_worker_schemas :
   unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
-    board / coord-core / coord-extra / code / worktree / run /
+    board / coord-core / coord-extra / agent / code / worktree / run /
     spawn schemas, deduped, intersected with
     {!local_worker_public_tool_names}.  This is the public local-
     worker surface as the dashboard sees it. *)

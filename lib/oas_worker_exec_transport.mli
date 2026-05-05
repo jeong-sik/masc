@@ -193,7 +193,9 @@ val provider_label : Llm_provider.Provider_config.t -> string
       provider).
     - [Error sdk_error] — provider supports neither lane.
 
-    Codex_cli + keeper-bound actor tools trigger the [#10097] omission
+    Codex_cli + keeper-bound actor tools use the per-keeper raw bearer
+    token when it is available, routed through OAS [bearer_token_env_var].
+    When no per-keeper token exists, they trigger the [#10097] omission
     counter/log path. Required turns reject because the omitted tools cannot
     satisfy the tool contract; optional turns keep the prior degraded
     discovery path and exclude those tools from the resulting policy. *)

@@ -14,12 +14,15 @@ import {
   readOnlyExt,
   themeExt,
   languageExt,
+  lineNumberExt,
   blameExtensions,
   keeperLineSelectExt,
   pushOwnership,
   internalDocumentSync,
+  syntaxHighlightExt,
 } from './ide-editor-extensions'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
+import { KeeperBadge } from '../keeper-badge'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -157,6 +160,8 @@ function CodeMirrorEditor({
         extensions: [
           readOnlyExt(),
           themeExt(),
+          lineNumberExt(),
+          syntaxHighlightExt(),
           lang,
           ...(onKeeperLineSelect
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
@@ -214,9 +219,9 @@ function CodeMirrorEditor({
   useEffect(() => ownershipStore.subscribe(() => forceRender(n => n + 1)), [ownershipStore])
 
   return html`
-    <div style=${{ display: 'grid', gridTemplateRows: showBlame ? 'auto 1fr' : '1fr', minHeight: 0 }}>
+    <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
-      <div ref=${containerRef} style=${{ overflow: 'auto', minHeight: 0 }} />
+      <div ref=${containerRef} class="ide-codemirror-host" />
     </div>
   `
 }
@@ -238,26 +243,26 @@ function BlameTimeline(
   keepers: ReadonlyArray<string>,
 ) {
   const latestEdit = latestEditMs(ownership)
+  const stats = keeperOwnershipStats(ownership, keepers)
   return html`
     <div
+      class="ide-blame-timeline"
       role="status"
       aria-label="Blame timeline"
-      style=${{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--sp-2)',
-        padding: 'var(--sp-2) var(--sp-3)',
-        borderBottom: '1px solid var(--color-border-divider)',
-        color: 'var(--color-fg-muted)',
-        background: 'var(--color-bg-surface)',
-        fontSize: 'var(--fs-11)',
-      }}
     >
-      <span style=${{ font: 'var(--type-eyebrow)', color: 'var(--color-fg-primary)' }}>Blame timeline</span>
-      <span>${keepers.join(' / ')}</span>
-      <span style=${{ marginLeft: 'auto', color: 'var(--color-fg-secondary)' }}>
-        latest ${latestEdit === null ? 'no edits' : formatTime(latestEdit)}
+      <span class="ide-blame-title">BLAME</span>
+      <span class="ide-blame-summary">${ownership.size} owned lines</span>
+      <span class="ide-blame-keepers">
+        ${stats.length > 0
+          ? stats.map(stat => html`
+              <span class="ide-blame-keeper" title=${`${stat.keeper}: ${stat.lines} lines`}>
+                <${KeeperBadge} id=${stat.keeper} variant="sigil" size="sm" />
+                <span>${stat.lines}</span>
+              </span>
+            `)
+          : html`<span class="ide-blame-empty">no keeper edits</span>`}
       </span>
+      <span class="ide-blame-latest">latest ${latestEdit === null ? 'no edits' : formatTime(latestEdit)}</span>
     </div>
   `
 }
@@ -321,6 +326,22 @@ function latestEditMs(ownership: ReadonlyMap<number, LineOwnership>): number | n
     if (latest === null || owner.last_edit_ms > latest) latest = owner.last_edit_ms
   }
   return latest
+}
+
+function keeperOwnershipStats(
+  ownership: ReadonlyMap<number, LineOwnership>,
+  keepers: ReadonlyArray<string>,
+): ReadonlyArray<{ keeper: string; lines: number }> {
+  const counts = new Map<string, number>()
+  for (const owner of ownership.values()) {
+    counts.set(owner.keeper_id, (counts.get(owner.keeper_id) ?? 0) + 1)
+  }
+  for (const keeper of keepers) {
+    if (!counts.has(keeper)) counts.set(keeper, 0)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([keeper, lines]) => ({ keeper, lines }))
 }
 
 function formatTime(ms: number): string {

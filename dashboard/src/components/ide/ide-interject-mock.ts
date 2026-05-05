@@ -38,11 +38,11 @@ export function IdeInterjectMock() {
 
   return html`
     <div
+      class="ide-interject-bar"
       role="region"
       aria-label="INTERJECT (interject store active keeper wiring)"
       style=${{
         display: 'grid',
-        gridTemplateColumns: 'auto 1fr auto',
         gap: 'var(--sp-2)',
         padding: 'var(--sp-2) var(--sp-3)',
         background: 'var(--color-bg-elevated)',
@@ -66,6 +66,7 @@ export function IdeInterjectMock() {
         </span>
       </div>
       <input
+        class="ide-interject-input"
         type="text"
         placeholder="Send message to active keeper..."
         aria-label="Interject input"
@@ -83,7 +84,7 @@ export function IdeInterjectMock() {
           font: 'var(--type-body)',
         }}
       />
-      <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+      <div class="ide-interject-actions" style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
         ${actions.map(action => InterjectButton(action, () => {
           void interjectStore.submit(action.kind)
         }))}

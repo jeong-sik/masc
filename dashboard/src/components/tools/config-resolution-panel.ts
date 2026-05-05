@@ -609,9 +609,13 @@ export function ConfigResolutionPanel({
                 <${ConfigRow} label="resolved base path" item=${runtimeResolution.resolved_base_path} />
                 <${ConfigRow} label="data root" item=${runtimeResolution.data_root} />
                 <${ConfigRow} label="prompt markdown dir" item=${runtimeResolution.prompt_markdown_dir} />
+                ${runtimeResolution.server_repo_path
+                  ? html`<${ConfigRow} label="server repo" item=${runtimeResolution.server_repo_path} />`
+                  : null}
               </div>
 
               <div class="mt-4 grid gap-3 md:grid-cols-2">
+                <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? '--'} />
                 <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? '--'} />
                 <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? '--'} />
                 <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />

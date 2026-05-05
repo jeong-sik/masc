@@ -37,6 +37,7 @@ describe('IdeEditor', () => {
     await waitFor(() => {
       expect(container.querySelector('.cm-content')).not.toBeNull()
     })
+    expect(container.querySelector('.cm-lineNumbers')).not.toBeNull()
     expect(container.querySelector('.cm-content')?.textContent).toBe('')
 
     documentStore.load({

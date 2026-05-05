@@ -23,9 +23,10 @@ let provider_effective_max_turns kind requested =
   | Gemini_cli | Kimi_cli | Codex_cli ->
       requested
 
-(* #10097: codex_cli omits keeper-bound runtime MCP tools that require
-   request-scoped auth headers.  That omission is a structural provider
-   limitation, not a per-call incident:
+(* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the
+   keeper has a raw bearer token that OAS can route through bearer_token_env_var.
+   Missing-token omissions are still a structural lane/auth setup issue, not a
+   per-call incident:
 
      - [WARN] emits only when an agent first sees an omitted-tool
        fingerprint, or when that agent's omitted tool set changes.
@@ -92,8 +93,8 @@ let record_codex_cli_omission_for_agent
       Log.warn ~ctx:"oas_worker_exec"
         "codex_cli omitting keeper-bound runtime MCP tool(s) that \
          require request-scoped auth headers: %s \
-         (structural provider limitation for %s; subsequent omissions \
-         of this same set are counted in \
+         (no per-keeper bearer-token lane available for %s; subsequent \
+         omissions of this same set are counted in \
          masc_codex_cli_mcp_tool_omission_total and not re-logged)"
         (String.concat ", " (List.sort String.compare tools))
         agent_name_key
@@ -629,12 +630,20 @@ let resolve_tool_lane_for_oas_tools
         |> dedupe_preserve_order
     | _ -> []
   in
-  let codex_keeper_bound_actor_tools =
+  let codex_can_auth_keeper_bound_actor_tools =
     match provider_cfg.kind, requested_agent_name with
     | Llm_provider.Provider_config.Codex_cli, Some agent_name
       when Option.is_some (keeper_name_of_agent_name agent_name) ->
+        Option.is_some (per_keeper_authorization_header ~agent_name)
+    | _ -> false
+  in
+  let codex_keeper_bound_actor_tools =
+    match provider_cfg.kind, requested_agent_name with
+    | Llm_provider.Provider_config.Codex_cli, Some agent_name
+      when Option.is_some (keeper_name_of_agent_name agent_name)
+           && not codex_can_auth_keeper_bound_actor_tools ->
         List.filter runtime_mcp_tool_requires_bound_actor
-          (public_tool_names @ keeper_internal_tool_names)
+        (public_tool_names @ keeper_internal_tool_names)
     | _ -> []
   in
   (* #10097: WARN once per distinct fingerprint + always-emit

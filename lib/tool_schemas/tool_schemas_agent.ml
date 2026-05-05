@@ -8,6 +8,9 @@ open Masc_domain
     drift. Same shape as #8467/#8480/#8484/#8490/#8493 mirror+sync
     pattern. *)
 
+let agent_card_action_enum_strings = [ "get"; "refresh" ]
+let collaboration_format_enum_strings = [ "text"; "json" ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_agents";
@@ -109,6 +112,27 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+
+  {
+    name = "masc_agent_card";
+    description = "Return the MASC server agent card and optional live agent summary.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun s -> `String s) agent_card_action_enum_strings));
+          ("description", `String "Card action: get or refresh.");
+          ("default", `String "get");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional live agent name to include in the card.");
+        ]);
+      ]);
       ("additionalProperties", `Bool false);
     ];
   };

@@ -3,6 +3,104 @@ module Types = Masc_domain
 open Masc_mcp
 open Test_operator_control_support
 
+let last_substring_index haystack needle =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0 || n_len > h_len then None
+  else
+    let rec loop i last =
+      if i + n_len > h_len then last
+      else
+        let last =
+          if String.sub haystack i n_len = needle then Some i else last
+        in
+        loop (i + 1) last
+    in
+    loop 0 None
+
+(* Find the FIRST occurrence of [needle] in [haystack] at or after
+   [from].  Used by the regression below to anchor on the emit that
+   actually follows the timing computations, rather than the last
+   occurrence in the file (which can be unrelated, e.g. an early
+   paused-branch emit at a higher offset, or a new caller added later
+   anywhere in the source). *)
+let first_substring_index_after haystack needle ~from =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0 || n_len > h_len || from >= h_len then None
+  else
+    let rec loop i =
+      if i + n_len > h_len then None
+      else if String.sub haystack i n_len = needle then Some i
+      else loop (i + 1)
+    in
+    loop (max 0 from)
+
+let expect_source_marker source marker =
+  match last_substring_index source marker with
+  | Some idx -> idx
+  | None -> Alcotest.failf "source marker not found: %s" marker
+
+(* PR #13114 regression guard.
+
+   The regression we defend against: the non-paused branch of
+   [keepers_json] computed [dt_profile] / [dt_activity] AFTER calling
+   [emit_timing_log], so the timing log always reported zero for the
+   profile and activity fields.
+
+   The invariant: in the non-paused branch, both timing assignments
+   must precede the [emit_timing_log] call that consumes them.  The
+   file also contains an early [emit_timing_log] call in the paused
+   branch (which intentionally exits before the timing
+   computations), so a literal "last emit in file" anchor is fragile
+   — Copilot correctly flagged this could mask a real regression if
+   a new [emit_timing_log] caller appeared anywhere later in the
+   file.
+
+   Robust formulation: anchor on the FIRST [emit_timing_log] that
+   appears at or after both [dt_profile :=] and [dt_activity :=].
+   That is exactly the "timing log emitted after the timing
+   computations" the PR enforces, regardless of how many other
+   [emit_timing_log] callers exist before or after. *)
+let test_keeper_subop_timing_log_after_profile_activity () =
+  let root = Masc_test_deps.find_project_root () in
+  let path =
+    Filename.concat root "lib/operator/operator_control_snapshot.ml"
+  in
+  let source =
+    match Safe_ops.read_file_safe path with
+    | Ok text -> text
+    | Error err -> Alcotest.failf "read %s failed: %s" path err
+  in
+  let profile_idx =
+    expect_source_marker source
+      "dt_profile := Time_compat.now () -. t_profile"
+  in
+  let activity_idx =
+    expect_source_marker source
+      "dt_activity := Time_compat.now () -. t_act"
+  in
+  let timings_done_idx = max profile_idx activity_idx in
+  let emit_idx =
+    match
+      first_substring_index_after source
+        "emit_timing_log (Time_compat.now () -. t_work_start)"
+        ~from:timings_done_idx
+    with
+    | Some idx -> idx
+    | None ->
+        Alcotest.failf
+          "no [emit_timing_log (Time_compat.now () -. t_work_start)] found \
+           after the latest dt_profile/dt_activity assignment (last at byte \
+           %d).  PR #13114 requires the non-paused branch to call the \
+           timing log AFTER computing both deltas."
+          timings_done_idx
+  in
+  Alcotest.(check bool) "profile timing computed before non-paused log" true
+    (profile_idx < emit_idx);
+  Alcotest.(check bool) "activity timing computed before non-paused log" true
+    (activity_idx < emit_idx)
+
 let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
   let status =
     Operator_control_snapshot.align_keeper_runtime_status

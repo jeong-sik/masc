@@ -34,6 +34,10 @@ let () =
             Test_operator_control_snapshot
             .test_snapshot_prefers_metrics_context_truth_over_usage_counters;
           Alcotest.test_case
+            "snapshot sub-op timing logs after profile and activity" `Quick
+            Test_operator_control_snapshot
+            .test_keeper_subop_timing_log_after_profile_activity;
+          Alcotest.test_case
             "snapshot summary surfaces paused keeper runtime trust" `Quick
             Test_operator_control_snapshot
             .test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust;

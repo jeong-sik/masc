@@ -4,6 +4,18 @@
     Eio.Promise blocking, Atomic cancel flag) at the MASC layer with
     MASC-visible waiter metadata for observability.
 
+    {1 Status — 2026-05-05}
+
+    [with_permit] is intentionally passthrough. Provider-level throttling
+    moved to OAS cascade per RFC-0026 (PR-E-1.6 + 1.7); MASC-layer
+    gating couples request classification with local resource estimates
+    and cannot express per-provider capacity. The
+    [insert_sorted] / [waiter] / [global.waiters] machinery below is
+    observability scaffolding for the future cascade-layer admission
+    router and is not consumed by the current call path; do not delete.
+    See docs/audit-responses/2026-05-05-dashboard-heuristic.md §3 for the
+    full classification.
+
     @since 3.0.0 *)
 
 (* ── Types ─────────────────────────────────────────────── *)
@@ -40,6 +52,9 @@ type t = {
 
 (* ── Sorted Insertion ──────────────────────────────────── *)
 
+(* RFC-0026 observability scaffolding: defined for future cascade-layer
+   admission router consumption; not invoked from the current passthrough
+   [with_permit] path. Audit response 2026-05-05 §3.2. Do not delete. *)
 (** Insert waiter in priority order (lower rank = higher priority = front).
     Stable: equal-rank waiters maintain FIFO order. *)
 let insert_sorted entry ws =
@@ -145,7 +160,8 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
          and handles 429/timeout by falling to the next provider.
          Gating here starves cloud-routed keepers behind a serial local
          decode and cannot express per-provider capacity.
-         Metric observation tracks real inflight even though gating is off. *)
+         Metric observation tracks real inflight even though gating is off.
+         RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
       Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
       match f () with
       | result ->

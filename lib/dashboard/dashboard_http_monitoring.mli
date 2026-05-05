@@ -22,6 +22,11 @@ val board_monitoring_json : now_ts:float -> Yojson.Safe.t * bool
 val governance_monitoring_json :
   now_ts:float -> base_path:string -> Yojson.Safe.t * bool
 
+(** Snapshot of auth/credential runtime drift counters that should
+    page an operator, including keeper credential archival after
+    starvation recovery. *)
+val credential_monitoring_json : unit -> Yojson.Safe.t
+
 (** Point-in-time slot occupancy / queue depth snapshot. *)
 val slot_monitoring_json : unit -> Yojson.Safe.t
 

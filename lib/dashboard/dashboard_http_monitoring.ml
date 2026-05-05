@@ -215,6 +215,26 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
     ("judge_online", `Bool runtime.judge_online);
   ], true)
 
+let credential_monitoring_json () : Yojson.Safe.t =
+  let archived_starvation =
+    int_of_float
+      (Prometheus.metric_total
+         Prometheus.metric_config_credential_archived_starvation)
+  in
+  let needs_attention = archived_starvation > 0 in
+  `Assoc [
+    ("alert_level", `String (if needs_attention then "bad" else "ok"));
+    ("needs_attention", `Bool needs_attention);
+    ( "credential_archived_starvation_total",
+      `Int archived_starvation );
+    ( "metric_name",
+      `String Prometheus.metric_config_credential_archived_starvation );
+    ( "reason",
+      if needs_attention then
+        `String "bare_form_keeper_credential_archived_after_starvation"
+      else `Null );
+  ]
+
 let slot_monitoring_json () : Yojson.Safe.t =
   try
     let idle = Discovery_cache.idle_slot_count () in

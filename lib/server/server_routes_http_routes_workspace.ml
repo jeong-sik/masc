@@ -128,6 +128,12 @@ let excluded_dirs =
 let default_tree_node_limit = 750
 let max_tree_node_limit = 2000
 
+let tree_node_limit_of_query = function
+  | Some raw -> (
+      try max 1 (min max_tree_node_limit (int_of_string raw))
+      with _ -> default_tree_node_limit)
+  | None -> default_tree_node_limit
+
 let safe_path base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
@@ -199,12 +205,7 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
         else
           let full = Filename.concat dir f in
           let is_dir = try Sys.is_directory full with _ -> false in
-          let base_len = String.length base in
-          let rel =
-            if String.length full > base_len + 1
-            then String.sub full (base_len + 1) (String.length full - base_len - 1)
-            else f
-          in
+          let rel = rel_under base full in
           let has_children = is_dir && depth < max_depth in
           let parent = if depth = 0 then "" else Filename.dirname rel in
           let node = file_tree_node
@@ -409,11 +410,7 @@ let add_routes router =
              | None -> 3
            in
            let max_nodes =
-             match Uri.get_query_param uri "limit" with
-             | Some l ->
-               (try max 1 (min max_tree_node_limit (int_of_string l))
-                with _ -> default_tree_node_limit)
-             | None -> default_tree_node_limit
+             tree_node_limit_of_query (Uri.get_query_param uri "limit")
            in
            let nodes =
              if not (Sys.file_exists base) then []

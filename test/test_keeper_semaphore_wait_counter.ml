@@ -127,7 +127,8 @@ let test_wait_observation_reason_labels () =
     [ "semaphore_wait_pending"; "peers_holding_slot"; "channel_reactive" ]
     (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_pending
-       ~channel:Masc_mcp.Keeper_world_observation.Reactive);
+       ~channel:Masc_mcp.Keeper_world_observation.Reactive
+       ());
   Alcotest.(check (list string))
     "timeout scheduled autonomous reasons"
     [
@@ -137,7 +138,20 @@ let test_wait_observation_reason_labels () =
     ]
     (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_timeout
-       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous)
+       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+       ());
+  Alcotest.(check (list string))
+    "timeout reasons can carry precise phase"
+    [
+      "semaphore_wait_timeout";
+      "phase_autonomous_queue_head";
+      "channel_scheduled_autonomous";
+    ]
+    (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
+       ~phase_label:"autonomous_queue_head"
+       ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_timeout
+       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+       ())
 
 let test_wait_observation_updates_registry_skip_stamp () =
   let base_path =
@@ -156,7 +170,8 @@ let test_wait_observation_updates_registry_skip_stamp () =
         ~base_path
         ~keeper_name:keeper
         ~channel:Masc_mcp.Keeper_world_observation.Reactive
-        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_pending;
+        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_pending
+        ();
       match Masc_mcp.Keeper_registry.get ~base_path keeper with
       | Some { Masc_mcp.Keeper_registry.last_skip_observation = Some (_, reasons); _ } ->
         Alcotest.(check (list string))

@@ -54,15 +54,19 @@ type semaphore_wait_observation_kind =
   | Semaphore_wait_timeout
 
 val semaphore_wait_observation_reasons :
+  ?phase_label:string ->
   kind:semaphore_wait_observation_kind ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
+  unit ->
   string list
 
 val record_semaphore_wait_observation :
+  ?phase_label:string ->
   base_path:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   kind:semaphore_wait_observation_kind ->
+  unit ->
   unit
 
 val oas_timeout_budget_observation_reasons : string list

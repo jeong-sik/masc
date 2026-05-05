@@ -108,7 +108,7 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
         self.assertIn('"act_linked_count": 1', result.stdout)
         self.assertIn('"act_missing_count": 1', result.stdout)
 
-    def test_startup_fixture_keeps_unlinked_emergency_action_visible(self) -> None:
+    def test_startup_fixture_links_all_decisions_after_emergency_acts(self) -> None:
         orient = json.loads(
             (FIXTURE_DIR / "orient.startup.json").read_text(encoding="utf-8")
         )
@@ -123,15 +123,26 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
         by_id = {decision.decision_id: decision for decision in report.decisions}
 
         self.assertEqual(report.decisions_total, 5)
-        self.assertEqual(report.act_linked_count, 4)
-        self.assertEqual(report.act_missing_count, 1)
+        self.assertEqual(report.act_linked_count, 5)
+        self.assertEqual(report.act_missing_count, 0)
         self.assertEqual(
             by_id["D-EMERGENCY-1"].act_status,
-            "ACT_MISSING",
+            "ACT_LINKED",
+        )
+        self.assertEqual(
+            by_id["D-EMERGENCY-1"].act_artifacts,
+            [
+                "PR#13218 keeper credential auto-recovery",
+                "PR#13231 keeper slot forced-reclaim regression",
+                "PR#13246 keeper slot crash-path force release",
+            ],
         )
         self.assertEqual(
             by_id["D-P1-1"].act_artifacts,
-            ["PR#13123 alive-stuck recovery"],
+            [
+                "PR#13123 alive-stuck recovery",
+                "PR#13190 partial stale-turn recovery",
+            ],
         )
 
 

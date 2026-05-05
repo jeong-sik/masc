@@ -765,6 +765,33 @@ let build_keeper_snapshot
       @ cascade_findings @ audit_findings;
   }
 
+(* The safe-autonomy screen renders one row per keeper.  This probe is
+   intentionally much shorter than interactive sandbox-status calls; otherwise
+   a slow Docker daemon costs [timeout * keeper_count] before the dashboard can
+   return any bytes.
+
+   Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
+   through [Log.warn]-style sites that format duration with [%.0f],
+   which would render the 0.25s budget as "0s" and confuse operators
+   reading "command timed out after 0s".  1.0s produces a
+   self-explanatory diagnostic when Docker is genuinely slow.
+
+   Worst-case budget bookkeeping (PR #13113 review):
+   [Keeper_sandbox_runtime.list_containers] internally runs TWO
+   sequential Docker commands (`docker ps` then `docker inspect`),
+   each gated by [~timeout_sec].  The per-row worst case is
+   therefore [2 * timeout_sec], not [timeout_sec].  At 1.0s × 2
+   commands × 50 keepers the screen budget is ~100s in the
+   worst case where every Docker call stalls — well above the
+   typical 15s client deadline, but bounded.  In the common case
+   Docker responds in tens of ms and the screen returns in <1s.
+   Operators who need a tighter overall budget should either
+   reduce keeper count surfaced here, or wait for the upstream
+   "single overall probe budget" follow-up (RFC TBD) that would
+   short-circuit further probes once a wall-clock deadline is hit.
+*)
+let sandbox_live_probe_timeout_sec = 1.0
+
 let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let meta = snapshot.meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -772,7 +799,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:false
-      ~config ~meta ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dashboard ()) ~verbose:false ()
+      ~config ~meta ~timeout_sec:sandbox_live_probe_timeout_sec ~verbose:false ()
   in
   let domains =
     [

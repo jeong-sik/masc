@@ -938,9 +938,14 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
     - no entry's primary parse matches [primary],
     - or secondary parsing yields no provider (unregistered/unavailable
       scheme, invalid syntax).
-    The function never raises; observability for swap success/failure is
-    the caller's responsibility (PR-9b adds [cascade_secondary_swap_total]
-    in [oas_worker_named_cascade]). *)
+    The function never raises; observability for swap success/failure
+    flows through the unified
+    [Llm_metric_bridge.emit_fallback_triggered ~kind:"dual_track_swap"]
+    counter that the caller in [oas_worker_named_cascade] increments —
+    successful swaps tag [~detail:"swapped"], secondary rejections tag
+    [~detail:<filter_rejection_reason>]. (#13097 review: removed stale
+    [cascade_secondary_swap_total] reference; that name was never
+    registered, the unified counter is the SSOT.) *)
 let resolve_secondary_provider_for_primary ?sw ?net ?clock
     ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with

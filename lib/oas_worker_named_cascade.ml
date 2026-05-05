@@ -308,15 +308,60 @@ let filter_candidate_providers_for_tool_support
       match secondary_resolver with
       | None -> initial_kept, initial_rejected
       | Some resolver ->
-          let swapped_in, still_rejected =
-            List.partition_map
+          (* #13097 review (codex P1, copilot): preserve original cascade
+             priority slots when a primary is swapped to its secondary.
+             The earlier ([initial_kept @ swapped_in], …) implementation
+             appended every secondary after every kept provider, which
+             changed runtime ordering whenever a rejected primary came
+             before a kept one — failover then routed to lower-priority
+             providers ahead of the configured fallback.
+
+             We re-walk [provider_cfgs] in original order: kept primaries
+             stay in place, rejected primaries that produce a successful
+             secondary occupy the same slot as their primary (replaced),
+             and entries whose secondary is also rejected fall into
+             [rejected]. The result is a single pass that keeps slot
+             ordering stable. *)
+          let swap_outcomes =
+            List.map
               (attempt_secondary_swap
                  ~keeper_name ?runtime_mcp_policy ~tools
                  ~require_tool_choice_support ~require_tool_support
                  ~secondary_resolver:resolver)
               initial_rejected
           in
-          (initial_kept @ swapped_in, still_rejected)
+          let still_rejected =
+            List.filter_map
+              (function
+                | Either.Left _ -> None
+                | Either.Right pair -> Some pair)
+              swap_outcomes
+          in
+          (* Build a lookup from rejected primary's identity (physical
+             pointer is stable here since [initial_rejected] holds the
+             same [Provider_config.t] values we just received) to its
+             swap outcome, so a single pass over [provider_cfgs] can
+             splice secondaries back into their primary's slot. *)
+          let outcome_for_primary =
+            List.combine initial_rejected swap_outcomes
+          in
+          let kept_in_order =
+            List.filter_map
+              (fun cfg ->
+                if List.exists (fun k -> k == cfg) initial_kept then
+                  Some cfg
+                else
+                  match
+                    List.find_opt
+                      (fun ((rejected_cfg, _), _) -> rejected_cfg == cfg)
+                      outcome_for_primary
+                  with
+                  | Some (_, Either.Left secondary) -> Some secondary
+                  | Some (_, Either.Right _) -> None
+                  | None -> None)
+              provider_cfgs
+          in
+          (kept_in_order, still_rejected)
     in
     if kept = [] && provider_cfgs <> [] then begin
       let signature = signature_of_rejected_providers rejected in

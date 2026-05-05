@@ -4,16 +4,21 @@
     the public [is_masc_write_allowed].  Audit P3 (2026-04-29 §1.1)
     flagged the unit-test gap on traversal cases.
 
-    Note: [test/test_decision_pipeline.ml:113-133] already
-    covers 6 baseline cases (3 allowed prefixes + 3 disallowed,
+    Note: [test/test_decision_pipeline.ml] (the
+    [test_keeper_writable_prefix_paths] block) already covers
+    6 baseline cases (3 allowed prefixes + 3 disallowed,
     including one [..] escape `.masc/playground/../reputation/evil.json`).
     This suite is a {b dedicated, exhaustive} pin for the lexical
-    normaliser — 19 cases including prefix-name boundaries
+    normaliser — 20 cases including prefix-name boundaries
     ([.masc/decision_audit_sneaky/], plural [playgrounds],
-    [.worktrees-stale/]), root-overshoot semantics
-    ([../../etc/passwd]), and the non-escape "round-trip into
-    writable" case ([playground/../playground/x] → still allowed).
-    Cases overlap with [test_decision_pipeline] are intentional
+    [.worktrees-stale/]), root-overshoot semantics tested via
+    a writable-prefix path so the rejection signal is unambiguous
+    ([.masc/playground/../../../.masc/playground/x] →
+    still allowed because the lexical collapse drops [..] beyond
+    root, leaving a writable prefix), and the non-escape
+    "round-trip into writable" case
+    ([playground/../playground/x] → still allowed).  Cases
+    overlap with [test_decision_pipeline] are intentional
     redundancy at a different abstraction level (pure isolated
     test vs the integrated decision pipeline).
 
@@ -115,6 +120,38 @@ let test_dotdot_at_root_drops () =
   assert (
     not (P.is_masc_write_allowed "../../etc/passwd"))
 
+let test_root_overshoot_drops_to_writable_prefix () =
+  (* Codex review caught that test_dotdot_at_root_drops above
+     can't distinguish "[..] beyond root drops" from "[/etc/]
+     just isn't writable" — both produce false.
+
+     This test isolates the "drop" semantics: pass a path with
+     more leading [..]s than there are segments, but ending in
+     a writable prefix.  The lexical normaliser should drop the
+     excess [..]s (not raise, not preserve them as literal
+     segments) so the final path collapses to a writable
+     subdir.  Path:
+
+       .masc/playground/../../../.masc/playground/x
+
+     collapse:
+       [.masc] [playground] [..] [..] [..] [.masc] [playground] [x]
+                          ↓
+       [.masc] [playground]   →   pop, [.masc]
+                              →   pop, []
+                              →   drop, []
+                              →   push, [.masc]
+                              →   push, [.masc, playground]
+                              →   push, [.masc, playground, x]
+       Final: ".masc/playground/x"  → WRITABLE.
+
+     If the normaliser raised or preserved literal [..]s, the
+     final path would not match the writable prefix and this
+     would return false. *)
+  assert (
+    P.is_masc_write_allowed
+      ".masc/playground/../../../.masc/playground/x")
+
 let test_self_ref_dot_collapse_allowed () =
   (* [.] segments must be silently dropped without changing
      write-allowed semantics. *)
@@ -170,6 +207,7 @@ let () =
   test_traversal_to_economy_rejected ();
   test_traversal_to_etc_rejected ();
   test_dotdot_at_root_drops ();
+  test_root_overshoot_drops_to_writable_prefix ();
   test_self_ref_dot_collapse_allowed ();
   test_traversal_back_into_writable_allowed ();
   test_decision_audit_sneaky_rejected ();

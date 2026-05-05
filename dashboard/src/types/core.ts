@@ -190,6 +190,21 @@ export interface BoardReactionToggleResult {
   summary: BoardReactionSummary[]
 }
 
+// --- SubBoard ---
+
+export type SubBoardAccess = 'open' | 'members_only' | 'owner_only'
+
+export interface SubBoard {
+  id: string
+  slug: string
+  name: string
+  description: string
+  owner: string
+  access: SubBoardAccess
+  created_at: string
+  post_count: number
+}
+
 // --- Keeper Metrics ---
 
 export interface InferenceTelemetry {

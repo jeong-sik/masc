@@ -9,6 +9,7 @@ import type {
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
+  SubBoard, SubBoardAccess,
 } from '../types'
 
 export interface BoardHearth {
@@ -639,4 +640,55 @@ export function commentPost(postId: string, author: string, content: string, par
   const body: Record<string, string> = { post_id: postId, author, content }
   if (parentId) body.parent_id = parentId
   return post(`/api/v1/tools/masc_board_comment`, body)
+}
+
+// --- SubBoard API ---
+
+function normalizeSubBoardAccess(raw: unknown): SubBoardAccess {
+  if (raw === 'members_only' || raw === 'owner_only') return raw
+  return 'open'
+}
+
+export function normalizeSubBoard(raw: unknown): SubBoard | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const slug = asString(raw.slug, '').trim()
+  const name = asString(raw.name, '').trim()
+  if (!id || !slug) return null
+  return {
+    id,
+    slug,
+    name,
+    description: asString(raw.description, ''),
+    owner: asString(raw.owner, ''),
+    access: normalizeSubBoardAccess(raw.access),
+    created_at: asNullableIsoTimestamp(raw.created_at) ?? new Date(0).toISOString(),
+    post_count: asInt(raw.post_count) ?? 0,
+  }
+}
+
+export async function fetchSubBoards(): Promise<SubBoard[]> {
+  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
+  if (!isRecord(data)) return []
+  const raw = Array.isArray(data.sub_boards) ? data.sub_boards : []
+  return raw.flatMap((r: unknown) => {
+    const sb = normalizeSubBoard(r)
+    return sb ? [sb] : []
+  })
+}
+
+export async function fetchSubBoard(subBoardId: string): Promise<SubBoard | null> {
+  const data = await withRetries('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
+  return normalizeSubBoard(data)
+}
+
+export function createSubBoard(
+  slug: string,
+  name: string,
+  description: string,
+  access?: SubBoardAccess,
+): Promise<unknown> {
+  const body: Record<string, string> = { slug, name, description }
+  if (access) body.access = access
+  return post('/api/v1/board/sub-boards', body)
 }

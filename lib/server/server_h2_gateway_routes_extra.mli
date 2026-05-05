@@ -33,6 +33,10 @@ val dispatch :
     - [GET /api/v1/board/flairs] — available flair list.
     - [GET /api/v1/board/<post_id>] — single post with
       configurable [format] query param (defaults to ["nested"]).
+    - [GET /api/v1/board/sub-boards] — sub-board list.
+    - [POST /api/v1/board/sub-boards] — create sub-board (auth required).
+      Body: [{ slug, name, description, access? }].
+    - [GET /api/v1/board/sub-boards/<id_or_slug>] — single sub-board.
 
     {2 Karma}
     - [GET /api/v1/karma] — full karma table sorted descending by

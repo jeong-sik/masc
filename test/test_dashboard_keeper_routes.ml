@@ -2,7 +2,7 @@ open Alcotest
 module Routes = Masc_mcp.Server_routes_http_routes_dashboard
 module Keeper_api = Masc_mcp.Server_dashboard_http_keeper_api
 module Auth = Masc_mcp.Auth
-module Types = Types
+module Types = Masc_domain
 
 type http_result =
   { status : int option

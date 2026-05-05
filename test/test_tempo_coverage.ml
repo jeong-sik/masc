@@ -9,7 +9,7 @@
 open Alcotest
 
 module Tempo = Masc_mcp.Tempo
-module Types = Types
+module Types = Masc_domain
 
 (* ============================================================
    state_to_json Tests

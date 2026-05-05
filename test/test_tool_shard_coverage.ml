@@ -7,7 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
-module Types = Types
+module Types = Masc_domain
 
 let get_json_assoc key = function
   | `Assoc fields -> (

@@ -13,7 +13,7 @@
 open Alcotest
 
 module Session = Masc_mcp.Session
-module Types = Types
+module Types = Masc_domain
 
 (* ============================================================
    Type Existence Tests

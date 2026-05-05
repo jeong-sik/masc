@@ -11,7 +11,7 @@
 open Alcotest
 
 module Session = Masc_mcp.Session
-module Types = Types
+module Types = Masc_domain
 module Env_config = Env_config
 
 let num_agents = 20

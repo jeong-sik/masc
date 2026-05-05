@@ -89,6 +89,41 @@ let test_record_lenient_fallback_increments_metrics () =
        ~labels
        ())
 
+let test_lenient_fallback_metrics_json_reads_counters () =
+  let raw = "still-not-json" in
+  let labels = [("judge", "governance")] in
+  let before_unparseable =
+    int_of_float
+      (Prometheus.metric_value_or_zero
+         Prometheus.metric_governance_judge_unparseable
+         ~labels
+         ())
+  in
+  let before_fallback =
+    int_of_float
+      (Prometheus.metric_value_or_zero
+         Prometheus.metric_governance_lenient_json_fallback_hit
+         ~labels
+         ())
+  in
+  ignore
+    (Judge_diagnostics.record_lenient_fallback
+       ~judge_label:"Governance"
+       raw);
+  let json =
+    Judge_diagnostics.lenient_fallback_metrics_json
+      ~judge_label:"Governance"
+  in
+  let open Yojson.Safe.Util in
+  check string "judge label" "governance"
+    (json |> member "judge" |> to_string);
+  check int "unparseable total"
+    (before_unparseable + 1)
+    (json |> member "governance_judge_unparseable_total" |> to_int);
+  check int "fallback total"
+    (before_fallback + 1)
+    (json |> member "governance_lenient_json_fallback_hit_total" |> to_int)
+
 let () =
   run "judge_diagnostics (#9774)"
     [
@@ -106,5 +141,7 @@ let () =
             test_format_lenient_fallback_truncates_huge_raw;
           test_case "record increments metrics" `Quick
             test_record_lenient_fallback_increments_metrics;
+          test_case "metrics JSON reads counters" `Quick
+            test_lenient_fallback_metrics_json_reads_counters;
         ] );
     ]

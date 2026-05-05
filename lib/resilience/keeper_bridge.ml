@@ -158,6 +158,24 @@ let apply_post_turn_resilience
       let strategy_execution_json =
         strategy_execution_to_json strategy_execution
       in
+      (* #13072: audit category SSOT.
+         - [RecoveryAttempted] is reserved for *dispatched* recovery —
+           an executor was wired and ran (success or failure).  Audit
+           consumers (lib/resilience/audit.mli:76-81) downstream of
+           [RecoveryAttempted] / [RecoverySucceeded] / [RecoveryFailed]
+           assume the strategy was actually invoked.
+         - When [strategy_executor] is omitted the recovery surface
+           was advertised but no dispatch occurred; emit under
+           [RecoveryClassified] instead so consumers that key off the
+           category do not over-count attempted dispatches. *)
+      let audit_category =
+        match strategy_execution with
+        | Strategy_execution_not_configured ->
+            Audit.category_to_string Audit.RecoveryClassified
+        | Strategy_execution_completed _
+        | Strategy_execution_failed _ ->
+            Audit.category_to_string Audit.RecoveryAttempted
+      in
       let envelope_id =
         match audit_store with
         | None -> None
@@ -174,7 +192,7 @@ let apply_post_turn_resilience
             in
             let envelope =
               Shared_audit.Store.append store
-                ~category:"RecoveryAttempted" ~payload
+                ~category:audit_category ~payload
             in
             Some envelope.Shared_audit.Envelope.id
       in

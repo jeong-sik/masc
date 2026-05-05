@@ -209,8 +209,11 @@ val execute_strategy :
     next attempt and emit [RetryAttempt]/[RetryBackoff] events.
 
     [Fallback], [Handoff], and [Abort] invoke their corresponding callbacks.
-    [Abort] always runs the strategy cleanup before calling [abort]; cleanup
-    exceptions are returned as [Error] and no abort callback is invoked. *)
+    [Abort] always runs the strategy cleanup before calling [abort].
+
+    Exceptions raised by executor callbacks are returned as [Error] so the
+    keeper bridge can audit [Strategy_execution_failed] instead of letting
+    callback bugs tear down the turn. *)
 
 (** {1 Convenience constructors for [error_mode]} *)
 

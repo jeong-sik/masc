@@ -306,6 +306,21 @@ let test_execute_abort_runs_cleanup_before_abort () =
       assert (!events = [ "abort:budget exhausted"; "cleanup" ])
   | _ -> assert false
 
+let test_execute_callback_exception_becomes_error () =
+  let executor =
+    make_executor
+      ~on_event:(fun _ -> raise (Failure "event sink down"))
+      ()
+  in
+  let strategy =
+    R.Retry { max_attempts = 1; backoff = (fun _ -> 0.0) }
+  in
+  match R.execute_strategy executor strategy with
+  | Error msg ->
+      assert (contains msg "on_event raised");
+      assert (contains msg "event sink down")
+  | _ -> assert false
+
 let () =
   test_transient_default_args ();
   test_transient_explicit_args ();
@@ -332,4 +347,5 @@ let () =
   test_execute_fallback_applies_value ();
   test_execute_handoff_requests_operator ();
   test_execute_abort_runs_cleanup_before_abort ();
+  test_execute_callback_exception_becomes_error ();
   print_endline "test_recovery: all assertions passed"

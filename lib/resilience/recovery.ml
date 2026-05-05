@@ -73,17 +73,38 @@ type strategy_executor = {
 let clamp_delay_s delay_s =
   if Float.is_finite delay_s then max 0.0 delay_s else 0.0
 
+(* #13072 — every executor callback (on_event, run_retry_attempt,
+   sleep, apply_fallback, request_handoff, abort) is foreign code
+   from this module's perspective; an exception escaping any of them
+   bypasses [keeper_bridge]'s [Strategy_execution_failed] audit and
+   tears down the keeper turn. Wrap each call in [trap] so executor
+   misbehaviour surfaces as [Error <string>] like the existing
+   [cleanup] arm in [Abort]. Keep this module independent from Eio;
+   cancellation-aware callers should encode cancellation in their
+   executor result rather than adding a scheduler dependency here. *)
+let trap_call ~op f =
+  match f () with
+  | exception exn ->
+      Error (Printf.sprintf "%s raised: %s" op (Printexc.to_string exn))
+  | v -> Ok v
+
 let execute_strategy : type a.
     strategy_executor ->
     a strategy ->
     (execution_outcome, string) result =
  fun executor strategy ->
+  let ( let* ) = Result.bind in
+  let on_event evt = trap_call ~op:"on_event" (fun () -> executor.on_event evt) in
   match strategy with
   | Retry { max_attempts; backoff } ->
       let max_attempts = max 1 max_attempts in
       let rec loop attempt =
-        executor.on_event (RetryAttempt { attempt; max_attempts });
-        match executor.run_retry_attempt ~attempt with
+        let* () = on_event (RetryAttempt { attempt; max_attempts }) in
+        let* outcome =
+          trap_call ~op:"run_retry_attempt" (fun () ->
+            executor.run_retry_attempt ~attempt)
+        in
+        match outcome with
         | Retry_success -> Ok (RetrySucceeded { attempts = attempt })
         | Fatal_failure error ->
             Ok (RetryFatal { attempt; error })
@@ -94,36 +115,51 @@ let execute_strategy : type a.
                    { attempts = attempt; last_error = Some error })
             else
               let delay_s = clamp_delay_s (backoff attempt) in
-              executor.on_event
-                (RetryBackoff { attempt; delay_s; error });
-              executor.sleep delay_s;
+              let* () =
+                on_event (RetryBackoff { attempt; delay_s; error })
+              in
+              let* () =
+                trap_call ~op:"sleep" (fun () -> executor.sleep delay_s)
+              in
               loop (attempt + 1)
       in
       loop 1
   | Fallback { fallback_value; degrade_confidence_by } ->
       let confidence_delta = degrade_confidence_by in
-      executor.on_event
-        (FallbackApply { value = fallback_value; confidence_delta });
+      let* () =
+        on_event (FallbackApply { value = fallback_value; confidence_delta })
+      in
+      let* applied =
+        trap_call ~op:"apply_fallback" (fun () ->
+          executor.apply_fallback ~value:fallback_value ~confidence_delta)
+      in
       Result.map
         (fun () ->
           FallbackApplied { value = fallback_value; confidence_delta })
-        (executor.apply_fallback ~value:fallback_value ~confidence_delta)
+        applied
   | Handoff { operator_message; preserve_state } ->
-      executor.on_event
-        (HandoffRequest { message = operator_message; preserve_state });
+      let* () =
+        on_event (HandoffRequest { message = operator_message; preserve_state })
+      in
+      let* requested =
+        trap_call ~op:"request_handoff" (fun () ->
+          executor.request_handoff ~message:operator_message ~preserve_state)
+      in
       Result.map
         (fun () ->
           HandoffRequested { message = operator_message; preserve_state })
-        (executor.request_handoff ~message:operator_message
-           ~preserve_state)
-  | Abort { reason; cleanup } -> (
-      match cleanup () with
-      | exception exn -> Error (Printexc.to_string exn)
-      | () ->
-          executor.on_event (AbortRun { reason });
-          Result.map
-            (fun () -> Aborted { reason })
-            (executor.abort ~reason))
+        requested
+  | Abort { reason; cleanup } ->
+      let* () =
+        trap_call ~op:"cleanup" (fun () -> cleanup ())
+      in
+      let* () = on_event (AbortRun { reason }) in
+      let* aborted =
+        trap_call ~op:"abort" (fun () -> executor.abort ~reason)
+      in
+      Result.map
+        (fun () -> Aborted { reason })
+        aborted
 
 (* TLA+ taxonomy mirrors for specs/resilience/ResilienceDegradation.tla.
    Payload-bearing constructors cannot use ppx_tla's [all_states], so

@@ -258,7 +258,7 @@ let test_pipeline_writes_audit_when_store_supplied () =
   assert (List.length recent = 1);
   match recent with
   | [ env ] ->
-      assert (env.Shared_audit.Envelope.category = "RecoveryAttempted");
+      assert (env.Shared_audit.Envelope.category = "RecoveryClassified");
       assert (Some env.Shared_audit.Envelope.id = outcome.audit_envelope_id);
       let audit_status =
         match env.Shared_audit.Envelope.payload with
@@ -270,6 +270,28 @@ let test_pipeline_writes_audit_when_store_supplied () =
         | _ -> None
       in
       assert (audit_status = Some (`String "not_configured"))
+  | _ -> assert false
+
+let test_pipeline_writes_attempted_audit_when_executor_supplied () =
+  let tmp_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_bridge_attempted_audit_%d" (Unix.getpid ()))
+  in
+  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message:_ ~preserve_state:_ -> Ok ())
+      ()
+  in
+  let outcome =
+    KB.apply_post_turn_resilience witness ~audit_store:store
+      ~strategy_executor:executor ~now:7.0 ~working_context:None
+      ~maybe_error:(Some "completely unknown failure mode") ()
+  in
+  assert (Option.is_some outcome.audit_envelope_id);
+  match Shared_audit.Store.recent store ~n:1 with
+  | [ env ] ->
+      assert (env.Shared_audit.Envelope.category = "RecoveryAttempted")
   | _ -> assert false
 
 let () =
@@ -289,4 +311,5 @@ let () =
   test_pipeline_classifies_resource_token ();
   test_pipeline_upserts_into_working_context ();
   test_pipeline_writes_audit_when_store_supplied ();
+  test_pipeline_writes_attempted_audit_when_executor_supplied ();
   print_endline "test_keeper_bridge: all assertions passed"

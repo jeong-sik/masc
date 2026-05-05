@@ -64,10 +64,10 @@ blocking_sleep_hits="$(search_lines 'Unix\.sleep(f)?\b' lib)"
 if [ -n "$blocking_sleep_hits" ]; then
   disallowed_blocking_sleep_hits="$(
     printf '%s\n' "$blocking_sleep_hits" \
-      | filter_out_lines '^lib/(process/file_lock_eio\.ml|shutdown\.ml):'
+      | filter_out_lines '^lib/(process/file_lock_eio\.ml|shutdown\.ml|keeper/keeper_turn_slot\.ml):'
   )"
   if [ -n "$disallowed_blocking_sleep_hits" ]; then
-    echo "ERROR: raw Unix.sleep/Unix.sleepf usage is only allowed in lib/process/file_lock_eio.ml and lib/shutdown.ml" >&2
+    echo "ERROR: raw Unix.sleep/Unix.sleepf usage is only allowed in lib/process/file_lock_eio.ml, lib/shutdown.ml, and lib/keeper/keeper_turn_slot.ml (D-10 no-Eio-clock fallback)" >&2
     printf '%s\n' "$disallowed_blocking_sleep_hits" >&2
     fail=1
   fi

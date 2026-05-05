@@ -11,6 +11,7 @@ import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
+import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { navigate, route } from '../../router'
@@ -154,6 +155,7 @@ export function IdeShell() {
             diffRows=${coordinator.diffRows}
             onKeeperLineSelect=${pinInspectorKeeper}
           />
+          <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>
         <div
           class="ide-plane-conversation"

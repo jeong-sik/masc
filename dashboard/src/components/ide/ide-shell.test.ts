@@ -44,6 +44,7 @@ vi.mock('../../api/repositories', () => ({
 
 import { IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
+import { clearTraces, pushTrace } from './keeper-trace-store'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -74,6 +75,7 @@ describe('IdeShell', () => {
     vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
+    clearTraces()
   })
 
   it('hydrates layer buttons from the route layers param', () => {
@@ -210,6 +212,48 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Cascade')
+  })
+
+  it('mounts the OverlayKeeperTrace overlay when the keeper-trace layer is toggled on', () => {
+    pushTrace({
+      id: 'shell-mount-evt-1',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'shell-mount-evt-1',
+      line: null,
+    })
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', layers: 'keeper-trace' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const overlay = container.querySelector('[data-overlay="keeper-trace"]')
+    expect(overlay).not.toBeNull()
+  })
+
+  it('does not render the OverlayKeeperTrace overlay when the keeper-trace layer is off', () => {
+    pushTrace({
+      id: 'shell-mount-evt-2',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'shell-mount-evt-2',
+      line: null,
+    })
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const overlay = container.querySelector('[data-overlay="keeper-trace"]')
+    expect(overlay).toBeNull()
   })
 
   it('opens the keeper shell drawer from the terminal route param', async () => {

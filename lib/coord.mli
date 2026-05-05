@@ -23,6 +23,16 @@ include module type of Coord_agent
     Wraps [Coord_init.init] and calls [join] when [agent_name] is provided. *)
 val init : config -> agent_name:string option -> string
 
+(** {1 Test hooks} *)
+
+module For_testing : sig
+  val warn_telemetry_drop :
+    event_family:string -> event_kind:string -> exn -> unit
+  (** Emit the same observable drop marker used when audit/telemetry hooks
+      cannot run. Exposed so tests do not depend on backend-specific
+      [Effect.Unhandled] behavior. *)
+end
+
 (** {1 FSM drift observability (#9795)} *)
 
 val fsm_drift_metric : string

@@ -79,27 +79,31 @@ let warn_telemetry_drop ~event_family ~event_kind exn =
         ("exception", `String exn_str);
       ]
   in
-  (* Isolated swallows: the call sites that invoke this helper rely on
-     the "[Effect.Unhandled] is fully absorbed" contract — propagating
-     an exception out of the lifecycle hook would crash the caller.
-     Each observability side effect is wrapped separately so a failure
-     in one (e.g. [Log.emit] hitting a sink failure) does not skip the
-     other (the counter still increments and stays observable). The
-     primary contract remains "do not break the caller". (#13096
-     review, copilot P1; supersedes the single-try wrapping noted in
+  (* Isolated observed side effects: the call sites that invoke this helper rely
+     on the "[Effect.Unhandled] is fully absorbed" contract — propagating a
+     normal exception out of the lifecycle hook would crash the caller. Each
+     observability side effect is wrapped separately so a failure in one (e.g.
+     [Log.emit] hitting a sink failure) does not skip the other (the counter
+     still increments and stays observable). [Telemetry_observe] also preserves
+     [Eio.Cancel.Cancelled], so cancellation is never hidden by this fallback.
+     (#13096 review, copilot P1; supersedes the single-try wrapping noted in
      codex P2.) *)
-  (try
-    Log.emit Log.Warn ~module_name:"Coord" ~details
-      (Printf.sprintf
-         "telemetry/audit dropped (non-Eio context): %s/%s"
-         event_family event_kind)
-  with _ -> ());
-  (try
-    Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
-      ~labels:
-        [ ("event_family", event_family); ("event_kind", event_kind) ]
-      ()
-  with _ -> ())
+  Telemetry_observe.observe_or_default ~kind:"coord_telemetry_drop_log"
+    ~default:() (fun () ->
+      Log.emit Log.Warn ~module_name:"Coord" ~details
+        (Printf.sprintf
+           "telemetry/audit dropped (non-Eio context): %s/%s"
+           event_family event_kind));
+  Telemetry_observe.observe_or_default ~kind:"coord_telemetry_drop_metric"
+    ~default:() (fun () ->
+      Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
+        ~labels:
+          [ ("event_family", event_family); ("event_kind", event_kind) ]
+        ())
+
+module For_testing = struct
+  let warn_telemetry_drop = warn_telemetry_drop
+end
 
 (* Exhaustive on [Masc_domain.task_action]: a new variant becomes a compile
    error here so the audit-log mapping cannot silently fall into the

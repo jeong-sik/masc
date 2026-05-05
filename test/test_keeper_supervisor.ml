@@ -218,30 +218,62 @@ let test_self_preservation_empty_input () =
   let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:5 [] in
   check int "empty in = empty out" 0 (List.length result)
 
-let test_self_preservation_allows_partial_stale_recovery () =
+let stale_entries names =
+  List.map
+    (fun name ->
+      ignore (Reg.register ~base_path:bp name (make_meta name));
+      Reg.set_failure_reason ~base_path:bp name
+        (Some
+           (Reg.Stale_turn_timeout
+              (Reg.Idle_turn { stall_seconds = 99_000.0 })));
+      match Reg.get ~base_path:bp name with
+      | Some e -> (e, "stale_turn_timeout")
+      | None -> fail name)
+    names
+
+let test_self_preservation_allows_bounded_partial_stale_recovery () =
   Reg.clear ();
-  Sup.reset_self_preservation_escape_state ();
+  Sup.reset_self_preservation_escape_state_for_test ();
   let names = [ "a"; "b"; "c"; "d"; "e"; "f" ] in
-  let entries =
-    List.map
-      (fun name ->
-        ignore (Reg.register ~base_path:bp name (make_meta name));
-        Reg.set_failure_reason ~base_path:bp name
-          (Some
-             (Reg.Stale_turn_timeout
-                (Reg.Idle_turn { stall_seconds = 99_000.0 })));
-        match Reg.get ~base_path:bp name with
-        | Some e -> (e, "stale_turn_timeout")
-        | None -> fail name)
-      names
-  in
+  let entries = stale_entries names in
   let result =
     Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers"
       ~total_keepers:17 entries
   in
   check int "partial stale recovery cohort allowed through"
     (List.length entries) (List.length result);
-  Sup.reset_self_preservation_escape_state ();
+  Sup.reset_self_preservation_escape_state_for_test ();
+  Reg.clear ()
+
+let test_self_preservation_suppresses_large_partial_stale_recovery () =
+  Reg.clear ();
+  Sup.reset_self_preservation_escape_state_for_test ();
+  let entries =
+    stale_entries
+      [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "i" ]
+  in
+  let result =
+    Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers"
+      ~total_keepers:17 entries
+  in
+  check int "large partial stale cohort suppressed" 0 (List.length result);
+  Sup.reset_self_preservation_escape_state_for_test ();
+  Reg.clear ()
+
+let test_self_preservation_suppresses_universal_stale_recovery () =
+  Reg.clear ();
+  Sup.reset_self_preservation_escape_state_for_test ();
+  let entries =
+    stale_entries
+      [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "i"; "j"; "k"; "l";
+        "m"; "n"; "o"; "p"; "q" ]
+  in
+  let result =
+    Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers"
+      ~total_keepers:17 entries
+  in
+  check int "universal stale cohort suppressed" 0 (List.length result);
+  Sup.reset_self_preservation_escape_state_for_test ();
   Reg.clear ()
 
 (* ── Runtime override: fiber_health_of ─────────────────── *)
@@ -1170,8 +1202,12 @@ let () =
     "self_preservation_properties", [
       test_case "output subset of input" `Quick test_self_preservation_subset;
       test_case "empty input → empty output" `Quick test_self_preservation_empty_input;
-      test_case "partial stale recovery cohort allowed" `Quick
-        test_self_preservation_allows_partial_stale_recovery;
+      test_case "bounded partial stale recovery cohort allowed" `Quick
+        test_self_preservation_allows_bounded_partial_stale_recovery;
+      test_case "large partial stale recovery cohort suppressed" `Quick
+        test_self_preservation_suppresses_large_partial_stale_recovery;
+      test_case "universal stale recovery cohort suppressed" `Quick
+        test_self_preservation_suppresses_universal_stale_recovery;
     ];
     "runtime_override", [
       test_case "fiber_health_of respects max_restarts override" `Quick

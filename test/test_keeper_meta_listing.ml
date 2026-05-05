@@ -654,6 +654,30 @@ let test_keeper_list_preserves_known_social_model () =
             Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
       | None -> fail "expected sangsu row in keeper list")
 
+let test_keeper_list_cache_retries_after_inflight_invalidation () =
+  Tool_keeper.For_testing.reset_keeper_list_cache ();
+  Fun.protect
+    ~finally:Tool_keeper.For_testing.reset_keeper_list_cache
+    (fun () ->
+      let calls = ref 0 in
+      let body =
+        Tool_keeper.For_testing.cached_keeper_list_text ~key:"race"
+          ~ttl_s:60.0 (fun () ->
+            incr calls;
+            if !calls = 1 then (
+              Tool_keeper.For_testing.invalidate_keeper_list_cache ();
+              "stale")
+            else
+              "fresh")
+      in
+      check string "in-flight invalidation forces recompute" "fresh" body;
+      check int "compute retried after invalidation" 2 !calls;
+      let cached =
+        Tool_keeper.For_testing.cached_keeper_list_text ~key:"race"
+          ~ttl_s:60.0 (fun () -> "unexpected")
+      in
+      check string "fresh recompute was cached" "fresh" cached)
+
 let () =
   run "keeper_meta_listing"
     [
@@ -673,6 +697,8 @@ let () =
             test_keeper_list_normalizes_unknown_social_model;
           test_case "tool keeper list preserves known social model" `Quick
             test_keeper_list_preserves_known_social_model;
+          test_case "keeper list cache retries after in-flight invalidation"
+            `Quick test_keeper_list_cache_retries_after_inflight_invalidation;
           test_case "tool keeper list exposes last social transition reason"
             `Quick test_keeper_list_exposes_last_social_transition_reason;
           test_case "keeper persona audit reports durable live keeper" `Quick

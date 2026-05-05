@@ -17,6 +17,14 @@ val schemas : Masc_domain.tool_schema list
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
+module For_testing : sig
+  val reset_keeper_list_cache : unit -> unit
+  val invalidate_keeper_list_cache : unit -> unit
+
+  val cached_keeper_list_text :
+    key:string -> ttl_s:float -> (unit -> string) -> string
+end
+
 (** Streaming dispatch: handles keeper_msg with real-time text delta callback.
     The [on_text_delta] callback receives each text fragment from the MODEL
     as it arrives. Returns [None] for tool names other than [masc_keeper_msg].

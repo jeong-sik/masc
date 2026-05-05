@@ -109,7 +109,9 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
         self.assertIn('"act_missing_count": 1', result.stdout)
 
     def test_startup_fixture_keeps_unlinked_emergency_action_visible(self) -> None:
-        orient = json.loads((FIXTURE_DIR / "orient.startup.json").read_text())
+        orient = json.loads(
+            (FIXTURE_DIR / "orient.startup.json").read_text(encoding="utf-8")
+        )
         act_map = decide_goal_loop_findings.load_act_map_input(
             str(FIXTURE_DIR / "act-map.startup.json")
         )

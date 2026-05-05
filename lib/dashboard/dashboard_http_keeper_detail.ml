@@ -581,19 +581,21 @@ let compute_metrics_window
     top_counts_json ~limit:5 ~name_key:"tool" tool_counts_window
   in
   let tool_count name = Option.value ~default:0 (Hashtbl.find_opt tool_counts_window name) in
-  let pr_review_read_tool_count = tool_count "keeper_pr_review_read" in
-  let pr_review_mutation_tool_count =
+  let pr_review_read_tool_call_count = tool_count "keeper_pr_review_read" in
+  let pr_review_mutation_tool_call_count =
     tool_count "keeper_pr_review_comment" + tool_count "keeper_pr_review_reply"
   in
-  let pr_review_tool_count =
-    pr_review_read_tool_count + pr_review_mutation_tool_count
+  let pr_review_tool_call_count =
+    pr_review_read_tool_call_count + pr_review_mutation_tool_call_count
   in
-  let pr_work_git_tool_count =
+  let pr_work_git_tool_call_count =
     tool_count "keeper_preflight_check"
     + tool_count "masc_worktree_create"
     + tool_count "masc_code_git"
   in
-  let pr_work_signal_count = pr_review_tool_count + pr_work_git_tool_count in
+  let pr_work_tool_call_count =
+    pr_review_tool_call_count + pr_work_git_tool_call_count
+  in
   let top_memory_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" memory_kind_counts_window
   in
@@ -700,15 +702,17 @@ let compute_metrics_window
     ("proactive_preview_similarity_method", `String "jaccard_adjacent_preview");
     ("proactive_preview_similarity_window", `Int proactive_similarity_window);
     ("tool_call_count", `Int acc.ma_tool_call_count);
-    ("pr_review_read_tool_count", `Int pr_review_read_tool_count);
-    ("pr_review_mutation_tool_count", `Int pr_review_mutation_tool_count);
-    ("pr_review_tool_count", `Int pr_review_tool_count);
-    ("pr_work_git_tool_count", `Int pr_work_git_tool_count);
-    ("pr_work_signal_count", `Int pr_work_signal_count);
-    ("observed_pr_review_work", `Bool (pr_review_tool_count > 0));
-    ("observed_pr_mutation_work", `Bool (pr_review_mutation_tool_count > 0));
-    ("observed_git_work", `Bool (pr_work_git_tool_count > 0));
-    ("observed_pr_work", `Bool (pr_work_signal_count > 0));
+    ("pr_review_read_tool_call_count", `Int pr_review_read_tool_call_count);
+    ( "pr_review_mutation_tool_call_count",
+      `Int pr_review_mutation_tool_call_count );
+    ("pr_review_tool_call_count", `Int pr_review_tool_call_count);
+    ("pr_work_git_tool_call_count", `Int pr_work_git_tool_call_count);
+    ("pr_work_tool_call_count", `Int pr_work_tool_call_count);
+    ("observed_pr_review_tool_calls", `Bool (pr_review_tool_call_count > 0));
+    ( "observed_pr_mutation_tool_calls",
+      `Bool (pr_review_mutation_tool_call_count > 0) );
+    ("observed_git_tool_calls", `Bool (pr_work_git_tool_call_count > 0));
+    ("observed_pr_work_tool_calls", `Bool (pr_work_tool_call_count > 0));
     ("memory_checks", `Int acc.ma_memory_checks);
     ("memory_passed", `Int acc.ma_memory_passed);
     ("memory_failed", `Int memory_failed);

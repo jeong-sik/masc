@@ -92,6 +92,29 @@ let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   check bool "last keeper is not delayed by list position" true
     (List.nth warmups 13 <= 75)
 
+(* §L (tracker #13155): pin exact warmup outputs for fixed keeper
+   names so any silent regression to native-int [acc lsl 5] (which
+   wraps differently on 31-bit vs 63-bit OCaml) breaks at least one
+   assertion on at least one architecture.
+
+   Expected values come from the Int32 djb2 spec:
+     [acc := Int32.logand (Int32.add (Int32.add (acc lsl 5) acc) ch)
+            0x3FFF_FFFFl]
+
+   With [base_warmup = 0, stagger_window_sec = 99] the formula
+   reduces to [hash mod 100] which is itself stable across platforms
+   under the Int32 implementation. *)
+let test_warmup_hash_pinned_cross_platform () =
+  let warmup name =
+    Boot.autoboot_proactive_warmup_sec ~base_warmup:0
+      ~stagger_window_sec:99 ~keeper_name:name
+  in
+  check int "verifier hash mod 100 (Int32 djb2)" 25 (warmup "verifier");
+  check int "designer hash mod 100 (Int32 djb2)" 74 (warmup "designer");
+  check int "developer hash mod 100 (Int32 djb2)" 15 (warmup "developer");
+  check int "analyst hash mod 100 (Int32 djb2)" 73 (warmup "analyst");
+  check int "janitor hash mod 100 (Int32 djb2)" 4 (warmup "janitor")
+
 let test_autoboot_warmup_is_order_independent () =
   let warmup name =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:60 ~stagger_window_sec:15
@@ -166,5 +189,7 @@ let () =
             test_autoboot_warmup_jitter_is_bounded_not_linear;
           test_case "warmup deterministic per keeper" `Quick
             test_autoboot_warmup_is_order_independent;
+          test_case "Int32 hash pinned cross-platform (#13155 §L)" `Quick
+            test_warmup_hash_pinned_cross_platform;
         ] );
     ]

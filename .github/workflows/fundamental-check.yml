@@ -47,3 +47,16 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
         run: bash scripts/lint/godfile-size-regression.sh
+
+  yaml-syntax:
+    name: Workflow YAML syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Run lint
+        run: bash scripts/lint/yaml-syntax.sh

@@ -47,7 +47,7 @@ let git_capture_output ~repo_root args =
       ~actor:"system/build_identity"
       ~raw_source
       ~summary:"build identity git probe"
-      ~timeout_sec:5.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Build_identity ())
       argv
   with
   | Unix.WEXITED 0, output -> Some output

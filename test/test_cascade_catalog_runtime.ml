@@ -331,6 +331,13 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
+  let skip_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_health_probe_skipped
+      ~labels:[("provider_name", "custom"); ("profile_name", "big_three")]
+      ()
+  in
+  let before_skip_metric = skip_metric () in
   let shared_model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
   let custom_exec_model =
     Printf.sprintf "custom:custom-exec@%s/v1" dummy_base_url
@@ -364,6 +371,9 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   check int "profile_count" 4 (json_int_field "profile_count" snapshot_json);
   check bool "bootstrap probe status is skipped" true
     (contains_substring (Yojson.Safe.to_string snapshot_json) "\"status\":\"skipped\"");
+  check (float 0.0001) "bootstrap skip metric increments for big_three"
+    1.0
+    (skip_metric () -. before_skip_metric);
   let blank_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())

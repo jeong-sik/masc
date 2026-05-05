@@ -79,14 +79,24 @@ let warn_telemetry_drop ~event_family ~event_kind exn =
         ("exception", `String exn_str);
       ]
   in
-  Log.emit Log.Warn ~module_name:"Coord" ~details
-    (Printf.sprintf
-       "telemetry/audit dropped (non-Eio context): %s/%s"
-       event_family event_kind);
-  Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
-    ~labels:
-      [ ("event_family", event_family); ("event_kind", event_kind) ]
-    ()
+  (* Inner swallow: the call sites that invoke this helper rely on the
+     "[Effect.Unhandled] is fully absorbed" contract — propagating an
+     exception out of the lifecycle hook would crash the caller. Both
+     observability side effects below can in principle raise (Log.emit
+     reaches into formatters / IO buffers; Prometheus.inc_counter takes
+     a global lock). If they do, we still drop the warn signal — the
+     primary contract is "do not break the caller". (#13096 review,
+     codex P2) *)
+  (try
+    Log.emit Log.Warn ~module_name:"Coord" ~details
+      (Printf.sprintf
+         "telemetry/audit dropped (non-Eio context): %s/%s"
+         event_family event_kind);
+    Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
+      ~labels:
+        [ ("event_family", event_family); ("event_kind", event_kind) ]
+      ()
+  with _ -> ())
 
 (* Exhaustive on [Masc_domain.task_action]: a new variant becomes a compile
    error here so the audit-log mapping cannot silently fall into the

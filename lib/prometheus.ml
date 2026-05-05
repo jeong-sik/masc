@@ -706,8 +706,13 @@ let metric_telemetry_coverage_gap =
    ledger pattern (only [tool_called] survives because it is wired on a
    different fiber-bearing path).  Labels: [event_family] (one of
    [agent_lifecycle] / [task_transition] / [accountability]) and
-   [event_kind] (the lifecycle/transition variant); both vocabularies are
-   bounded so series cardinality is at most ~12. *)
+   [event_kind] (the lifecycle/transition variant). [event_kind] for
+   [agent_lifecycle] is one of [join] / [rejoin] / [leave] (3 values).
+   [event_kind] for both [task_transition] and [accountability] uses the
+   8 [Masc_domain.task_action_to_string] values: [claim] / [start] /
+   [done] / [cancel] / [release] / [submit_for_verification] / [approve]
+   / [reject]. Both vocabularies are bounded so series cardinality is at
+   most 19 (3 + 8 + 8). *)
 let metric_coord_telemetry_drop =
   "masc_coord_telemetry_drop_total"
 
@@ -1976,13 +1981,15 @@ let init () =
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \
      + Telemetry emit because the dispatch happened outside an Eio \
-     scheduler. Labels: event_family (agent_lifecycle | task_transition \
-     | accountability), event_kind (the variant — join/rejoin/leave for \
-     lifecycle, claim/start/done/release/cancel/submit/approve/reject \
-     for transitions, record for accountability). Non-zero rate means a \
-     production path is firing the lifecycle outside an Eio context; \
-     before this counter the drop was silent (#10358 attrition root \
-     cause)."
+     scheduler. Labels: event_family (one of agent_lifecycle | \
+     task_transition | accountability) and event_kind (the variant). \
+     event_kind values: agent_lifecycle uses join | rejoin | leave (3 \
+     values); task_transition and accountability both use the 8 \
+     task_action variants claim | start | done | cancel | release | \
+     submit_for_verification | approve | reject. Cardinality bound: 19 \
+     series (3 + 8 + 8). Non-zero rate means a production path is \
+     firing the lifecycle outside an Eio context; before this counter \
+     the drop was silent (#10358 attrition root cause)."
     Counter;
   add metric_auth_credential_ambiguous_lookup
     "Total runtime credential lookups where N>=2 credentials share the \

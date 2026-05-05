@@ -885,9 +885,39 @@ let execution_summary_json ~meta ~latest_receipt =
         | None -> `Null );
     ]
 
+let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
+    ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
+    ~next_human_action =
+  let observed_at_unix = Time_compat.now () in
+  let task_id = Keeper_runtime_contract.current_task_id_opt meta in
+  let goal_ids = meta.active_goal_ids in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  [
+    terminal_reason_timeline_event ~latest_decision ~latest_receipt;
+    Option.bind latest_decision decision_timeline_event;
+    Option.bind latest_receipt receipt_timeline_event;
+    Option.bind latest_tool_call tool_call_timeline_event;
+    Option.bind latest_approval_audit approval_event_timeline_event;
+    blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
+      ~runtime_blocker_fields ?task_id ~goal_ids
+      ~trace_id ~next_human_action ();
+  ]
+  |> List.filter_map Fun.id
+  |> sort_timeline_events
+  |> fun events -> latest_causal_from_timeline (`List events)
+
 let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
+  let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
+  let latest_approval_audit =
+    match
+      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
+        ~keeper_name:meta.name ~n:1 ()
+    with
+    | json :: _ -> Some json
+    | [] -> None
+  in
   let latest_terminal_reason =
     latest_terminal_reason_opt ~latest_decision ~latest_receipt
   in
@@ -931,9 +961,9 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
     execution_summary_json ~meta ~latest_receipt
   in
   let latest_causal_event =
-    match terminal_reason_timeline_event ~latest_decision ~latest_receipt with
-    | Some event -> event
-    | None -> `Null
+    latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
+      ~latest_tool_call ~latest_approval_audit
+      ~runtime_blocker_fields ~next_human_action
   in
   `Assoc
     [

@@ -26,6 +26,7 @@ type board_error =
   | Io_error of string
   | Validation_error of string
   | Already_voted of string
+  | Already_exists of string
   [@@deriving show]
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
@@ -184,6 +185,45 @@ type reaction_toggle_result = {
   summary: reaction_summary list;
 }
 
+(** {1 SubBoard — Named spaces within the board} *)
+
+module Sub_board_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  val to_string : t -> string
+  val generate : unit -> t
+end = struct
+  type t = string
+
+  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+
+  let of_string s =
+    let s = String.trim s in
+    let len = String.length s in
+    if len >= 1 && len <= 64 && Re.execp valid_pattern s then Ok s
+    else Error (Invalid_id (Printf.sprintf "Invalid sub_board_id: %s" s))
+
+  let to_string t = t
+
+  let generate () = Random_id.prefixed ~prefix:"sb-" ~bytes:16
+end
+
+type sub_board_access =
+  | Open
+  | Members_only
+  | Owner_only
+
+type sub_board = {
+  id: Sub_board_id.t;
+  slug: string;
+  name: string;
+  description: string;
+  owner: Agent_id.t;
+  access: sub_board_access;
+  created_at: float;
+  post_count: int;
+}
+
 (** {1 Limits - Enforced, Not Optional} *)
 
 module Limits = struct
@@ -198,6 +238,7 @@ module Limits = struct
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
   let author_post_cap = env_int "MASC_BOARD_AUTHOR_POST_CAP" 100
+  let max_sub_boards = env_int "MASC_BOARD_MAX_SUB_BOARDS" 256
 end
 
 (** {1 Vote Direction} *)
@@ -256,4 +297,6 @@ type store = {
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
   mutable last_flush: float;
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
+  sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)
+  sub_boards_by_slug: (string, string) Hashtbl.t;          (** slug -> sub_board_id *)
 }

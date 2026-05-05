@@ -642,6 +642,32 @@ let load_persisted_reactions store =
         Log.BoardLog.error "load reactions failed: %s" (Printexc.to_string e)
   end
 
+let load_persisted_sub_boards store =
+  let path = sub_boards_path () in
+  if Fs_compat.file_exists path then begin
+    try
+      let loaded = ref 0 in
+      let lines = Fs_compat.load_jsonl path in
+      List.iter
+        (fun json ->
+           match sub_board_of_yojson json with
+           | Some sb ->
+               let id = Sub_board_id.to_string sb.id in
+               Hashtbl.replace store.sub_boards id sb;
+               Hashtbl.replace store.sub_boards_by_slug sb.slug id;
+               Stdlib.incr loaded
+           | None -> ())
+        lines;
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 sub-boards from %s" path
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
+        Log.BoardLog.error "load sub-boards failed: %s" (Printexc.to_string e)
+  end
+
 (** {1 Hearth (topic) operations} *)
 
 (** List active hearths with post counts *)
@@ -746,6 +772,7 @@ let global_lazy : store Eio.Lazy.t ref =
     recalculate_reply_counts store;
     load_persisted_votes store;
     load_persisted_reactions store;
+    load_persisted_sub_boards store;
     store))
 
 let global () = Eio.Lazy.force !global_lazy
@@ -760,6 +787,7 @@ let reset_global_for_test () =
     recalculate_reply_counts store;
     load_persisted_votes store;
     load_persisted_reactions store;
+    load_persisted_sub_boards store;
     store)
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)

@@ -274,3 +274,24 @@ val stats : unit -> Yojson.Safe.t
 
 val flush : unit -> unit
 (** Force-flush dirty posts/comments to disk. *)
+
+(** {1 SubBoard operations} *)
+
+val create_sub_board :
+  slug:string ->
+  name:string ->
+  description:string ->
+  owner:string ->
+  ?access:Board.sub_board_access ->
+  unit ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val get_sub_board :
+  sub_board_id:string ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val list_sub_boards : unit -> Board.sub_board list
+
+val delete_sub_board :
+  sub_board_id:string ->
+  (unit, Board.board_error) Result.t

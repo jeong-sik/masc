@@ -25,6 +25,7 @@ type board_error =
   | Io_error of string
   | Validation_error of string
   | Already_voted of string
+  | Already_exists of string
 [@@deriving show]
 
 (** {1 Safe ID Modules — Parse, Don't Validate} *)
@@ -131,6 +132,34 @@ type reaction_toggle_result = {
   summary : reaction_summary list;
 }
 
+(** {1 SubBoard — Named spaces within the board} *)
+
+module Sub_board_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  (** Validates [a-zA-Z0-9_-]+, length 1–64. *)
+  val to_string : t -> string
+  val generate : unit -> t
+  (** Cryptographic random id, prefix ["sb-"]. *)
+end
+
+type sub_board_access =
+  | Open          (** Anyone can post and read. *)
+  | Members_only  (** Only listed members can post; anyone can read. *)
+  | Owner_only    (** Only the owner can post; anyone can read. *)
+
+type sub_board = {
+  id : Sub_board_id.t;
+  slug : string;
+  (** URL-safe lowercase identifier, e.g. ["announcements"]. *)
+  name : string;
+  description : string;
+  owner : Agent_id.t;
+  access : sub_board_access;
+  created_at : float;
+  post_count : int;
+}
+
 (** {1 Limits — Enforced, Not Optional}
 
     All values resolved from [MASC_BOARD_*] env vars at module init,
@@ -147,6 +176,8 @@ module Limits : sig
   val sweeper_interval_sec : int
   val sweeper_batch_size : int
   val author_post_cap : int
+  val max_sub_boards : int
+  (** Maximum number of sub-boards. Default 256. *)
 end
 
 (** {1 Vote Direction} *)
@@ -205,4 +236,8 @@ type store = {
   dirty_comment_ids : (string, unit) Hashtbl.t;
   mutable last_flush : float;
   flusher_inbox : flusher_msg Eio.Stream.t;
+  sub_boards : (string, sub_board) Hashtbl.t;
+  (** Sub-board id -> sub_board record. *)
+  sub_boards_by_slug : (string, string) Hashtbl.t;
+  (** slug -> sub_board id index for O(1) slug lookup. *)
 }

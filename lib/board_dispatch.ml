@@ -629,3 +629,21 @@ let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
+
+(** {1 SubBoard operations} *)
+
+let create_sub_board ~slug ~name ~description ~owner ?access () =
+  match backend () with
+  | Jsonl store -> Board.create_sub_board store ~slug ~name ~description ~owner ?access ()
+
+let get_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.get_sub_board store ~sub_board_id
+
+let list_sub_boards () =
+  match backend () with
+  | Jsonl store -> Board.list_sub_boards store
+
+let delete_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.delete_sub_board store ~sub_board_id

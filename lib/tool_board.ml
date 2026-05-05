@@ -125,6 +125,7 @@ let board_error_to_string = function
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
+  | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
 
 let visibility_of_string = Board.visibility_of_string
 

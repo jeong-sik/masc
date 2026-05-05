@@ -47,8 +47,28 @@ let write_current_seq config seq =
 let append_line path line =
   Fs_compat.append_file path line
 
+let sanitize_entity_ref (value : entity_ref) =
+  {
+    kind = Inference_utils.sanitize_text_utf8 value.kind;
+    id = Inference_utils.sanitize_text_utf8 value.id;
+  }
+
+let sanitize_event (value : event) =
+  {
+    value with
+    ts_iso = Inference_utils.sanitize_text_utf8 value.ts_iso;
+    room_id = Inference_utils.sanitize_text_utf8 value.room_id;
+    kind = Inference_utils.sanitize_text_utf8 value.kind;
+    actor = Option.map sanitize_entity_ref value.actor;
+    subject = Option.map sanitize_entity_ref value.subject;
+    payload = Inference_utils.sanitize_json_utf8 value.payload;
+    tags = List.map Inference_utils.sanitize_text_utf8 value.tags;
+  }
+
 let format_sse_event (value : event) =
-  let data = Yojson.Safe.to_string (event_to_yojson value) in
+  let data =
+    value |> sanitize_event |> event_to_yojson |> Yojson.Safe.to_string
+  in
   Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" value.seq data
 
 (* ================================================================ *)
@@ -160,6 +180,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             payload;
             tags;
           }
+          |> sanitize_event
         in
         append_line (day_path config)
           (Yojson.Safe.to_string (event_to_yojson value) ^ "\n");

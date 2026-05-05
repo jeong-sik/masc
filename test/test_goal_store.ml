@@ -185,6 +185,36 @@ let test_update_missing_goal_does_not_bump () =
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
 
+let test_write_state_sanitizes_invalid_utf8_before_persisting () =
+  with_room @@ fun config ->
+  Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+  let replacement = "\xEF\xBF\xBD" in
+  let goal =
+    {
+      (make_goal "utf8-goal" "bad\xffgoal") with
+      metric = Some "metric\xffvalue";
+      target_value = Some "target\xffvalue";
+    }
+  in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  let raw = Fs_compat.load_file (Goal_store.goals_path config) in
+  check bool "raw file has no original invalid byte" false
+    (String.contains raw '\255');
+  let state = Goal_store.read_state config in
+  let saved_goal =
+    match state.goals with
+    | [ goal ] -> goal
+    | _ -> fail "expected one goal"
+  in
+  check string "title repaired on write" ("bad" ^ replacement ^ "goal")
+    saved_goal.title;
+  check (option string) "metric repaired on write"
+    (Some ("metric" ^ replacement ^ "value"))
+    saved_goal.metric;
+  let stats = Safe_ops.persistence_utf8_repair_stats () in
+  check int "read path did not repair goal store" 0 stats.repaired_reads
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -202,4 +232,6 @@ let () =
           test_case "list_goals filters by phase" `Quick
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
-            test_update_missing_goal_does_not_bump ] ) ]
+            test_update_missing_goal_does_not_bump;
+          test_case "write_state sanitizes invalid utf8" `Quick
+            test_write_state_sanitizes_invalid_utf8_before_persisting ] ) ]

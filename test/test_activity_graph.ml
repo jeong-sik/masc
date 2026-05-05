@@ -56,6 +56,40 @@ let test_emit_and_list_events () =
       in
       check int "task filter" 1 (List.length task_only))
 
+let test_emit_sanitizes_invalid_utf8_before_persisting () =
+  with_config (fun config ->
+      Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+      let replacement = "\xEF\xBF\xBD" in
+      ignore
+        (Activity_graph.emit config ~kind:"message.broadcast"
+           ~actor:(Activity_graph.entity ~kind:"agent" "bad\xffactor")
+           ~tags:[ "message"; "bad\xfftag" ]
+           ~payload:(`Assoc [ ("content", `String "bad\xffpayload") ])
+           ());
+      let events =
+        Activity_graph.list_events config ~after_seq:0 ~limit:10 ()
+      in
+      let event =
+        match events with
+        | [ event ] -> event
+        | _ -> fail "expected one event"
+      in
+      let open Yojson.Safe.Util in
+      check string "actor id repaired on write"
+        ("bad" ^ replacement ^ "actor")
+        (match event.actor with
+         | Some actor -> actor.id
+         | None -> fail "expected actor");
+      check string "tag repaired on write"
+        ("bad" ^ replacement ^ "tag")
+        (List.hd event.tags);
+      check string "payload repaired on write"
+        ("bad" ^ replacement ^ "payload")
+        (event.payload |> member "content" |> to_string);
+      let stats = Safe_ops.persistence_utf8_repair_stats () in
+      check int "read path did not repair activity graph row" 0
+        stats.repaired_reads)
+
 let test_filtered_client_receives_matching_events () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -302,6 +336,8 @@ let () =
       ( "core",
         [
           test_case "emit and list events" `Quick test_emit_and_list_events;
+          test_case "emit sanitizes invalid utf8 before persisting" `Quick
+            test_emit_sanitizes_invalid_utf8_before_persisting;
           test_case "filtered client receives matching events" `Quick
             test_filtered_client_receives_matching_events;
           test_case "graph summary builds nodes and edges" `Quick

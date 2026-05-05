@@ -56,6 +56,21 @@ let clear_all_envs () =
     (Cfg.known_callers ());
   List.iter (fun name -> Unix.putenv name "") legacy_envs
 
+(* The PR's stated invariant is "dashboard judges resolve to a
+   bounded 45.0s default, not the 300s worker budget".  Pin the
+   numeric value of [dashboard_judge_default_sec] explicitly.
+   Without this anchor, a future widen back toward the worker
+   budget would still pass the existing
+   [judge resolves to dashboard_judge_default_sec] checks because
+   both sides of the comparison would shift in lockstep. *)
+let test_dashboard_judge_default_is_45s () =
+  Alcotest.(check (float 0.0001))
+    "dashboard_judge_default_sec is bounded at 45.0s; widening it \
+     back toward the 300s worker budget reintroduces the operator-\
+     surface stall this PR is meant to prevent — see #13113 follow-up"
+    45.0
+    Cfg.dashboard_judge_default_sec
+
 let test_judge_defaults_are_bounded () =
   clear_all_envs ();
   Alcotest.(check (float 0.0001))
@@ -124,6 +139,8 @@ let () =
     [
       ( "defaults",
         [
+          Alcotest.test_case "dashboard_judge_default_sec is 45s"
+            `Quick test_dashboard_judge_default_is_45s;
           Alcotest.test_case "judge defaults are bounded"
             `Quick test_judge_defaults_are_bounded;
           Alcotest.test_case "judges listed in known_callers"

@@ -41,6 +41,7 @@ import {
 import type { BoardComment, BoardPost } from './board-state'
 
 const MAX_INLINE_COMMENT_DEPTH = 5
+const INITIAL_CHILD_REPLY_LIMIT = 5
 
 // ── Expiry chip (returns html, kept in UI layer) ───────────────────
 function expiryChip(post: BoardPost) {
@@ -183,6 +184,7 @@ function CommentItem({
   const [expanded, setExpanded] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [deepExpanded, setDeepExpanded] = useState(false)
+  const [visibleReplyLimit, setVisibleReplyLimit] = useState(INITIAL_CHILD_REPLY_LIMIT)
   const displayText = needsTruncation && !expanded
     ? `${contentChars.slice(0, 297).join('')}...`
     : comment.content
@@ -197,6 +199,11 @@ function CommentItem({
   const childForceExpanded = forceThreadExpanded || deepExpanded
   const repliesExpanded = !collapsedByUser
   const canToggleReplies = replies.length > 0 && !cappedByDepth && !suppressCollapseToggle && !forceThreadExpanded
+  const visibleReplies = forceThreadExpanded
+    ? replies
+    : replies.slice(0, visibleReplyLimit)
+  const hiddenSiblingReplyCount = Math.max(0, replies.length - visibleReplies.length)
+  const canLoadMoreSiblingReplies = showReplies && !forceThreadExpanded && hiddenSiblingReplyCount > 0
   const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
@@ -301,7 +308,14 @@ function CommentItem({
       </div>
       ${showReplies ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} suppressCollapseToggle=${suppressCollapseToggle} />`)}
+          ${visibleReplies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} suppressCollapseToggle=${suppressCollapseToggle} />`)}
+          ${canLoadMoreSiblingReplies ? html`
+            <button
+              type="button"
+              class="ml-4 mt-1 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-divider)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+              onClick=${() => setVisibleReplyLimit(visibleReplyLimit + INITIAL_CHILD_REPLY_LIMIT)}
+            >답글 ${hiddenSiblingReplyCount}개 더 보기</button>
+          ` : null}
         </div>
       ` : null}
     </div>

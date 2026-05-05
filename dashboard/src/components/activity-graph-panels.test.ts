@@ -39,6 +39,8 @@ async function loadPanels(options: {
       html`<div>${message ?? children}</div>`,
     LoadingState: ({ children }: { children?: unknown }) =>
       html`<div>${children}</div>`,
+    ErrorState: ({ message }: { message?: string }) =>
+      html`<div>${message ?? ''}</div>`,
   }))
   Vitest.vi.doMock('./common/button', () => ({
     ActionButton: ({ children, onClick }: { children?: unknown; onClick?: () => void }) =>

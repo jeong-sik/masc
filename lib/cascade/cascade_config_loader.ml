@@ -192,6 +192,14 @@ let catalog_key_specs =
     ("_num_ctx", Schema_field);
     ("_thinking_enabled", Schema_field);
     ("_thinking_budget", Schema_field);
+    (* Scoring parameter overrides (Weighted_random strategy) *)
+    ("_latency_baseline_ms", Schema_field);
+    ("_rate_limit_recency_window_s", Schema_field);
+    ("_rate_limit_decay_base", Schema_field);
+    ("_rate_limit_skip_after", Schema_field);
+    ("_server_error_recency_window_s", Schema_field);
+    ("_server_error_decay_base", Schema_field);
+    ("_server_error_skip_after", Schema_field);
     ("_keeper_assignable", Keeper_assignable_field);
     ("_fallback_cascade", Fallback_cascade_field);
   ]
@@ -561,6 +569,29 @@ type strategy_config = {
   cli_max_concurrent : int option;
   tiers : string list list option;
   sticky_ttl_ms : int option;
+  (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
+  latency_baseline_ms : float option;
+  (** Milliseconds.  Provider p50 above this value incurs a fractional
+      score penalty.  When [None], falls back to
+      [MASC_CASCADE_LATENCY_BASELINE_MS] env var, then default 2000.0. *)
+  rate_limit_recency_window_s : float option;
+  (** Seconds.  Lookback window for counting recent 429 events.
+      When [None], falls back to env var, then default 60.0. *)
+  rate_limit_decay_base : float option;
+  (** Per-event decay multiplier in (0.0, 1.0).
+      When [None], falls back to env var, then default 0.5. *)
+  rate_limit_skip_after : int option;
+  (** Hard-skip threshold for 429 events.
+      When [None], falls back to env var, then default 3. *)
+  server_error_recency_window_s : float option;
+  (** Seconds.  Lookback window for counting recent 5xx events.
+      When [None], falls back to env var, then default 120.0. *)
+  server_error_decay_base : float option;
+  (** Per-event decay multiplier in (0.0, 1.0).
+      When [None], falls back to env var, then default 0.6. *)
+  server_error_skip_after : int option;
+  (** Hard-skip threshold for 5xx events.
+      When [None], falls back to env var, then default 4. *)
 }
 
 (* Read a [string list list] from a JSON [list of list of string].
@@ -596,6 +627,13 @@ let empty_strategy_config = {
   cli_max_concurrent = None;
   tiers = None;
   sticky_ttl_ms = None;
+  latency_baseline_ms = None;
+  rate_limit_recency_window_s = None;
+  rate_limit_decay_base = None;
+  rate_limit_skip_after = None;
+  server_error_recency_window_s = None;
+  server_error_decay_base = None;
+  server_error_skip_after = None;
 }
 
 let resolve_strategy_config ~config_path ~name =
@@ -616,4 +654,18 @@ let resolve_strategy_config ~config_path ~name =
         read_int_field json (name ^ "_cli_max_concurrent");
       tiers = read_tiers_field json (name ^ "_tiers");
       sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms");
+      latency_baseline_ms =
+        read_float_field json (name ^ "_latency_baseline_ms");
+      rate_limit_recency_window_s =
+        read_float_field json (name ^ "_rate_limit_recency_window_s");
+      rate_limit_decay_base =
+        read_float_field json (name ^ "_rate_limit_decay_base");
+      rate_limit_skip_after =
+        read_int_field json (name ^ "_rate_limit_skip_after");
+      server_error_recency_window_s =
+        read_float_field json (name ^ "_server_error_recency_window_s");
+      server_error_decay_base =
+        read_float_field json (name ^ "_server_error_decay_base");
+      server_error_skip_after =
+        read_int_field json (name ^ "_server_error_skip_after");
     }

@@ -350,6 +350,51 @@ let run_named
     | Error err ->
       (Error err, None)
     | Ok config ->
+      (* RFC-0022 PR-2 §4 — attempt-liveness observer.
+
+         Mode is captured once per attempt. Off short-circuits before
+         observer construction so the wrapper is bit-identical to the
+         baseline. Observe and Enforce wrap on_event, start a tick fiber
+         under [~sw], and finalize the per-attempt outcome counter when
+         the run returns. Enforce additionally calls [Eio.Switch.fail]
+         on the first Outcome to tear down [Oas_worker_exec.run]. *)
+      let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
+      let liveness_observer_opt =
+        match liveness_mode with
+        | Cascade_attempt_liveness_config.Off -> None
+        | Cascade_attempt_liveness_config.Observe
+        | Cascade_attempt_liveness_config.Enforce ->
+            let budget =
+              Cascade_attempt_liveness_config.budget_for_label
+                provider_cfg.model_id
+            in
+            let obs =
+              Cascade_attempt_liveness_observer.create
+                ~mode:liveness_mode ~budget ~cascade_label:cascade_name
+                ~provider_label:provider_cfg.model_id
+                ~started_at:(Time_compat.now ())
+            in
+            (match Eio_context.get_clock_opt () with
+             | Some clock ->
+                 Cascade_attempt_liveness_observer.start_tick_fiber obs
+                   ~sw ~clock
+             | None ->
+                 (* No clock available — wrapper still emits counters
+                    via on_event but TTFT/wall checks won't fire. *)
+                 ());
+            Some obs
+      in
+      let liveness_on_event =
+        match liveness_observer_opt with
+        | None -> on_event
+        | Some obs ->
+            Cascade_attempt_liveness_observer.wrap_on_event obs on_event
+      in
+      let finalize_liveness () =
+        match liveness_observer_opt with
+        | None -> ()
+        | Some obs -> Cascade_attempt_liveness_observer.finalize obs
+      in
       match
         with_codex_cli_preflight
           ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
@@ -361,7 +406,8 @@ let run_named
             in
             let run_fn () =
               Oas_worker_exec.run ~sw ~net ~config
-                ?oas_checkpoint:effective_checkpoint ?on_event
+                ?oas_checkpoint:effective_checkpoint
+                ?on_event:liveness_on_event
                 ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
                 ?contract goal
             in
@@ -390,8 +436,10 @@ let run_named
             Ok result)
     with
     | Error err ->
+      finalize_liveness ();
       (Error err, None)
     | Ok result ->
+      finalize_liveness ();
       let result =
         Result.map_error
           (enrich_sdk_error ~cascade_name:error_cascade_name ~provider_cfg)

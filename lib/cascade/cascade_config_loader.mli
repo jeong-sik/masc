@@ -219,6 +219,39 @@ type strategy_config = {
       ([300_000]) when [kind] is [sticky] and this field is absent.
       Values [<= 0] disable affinity entirely.
       @since 0.9.7 *)
+
+  (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
+
+  latency_baseline_ms : float option;
+  (** ["{name}_latency_baseline_ms"]. Provider p50 above this value
+      incurs a fractional score penalty.  Falls back to env var
+      [MASC_CASCADE_LATENCY_BASELINE_MS] or default 2000.0 when absent. *)
+
+  rate_limit_recency_window_s : float option;
+  (** ["{name}_rate_limit_recency_window_s"]. Lookback window for
+      counting recent 429 events.  Falls back to env var or default
+      60.0. *)
+
+  rate_limit_decay_base : float option;
+  (** ["{name}_rate_limit_decay_base"]. Per-event decay multiplier
+      in (0.0, 1.0).  Falls back to env var or default 0.5. *)
+
+  rate_limit_skip_after : int option;
+  (** ["{name}_rate_limit_skip_after"]. Hard-skip threshold for 429
+      events.  Falls back to env var or default 3. *)
+
+  server_error_recency_window_s : float option;
+  (** ["{name}_server_error_recency_window_s"]. Lookback window for
+      counting recent 5xx events.  Falls back to env var or default
+      120.0. *)
+
+  server_error_decay_base : float option;
+  (** ["{name}_server_error_decay_base"]. Per-event decay multiplier
+      in (0.0, 1.0).  Falls back to env var or default 0.6. *)
+
+  server_error_skip_after : int option;
+  (** ["{name}_server_error_skip_after"]. Hard-skip threshold for 5xx
+      events.  Falls back to env var or default 4. *)
 }
 
 val resolve_strategy_config :

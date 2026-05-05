@@ -152,29 +152,62 @@ let apply_post_turn_resilience
       let kind = error_mode_kind mode in
       let strategy = Recovery.default_strategy mode in
       let strategy_class = strategy_class_of_strategy strategy in
+      (* PR #13072 review (thread 4): durable audit must exist BEFORE
+         side-effecting callbacks run.  If [Shared_audit.Store.append]
+         raises on I/O after the executor already mutated state, the
+         side effect happens with no record.  Emit the [RecoveryAttempted]
+         envelope first when an executor is wired; the outcome envelope
+         (RecoverySucceeded/RecoveryFailed) is appended after the
+         executor returns. *)
+      let attempted_envelope_id =
+        match (audit_store, strategy_executor) with
+        | Some store, Some _ ->
+            let payload =
+              `Assoc
+                [
+                  ("error_kind", `String kind);
+                  ("strategy_class", `String strategy_class);
+                  ("strategy_execution",
+                   `Assoc [ ("status", `String "dispatching") ]);
+                  ("error_detail", `String err);
+                  ("now", `Float now);
+                ]
+            in
+            let envelope =
+              Shared_audit.Store.append store
+                ~category:(Audit.category_to_string Audit.RecoveryAttempted)
+                ~payload
+            in
+            Some envelope.Shared_audit.Envelope.id
+        | _ -> None
+      in
       let strategy_execution =
         execute_strategy_if_configured strategy_executor strategy
       in
       let strategy_execution_json =
         strategy_execution_to_json strategy_execution
       in
-      (* #13072: audit category SSOT.
-         - [RecoveryAttempted] is reserved for *dispatched* recovery —
-           an executor was wired and ran (success or failure).  Audit
-           consumers (lib/resilience/audit.mli:76-81) downstream of
-           [RecoveryAttempted] / [RecoverySucceeded] / [RecoveryFailed]
-           assume the strategy was actually invoked.
-         - When [strategy_executor] is omitted the recovery surface
-           was advertised but no dispatch occurred; emit under
-           [RecoveryClassified] instead so consumers that key off the
-           category do not over-count attempted dispatches. *)
-      let audit_category =
+      (* PR #13072 review (thread 3): map the outcome to its proper
+         category instead of collapsing every dispatched run under
+         [RecoveryAttempted].  Audit consumers can now key off the
+         enum.  [Strategy_execution_completed] success-shaped
+         outcomes (Retry succeeded, Fallback applied, Handoff
+         requested) → [RecoverySucceeded].  Failure-shaped outcomes
+         (Retry exhausted/fatal, Aborted) and the explicit
+         [Strategy_execution_failed] callback-failure path →
+         [RecoveryFailed].  [Strategy_execution_not_configured] still
+         maps to [RecoveryClassified] because no dispatch happened. *)
+      let outcome_category =
         match strategy_execution with
-        | Strategy_execution_not_configured ->
-            Audit.category_to_string Audit.RecoveryClassified
-        | Strategy_execution_completed _
-        | Strategy_execution_failed _ ->
-            Audit.category_to_string Audit.RecoveryAttempted
+        | Strategy_execution_not_configured -> Audit.RecoveryClassified
+        | Strategy_execution_completed (Recovery.RetrySucceeded _)
+        | Strategy_execution_completed (Recovery.FallbackApplied _)
+        | Strategy_execution_completed (Recovery.HandoffRequested _) ->
+            Audit.RecoverySucceeded
+        | Strategy_execution_completed (Recovery.RetryExhausted _)
+        | Strategy_execution_completed (Recovery.RetryFatal _)
+        | Strategy_execution_completed (Recovery.Aborted _)
+        | Strategy_execution_failed _ -> Audit.RecoveryFailed
       in
       let envelope_id =
         match audit_store with
@@ -188,13 +221,23 @@ let apply_post_turn_resilience
                   ("strategy_execution", strategy_execution_json);
                   ("error_detail", `String err);
                   ("now", `Float now);
+                  ( "attempted_envelope_id",
+                    match attempted_envelope_id with
+                    | None -> `Null
+                    | Some s -> `String s );
                 ]
             in
             let envelope =
               Shared_audit.Store.append store
-                ~category:audit_category ~payload
+                ~category:(Audit.category_to_string outcome_category)
+                ~payload
             in
             Some envelope.Shared_audit.Envelope.id
+      in
+      let envelope_id =
+        match envelope_id with
+        | Some _ -> envelope_id
+        | None -> attempted_envelope_id
       in
       let resilience_meta =
         `Assoc

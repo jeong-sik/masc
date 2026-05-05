@@ -114,7 +114,16 @@ let execute_strategy : type a.
                 (RetryExhausted
                    { attempts = attempt; last_error = Some error })
             else
-              let delay_s = clamp_delay_s (backoff attempt) in
+              (* PR #13072 review: the strategy's [backoff] callback is
+                 part of the public [Retry.t] API and may raise (caller
+                 typo, integer overflow on attempt, etc.).  Without this
+                 trap the exception escaped and tore down the turn,
+                 instead of being converted into the [Error ...] that
+                 [execute_strategy]'s contract promises. *)
+              let* delay_s_raw =
+                trap_call ~op:"backoff" (fun () -> backoff attempt)
+              in
+              let delay_s = clamp_delay_s delay_s_raw in
               let* () =
                 on_event (RetryBackoff { attempt; delay_s; error })
               in

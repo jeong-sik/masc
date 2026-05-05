@@ -272,7 +272,16 @@ let test_pipeline_writes_audit_when_store_supplied () =
       assert (audit_status = Some (`String "not_configured"))
   | _ -> assert false
 
-let test_pipeline_writes_attempted_audit_when_executor_supplied () =
+(* PR #13072 review (threads 3 + 4): when an executor is supplied,
+   two audit envelopes must be written:
+   - [RecoveryAttempted] pre-flight, BEFORE the executor's callbacks
+     run, so an I/O failure on the post-flight append still leaves a
+     durable record of the attempt;
+   - the outcome envelope ([RecoverySucceeded] / [RecoveryFailed])
+     after the executor returns, so audit consumers can key off the
+     category enum instead of parsing payloads. *)
+let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
+    () =
   let tmp_dir =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "test_keeper_bridge_attempted_audit_%d" (Unix.getpid ()))
@@ -289,9 +298,49 @@ let test_pipeline_writes_attempted_audit_when_executor_supplied () =
       ~maybe_error:(Some "completely unknown failure mode") ()
   in
   assert (Option.is_some outcome.audit_envelope_id);
-  match Shared_audit.Store.recent store ~n:1 with
-  | [ env ] ->
-      assert (env.Shared_audit.Envelope.category = "RecoveryAttempted")
+  let recent = Shared_audit.Store.recent store ~n:2 in
+  assert (List.length recent = 2);
+  (* Most recent is the outcome (HandoffRequested → RecoverySucceeded);
+     older is the pre-flight RecoveryAttempted. *)
+  match recent with
+  | [ outcome_env; attempted_env ] ->
+      assert (
+        attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
+      assert (
+        outcome_env.Shared_audit.Envelope.category = "RecoverySucceeded");
+      assert (
+        Some outcome_env.Shared_audit.Envelope.id
+        = outcome.audit_envelope_id)
+  | _ -> assert false
+
+(* PR #13072 review (thread 3): a callback-failure path
+   ([Strategy_execution_failed]) emits [RecoveryFailed], not
+   [RecoveryAttempted]. *)
+let test_pipeline_writes_recovery_failed_when_callback_fails () =
+  let tmp_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_bridge_recovery_failed_%d" (Unix.getpid ()))
+  in
+  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message:_ ~preserve_state:_ ->
+        Error "synthetic callback failure")
+      ()
+  in
+  let _ =
+    KB.apply_post_turn_resilience witness ~audit_store:store
+      ~strategy_executor:executor ~now:8.0 ~working_context:None
+      ~maybe_error:(Some "completely unknown failure mode") ()
+  in
+  let recent = Shared_audit.Store.recent store ~n:2 in
+  assert (List.length recent = 2);
+  match recent with
+  | [ outcome_env; attempted_env ] ->
+      assert (
+        attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
+      assert (
+        outcome_env.Shared_audit.Envelope.category = "RecoveryFailed")
   | _ -> assert false
 
 let () =
@@ -311,5 +360,6 @@ let () =
   test_pipeline_classifies_resource_token ();
   test_pipeline_upserts_into_working_context ();
   test_pipeline_writes_audit_when_store_supplied ();
-  test_pipeline_writes_attempted_audit_when_executor_supplied ();
+  test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied ();
+  test_pipeline_writes_recovery_failed_when_callback_fails ();
   print_endline "test_keeper_bridge: all assertions passed"

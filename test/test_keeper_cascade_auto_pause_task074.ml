@@ -29,6 +29,7 @@ module EC = Masc_mcp.Keeper_error_classify
 module Owne = Masc_mcp.Oas_worker_named
 module KT = Masc_mcp.Keeper_types
 module Regime = Masc_mcp.Keeper_behavioral_regime
+module UT = Masc_mcp.Keeper_unified_turn
 
 let cascade_name raw = Owne.cascade_name_of_string raw
 
@@ -88,6 +89,15 @@ let mk_admission_queue_timeout () =
          cascade_name = cascade_name "test";
          wait_sec = 5.0 })
 
+let mk_required_tool_contract_violation () =
+  Agent_sdk.Error.Agent
+    (Agent_sdk.Error.CompletionContractViolation
+       {
+         contract = Agent_sdk.Completion_contract_id.Require_tool_use;
+         reason =
+           "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+       })
+
 let test_pause_does_not_fire_on_transient () =
   check bool "Oas_timeout_budget -> no pause" false
     (EC.is_cascade_exhausted_error (mk_oas_timeout_budget ()));
@@ -126,6 +136,29 @@ let test_regime_flips_to_thrashing_at_threshold () =
   check string "rule_id -> turn_fail_streak"
     "turn_fail_streak" snapshot.reason.rule_id
 
+let test_required_tool_contract_pause_guard () =
+  let violation = mk_required_tool_contract_violation () in
+  check bool "below threshold -> no pause" false
+    (UT.should_auto_pause_required_tool_contract_violation
+       ~paused:false
+       ~consecutive_failures:(Regime.turn_fail_streak_threshold - 1)
+       violation);
+  check bool "threshold -> pause" true
+    (UT.should_auto_pause_required_tool_contract_violation
+       ~paused:false
+       ~consecutive_failures:Regime.turn_fail_streak_threshold
+       violation);
+  check bool "already paused -> no duplicate pause" false
+    (UT.should_auto_pause_required_tool_contract_violation
+       ~paused:true
+       ~consecutive_failures:Regime.turn_fail_streak_threshold
+       violation);
+  check bool "non contract error -> no pause" false
+    (UT.should_auto_pause_required_tool_contract_violation
+       ~paused:false
+       ~consecutive_failures:Regime.turn_fail_streak_threshold
+       (mk_oas_timeout_budget ()))
+
 let () =
   run "keeper_cascade_auto_pause_task074"
     [
@@ -141,5 +174,10 @@ let () =
           test_case "pause threshold < crash default" `Quick test_threshold_pin;
           test_case "regime flip at threshold" `Quick
             test_regime_flips_to_thrashing_at_threshold;
+        ] );
+      ( "required-tool contract pause",
+        [
+          test_case "required contract loops pause before crash" `Quick
+            test_required_tool_contract_pause_guard;
         ] );
     ]

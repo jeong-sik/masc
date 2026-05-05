@@ -479,7 +479,7 @@ let test_oas_pin_source_contracts () =
      is intentionally drifting (e.g. mid-bump). *)
   check bool "dune-local.sh asserts oas pin before invoking dune" true
     (file_contains_pattern "scripts/dune-local.sh"
-       "scripts/check-oas-pin.sh\" --local-only");
+       "_pin_check}\" --local-only");
   check bool "dune-local.sh exposes MASC_SKIP_PIN_CHECK bypass" true
     (file_contains_pattern "scripts/dune-local.sh"
        "MASC_SKIP_PIN_CHECK");
@@ -609,10 +609,10 @@ let test_http_write_auth_contracts () =
        "else ensure_same_origin_browser_request request");
   check bool "broadcast route requires token-bound broadcast permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       {|with_token_permission_auth ~permission:Types.CanBroadcast|});
+       {|with_token_permission_auth ~permission:Masc_domain.CanBroadcast|});
   check bool "keeper config update requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+       {|with_token_permission_auth ~permission:Masc_domain.CanAdmin|});
   check bool "board vote route requires board vote tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
        {|with_tool_auth ~tool_name:"masc_board_vote"|});
@@ -633,10 +633,10 @@ let test_http_write_auth_contracts () =
        {|with_tool_auth ~tool_name:"masc_broadcast"|});
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
-       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+       {|with_token_permission_auth ~permission:Masc_domain.CanAdmin|});
   check bool "dashboard delete actions require token-bound admin permission" true
     (file_contains_pattern "lib/server/server_dashboard_http_delete_actions.ml"
-       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+       {|with_token_permission_auth ~permission:Masc_domain.CanAdmin|});
   check bool "server auth defines public-read cors origin helper" true
     (file_contains_pattern "lib/server/server_auth.ml"
        "let public_read_cors_origin_opt");
@@ -664,7 +664,7 @@ let test_tool_admin_snapshot_auth_contracts () =
   check bool "tool admin snapshot metadata requires admin permission" true
     (file_contains_pattern "lib/tool_misc.ml"
        {|"masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
-      Some Types.CanAdmin|});
+      Some Masc_domain.CanAdmin|});
   check bool "tool admin snapshot legacy permission map requires admin" true
     (file_contains_pattern "lib/tool_permission_map.ml"
        {|("masc_tool_admin_snapshot", CanAdmin)|})

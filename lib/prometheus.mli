@@ -293,6 +293,7 @@ val metric_keeper_stale_storm_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
+val metric_keeper_progress_updated_line_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_turn_metrics_snapshot_failures : string

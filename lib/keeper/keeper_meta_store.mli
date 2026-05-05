@@ -95,7 +95,9 @@ val read_meta_if_changed :
 val current_utc_timestamp : unit -> string
 
 (** Refresh the [Updated:] line in the keeper progress markdown.
-    Best-effort — swallows all exceptions. *)
+    Best-effort: a missing progress file is a no-op; other failures
+    increment [metric_keeper_progress_updated_line_failures] and log a
+    warning. *)
 val refresh_progress_updated_line : Coord.config -> string -> unit
 
 (** Atomic write of [persisted] to [path]; runs the

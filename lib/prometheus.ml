@@ -961,6 +961,8 @@ let metric_cascade_fallback_cycle_detected_total =
   "masc_cascade_fallback_cycle_detected_total"
 let metric_provider_health_probe_skipped =
   "masc_provider_health_probe_skipped_total"
+let metric_provider_actual_health_status =
+  "masc_provider_actual_health_status"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
 let metric_keeper_passive_loop_detected_total =
@@ -1602,6 +1604,11 @@ let init () =
      value means provider liveness was not actually probed at catalog \
      validation time."
     Counter;
+  add metric_provider_actual_health_status
+    "Last advisory provider health status observed by runtime catalog \
+     validation. Values: 0=unknown/skipped, 1=healthy, 3=unhealthy. Labels: \
+     provider_name, profile_name, model_id."
+    Gauge;
   add metric_keeper_passive_loop_detected_total
     "#12799 Total passive-loop detections: keeper issued only read-only tool \
      calls for N consecutive turns. Labeled by keeper."

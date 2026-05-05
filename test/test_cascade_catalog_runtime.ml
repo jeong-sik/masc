@@ -423,6 +423,60 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
       check bool "active profile list is included" true
         (contains_substring detail "tool_rerank")
 
+let test_valid_catalog_probes_local_endpoints_when_eio_caps_available () =
+  with_temp_dir "cascade-catalog-runtime-probe" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
+  let skip_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_health_probe_skipped
+      ~labels:[("provider_name", "custom"); ("profile_name", "big_three")]
+      ()
+  in
+  let health_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_actual_health_status
+      ~labels:
+        [
+          ("provider_name", "custom");
+          ("profile_name", "big_three");
+          ("model_id", "mock");
+        ]
+      ()
+  in
+  let before_skip_metric = skip_metric () in
+  let model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf {|{"big_three_models": ["%s"]}|} model));
+  let snapshot =
+    match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+    | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
+    | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
+        fail "expected fully validated snapshot without rejected profiles"
+    | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
+        fail "expected a freshly validated snapshot"
+    | Error rejection ->
+        failf "unexpected validation rejection: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+  in
+  let snapshot_string =
+    Yojson.Safe.to_string (Cascade_catalog_runtime.snapshot_to_yojson snapshot)
+  in
+  check bool "local probe status is error" true
+    (contains_substring snapshot_string "\"status\":\"error\"");
+  check bool "local probe reports endpoint" true
+    (contains_substring snapshot_string "local endpoint");
+  check bool "local probe is not skipped" false
+    (contains_substring snapshot_string "\"status\":\"skipped\"");
+  check (float 0.0001) "local probe does not increment skipped metric"
+    0.0
+    (skip_metric () -. before_skip_metric);
+  check (float 0.0001) "unhealthy local probe gauge" 3.0 (health_metric ())
+
 let test_invalid_hot_reload_preserves_last_known_good () =
   with_temp_dir "cascade-catalog-lkg" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -1019,6 +1073,10 @@ let () =
             "valid catalog skips live probes at bootstrap"
             `Quick
             test_valid_catalog_skips_live_probes_at_bootstrap;
+          test_case
+            "valid catalog probes local endpoints when Eio caps available"
+            `Quick
+            test_valid_catalog_probes_local_endpoints_when_eio_caps_available;
           test_case
             "route validation rejects unknown route key"
             `Quick

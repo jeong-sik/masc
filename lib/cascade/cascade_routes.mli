@@ -21,6 +21,9 @@ type logical_use =
   | Openai_compat
   | Persona_generation
   | Provider_benchmark
+  | Simple_task
+  | Moderate_task
+  | Complex_task
   | Tool_rerank_use
 
 val logical_use_key : logical_use -> string

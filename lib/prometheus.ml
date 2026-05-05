@@ -794,6 +794,8 @@ let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
 let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
+let metric_dashboard_execution_render_phase_sec =
+  "masc_dashboard_execution_render_phase_seconds"
 (* PR-0.2.A (RFC 2026-04-masc-ide-strategy): generic cache hit/miss
    counters, labelled by [cache] = "eio" | "dashboard".  Distinct from
    the WS-specific parse/bytes cache counters above; these track the
@@ -2259,6 +2261,11 @@ let init () =
   add metric_ws_bytes_cache_misses
     "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
     Counter;
+  register_histogram ~name:metric_dashboard_execution_render_phase_sec
+    ~help:
+      "Dashboard execution render phase latency in seconds. Labels: \
+       phase=total|snapshot|operations|enrich|enrich_per_keeper|data_load|assemble."
+    ();
   (* PR-0.2.A: generic cache hit/miss counters.  Labels: cache=eio|dashboard.
      [eio] tracks Cache_eio.get; [dashboard] tracks Dashboard_cache.get_or_compute.
      Per-label series are auto-created on first inc_counter call. *)

@@ -104,6 +104,24 @@ let format_slow_render_timings (t : render_phase_timings_ms) =
     t.data_load_ms
     t.assemble_ms
 
+let render_phase_seconds ms =
+  if ms <= 0.0 then 0.0 else ms /. 1000.0
+
+let observe_render_phase phase ms =
+  Prometheus.observe_histogram
+    Prometheus.metric_dashboard_execution_render_phase_sec
+    ~labels:[("phase", phase)]
+    (render_phase_seconds ms)
+
+let record_render_phase_timings (t : render_phase_timings_ms) =
+  observe_render_phase "total" t.total_ms;
+  observe_render_phase "snapshot" t.snapshot_ms;
+  observe_render_phase "operations" t.operations_ms;
+  observe_render_phase "enrich" t.enrich_ms;
+  observe_render_phase "enrich_per_keeper" (per_keeper_enrich_ms t);
+  observe_render_phase "data_load" t.data_load_ms;
+  observe_render_phase "assemble" t.assemble_ms
+
 let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   match keeper_json with
@@ -596,6 +614,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         assemble_ms = phase_ms t_after_data_load t_end;
         n_keepers = List.length keepers;
       } in
+      record_render_phase_timings timings;
       (* #9766: surface phase breakdown in the slow-render WARN so the
          59.8s/9-keeper sample (~6.6s/keeper) can be attributed to a
          specific phase without rebuilding the binary with extra

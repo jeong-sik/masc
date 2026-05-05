@@ -6,6 +6,7 @@
 
 open Alcotest
 module DE = Masc_mcp.Dashboard_execution
+module Prom = Masc_mcp.Prometheus
 
 let sample_timings () : DE.render_phase_timings_ms = {
   total_ms = 59800.0;
@@ -51,6 +52,37 @@ let test_format_with_zero_keepers () =
   check bool "zero keepers reports per_keeper=0" true
     (Astring.String.is_infix ~affix:"per_keeper=0ms" s)
 
+let phase_sum phase =
+  Prom.metric_value_or_zero
+    Prom.metric_dashboard_execution_render_phase_sec
+    ~labels:[("phase", phase)]
+    ()
+
+let phase_count phase =
+  Prom.metric_value_or_zero
+    (Prom.metric_dashboard_execution_render_phase_sec ^ "_count")
+    ~labels:[("phase", phase)]
+    ()
+
+let test_record_timings_observes_prometheus () =
+  let total_before = phase_sum "total" in
+  let total_count_before = phase_count "total" in
+  let per_keeper_before = phase_sum "enrich_per_keeper" in
+  let per_keeper_count_before = phase_count "enrich_per_keeper" in
+  DE.record_render_phase_timings (sample_timings ());
+  check (float 1e-6) "total phase seconds +59.8"
+    (total_before +. 59.8)
+    (phase_sum "total");
+  check (float 1e-6) "total phase count +1"
+    (total_count_before +. 1.0)
+    (phase_count "total");
+  check (float 1e-6) "per-keeper enrich seconds +6"
+    (per_keeper_before +. 6.0)
+    (phase_sum "enrich_per_keeper");
+  check (float 1e-6) "per-keeper enrich count +1"
+    (per_keeper_count_before +. 1.0)
+    (phase_count "enrich_per_keeper")
+
 let () =
   run "dashboard_render_timing_9766" [
     ("phase_timing", [
@@ -62,5 +94,7 @@ let () =
           test_format_includes_all_phases;
         test_case "format handles zero keepers" `Quick
           test_format_with_zero_keepers;
+        test_case "record timings emits Prometheus phase metrics" `Quick
+          test_record_timings_observes_prometheus;
       ]);
   ]

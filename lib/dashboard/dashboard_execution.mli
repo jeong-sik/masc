@@ -29,3 +29,8 @@ val per_keeper_enrich_ms : render_phase_timings_ms -> float
 val format_slow_render_timings : render_phase_timings_ms -> string
 (** Render the breakdown into the WARN suffix.  Stable format so
     log scrapers can parse it. *)
+
+val record_render_phase_timings : render_phase_timings_ms -> unit
+(** Emit the render phase breakdown into Prometheus.  This mirrors the
+    slow-render log payload so dashboard N+1 / enrichment cost is visible
+    even when the render stays below the warning threshold. *)

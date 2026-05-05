@@ -814,6 +814,13 @@ val metric_ws_parse_cache_misses : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
 
+(** Dashboard execution render phase latency histogram. Labels:
+    [phase] = total | snapshot | operations | enrich | enrich_per_keeper
+            | data_load | assemble.
+    The per-phase series let operators distinguish broad dashboard N+1 /
+    enrichment cost from unrelated snapshot or assembly latency. *)
+val metric_dashboard_execution_render_phase_sec : string
+
 (** PR-0.2.A (RFC 2026-04-masc-ide-strategy): cache lookup hit/miss
     counters. Labels: [cache] with values
     - ["eio"]      — [Cache_eio.get] (filesystem-backed key/value cache).

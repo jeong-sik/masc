@@ -294,6 +294,47 @@ let test_span_status_of_string_opt_returns_none_for_unknown () =
     (Activity_graph.span_status_of_string_opt "open"
      |> Option.map Activity_graph.span_status_to_string)
 
+(* UTF-8 regression: emit an event whose payload contains an invalid UTF-8
+   byte, verify the on-disk JSONL line is valid UTF-8 and the event
+   round-trips cleanly. *)
+let has_invalid_utf8_byte s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len then false
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then loop (i + dlen)
+      else true
+  in
+  loop 0
+
+let test_emit_repairs_invalid_utf8_in_payload () =
+  with_config (fun config ->
+      Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+      (* \xff is not valid UTF-8 *)
+      let bad_value = "content with bad\xff byte" in
+      ignore
+        (Activity_graph.emit config ~kind:"message.broadcast"
+           ~actor:(Activity_graph.entity ~kind:"agent" "system")
+           ~tags:[ "message" ]
+           ~payload:(`Assoc [ ("content", `String bad_value) ])
+           ());
+      (* The repair should have been recorded at write time *)
+      let stats = Safe_ops.persistence_utf8_repair_stats () in
+      check bool "repair triggered on emit" true (stats.repaired_reads >= 1);
+      (* Reading back should succeed with valid UTF-8 in the payload field *)
+      let events =
+        Activity_graph.list_events config ~after_seq:0 ~limit:10 ()
+      in
+      check int "one event emitted" 1 (List.length events);
+      let ev = List.hd events in
+      let loaded_content =
+        Yojson.Safe.Util.(ev.payload |> member "content" |> to_string)
+      in
+      check bool "payload content is valid UTF-8" false
+        (has_invalid_utf8_byte loaded_content))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -320,5 +361,10 @@ let () =
             test_span_status_of_string_keeps_legacy_unknown_fallback;
           test_case "span_status_opt None for unknown" `Quick
             test_span_status_of_string_opt_returns_none_for_unknown;
+        ] );
+      ( "utf8-write-regression",
+        [
+          test_case "emit repairs invalid UTF-8 in event payload" `Quick
+            test_emit_repairs_invalid_utf8_in_payload;
         ] );
     ]

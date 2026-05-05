@@ -150,7 +150,10 @@ let read_json_local_result path =
 
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
-  let content = Yojson.Safe.pretty_to_string json in
+  let content =
+    Yojson.Safe.pretty_to_string json
+    |> Safe_ops.repair_utf8_text ~surface:"write_json" ~path
+  in
   Fs_compat.save_file_atomic path content
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)

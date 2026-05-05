@@ -161,8 +161,12 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             tags;
           }
         in
-        append_line (day_path config)
-          (Yojson.Safe.to_string (event_to_yojson value) ^ "\n");
+        let line =
+          Yojson.Safe.to_string (event_to_yojson value) ^ "\n"
+          |> Safe_ops.repair_utf8_text ~surface:"activity_graph:event_line"
+               ~path:(day_path config)
+        in
+        append_line (day_path config) line;
         value)
   in
   let encoded = format_sse_event value in

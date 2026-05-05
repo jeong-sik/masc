@@ -185,6 +185,38 @@ let test_update_missing_goal_does_not_bump () =
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
 
+(* UTF-8 regression: write a goal whose title contains an invalid byte,
+   verify the on-disk file is valid UTF-8 and the round-trip succeeds. *)
+let has_invalid_utf8_byte s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len then false
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then loop (i + dlen)
+      else true
+  in
+  loop 0
+
+let test_write_state_repairs_invalid_utf8_in_title () =
+  with_room @@ fun config ->
+  Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+  (* \xff is not valid UTF-8 *)
+  let bad_title = "goal with bad\xff byte" in
+  let g = make_goal "g-utf8" bad_title in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [g] };
+  (* The repair should have been recorded at write time *)
+  let stats = Safe_ops.persistence_utf8_repair_stats () in
+  check bool "repair triggered on write" true (stats.repaired_reads >= 1);
+  (* Reading back should succeed and yield valid UTF-8 in the title *)
+  let state = Goal_store.read_state config in
+  match state.goals with
+  | [loaded] ->
+    check bool "loaded title is valid UTF-8" false (has_invalid_utf8_byte loaded.title)
+  | _ -> fail "expected one goal after round-trip"
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -202,4 +234,7 @@ let () =
           test_case "list_goals filters by phase" `Quick
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
-            test_update_missing_goal_does_not_bump ] ) ]
+            test_update_missing_goal_does_not_bump ] );
+      ( "utf8-write-regression",
+        [ test_case "write_state repairs invalid UTF-8 in goal title" `Quick
+            test_write_state_repairs_invalid_utf8_in_title ] ) ]

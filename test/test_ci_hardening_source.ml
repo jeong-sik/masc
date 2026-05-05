@@ -729,6 +729,20 @@ let test_keeper_sandbox_credential_volume_contracts () =
     (file_contains_pattern "lib/keeper/host_config_provider.ml"
        {|let cred_root = "/tmp/keeper-creds"|})
 
+let test_board_flusher_start_retry_contracts () =
+  check bool "board flusher start has bounded CAS retry count" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "let flusher_start_cas_retries = 3");
+  check bool "board flusher CAS contention yields before retry" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "Eio.Fiber.yield ()");
+  check bool "board flusher retry decrements attempts" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "loop (attempts_left - 1)");
+  check bool "board flusher exhausted retry is operator visible" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "Board flusher actor startup CAS contention exhausted")
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1435,6 +1449,8 @@ let () =
              test_keeper_list_cache_atomic_contracts;
            test_case "keeper sandbox credential volume contracts" `Quick
              test_keeper_sandbox_credential_volume_contracts;
+           test_case "board flusher start retry contracts" `Quick
+             test_board_flusher_start_retry_contracts;
            test_case "dashboard warm hydration contracts" `Quick
              test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

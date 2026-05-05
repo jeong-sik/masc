@@ -124,9 +124,10 @@ val detect_alive_but_stuck :
     keeper has gone longer than
     [max(stall_floor_sec, stall_multiplier * proactive.cooldown_sec)]
     without a proactive turn while autonomous turns kept advancing.
-    Reference timestamp is [proactive_rt.last_ts] if set, else
-    [entry.started_at] (covers the never-started case).  Returns [None]
-    otherwise.  Exposed for tests. *)
+    Reference timestamp is the newer of [proactive_rt.last_ts] and
+    [entry.started_at] if proactive has fired, else [entry.started_at]
+    (covers the never-started case).  Returns [None] otherwise.  Exposed
+    for tests. *)
 
 val alive_but_stuck_scan : 'a context -> unit
 (** Scan all keepers in [Keeper_registry].  For each keeper detected as

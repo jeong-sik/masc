@@ -1492,6 +1492,26 @@ let () =
             | None -> fail "expected stalled keeper to be detected"
             | Some elapsed ->
               check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
+        test_case
+          "fresh fiber start suppresses stale persisted proactive_ts"
+          `Quick
+          (fun () ->
+            (* Regression for live restart on 2026-05-05: keepers booted
+               with a fresh registry [started_at] but old persisted
+               [proactive_rt.last_ts], causing the alive-but-stuck scan to
+               crash them before a recovery turn could run. *)
+            let entry = make_test_entry
+                ~name:"abs-fresh-restart"
+                ~paused:false
+                ~phase:KSM.Running
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:1_000.0
+                ~cooldown_sec:60
+                ~started_at:99_500.0
+            in
+            check (option (float 0.1))
+              "fresh boot grace wins over stale persisted proactive_ts"
+              None (detect entry));
         test_case "scan queues recovery wakeup for running stalled keeper" `Quick
           (fun () ->
             Eio_main.run @@ fun env ->
@@ -1525,6 +1545,7 @@ let () =
                 ignore (Reg.register ~base_path:config.base_path name meta);
                 ignore (Reg.dispatch_event ~base_path:config.base_path name
                           KSM.Fiber_started);
+                Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
                 let ctx : _ KT.context =
                   {
                     config;
@@ -1596,6 +1617,7 @@ let () =
                 ignore (Reg.register ~base_path:config.base_path name meta);
                 ignore (Reg.dispatch_event ~base_path:config.base_path name
                           KSM.Fiber_started);
+                Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
                 let ctx : _ KT.context =
                   {
                     config;

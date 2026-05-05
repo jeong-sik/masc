@@ -1741,8 +1741,12 @@ let liveness_recovery_scan (ctx : _ context) =
     [max(stall_floor_sec, stall_multiplier * cooldown_sec)] without a
     proactive turn.
 
-    Reference timestamp: [proactive_rt.last_ts] if that has ever
-    fired ([> 0.0]), otherwise [entry.started_at] — this catches the
+    Reference timestamp: the newer of [proactive_rt.last_ts] and
+    [entry.started_at] when proactive has ever fired ([> 0.0]),
+    otherwise [entry.started_at].  This preserves detection for
+    long-running frozen keepers while giving freshly restarted keepers
+    the normal boot grace even when their persisted proactive timestamp
+    is old.  The [entry.started_at] fallback also catches the
     "never_started" case (e.g. [glm-coding-plan] in the production
     sample) without a separate code path.
 
@@ -1763,8 +1767,10 @@ let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
     in
     let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
     let reference_ts =
-      if last_proactive_ts > 0.0 then last_proactive_ts
-      else entry.started_at
+      if last_proactive_ts > 0.0 then
+        Float.max last_proactive_ts entry.started_at
+      else
+        entry.started_at
     in
     let elapsed = now -. reference_ts in
     if elapsed > stall_threshold then Some elapsed else None

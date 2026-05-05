@@ -513,7 +513,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         []
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t)
-      : bool * string =
+      : Tool_result.t =
+    let start_time = Time_compat.now () in
     let config = state.room_config in
     let agent_name = actor in
     let ctx_room : Tool_coord.context = { config; agent_name } in
@@ -522,19 +523,30 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     match name with
     | "masc_status" -> (
         match Tool_coord.dispatch ctx_room ~name ~args with
-        | Some { Coord_types.success; message } -> (success, message)
-        | None -> (false, "masc_status: dispatch failed"))
+        | Some { Coord_types.success; message } ->
+            Tool_result.wrap ~tool_name:name ~start_time (success, message)
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_status: dispatch failed"))
     | "masc_tasks" -> (
         match Tool_task.dispatch ctx_task ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_tasks: dispatch failed"))
+        | Some result ->
+            Tool_result.wrap ~tool_name:name ~start_time result
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_tasks: dispatch failed"))
     | "masc_agents" -> (
         match Tool_agent.dispatch ctx_agent ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_agents: dispatch failed"))
+        | Some result ->
+            Tool_result.wrap ~tool_name:name ~start_time result
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_agents: dispatch failed"))
     | "masc_board_list" ->
         Tool_board.handle_tool name args
-    | _ -> (false, Printf.sprintf "judge: tool '%s' not allowed" name)
+    | _ ->
+        Tool_result.wrap ~tool_name:name ~start_time
+          (false, Printf.sprintf "judge: tool '%s' not allowed" name)
   in
   let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in

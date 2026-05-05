@@ -768,7 +768,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42). *)
   let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
     match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
-    | (Some blocked, _) -> Some (Tool_result.to_legacy blocked)
+    | (Some blocked, _) -> Some (Tool_result.to_legacy_compat blocked)
     | (None, coerced_args) -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:coerced_args
@@ -789,7 +789,8 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
     | Mod_compact ->
-        Tool_compact.dispatch ~name ~args:coerced_args
+        Option.map Tool_result.to_legacy_compat
+          (Tool_compact.dispatch ~name ~args:coerced_args)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
     | Mod_task ->
@@ -881,7 +882,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
   let dispatch_internal_keeper_runtime_tool () =
     match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
-    | (Some blocked, _) -> Some (Tool_result.to_legacy blocked)
+    | (Some blocked, _) -> Some (Tool_result.to_legacy_compat blocked)
     | (None, coerced_args) -> (
         match internal_keeper_meta_of_agent () with
         | Error msg -> Some (false, msg)

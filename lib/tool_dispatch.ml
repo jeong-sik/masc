@@ -114,7 +114,7 @@ let run_post_hooks result =
     Post-hooks fire as a side-effect after the handler completes,
     enabling tool metrics and usage logging for all dispatch paths
     (keeper, MCP, tag-dispatch). *)
-let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
+let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
   let name = token.name in
   match Hashtbl.find_opt registry name with
   | Some handler ->
@@ -130,17 +130,16 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
     (match result with
      | Some (success, message) ->
        let tr = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
-       let tr' = run_post_hooks tr in
-       Some (Tool_result.to_legacy tr')
+       Some (run_post_hooks tr)
      | None -> None)
   | None -> None
 
 (** Structured dispatch with hook support.
 
-    Execution order: pre-hooks → handler (with post-hooks) → result wrapping.
+    Execution order: pre-hooks → handler (with post-hooks) → result.
 
-    Post-hooks are already fired inside [dispatch], so this function only
-    adds pre-hook gating and [Tool_result.t] wrapping.
+    Pre-hooks may short-circuit with a rejection result or coerce args.
+    Post-hooks are fired inside [dispatch].
 
     Returns [None] when the tool is unknown to the registry. *)
 let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
@@ -148,11 +147,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   match run_pre_hooks ~name ~args with
   | (Some _ as blocked, _) -> blocked
   | (None, coerced_args) ->
-    let start_time = Time_compat.now () in
-    (match dispatch ~token ~args:coerced_args with
-     | Some (success, message) ->
-       Some (Tool_result.wrap ~tool_name:name ~start_time (success, message))
-     | None -> None)
+    dispatch ~token ~args:coerced_args
 
 (** Feature flag: use the new dispatch path.
     Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)

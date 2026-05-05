@@ -11,7 +11,9 @@ let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 
-let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
+let tool_result_or_error (tr : Tool_result.t) =
+  let (ok, msg) = Tool_result.to_legacy_compat tr in
+  if ok then msg else error_json msg
 
 (** Phase B PR-5 precursor (2026-04-28): the action mapping itself,
     parameterised by the typed [Keeper_failure_circuit_breaker.error_class].

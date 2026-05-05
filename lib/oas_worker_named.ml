@@ -1177,7 +1177,7 @@ let run_named_with_masc_tools
     ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
@@ -1228,7 +1228,7 @@ let run_model_with_masc_tools
     ~goal
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)

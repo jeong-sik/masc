@@ -6,7 +6,7 @@
 
 (** {1 Types} *)
 
-type tool_result = bool * string
+type tool_result = Tool_result.t
 
 (** {1 API} *)
 

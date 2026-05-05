@@ -98,29 +98,214 @@ function Ticker({ events }) {
   );
 }
 
+function kpiArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function kpiText(value) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function kpiNorm(value) {
+  return kpiText(value).toLowerCase();
+}
+
+function kpiFirstArray() {
+  for (let i = 0; i < arguments.length; i++) {
+    const rows = kpiArray(arguments[i]);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function kpiList(items, render, fallback) {
+  const out = items.map(render).filter(Boolean).slice(0, 3);
+  return out.length ? out.join(" · ") : fallback;
+}
+
+function kpiFixed(value, digits) {
+  const s = value.toFixed(digits);
+  return s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function kpiEventText(ev) {
+  return [
+    ev && ev.kind,
+    ev && ev.text,
+    ev && ev.summary,
+    ev && ev.msg,
+    ev && ev.message,
+  ].map(kpiText).join(" ");
+}
+
+function kpiIsFailureEvent(ev) {
+  const kind = kpiNorm(ev && ev.kind);
+  return ["fail", "failed", "err", "error"].indexOf(kind) >= 0 ||
+    /\b(fail|failed|error|timeout)\b/i.test(kpiEventText(ev));
+}
+
+function kpiIsCascadeEvent(ev) {
+  const kind = kpiNorm(ev && ev.kind);
+  return kind === "cascade" || /\bcascade\b|hit@step|@step\s*=?\s*\d+/i.test(kpiEventText(ev));
+}
+
+function kpiPassFail(events) {
+  let pass = 0;
+  let fail = 0;
+  events.forEach(ev => {
+    const text = kpiEventText(ev);
+    const failMatch = text.match(/(\d+)\s*(?:FAIL|FAILED|FAILS)\b/i);
+    const passMatch = text.match(/(\d+)\s*(?:PASS|PASSED|PASSES)\b/i);
+    if (failMatch) fail += Number(failMatch[1]);
+    if (passMatch) pass += Number(passMatch[1]);
+  });
+  return { pass, fail, total: pass + fail };
+}
+
+function kpiCascadeStats(D, events) {
+  const cascades = D.cascade ? (Array.isArray(D.cascade) ? D.cascade : [D.cascade]) : [];
+  const hits = [];
+  cascades.forEach(cascade => {
+    const steps = kpiArray(cascade && cascade.steps);
+    steps.forEach((step, idx) => {
+      if (kpiNorm(step && step.status) === "hit") {
+        hits.push({ provider: kpiText(step && step.provider) || "provider", step: idx + 1 });
+      }
+    });
+    if (!steps.length && kpiNorm(cascade && cascade.status) === "hit") {
+      hits.push({ provider: kpiText(cascade && cascade.provider) || "cascade", step: null });
+    }
+  });
+  if (hits.length) {
+    return {
+      count: hits.length,
+      note: kpiList(hits, hit => hit.provider + (hit.step ? " @step" + hit.step : ""), "structured cascade"),
+    };
+  }
+  const eventHits = events.filter(kpiIsCascadeEvent);
+  return {
+    count: eventHits.length,
+    note: eventHits.length
+      ? kpiList(eventHits, ev => kpiText(ev && ev.keeper) || kpiText(ev && ev.t), "recent events")
+      : "no cascade hits",
+  };
+}
+
+function kpiCollect(D) {
+  const empty = "—";
+  const keepers = kpiArray(D.keepers);
+  const goals = kpiArray(D.goals);
+  const tasks = kpiArray(D.tasks);
+  const providers = kpiArray(D.providers);
+  const events = kpiArray(D.events);
+  const prs = kpiFirstArray(D.prs, D.pullRequests, D.pull_requests);
+
+  const activeKeepers = keepers.filter(k => ["active", "busy", "running", "working"].indexOf(kpiNorm(k && k.status)) >= 0);
+  const stalledKeepers = keepers.filter(k => ["blocked", "stalled", "stuck"].indexOf(kpiNorm(k && k.status)) >= 0);
+  const failedTasks = tasks.filter(t => ["err", "error", "fail", "failed", "stalled"].indexOf(kpiNorm(t && t.status)) >= 0);
+  const failureEvents = events.filter(kpiIsFailureEvent);
+
+  const testCounts = kpiPassFail(events);
+  const terminalTasks = tasks.filter(t => ["done", "err", "error", "fail", "failed", "ok", "pass", "passed", "success"].indexOf(kpiNorm(t && t.status)) >= 0);
+  const doneTasks = terminalTasks.filter(t => ["done", "ok", "pass", "passed", "success"].indexOf(kpiNorm(t && t.status)) >= 0);
+
+  let passRateValue = empty;
+  let passRateNote = "no pass/fail feed";
+  if (testCounts.total > 0) {
+    passRateValue = Math.round((testCounts.pass / testCounts.total) * 100);
+    passRateNote = testCounts.pass + "/" + testCounts.total + " passed";
+  } else if (terminalTasks.length) {
+    passRateValue = Math.round((doneTasks.length / terminalTasks.length) * 100);
+    passRateNote = doneTasks.length + "/" + terminalTasks.length + " terminal tasks";
+  }
+
+  const failureCount = testCounts.total > 0
+    ? testCounts.fail
+    : ((tasks.length || events.length) ? failedTasks.length + failureEvents.length : null);
+  const failureValue = failureCount === null ? empty : failureCount;
+  const failureUnit = testCounts.total > 0 ? "/" + testCounts.total : (tasks.length ? "/" + tasks.length : "");
+  const failureNote = testCounts.total > 0
+    ? testCounts.pass + " pass"
+    : (failureCount > 0
+      ? kpiList(failedTasks.concat(failureEvents), item => kpiText(item && item.id) || kpiText(item && item.keeper) || kpiText(item && item.t), "recent failures")
+      : "no recent failures");
+
+  const tpsValues = providers.map(p => Number(p && p.tps)).filter(Number.isFinite);
+  const tpsTotal = tpsValues.reduce((sum, value) => sum + value, 0);
+  const tps = {
+    value: tpsValues.length ? kpiFixed(tpsTotal, 2) : empty,
+    unit: tpsValues.length ? "tps" : "",
+    note: tpsValues.length ? providers.length + " providers" : "no provider telemetry",
+    live: tpsValues.length > 0,
+  };
+
+  const cascade = kpiCascadeStats(D, events);
+
+  const openPrs = prs.filter(pr => {
+    const state = kpiNorm(pr && (pr.state || pr.status));
+    return state !== "closed" && state !== "done" && state !== "merged";
+  });
+  const prMetric = {
+    value: prs.length ? openPrs.length : empty,
+    note: prs.length
+      ? kpiList(openPrs, pr => {
+        if (!pr) return "";
+        if (pr.number) return "#" + pr.number;
+        return kpiText(pr.id || pr.title);
+      }, "clear")
+      : "no PR feed",
+  };
+
+  const goalDone = goals.reduce((sum, goal) => sum + (Number(goal && goal.progress) || 0), 0);
+  const goalTotal = goals.reduce((sum, goal) => sum + (Number(goal && goal.total) || 0), 0);
+  const goalMetric = {
+    value: goalTotal ? goalDone : empty,
+    unit: goalTotal ? "/" + goalTotal : "",
+    note: goalTotal ? Math.round((goalDone / goalTotal) * 100) + "% · " + goals.length + " goals" : "no goal feed",
+  };
+
+  const activeMetric = {
+    value: keepers.length ? activeKeepers.length : empty,
+    unit: keepers.length ? "/" + keepers.length : "",
+    note: activeKeepers.length ? kpiList(activeKeepers, k => kpiText(k && k.id), "active") : "no active keepers",
+  };
+  const stalledMetric = {
+    value: keepers.length ? stalledKeepers.length : empty,
+    note: stalledKeepers.length ? kpiList(stalledKeepers, k => kpiText(k && k.id) + (k && k.t ? " · " + k.t : ""), "stalled") : "clear",
+  };
+
+  let spot = { label: "Tokens/sec", value: tps.value, unit: tps.unit, tone: "brass", note: tps.note, urgent: false };
+  if (failureCount > 0) {
+    spot = { label: "Fails", value: failureValue, unit: failureUnit, tone: "err", note: failureNote, urgent: true };
+  } else if (stalledKeepers.length > 0) {
+    spot = { label: "Stalled", value: stalledKeepers.length, unit: "", tone: "stalled", note: stalledMetric.note, urgent: true };
+  } else if (cascade.count > 0) {
+    spot = { label: "Cascade Hits", value: cascade.count, unit: "", tone: "info", note: cascade.note, urgent: true };
+  }
+
+  return {
+    spot,
+    tps,
+    passRate: { value: passRateValue, unit: passRateValue === empty ? "" : "%", note: passRateNote },
+    fails: { value: failureValue, unit: failureUnit, note: failureNote },
+    cascade,
+    prs: prMetric,
+    active: activeMetric,
+    stalled: stalledMetric,
+    goals: goalMetric,
+    metricCount: 8,
+  };
+}
+
 // ============== KPI Strip ==============
 function KpiStrip() {
   const [col, toggle] = (window.useCollapsed ? window.useCollapsed("kpi") : [false, () => {}]);
-  // "Spotlight" — surface the most urgent KPI as the first, larger cell.
-  // Priority: cascade@step ≥ 2 > stalled keepers > failed tests > token velocity
-  const D = window.MASC_DATA || {};
-  const stalled = (D.keepers || []).filter(k => k.status === "stalled");
-  const cascadeHits = 2; // mock seeded
-  const fails = 3;
-  let spot;
-  if (cascadeHits >= 2) {
-    spot = { label: "Cascade @step\u22652", value: cascadeHits, unit: "@step", tone: "info", note: "anthropic → moonshot", urgent: true };
-  } else if (stalled.length > 0) {
-    spot = { label: "Stalled", value: stalled.length, unit: "", tone: "stalled", note: stalled[0].id + " · 22m", urgent: true };
-  } else if (fails > 0) {
-    spot = { label: "Fails", value: fails, unit: "/47", tone: "err", note: "merge-blockers", urgent: true };
-  } else {
-    spot = { label: "Tokens/sec", value: "1.24", unit: "tps", tone: "brass", note: "▲ +0.10 · 5m", urgent: false };
-  }
+  const stats = kpiCollect(window.MASC_DATA || {});
+  const spot = stats.spot;
   return (
     <div className={"kpi" + (col ? " wx-collapsed" : "")}>
       <div className="kpi-collapse-tab" onClick={toggle} title={col ? "expand KPI" : "collapse KPI"}>
-        {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : "8 metrics") : "▾"}
+        {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : stats.metricCount + " metrics") : "▾"}
         {!col && (
           <a className="wx-popout"
              href="?widget=kpi"
@@ -135,45 +320,45 @@ function KpiStrip() {
         <span className={"kpi-v " + spot.tone}>{spot.value}{spot.unit && <span className="u">{spot.unit}</span>}</span>
         <span className="kpi-d">{spot.note}</span>
       </div>
-      <div className="kpi-cell live">
+      <div className={"kpi-cell" + (stats.tps.live ? " live" : "")}>
         <span className="kpi-l">Tokens/sec</span>
-        <span className="kpi-v brass">1.24<span className="u">tps</span></span>
-        <span className="kpi-d up">▲ +0.10 · 5m</span>
+        <span className="kpi-v brass">{stats.tps.value}{stats.tps.unit && <span className="u">{stats.tps.unit}</span>}</span>
+        <span className="kpi-d">{stats.tps.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Pass Rate</span>
-        <span className="kpi-v ok">87<span className="u">%</span></span>
-        <span className="kpi-d up">▲ +2 · 1h</span>
+        <span className="kpi-v ok">{stats.passRate.value}{stats.passRate.unit && <span className="u">{stats.passRate.unit}</span>}</span>
+        <span className="kpi-d">{stats.passRate.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Fails</span>
-        <span className="kpi-v err">3<span className="u">/47</span></span>
-        <span className="kpi-d dn">▼ −2 · 1h</span>
+        <span className="kpi-v err">{stats.fails.value}{stats.fails.unit && <span className="u">{stats.fails.unit}</span>}</span>
+        <span className="kpi-d">{stats.fails.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Cascade Hits</span>
-        <span className="kpi-v info">2<span className="u">@step</span></span>
-        <span className="kpi-d">anthropic → moonshot</span>
+        <span className="kpi-v info">{stats.cascade.count}</span>
+        <span className="kpi-d">{stats.cascade.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Open PRs</span>
-        <span className="kpi-v">4</span>
-        <span className="kpi-d">#9712 #9718 #9721 #9724</span>
+        <span className="kpi-v">{stats.prs.value}</span>
+        <span className="kpi-d">{stats.prs.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Active Keepers</span>
-        <span className="kpi-v">2<span className="u">/ 8</span></span>
-        <span className="kpi-d">nick0cave · masc-improver</span>
+        <span className="kpi-v">{stats.active.value}{stats.active.unit && <span className="u">{stats.active.unit}</span>}</span>
+        <span className="kpi-d">{stats.active.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Stalled</span>
-        <span className="kpi-v" style={{color:"var(--stalled-fg)"}}>1</span>
-        <span className="kpi-d">rama · 22m</span>
+        <span className="kpi-v" style={{color:"var(--stalled-fg)"}}>{stats.stalled.value}</span>
+        <span className="kpi-d">{stats.stalled.note}</span>
       </div>
       <div className="kpi-cell">
         <span className="kpi-l">Goal Progress</span>
-        <span className="kpi-v">14<span className="u">/24</span></span>
-        <span className="kpi-d">58% · 4 goals</span>
+        <span className="kpi-v">{stats.goals.value}{stats.goals.unit && <span className="u">{stats.goals.unit}</span>}</span>
+        <span className="kpi-d">{stats.goals.note}</span>
       </div>
     </div>
   );

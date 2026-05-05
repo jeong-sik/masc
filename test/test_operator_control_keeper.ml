@@ -348,6 +348,16 @@ let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
+      (* Reviewer #13227 (thread 2): clearing the registry while the
+         [masc_keeper_up] keepalive fiber is still tracked turns the
+         later [stop_keepalive] in [Fun.protect ~finally] into a no-op
+         (it looks up running fibers via [Keeper_registry.all]).
+         Without this, the live keeper fiber leaks into other tests
+         and makes the suite flaky.  Stop the keepalive explicitly
+         before clearing so the inline reset still observes an empty
+         registry without orphaning the fiber.  The finally block
+         keeps its own [stop_keepalive] as a defensive cleanup. *)
+      Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"

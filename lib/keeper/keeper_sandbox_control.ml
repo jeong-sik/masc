@@ -334,16 +334,20 @@ let identity_json (meta : keeper_meta) =
     ]
 
 let live_status_json ?(include_preflight = true)
+    ?preflight_override
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(timeout_sec : float)
     ~(verbose : bool)
     () =
   let preflight =
-    if include_preflight && meta.sandbox_profile = Docker then
-      preflight_status_json ~timeout_sec
-    else
-      None
+    match preflight_override with
+    | Some cached -> cached
+    | None ->
+      if include_preflight && meta.sandbox_profile = Docker then
+        preflight_status_json ~timeout_sec
+      else
+        None
   in
   let containers, container_error =
     if meta.sandbox_profile = Docker then

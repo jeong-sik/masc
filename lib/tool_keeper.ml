@@ -1087,19 +1087,56 @@ let handle_keeper_sandbox_status ctx args : tool_result =
   let verbose = get_bool args "verbose" false in
   let include_preflight = get_bool args "include_preflight" true in
   let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
-  let render_item (meta : keeper_meta) =
-    Keeper_sandbox_control.live_status_json
-      ~include_preflight ~config:ctx.config ~meta ~timeout_sec ~verbose ()
-  in
   match String.trim (get_string args "name" "") with
   | "" ->
-      let items =
+      (* Reviewer #13227 (thread 1): [keeper_sandbox_status_fleet_names]
+         dedupes by raw source name before [read_meta] resolves
+         separator aliases.  If one source exposes "issue-king" and
+         another "issue_king", both survive raw dedup and resolve to
+         the same persisted meta — re-dedupe by [meta.name] so each
+         physical keeper renders exactly once. *)
+      let resolved =
         keeper_sandbox_status_fleet_names ctx
         |> List.filter_map (fun name ->
              match read_meta ctx.config name with
-             | Ok (Some meta) -> Some (render_item meta)
+             | Ok (Some meta) -> Some meta
              | Ok None | Error _ -> None)
       in
+      let seen = Hashtbl.create 16 in
+      let unique_metas =
+        List.filter_map
+          (fun (meta : keeper_meta) ->
+            if Hashtbl.mem seen meta.name then None
+            else begin
+              Hashtbl.add seen meta.name ();
+              Some meta
+            end)
+          resolved
+      in
+      (* Reviewer #13227 (thread 3): docker_preflight is global rather
+         than per-keeper, so running it inside [live_status_json] for
+         every fleet item repeats the same expensive Docker probe N
+         times.  Probe once when at least one Docker keeper is in the
+         fleet, then feed the cached JSON into each render via
+         [preflight_override]. *)
+      let any_docker =
+        List.exists
+          (fun (m : keeper_meta) -> m.sandbox_profile = Docker)
+          unique_metas
+      in
+      let cached_preflight =
+        if include_preflight && any_docker then
+          Keeper_sandbox_control.preflight_status_json ~timeout_sec
+        else
+          None
+      in
+      let render_item (meta : keeper_meta) =
+        Keeper_sandbox_control.live_status_json
+          ~include_preflight
+          ~preflight_override:cached_preflight
+          ~config:ctx.config ~meta ~timeout_sec ~verbose ()
+      in
+      let items = List.map render_item unique_metas in
       ( true,
         Yojson.Safe.pretty_to_string
           (`Assoc
@@ -1118,7 +1155,10 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                  `Assoc
                    [
                      ("keeper", `String meta.name);
-                     ("sandbox", render_item meta);
+                     ( "sandbox",
+                       Keeper_sandbox_control.live_status_json
+                         ~include_preflight ~config:ctx.config ~meta
+                         ~timeout_sec ~verbose () );
                    ]
                  |> attach_identity_reseed ?identity_reseed
                in

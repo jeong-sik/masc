@@ -113,8 +113,18 @@ exit 0
       pin_check_exit_code
   in
   write_executable (Filename.concat scripts_dir "check-oas-pin.sh") pin_check_content;
-  (* Fake opam: just needs to be present in PATH *)
-  write_executable (Filename.concat bin_dir "opam") "#!/bin/sh\nexit 0\n";
+  (* Fake opam: present in PATH and echoes back the queried package
+     for `opam list --installed --short PKG` so the deps-installed
+     guard treats core deps (httpun/agent_sdk/...) as present.  Other
+     subcommands return 0 with empty stdout. *)
+  write_executable (Filename.concat bin_dir "opam")
+    {|#!/bin/sh
+if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
+  printf '%s\n' "$4"; exit 0
+fi
+if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
+exit 0
+|};
   (* Fake dune: log subcommand and exit 0 *)
   let dune_log = Filename.concat base "dune-calls.log" in
   write_executable
@@ -262,6 +272,129 @@ let test_clean_subcommand_skips_pin_guard () =
       check int "exits zero for clean subcommand" 0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+(* PR #13117 review (P2): the original guards checked args[0], so prefixing
+   global options like `--root .` before `clean` misclassified the call as
+   a non-clean target and ran pin/deps/ocaml-version guards on a target
+   that does not compile.  Pin the new subcommand-detection helper so
+   guard-skipping still kicks in. *)
+let test_clean_subcommand_with_global_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-flag" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--root . clean"
+      in
+      check int
+        "exits zero for `--root . clean` even when pin guard would fail"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-eq-flag" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--display=quiet clean"
+      in
+      check int
+        "exits zero for `--display=quiet clean` even when pin guard would fail"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+(* Codex-connector follow-ups (#13117, 2026-05-05):
+   - `--auto-promote` is a BOOLEAN common option (no arg).  Treating
+     it as value-taking made `--auto-promote clean` skip both tokens
+     and fall back to `build`.
+   - `-p PACKAGES` and `-x VAL` are SHORT value-taking common
+     options; the original `[[ "$a" == -* ]]` fallback consumed
+     only the flag and misread the value as the subcommand. *)
+let test_clean_subcommand_after_auto_promote_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-auto-promote" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--auto-promote clean"
+      in
+      check int
+        "`--auto-promote clean` (boolean flag, NOT value-taking) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_short_packages_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-short-p" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "-p mypkg clean"
+      in
+      check int
+        "`-p mypkg clean` (short value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_short_x_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-short-x" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "-x dev clean"
+      in
+      check int "`-x dev clean` (short value-taking flag) skips guards" 0
+        code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_cache_storage_mode_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-cache-storage-mode" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--cache-storage-mode copy clean"
+      in
+      check int
+        "`--cache-storage-mode copy clean` (value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_cache_check_probability_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-cache-check-probability" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--cache-check-probability 0.5 clean"
+      in
+      check int
+        "`--cache-check-probability 0.5 clean` (value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_pin_ok_build_proceeds () =
   with_temp_dir "dune-local-pin-ok" (fun dir ->
       let bin_dir, dune_log =
@@ -292,6 +425,121 @@ let test_dry_run_skips_pin_check () =
       check int "exits zero for dry run" 0 code;
       check bool "dune not actually invoked" false (Sys.file_exists dune_log))
 
+(* --- deps guard tests (#13117 review) ---------------------------------
+   Helper: fake a missing-deps environment by overriding [opam] in PATH
+   with one that responds to [list --installed --short <pkg>] with an
+   empty body (the case the guard is supposed to catch).  pin check
+   passes so the test isolates the deps-guard branch. *)
+
+let setup_repo_with_missing_deps base =
+  let bin_dir, dune_log = setup_fake_repo base ~pin_check_exit_code:0
+                            ~pin_check_stderr_msg:"" in
+  let opam_path = Filename.concat bin_dir "opam" in
+  let opam_script =
+    {|#!/bin/sh
+case "$1 $2 $3" in
+  "list --installed")
+    case "$5" in
+      *) ;;
+    esac
+    exit 0 ;;
+  "switch show "*) printf 'fake-switch\n' ;;
+esac
+exit 0
+|}
+  in
+  write_executable opam_path opam_script;
+  (bin_dir, dune_log)
+
+let test_missing_deps_aborts_build () =
+  with_temp_dir "dune-local-missing-deps" (fun dir ->
+    let bin_dir, dune_log = setup_repo_with_missing_deps dir in
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir
+        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"; "MASC_SKIP_DEPS_CHECK" ]
+        "build"
+    in
+    check int "exits non-zero on missing deps" 1 code;
+    check bool "missing deps message present" true
+      (contains_substring stderr "missing opam packages");
+    check bool "repair hint present" true
+      (contains_substring stderr "opam install . --deps-only");
+    check bool "skip hint present" true
+      (contains_substring stderr "MASC_SKIP_DEPS_CHECK=1");
+    check bool "dune not invoked" false (Sys.file_exists dune_log))
+
+let test_skip_deps_check_env_bypasses_guard () =
+  with_temp_dir "dune-local-skip-deps" (fun dir ->
+    let bin_dir, dune_log = setup_repo_with_missing_deps dir in
+    let code, _stdout, _stderr =
+      run_dune_local dir bin_dir
+        ~env:[ ("MASC_SKIP_DEPS_CHECK", "1") ]
+        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+        "build"
+    in
+    check int "exits zero when MASC_SKIP_DEPS_CHECK=1" 0 code;
+    check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+(* --- OCaml minimum version guard tests (#13117 review) ---------------- *)
+
+let setup_repo_with_old_ocaml base =
+  let bin_dir, dune_log = setup_fake_repo base ~pin_check_exit_code:0
+                            ~pin_check_stderr_msg:"" in
+  (* opam list --installed --short returns the dep so deps-guard passes;
+     we test the OCaml branch in isolation. *)
+  let opam_path = Filename.concat bin_dir "opam" in
+  let opam_script =
+    {|#!/bin/sh
+# Echo back the requested package name for `opam list --installed --short PKG`
+# (args: $1=list $2=--installed $3=--short $4=PKG) so the deps-installed
+# guard sees every package as present and we can isolate the OCaml-version
+# branch in this fixture.
+if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
+  printf '%s\n' "$4"; exit 0
+fi
+if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
+exit 0
+|}
+  in
+  write_executable opam_path opam_script;
+  (* Fake ocaml that reports an old version. *)
+  let ocaml_path = Filename.concat bin_dir "ocaml" in
+  write_executable ocaml_path
+    "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'The OCaml toplevel, version 5.0.0\\n'; fi\nexit 0\n";
+  (bin_dir, dune_log)
+
+let test_old_ocaml_aborts_build () =
+  with_temp_dir "dune-local-old-ocaml" (fun dir ->
+    let bin_dir, dune_log = setup_repo_with_old_ocaml dir in
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir
+        ~unset_env:
+          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
+        "build"
+    in
+    check int "exits non-zero on old OCaml" 1 code;
+    check bool "OCaml version message present" true
+      (contains_substring stderr "OCaml 5.0 detected");
+    check bool "minimum 5.4 mentioned" true
+      (contains_substring stderr ">= 5.4");
+    check bool "skip hint present" true
+      (contains_substring stderr "MASC_SKIP_OCAML_VERSION_CHECK=1");
+    check bool "dune not invoked" false (Sys.file_exists dune_log))
+
+let test_skip_ocaml_version_env_bypasses_guard () =
+  with_temp_dir "dune-local-skip-ocaml" (fun dir ->
+    let bin_dir, dune_log = setup_repo_with_old_ocaml dir in
+    let code, _stdout, _stderr =
+      run_dune_local dir bin_dir
+        ~env:[ ("MASC_SKIP_OCAML_VERSION_CHECK", "1") ]
+        ~unset_env:
+          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"; "MASC_SKIP_DEPS_CHECK" ]
+        "build"
+    in
+    check int "exits zero when MASC_SKIP_OCAML_VERSION_CHECK=1" 0 code;
+    check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let () =
   run "dune_local_script"
     [
@@ -307,9 +555,49 @@ let () =
             test_opam_absent_skips_pin_guard;
           test_case "clean subcommand skips pin guard" `Quick
             test_clean_subcommand_skips_pin_guard;
+          test_case
+            "`--root . clean` (global flag before subcommand) skips pin guard"
+            `Quick test_clean_subcommand_with_global_flag_skips_pin_guard;
+          test_case
+            "`--display=quiet clean` (--flag=value before subcommand) skips \
+             pin guard"
+            `Quick test_clean_subcommand_with_eq_flag_skips_pin_guard;
+          test_case
+            "`--auto-promote clean` (boolean flag is NOT value-taking) skips \
+             pin guard"
+            `Quick test_clean_subcommand_after_auto_promote_skips_pin_guard;
+          test_case
+            "`-p mypkg clean` (short -p IS value-taking) skips pin guard"
+            `Quick
+            test_clean_subcommand_after_short_packages_flag_skips_pin_guard;
+          test_case
+            "`-x dev clean` (short -x IS value-taking) skips pin guard"
+            `Quick test_clean_subcommand_after_short_x_flag_skips_pin_guard;
+          test_case
+            "`--cache-storage-mode copy clean` skips pin guard"
+            `Quick
+            test_clean_subcommand_after_cache_storage_mode_skips_pin_guard;
+          test_case
+            "`--cache-check-probability 0.5 clean` skips pin guard"
+            `Quick
+            test_clean_subcommand_after_cache_check_probability_skips_pin_guard;
           test_case "pin OK allows build to proceed" `Quick
             test_pin_ok_build_proceeds;
           test_case "MASC_DUNE_DRY_RUN=1 skips pin check" `Quick
             test_dry_run_skips_pin_check;
+        ] );
+      ( "deps_guard",
+        [
+          test_case "missing deps abort build with clear message" `Quick
+            test_missing_deps_aborts_build;
+          test_case "MASC_SKIP_DEPS_CHECK=1 bypasses deps guard" `Quick
+            test_skip_deps_check_env_bypasses_guard;
+        ] );
+      ( "ocaml_version_guard",
+        [
+          test_case "old OCaml aborts build with clear message" `Quick
+            test_old_ocaml_aborts_build;
+          test_case "MASC_SKIP_OCAML_VERSION_CHECK=1 bypasses ocaml guard"
+            `Quick test_skip_ocaml_version_env_bypasses_guard;
         ] );
     ]

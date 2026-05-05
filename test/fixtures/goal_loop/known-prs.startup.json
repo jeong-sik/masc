@@ -1,0 +1,24 @@
+{
+  "prs": [
+    {
+      "number": 13123,
+      "state": "MERGED",
+      "title": "fix(keeper): wake alive-stuck keepers"
+    },
+    {
+      "number": 13124,
+      "state": "MERGED",
+      "title": "fix: run provider health probes at bootstrap"
+    },
+    {
+      "number": 13138,
+      "state": "MERGED",
+      "title": "fix: surface keeper toml unknown keys in health"
+    },
+    {
+      "number": 13143,
+      "state": "MERGED",
+      "title": "fix: surface governance fallback counters"
+    }
+  ]
+}

@@ -40,3 +40,16 @@ python3 scripts/goal_loop_status.py \
   --verify-json test/fixtures/goal_loop/verify.fail.json \
   --loop-iteration "#fixture"
 ```
+
+Validate that the fixture's ACT artifacts point at known PR numbers:
+
+```bash
+python3 scripts/validate_goal_loop_act_map.py \
+  test/fixtures/goal_loop/act-map.startup.json \
+  --known-prs-json test/fixtures/goal_loop/known-prs.startup.json \
+  --require-pr-ref \
+  --fail-on any
+```
+
+For live validation, capture a current PR snapshot first and pass that file as
+`--known-prs-json`.

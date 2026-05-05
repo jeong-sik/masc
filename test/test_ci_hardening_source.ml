@@ -1036,16 +1036,22 @@ let test_http_cancel_response_contracts () =
     (file_contains_nearby_line_with_patterns "bin/main_eio.ml"
        ~anchor:{|else dispatch_route ~routes ~request ~path reqd|}
        ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
-       ~max_lines:3);
+       ~max_lines:8);
   check bool "main_eio suppresses stale httpun response writes" true
-    (file_contains_pattern "bin/main_eio.ml"
-       {|httpun.Reqd.respond_with_string: invalid state|});
+    (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
+    && file_contains_pattern "bin/main_eio.ml"
+         {|invalid state, currently handling error|}
+    && file_contains_pattern "bin/main_eio.ml" {|reqd respond skipped|});
   check bool "main_eio 500 fallback is best-effort" true
     (file_contains_pattern "bin/main_eio.ml"
        {|try_internal_error_response|});
   check bool "standalone ws closed writer is not warning noise" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
-       {|Failure "cannot write to closed writer"|})
+       {|Http_server_eio.Late_response.classify_write_failure|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|send_pong skipped|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|WS standalone handler closed before write completed|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true

@@ -49,6 +49,7 @@
         test_cascade_capability_profile
         test_cascade_required_capability_profile
         test_cascade_secondary_entry_parser
+        test_cascade_secondary_expand
         test_cascade_validator_capability_lint
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
@@ -257,6 +258,7 @@
           test_cascade_capability_profile
           test_cascade_required_capability_profile
           test_cascade_secondary_entry_parser
+          test_cascade_secondary_expand
           test_cascade_validator_capability_lint
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing

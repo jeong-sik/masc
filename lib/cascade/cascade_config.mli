@@ -155,6 +155,20 @@ val parse_model_string_result :
     auto-model lists. Other specs pass through unchanged. *)
 val expand_auto_models : string list -> string list
 
+val expand_weighted_auto_entries :
+  ?rotation_scope:string ->
+  Cascade_config_loader.weighted_entry list ->
+  Cascade_config_loader.weighted_entry list
+(** Like {!expand_auto_models} but for weighted entries. Each
+    [provider:auto] entry expands into one entry per concrete model,
+    preserving the original [weight], [supports_tool_choice], and
+    [secondary]/[secondary_supports_tool_choice] overrides on every
+    expanded entry. Non-auto entries pass through unchanged.
+
+    @since 0.151.0 RFC-0027 PR-9b dual-track lookup needs the expanded
+    entries to match a parsed primary [Provider_config] back to its
+    weighted entry (and therefore to its [secondary] declaration). *)
+
 (** Parse multiple model strings, skipping unavailable ones.
     Internally calls {!expand_auto_models} before parsing.
 

@@ -158,21 +158,37 @@ let run_named
   let error_cascade_name = cascade_name_of_string cascade_name in
   let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
-  let configured_labels_result, candidate_cfgs_result =
+  let configured_labels_result, candidate_cfgs_result, secondary_resolver =
     match model_strings with
     | Some ms when ms <> [] ->
       (* Direct model strings from keeper TOML — skip named preset lookup.
-         MASC passes these strings through without interpretation. *)
+         MASC passes these strings through without interpretation. PR-9b
+         secondary declarations are a named-cascade feature, so direct
+         model strings must not inherit profile-specific fallback behavior. *)
       ( Ok ms,
         Ok
           (resolve_providers_from_model_strings ?provider_filter
-             ~require_tool_choice_support ~require_tool_support ms) )
+             ~require_tool_choice_support ~require_tool_support ms),
+        None )
     | _ ->
+      let named_resolution =
+        Cascade_catalog_runtime
+        .resolve_named_providers_strict_with_secondary_resolver
+          ~sw ~net ?provider_filter ~cascade_name ()
+      in
+      let candidate_cfgs_result =
+        match named_resolution with
+        | Ok resolution -> Ok resolution.providers
+        | Error detail -> Error detail
+      in
+      let secondary_resolver =
+        match named_resolution with
+        | Ok resolution -> Some resolution.secondary_resolver
+        | Error _ -> None
+      in
       ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
-        resolve_cascade_providers ?provider_filter
-          ~require_tool_choice_support ~require_tool_support
-          ~cascade_name:runtime_cascade_name ()
-      )
+        candidate_cfgs_result,
+        secondary_resolver )
   in
   (match configured_labels_result, candidate_cfgs_result with
    | Error detail, _ | _, Error detail ->
@@ -186,6 +202,7 @@ let run_named
       ~tools
       ~require_tool_choice_support
       ~require_tool_support
+      ?secondary_resolver
       ~label:cascade_name
       candidate_cfgs
   in

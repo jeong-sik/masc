@@ -122,14 +122,20 @@ val reset_autonomous_completion_for_test : unit -> unit
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
     per keeper. Promoted to [Keeper_fiber_crash] at
     [oas_timeout_budget_strike_limit]; reset on any successful turn.
-    Counter survives within a server lifetime — restart resets it,
-    which is the desired behavior since the new fiber starts with
-    a fresh budget context. *)
+    Counter survives within a server lifetime. After restart, callers
+    may hydrate the first bump from persisted [Oas_timeout_budget_loop]
+    state so multi-process loops still reach the supervisor gate. *)
 val oas_timeout_budget_strike_limit : int
+
+val bump_budget_exhaustion_seeded :
+  keeper_name:string -> prior_strikes:int -> int
+(** Increment the strike count for [keeper_name] and return the new
+    count. If no in-memory count exists, [prior_strikes] is used as
+    the non-negative starting point. Thread-safe under [Eio.Mutex]. *)
 
 val bump_budget_exhaustion : keeper_name:string -> int
 (** Increment the strike count for [keeper_name] and return the new
-    count.  Thread-safe under [Eio.Mutex]. *)
+    count from the in-memory counter only. Thread-safe under [Eio.Mutex]. *)
 
 val reset_budget_exhaustion : keeper_name:string -> unit
 (** Drop any strike count for [keeper_name].  Idempotent. *)

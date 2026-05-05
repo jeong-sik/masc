@@ -15,7 +15,7 @@ import { activeFilter, activityListSearchQuery, type ActivityFilter } from './ta
 
 // Pure helper — filter events by categorical kind + free-text query.
 // Query matches summary, toolName, error, and stringified toolArgs/toolResult (case-insensitive).
-export function filterActivityEvents(
+function filterActivityEvents(
   events: UnifiedTraceEvent[],
   filter: ActivityFilter,
   query: string,

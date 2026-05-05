@@ -37,7 +37,7 @@ const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
 const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const BRASS_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
 
-export function PlanningStat({
+function PlanningStat({
   label,
   value,
   tone = 'default',

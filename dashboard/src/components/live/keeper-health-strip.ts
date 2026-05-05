@@ -40,7 +40,7 @@ function ContextBar({ p }: { p: KeeperPressure }) {
   `
 }
 
-export function keeperHealthStatusChips(
+function keeperHealthStatusChips(
   summary: Pick<KeeperHealthSummary, 'criticalCount' | 'warningCount'>,
 ): KeeperHealthChip[] {
   const alertCount = summary.warningCount + summary.criticalCount

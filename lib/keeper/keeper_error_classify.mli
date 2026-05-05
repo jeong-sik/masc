@@ -49,6 +49,17 @@ val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
     final accept-rejected result from the MASC OAS boundary. *)
 val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when the rotation-cap fast-fail should fire: the error is a
+    [required_tool_contract_violation], at least one cascade rotation has
+    already been attempted ([List.length attempted_cascades >= 2]; the list is
+    seeded with the initial cascade name so length=1 means no rotations yet),
+    and no untried fallback cascade remains. *)
+val should_cap_rotation_for_contract_violation :
+  attempted_cascades:string list ->
+  fallback_not_yet_tried:bool ->
+  Agent_sdk.Error.sdk_error ->
+  bool
+
 type degraded_retry =
   { next_cascade : string
   ; fallback_reason : string

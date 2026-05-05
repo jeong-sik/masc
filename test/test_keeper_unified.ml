@@ -5280,6 +5280,43 @@ let test_required_tool_contract_violation_ignores_legacy_internal_error () =
   check bool "legacy internal contract violation ignored" false
     (EC.is_required_tool_contract_violation err)
 
+(* Rotation-cap threshold: the cap must NOT fire on the very first attempt
+   (attempted_cascades length = 1, meaning no rotation has occurred yet).
+   Regression for the >= 1 / >= 2 threshold bug where the fast-fail fired
+   before any rotation was tried, causing immediate cycle failure instead of
+   offering at least one cascade rotation. *)
+let test_should_cap_rotation_does_not_fire_on_first_attempt () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap must not fire when no rotation has been attempted" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec" ]
+       ~fallback_not_yet_tried:false
+       err)
+
+let test_should_cap_rotation_fires_after_one_rotation () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap fires when one rotation has already been attempted" true
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:false
+       err)
+
+let test_should_cap_rotation_suppressed_while_fallback_available () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap is suppressed when an untried fallback cascade exists" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:true
+       err)
+
+let test_should_cap_rotation_ignores_non_contract_violation_error () =
+  let err = wrapped_claude_limit_error () in
+  check bool "cap does not fire for non-contract-violation errors" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:false
+       err)
+
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   let err =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
@@ -7634,6 +7671,14 @@ let () =
             test_required_tool_contract_violation_detected;
           test_case "legacy internal contract violation is ignored" `Quick
             test_required_tool_contract_violation_ignores_legacy_internal_error;
+          test_case "rotation cap does not fire before first rotation" `Quick
+            test_should_cap_rotation_does_not_fire_on_first_attempt;
+          test_case "rotation cap fires after one rotation" `Quick
+            test_should_cap_rotation_fires_after_one_rotation;
+          test_case "rotation cap suppressed while fallback available" `Quick
+            test_should_cap_rotation_suppressed_while_fallback_available;
+          test_case "rotation cap ignores non-contract-violation errors" `Quick
+            test_should_cap_rotation_ignores_non_contract_violation_error;
           test_case "structured cascade exhausted error detected" `Quick
             test_cascade_exhausted_error_detected_from_structured_internal_error;
           test_case "legacy internal cascade exhaustion is ignored" `Quick

@@ -1179,19 +1179,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   mark_terminal_error reclassified;
                   Error reclassified
                 end else if
-                  (* Fast-fail on second consecutive contract violation: if
-                     we already rotated once because the LLM only used
-                     passive/read-only tools, rotating to the same cascade
-                     is unlikely to change the LLM's choice on the same
-                     prompt.  Each rotation eats ~600s of turn budget, and
-                     in production we observe 4–5 rotations all hitting
-                     the same violation before the OAS retry guard
-                     finally aborts the cycle (see fleet logs:
+                  (* Fast-fail after one cascade rotation for a contract
+                     violation: if the LLM called no tools or only used
+                     passive/read-only tools on the first cascade and the
+                     same pattern repeats on a rotated cascade, further
+                     rotation is unlikely to change the model's tool-use
+                     choice on the same prompt.  Each rotation eats ~600s of
+                     turn budget; in production we observed 4–5 rotations all
+                     hitting the same violation before the OAS retry guard
+                     finally aborted the cycle (see fleet logs:
                      "passive status/read tools" cascade=big_three →
                      keeper_unified → kimi_cli_keeper → … →
-                     oas_timeout_budget at 1064s/1200s).  Cap rotation
-                     at 1 for this error class so the keeper releases
-                     its turn budget for actionable work.
+                     oas_timeout_budget at 1064s/1200s).  Cap at 1 rotation
+                     so the keeper releases its turn budget promptly.
+
+                     The cap fires when attempted_cascades has at least 2
+                     entries, meaning at least one rotation has already been
+                     tried (the list is seeded with the initial cascade name,
+                     so length=1 = no rotations yet; length≥2 = one or more
+                     rotations have been attempted).
 
                      Exception: if the current cascade declares a
                      fallback_cascade that has not been attempted yet,
@@ -1207,15 +1213,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         && not (String.equal fb execution_cascade_name)
                     | None -> false
                   in
-                  EC.is_required_tool_contract_violation err
-                  && List.length attempted_cascades >= 1
-                  && not fallback_not_yet_tried
+                  EC.should_cap_rotation_for_contract_violation
+                    ~attempted_cascades
+                    ~fallback_not_yet_tried
+                    err
                 then begin
                   Log.Keeper.warn
-                    "%s: required_tool_contract_violation on second cascade \
-                     (%s after %d prior rotation(s)) — skipping further \
+                    "%s: required_tool_contract_violation after rotation \
+                     (%s, %d cascade(s) attempted) — skipping further \
                      rotation; rotating again is unlikely to change the \
-                     model's passive-tool choice. Error: %s"
+                     model's tool-use choice. Error: %s"
                     meta.name execution_cascade_name
                     (List.length attempted_cascades)
                     (short_preview (Agent_sdk.Error.to_string err));

@@ -829,7 +829,8 @@ let test_sub_board_create_and_get () =
   | Ok sb ->
       Alcotest.(check string) "slug matches" "alpha-board" sb.Board.slug;
       Alcotest.(check string) "name matches" "Alpha" sb.name;
-      Alcotest.(check string) "owner matches" "agent-1" sb.owner;
+      Alcotest.(check string) "owner matches" "agent-1"
+        (Board_core_classify.Agent_id.to_string sb.owner);
       let id = Board.Sub_board_id.to_string sb.id in
       (match Board_dispatch.get_sub_board ~sub_board_id:id with
        | Error e -> Alcotest.fail (Board.show_board_error e)

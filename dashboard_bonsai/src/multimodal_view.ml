@@ -158,8 +158,9 @@ let empty_state : Node.t =
 
 let count_attrs (status : Multimodal_types.fetch_status) =
   match status with
-  | Fetch_stale _ -> [ Style.count; Style.count_stale ]
-  | Fetch_pending | Fetch_fresh -> [ Style.count ]
+  | Multimodal_types.Fetch_stale _ -> [ Style.count; Style.count_stale ]
+  | Multimodal_types.Fetch_pending | Multimodal_types.Fetch_fresh ->
+    [ Style.count ]
 ;;
 
 let view_of_response

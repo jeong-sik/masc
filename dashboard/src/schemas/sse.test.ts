@@ -24,6 +24,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('oas:masc:audit_event')).toBe('oas:masc:audit_event')
   })
 
+  it('accepts board reaction changes', () => {
+    expect(SSEEventTypeSchema.parse('reaction_changed')).toBe('reaction_changed')
+  })
+
   it('rejects an unknown event type', () => {
     const r = SSEEventTypeSchema.safeParse('this_is_not_a_real_event')
     expect(r.success).toBe(false)
@@ -103,6 +107,28 @@ describe('SSEMessageSchema', () => {
       type: 'post_created',
       post_id: 'post-1',
       post_kind: 1,
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('accepts typed board reaction metadata at the SSE boundary', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'reaction_changed',
+      target_type: 'comment',
+      target_id: 'comment-1',
+      user_id: 'dashboard-reviewer',
+      emoji: '🚀',
+      reacted: true,
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects malformed board reaction metadata at the SSE boundary', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'reaction_changed',
+      target_type: 'post',
+      target_id: 'post-1',
+      reacted: 'yes',
     })
     expect(r.success).toBe(false)
   })

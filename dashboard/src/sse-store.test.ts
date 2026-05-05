@@ -266,6 +266,24 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 
+  it('routes board reaction changes through the board refresh budget', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'reaction_changed',
+      target_type: 'comment',
+      target_id: 'comment-1',
+      user_id: 'dashboard-reviewer',
+      emoji: '🚀',
+      reacted: true,
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps optimistic post_created hydration inside the active hearth filter', async () => {
     const { sseStore } = await loadSseStore()
     const refreshHearths = vi.fn()

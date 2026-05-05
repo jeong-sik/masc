@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -29,6 +29,18 @@ vi.mock('../common/toast', () => ({
 
 vi.mock('../common/empty-state', () => ({
   EmptyState: ({ message }: { message: string }) => h('div', {}, message),
+}))
+
+vi.mock('../../api/board', () => ({
+  fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  toggleReaction: vi.fn().mockResolvedValue({
+    target_type: 'comment',
+    target_id: 'c1',
+    user_id: 'dashboard-reviewer',
+    emoji: '🚀',
+    reacted: true,
+    summary: [{ emoji: '🚀', count: 1, reacted: true }],
+  }),
 }))
 
 vi.mock('../common/input', () => ({
@@ -64,6 +76,7 @@ import {
   filterCommentTree,
 } from './post-detail'
 import { voteComment } from './board-state'
+import { toggleReaction } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
 afterEach(() => {
@@ -203,6 +216,27 @@ describe('CommentThread', () => {
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
     expect(screen.getByText('4')).toBeInTheDocument()
+  })
+
+  it('toggles a comment reaction from the thread', async () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'react to me',
+        created_at: '2026-04-02T00:00:00Z',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '🚀 리액션 0개' }))
+
+    await waitFor(() => {
+      expect(toggleReaction).toHaveBeenCalledWith('comment', 'c1', '🚀')
+    })
   })
 })
 

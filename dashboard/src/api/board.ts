@@ -1,7 +1,8 @@
 import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import type {
-  BoardActorIdentity, BoardPost, BoardComment, BoardSortMode,
+  BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
+  BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -433,6 +434,39 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | null {
+  if (!isRecord(raw)) return null
+  const emoji = asString(raw.emoji, '').trim()
+  if (!emoji) return null
+  return {
+    emoji,
+    count: asNumber(raw.count, 0),
+    reacted: raw.reacted === true,
+  }
+}
+
+function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleResult | null {
+  if (!isRecord(raw)) return null
+  const targetType = asString(raw.target_type, '').trim()
+  const targetId = asString(raw.target_id, '').trim()
+  const userId = asString(raw.user_id, '').trim()
+  const emoji = asString(raw.emoji, '').trim()
+  if ((targetType !== 'post' && targetType !== 'comment') || !targetId || !userId || !emoji) {
+    return null
+  }
+  const summary = Array.isArray(raw.summary)
+    ? raw.summary.map(normalizeBoardReactionSummary).filter((row): row is BoardReactionSummary => row !== null)
+    : []
+  return {
+    target_type: targetType,
+    target_id: targetId,
+    user_id: userId,
+    emoji,
+    reacted: raw.reacted === true,
+    summary,
+  }
+}
+
 export async function fetchBoard(
   sortBy?: BoardSortMode,
   options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
@@ -459,6 +493,23 @@ export async function fetchBoardHearths(): Promise<BoardHearth[]> {
     const raw = await get<{ hearths?: unknown[] }>('/api/v1/board/hearths')
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
+      : []
+  })
+}
+
+export async function fetchBoardReactions(
+  targetType: BoardReactionTargetType,
+  targetId: string,
+): Promise<BoardReactionSummary[]> {
+  return withRetries('fetchBoardReactions', async () => {
+    const params = new URLSearchParams({
+      target_type: targetType,
+      target_id: targetId,
+      user_id: defaultBoardVoter(),
+    })
+    const raw = await get<{ reactions?: unknown[] }>(`/api/v1/board/reactions?${params}`)
+    return Array.isArray(raw.reactions)
+      ? raw.reactions.map(normalizeBoardReactionSummary).filter((row): row is BoardReactionSummary => row !== null)
       : []
   })
 }
@@ -509,6 +560,24 @@ export function voteComment(commentId: string, direction: 'up' | 'down'): Promis
     vote: direction,
     voter: defaultBoardVoter(),
   })
+}
+
+export async function toggleReaction(
+  targetType: BoardReactionTargetType,
+  targetId: string,
+  emoji: string,
+): Promise<BoardReactionToggleResult> {
+  const raw = await post<unknown>('/api/v1/board/reactions', {
+    target_type: targetType,
+    target_id: targetId,
+    user_id: defaultBoardVoter(),
+    emoji,
+  })
+  const normalized = normalizeBoardReactionToggleResult(raw)
+  if (!normalized) {
+    throw new Error('Malformed board reaction response')
+  }
+  return normalized
 }
 
 export function createPost(

@@ -114,6 +114,10 @@ val comments_path : unit -> string
 (** Path to the board comments JSONL log under
     [<base>/.masc/board-comments.jsonl]. *)
 
+val reactions_path : unit -> string
+(** Path to the board reactions JSONL snapshot under
+    [<base>/.masc/board_reactions.jsonl]. *)
+
 val ensure_masc_dir : unit -> unit
 (** Idempotent [.masc] directory creation; called before
     every JSONL append. *)
@@ -145,6 +149,12 @@ val rewrite_comments : store -> unit
     [store.comments].  Same usage pattern as
     {!rewrite_posts}. *)
 
+val rewrite_reactions : store -> unit
+(** Atomically rewrites {!reactions_path} from [store.reactions]. *)
+
+val rewrite_reactions_unlocked : store -> unit
+(** Rewrites reactions assuming the caller already owns [store.mutex]. *)
+
 val mark_dirty_post : store -> string -> unit
 (** Marks one post for append-only deferred persistence.  Call with
     [store.mutex] already held. *)
@@ -157,6 +167,21 @@ val mark_dirty_comment : store -> string -> unit
 
 val post_to_yojson : post -> Yojson.Safe.t
 val comment_to_yojson : comment -> Yojson.Safe.t
+val reaction_to_yojson : reaction -> Yojson.Safe.t
+val reaction_of_yojson : Yojson.Safe.t -> reaction option
+val reaction_summary_to_yojson : reaction_summary -> Yojson.Safe.t
+val reaction_toggle_result_to_yojson : reaction_toggle_result -> Yojson.Safe.t
+
+val reaction_target_type_to_string : reaction_target_type -> string
+val reaction_target_type_of_string_opt : string -> reaction_target_type option
+val valid_reaction_target_type_strings : string list
+val board_reaction_emojis : string list
+val reaction_key :
+  target_type:reaction_target_type ->
+  target_id:string ->
+  user_id:string ->
+  emoji:string ->
+  string
 
 (** {1 Post operations} *)
 
@@ -265,3 +290,21 @@ val list_comments :
 (** Returns up to [limit] (default 1000) most recent
     comments across every post.  Used by the profile
     aggregator. *)
+
+(** {1 Reaction operations} *)
+
+val list_reactions :
+  store ->
+  target_type:reaction_target_type ->
+  target_id:string ->
+  ?user_id:string ->
+  unit ->
+  (reaction_summary list, board_error) Result.t
+
+val toggle_reaction :
+  store ->
+  target_type:reaction_target_type ->
+  target_id:string ->
+  user_id:string ->
+  emoji:string ->
+  (reaction_toggle_result, board_error) Result.t

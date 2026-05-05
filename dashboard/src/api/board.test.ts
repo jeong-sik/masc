@@ -5,7 +5,9 @@ import {
   fetchBoard,
   fetchBoardHearths,
   fetchBoardPost,
+  fetchBoardReactions,
   sanitizeBoardTitle,
+  toggleReaction,
   voteComment,
   asNullableIsoTimestamp,
   normalizePendingConfirmation,
@@ -603,6 +605,58 @@ describe('voteComment', () => {
       direction: 'down',
       vote: 'down',
       voter: 'dashboard-reviewer',
+    })
+  })
+})
+
+describe('board reactions', () => {
+  it('fetches reaction summaries with the dashboard voter', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ reactions: [{ emoji: '👍', count: 2, reacted: true }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardReactions('post', 'post-1')
+
+    expect(result).toEqual([{ emoji: '👍', count: 2, reacted: true }])
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/board/reactions?')
+    expect(url).toContain('target_type=post')
+    expect(url).toContain('target_id=post-1')
+    expect(url).toContain('user_id=dashboard-reviewer')
+  })
+
+  it('toggles a reaction through the board reaction endpoint', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        target_type: 'comment',
+        target_id: 'comment-1',
+        user_id: 'dashboard-reviewer',
+        emoji: '🚀',
+        reacted: true,
+        summary: [{ emoji: '🚀', count: 1, reacted: true }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await toggleReaction('comment', 'comment-1', '🚀')
+
+    expect(result.summary).toEqual([{ emoji: '🚀', count: 1, reacted: true }])
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/reactions')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      target_type: 'comment',
+      target_id: 'comment-1',
+      user_id: 'dashboard-reviewer',
+      emoji: '🚀',
     })
   })
 })

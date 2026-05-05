@@ -37,6 +37,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'comment_added',
   'post_voted',
   'comment_voted',
+  'reaction_changed',
   'heartbeat',
   'keeper_heartbeat',
   'keeper_handoff',
@@ -87,6 +88,10 @@ const STRING_FIELDS = new Set([
   'author',
   'voter',
   'direction',
+  'target_type',
+  'target_id',
+  'user_id',
+  'emoji',
   'hearth',
   'agent_name',
   'keeper_name',
@@ -131,7 +136,7 @@ const NUMBER_FIELDS = new Set([
   'total_turns',
 ])
 
-const BOOLEAN_FIELDS = new Set(['success'])
+const BOOLEAN_FIELDS = new Set(['success', 'reacted'])
 
 function ok<T>(data: T): SafeParseSuccess<T> {
   return { success: true, data }

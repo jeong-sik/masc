@@ -100,6 +100,13 @@ type board_sse_event =
   | Comment_added of { post_id : string; comment_id : string; author : string }
   | Post_voted of { post_id : string; voter : string; direction : Board.vote_direction }
   | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
+  | Reaction_changed of {
+      target_type : Board.reaction_target_type;
+      target_id : string;
+      user_id : string;
+      emoji : string;
+      reacted : bool;
+    }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 
@@ -451,6 +458,34 @@ let vote_comment ~voter ~comment_id ~direction =
          "board vote_comment failed: comment_id=%s voter=%s: %s"
          comment_id voter (Board_types.show_board_error e));
   result
+
+let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
+  let result =
+    match backend () with
+    | Jsonl store ->
+        Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji
+  in
+  (match result with
+   | Ok toggled ->
+       emit_board_sse_event
+         (Reaction_changed
+            {
+              target_type;
+              target_id;
+              user_id = toggled.user_id;
+              emoji = toggled.emoji;
+              reacted = toggled.reacted;
+            })
+   | Error e ->
+       Log.BoardLog.warn
+         "board reaction failed: target=%s:%s user=%s emoji=%s: %s"
+         (Board.reaction_target_type_to_string target_type)
+         target_id user_id emoji (Board_types.show_board_error e));
+  result
+
+let list_reactions ~target_type ~target_id ?user_id () =
+  match backend () with
+  | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let stats () =
   match backend () with

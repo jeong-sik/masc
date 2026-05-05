@@ -12,6 +12,7 @@ import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate } from '../../router'
+import { ReactionBar } from './reaction-bar'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -259,6 +260,9 @@ function CommentItem({
             onClick=${() => setExpanded(!expanded)}
           >${expanded ? '접기' : '더 보기...'}<//>
         ` : null}
+        <div class="mt-2">
+          <${ReactionBar} targetType="comment" targetId=${comment.id} compact />
+        </div>
         ${isReplying ? html`
           <div class="mt-2">
             <${RichComposer}
@@ -489,6 +493,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
               onClick=${() => handleVote('down')}
             >▼ 비추천<//>
           </div>
+
+          <${ReactionBar} targetType="post" targetId=${post.id} />
         </div>
       <//>
 

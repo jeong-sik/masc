@@ -10,8 +10,8 @@
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
     - the {b tools} list advertised to MCP clients
-      (10 schemas: post, list, get, comment, vote, stats,
-      search, comment_vote, profile, hearth_list, delete),
+      (12 schemas: post, list, get, comment, vote, stats,
+      search, comment_vote, reaction, profile, hearth_list, delete),
     - the {b truncated-markdown detector}
       ({!detect_truncated_markdown} +
       {!detect_truncated_markdown_with_reason}) used by
@@ -145,9 +145,9 @@ val tool_post_create : Masc_domain.tool_schema
     reached only through {!tools}). *)
 
 val tools : Masc_domain.tool_schema list
-(** All 11 board tool schemas in advertisement order:
+(** All board tool schemas in advertisement order:
     post / list / get / comment / vote / stats / search /
-    comment_vote / profile / hearth_list / delete. *)
+    comment_vote / reaction / profile / hearth_list / delete. *)
 
 (** {1 Tool dispatcher} *)
 

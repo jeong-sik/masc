@@ -579,6 +579,36 @@ let load_persisted_votes store =
       Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
   end
 
+let load_persisted_reactions store =
+  let path = reactions_path () in
+  if Fs_compat.file_exists path then begin
+    try
+      let loaded = ref 0 in
+      let lines = Fs_compat.load_jsonl path in
+      List.iter
+        (fun json ->
+           match reaction_of_yojson json with
+           | Some reaction ->
+               let user_id = Agent_id.to_string reaction.user_id in
+               let key =
+                 reaction_key ~target_type:reaction.target_type
+                   ~target_id:reaction.target_id ~user_id
+                   ~emoji:reaction.emoji
+               in
+               Hashtbl.replace store.reactions key reaction;
+               Stdlib.incr loaded
+           | None -> ())
+        lines;
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d reactions from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 reactions from %s" path
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
+        Log.BoardLog.error "load reactions failed: %s" (Printexc.to_string e)
+  end
+
 (** {1 Hearth (topic) operations} *)
 
 (** List active hearths with post counts *)
@@ -640,13 +670,28 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
                   else acc)
                 store.vote_log []
             in
+            let reaction_keys =
+              Hashtbl.fold
+                (fun key (reaction : reaction) acc ->
+                  if
+                    ((=) reaction.target_type Reaction_post
+                     && String.equal reaction.target_id post_key)
+                    || ((=) reaction.target_type Reaction_comment
+                        && List.exists (String.equal reaction.target_id)
+                             comment_ids)
+                  then key :: acc
+                  else acc)
+                store.reactions []
+            in
             List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
+            List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
             store.post_count := max 0 (!(store.post_count) - 1);
             invalidate_post_caches store;
             invalidate_comment_caches store;
             rewrite_posts store;
             rewrite_comments store;
             rewrite_vote_log store;
+            rewrite_reactions_unlocked store;
             store.dirty_posts <- false;
             store.dirty_comments <- false;
             Hashtbl.clear store.dirty_post_ids;
@@ -667,6 +712,7 @@ let global_lazy : store Eio.Lazy.t ref =
     load_persisted_comments store;
     recalculate_reply_counts store;
     load_persisted_votes store;
+    load_persisted_reactions store;
     store))
 
 let global () = Eio.Lazy.force !global_lazy
@@ -680,6 +726,7 @@ let reset_global_for_test () =
     load_persisted_comments store;
     recalculate_reply_counts store;
     load_persisted_votes store;
+    load_persisted_reactions store;
     store)
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)

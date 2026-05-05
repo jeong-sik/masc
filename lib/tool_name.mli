@@ -87,6 +87,7 @@ module Masc : sig
     | Board_list
     | Board_post
     | Board_profile
+    | Board_reaction
     | Board_search
     | Board_stats
     | Board_vote

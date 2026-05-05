@@ -219,6 +219,7 @@ module Masc = struct
     | Board_list
     | Board_post
     | Board_profile
+    | Board_reaction
     | Board_search
     | Board_stats
     | Board_vote
@@ -316,6 +317,7 @@ module Masc = struct
     | Board_list -> "masc_board_list"
     | Board_post -> "masc_board_post"
     | Board_profile -> "masc_board_profile"
+    | Board_reaction -> "masc_board_reaction"
     | Board_search -> "masc_board_search"
     | Board_stats -> "masc_board_stats"
     | Board_vote -> "masc_board_vote"
@@ -420,6 +422,7 @@ module Masc = struct
     | "masc_board_list" -> Some Board_list
     | "masc_board_post" -> Some Board_post
     | "masc_board_profile" -> Some Board_profile
+    | "masc_board_reaction" -> Some Board_reaction
     | "masc_board_search" -> Some Board_search
     | "masc_board_stats" -> Some Board_stats
     | "masc_board_vote" -> Some Board_vote
@@ -520,6 +523,7 @@ module Masc = struct
     | Board_list
     | Board_post
     | Board_profile
+    | Board_reaction
     | Board_search
     | Board_stats
     | Board_vote -> true

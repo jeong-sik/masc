@@ -730,6 +730,30 @@ let handle_comment_vote args =
         (true, Printf.sprintf "%s Already voted (idempotent)." (if String.equal direction_str "down" then "👎" else "👍"))
     | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
 
+let handle_reaction args =
+  let target_type_raw = get_string args "target_type" "" in
+  let target_id = get_string args "target_id" "" in
+  let user_id = get_string args "user_id" (get_string args "user" "anonymous") in
+  let emoji = get_string args "emoji" "" in
+  match Board.reaction_target_type_of_string_opt target_type_raw with
+  | None -> (false, "target_type must be post or comment")
+  | Some target_type ->
+      if String.equal (String.trim target_id) "" then
+        (false, "target_id required")
+      else if String.equal (String.trim user_id) ""
+              || String.equal (String.trim user_id) "anonymous"
+      then
+        (false, "user_id required")
+      else
+        match
+          Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji
+        with
+        | Ok result ->
+            ( true,
+              Yojson.Safe.pretty_to_string
+                (Board.reaction_toggle_result_to_yojson result) )
+        | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
+
 (** Agent profile *)
 let handle_profile args =
   let agent = get_string args "agent" "" in
@@ -898,6 +922,29 @@ let tool_comment_vote : Masc_domain.tool_schema = {
   ];
 }
 
+let tool_reaction : Masc_domain.tool_schema = {
+  name = "masc_board_reaction";
+  description = "Toggle a standard emoji reaction on a board post or comment.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("target_type", `Assoc [
+        ("type", `String "string");
+        ("enum", `List (List.map (fun s -> `String s) Board.valid_reaction_target_type_strings));
+        ("description", `String "Reaction target type: post or comment");
+      ]);
+      ("target_id", `Assoc [("type", `String "string"); ("description", `String "Post ID or comment ID")]);
+      ("user_id", `Assoc [("type", `String "string"); ("description", `String "Reacting user/agent name")]);
+      ("emoji", `Assoc [
+        ("type", `String "string");
+        ("enum", `List (List.map (fun s -> `String s) Board.board_reaction_emojis));
+        ("description", `String "Standard board reaction emoji");
+      ]);
+    ]);
+    ("required", `List [`String "target_type"; `String "target_id"; `String "user_id"; `String "emoji"]);
+  ];
+}
+
 let tool_profile : Masc_domain.tool_schema = {
   name = "masc_board_profile";
   description = "Get an agent's board profile: post count, comment count, vote activity, and engagement stats. Use to understand an agent's contribution patterns.";
@@ -1057,6 +1104,7 @@ let tools = [
   tool_stats;
   tool_search;
   tool_comment_vote;
+  tool_reaction;
   tool_profile;
   tool_hearth_list;
   tool_delete;
@@ -1085,6 +1133,10 @@ let handle_tool name args =
   | "masc_board_search" -> handle_search args
   | "masc_board_comment_vote" ->
     let result = handle_comment_vote args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_reaction" ->
+    let result = handle_reaction args in
     invalidate_board_list_cache ();
     result
   | "masc_board_profile" -> handle_profile args
@@ -1116,7 +1168,7 @@ let register () =
     | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->
         Some Masc_domain.CanReadState
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
-    | "masc_board_comment_vote" ->
+    | "masc_board_comment_vote" | "masc_board_reaction" ->
         Some Masc_domain.CanBroadcast
     | "masc_board_delete" | "masc_board_cleanup" ->
         Some Masc_domain.CanAdmin

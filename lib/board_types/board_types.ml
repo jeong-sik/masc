@@ -156,6 +156,33 @@ type comment = {
   votes_down: int;
 }
 
+type reaction_target_type =
+  | Reaction_post
+  | Reaction_comment
+
+type reaction = {
+  target_type: reaction_target_type;
+  target_id: string;
+  user_id: Agent_id.t;
+  emoji: string;
+  created_at: float;
+}
+
+type reaction_summary = {
+  emoji: string;
+  count: int;
+  reacted: bool;
+}
+
+type reaction_toggle_result = {
+  target_type: reaction_target_type;
+  target_id: string;
+  user_id: string;
+  emoji: string;
+  reacted: bool;
+  summary: reaction_summary list;
+}
+
 (** {1 Limits - Enforced, Not Optional} *)
 
 module Limits = struct
@@ -199,6 +226,7 @@ type store = {
   mutable karma_cache: (string * int) list option;       (** None = stale *)
   mutable sorted_posts_cache: post list option;           (** None = stale *)
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
+  reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)

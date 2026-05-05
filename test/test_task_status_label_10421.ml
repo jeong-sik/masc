@@ -8,7 +8,7 @@
 
 open Alcotest
 module C = Masc_mcp.Coord
-module T = Types
+module T = Masc_domain
 
 let check_label expected status =
   check string ("label of " ^ expected) expected

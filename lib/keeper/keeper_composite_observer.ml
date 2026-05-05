@@ -80,11 +80,13 @@ type invariant_key =
   | Invariant_no_cascade_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
+  | Invariant_phase_derivation_agreement
 
 let all_invariant_keys =
   [
     Invariant_phase_turn_alignment; Invariant_no_cascade_before_measurement;
     Invariant_compaction_atomicity; Invariant_event_priority_monotone;
+    Invariant_phase_derivation_agreement;
   ]
 
 type invariants_check = {
@@ -92,6 +94,7 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  phase_derivation_agreement : bool;
 }
 
 type last_outcome = {
@@ -242,12 +245,14 @@ let invariant_key_to_string = function
   | Invariant_no_cascade_before_measurement -> "NoCascadeBeforeMeasurement"
   | Invariant_compaction_atomicity -> "CompactionAtomicity"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
+  | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
 
 let invariant_key_of_string = function
   | "PhaseTurnAlignment" -> Some Invariant_phase_turn_alignment
   | "NoCascadeBeforeMeasurement" -> Some Invariant_no_cascade_before_measurement
   | "CompactionAtomicity" -> Some Invariant_compaction_atomicity
   | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
+  | "PhaseDerivationAgreement" -> Some Invariant_phase_derivation_agreement
   | _ -> None
 
 (* Derivation from registry entry *)
@@ -350,6 +355,11 @@ let check_event_priority_monotone
       obs.measurement_bind_count <= 1
       && not (Option.is_some obs.measurement && Option.is_some entry.pending_turn_measurement)
 
+let check_phase_derivation_agreement
+    (entry : Keeper_registry.registry_entry)
+    : bool =
+  Keeper_state_machine.derive_phase entry.conditions = entry.phase
+
 let compute_invariants
     (entry : Keeper_registry.registry_entry)
     ~(phase : ksm_phase)
@@ -366,12 +376,13 @@ let compute_invariants
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = check_event_priority_monotone entry;
+    phase_derivation_agreement = check_phase_derivation_agreement entry;
   }
 
 (* Prometheus bump — one counter tick per violated invariant per snapshot.
    Called from [observe]. PromQL rate/increase distinguishes transient
-   from steady-state violations. Labels bounded: keeper × invariant (4)
-   ≤ ~200 series on a 50-keeper host. Mirrors the naming pattern in
+   from steady-state violations. Labels bounded: keeper × invariant (5)
+   ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
    [Cascade_strategy_trace.bump_prometheus_counter]. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
@@ -386,7 +397,8 @@ let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
   bump Invariant_no_cascade_before_measurement inv.no_cascade_before_measurement;
   bump Invariant_compaction_atomicity inv.compaction_atomicity;
-  bump Invariant_event_priority_monotone inv.event_priority_monotone
+  bump Invariant_event_priority_monotone inv.event_priority_monotone;
+  bump Invariant_phase_derivation_agreement inv.phase_derivation_agreement
 
 (* Public API *)
 
@@ -495,6 +507,7 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
     "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
+    "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;
   ]
 
 let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Safe.t =

@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 lock_path="${DUNE_LOCAL_LOCK:-/tmp/me-dune-local.lock}"
+opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
 
 usage() {
   cat <<'USAGE'
@@ -10,6 +11,7 @@ Usage: scripts/dune-local.sh [dune-subcommand] [args...]
 
 Local Dune wrapper for multi-agent development:
   - serializes local Dune invocations with a machine-wide lock
+  - serializes opam switch validation with opam pin mutations
   - defaults local concurrency to DUNE_LOCAL_JOBS, or 2
   - injects --root <repo-root> unless --root is already present
   - asserts agent_sdk opam pin matches the repo SSOT before each build
@@ -17,6 +19,8 @@ Local Dune wrapper for multi-agent development:
   - asserts OCaml is at or above the repo floor (5.4)
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
+Set MASC_OPAM_LOCK=0 or MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
+Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
@@ -108,6 +112,28 @@ _detect_subcommand() {
   printf 'build\n'
 }
 _subcommand="$(_detect_subcommand)"
+
+_needs_opam_lock() {
+  [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
+  [[ "${MASC_OPAM_LOCK:-1}" != "0" ]] || return 1
+  [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" ]] || return 1
+  [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 1
+  [[ "${_subcommand}" != "clean" ]] || return 1
+  [[ "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]] || return 1
+  return 0
+}
+
+if _needs_opam_lock; then
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+  else
+    printf '[dune-local] warning: neither lockf nor flock found; opam switch checks are unlocked\n' >&2
+  fi
+fi
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   export DUNE_JOBS="${DUNE_JOBS:-${DUNE_LOCAL_JOBS:-2}}"

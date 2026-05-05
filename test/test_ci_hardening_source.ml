@@ -494,7 +494,25 @@ let test_oas_pin_source_contracts () =
        "MASC_SKIP_PIN_CHECK");
   check bool "dune-local.sh skips pin check inside GitHub Actions" true
     (file_contains_pattern "scripts/dune-local.sh"
-       "GITHUB_ACTIONS")
+       "GITHUB_ACTIONS");
+  check bool "dune-local.sh exposes shared opam switch lock path" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
+  check bool "dune-local.sh locks opam switch before pin guard" true
+    (match
+       file_pattern_position "scripts/dune-local.sh"
+         "waiting for opam switch lock",
+       file_pattern_position "scripts/dune-local.sh"
+         "checking agent_sdk pin"
+     with
+     | Some lock_pos, Some pin_pos -> lock_pos < pin_pos
+     | _ -> false);
+  check bool "external opam pin script uses the shared opam lock" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "MASC_OPAM_LOCK_HELD=1");
+  check bool "external opam pin script shares the opam lock path" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true

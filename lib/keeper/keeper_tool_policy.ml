@@ -56,7 +56,7 @@ let policy_config_unloaded_mutex = Stdlib.Mutex.create ()
 
 let policy_config_for_validation () = !policy_config
 
-let warn_unloaded_policy_config_once ~accessor =
+let warn_unloaded_policy_config_once ~accessor ~outcome =
   let should_warn =
     Stdlib.Mutex.lock policy_config_unloaded_mutex;
     Fun.protect
@@ -70,19 +70,24 @@ let warn_unloaded_policy_config_once ~accessor =
   in
   if should_warn then
     Log.Keeper.warn
-      "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; returning fallback"
-      accessor
+      "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; %s"
+      accessor outcome
 
-let observe_unloaded_policy_config ~accessor =
+(* PR #13185 review: the warn message originally hard-coded
+   "returning fallback", which is misleading on the strict
+   accessor path that raises [Invalid_argument] instead.  Take
+   [outcome] from the caller so the log line accurately describes
+   what the call site did. *)
+let observe_unloaded_policy_config ~accessor ~outcome =
   Prometheus.inc_counter Prometheus.metric_tool_policy_unloaded_query
     ~labels:[("accessor", accessor)]
     ();
-  warn_unloaded_policy_config_once ~accessor
+  warn_unloaded_policy_config_once ~accessor ~outcome
 
 let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
   match !policy_config with
   | None ->
-    observe_unloaded_policy_config ~accessor;
+    observe_unloaded_policy_config ~accessor ~outcome:"returning fallback";
     on_none ();
     default
   | Some cfg -> f cfg
@@ -91,7 +96,8 @@ let require_policy_config ~accessor =
   match !policy_config with
   | Some cfg -> cfg
   | None ->
-    observe_unloaded_policy_config ~accessor;
+    observe_unloaded_policy_config ~accessor
+      ~outcome:"raising Invalid_argument";
     invalid_arg
       (Printf.sprintf
          "tool_policy.%s requires init_policy_config; config/tool_policy.toml is not loaded"

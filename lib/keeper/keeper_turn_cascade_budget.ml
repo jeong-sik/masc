@@ -262,6 +262,15 @@ let oas_retry_budget_available_for_turn ~(is_retry : bool)
        ~reserve_degraded_retry_budget:false ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
 
+let degraded_retry_slot_phase_budget_sec =
+  Keeper_config.float_of_env_default
+    "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC"
+    ~default:60.0 ~min_v:5.0 ~max_v:Float.max_float
+;;
+
+let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
+  Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
+
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)
     (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
@@ -281,6 +290,7 @@ let reclassify_oas_timeout_for_attempt
 
 type degraded_retry_budget_decision =
   | No_degraded_retry
+  | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_budget_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
@@ -292,6 +302,7 @@ let next_fail_open_cascade_for_turn_with_budget
     ~(attempted_cascades : string list)
     ~(estimated_input_tokens : int)
     ~(max_turns : int)
+    ?time_spent_in_turn_s
     ~(remaining_turn_budget_s : float)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
   match
@@ -305,6 +316,13 @@ let next_fail_open_cascade_for_turn_with_budget
       (* The candidate is always a retry, so use per-attempt budget semantics
          regardless of whether the current attempt was itself a retry. *)
       if
+        Option.exists
+          (fun time_spent_in_turn_s ->
+            not
+              (degraded_retry_slot_phase_available ~time_spent_in_turn_s))
+          time_spent_in_turn_s
+      then Degraded_retry_slot_phase_exhausted retry
+      else if
         oas_retry_budget_available_for_turn
           ~is_retry:true ~estimated_input_tokens ~max_turns
           ~remaining_turn_budget_s

@@ -64,6 +64,11 @@ val oas_retry_budget_available_for_turn :
   remaining_turn_budget_s:float ->
   bool
 
+val degraded_retry_slot_phase_budget_sec : float
+
+val degraded_retry_slot_phase_available :
+  time_spent_in_turn_s:float -> bool
+
 (** Reclassify a structural OAS timeout only when the current attempt
     actually dispatched with an OAS timeout budget. This prevents a
     pre-retry turn-budget exhaustion from borrowing a stale previous
@@ -75,6 +80,7 @@ val reclassify_oas_timeout_for_attempt :
 
 type degraded_retry_budget_decision =
   | No_degraded_retry
+  | Degraded_retry_slot_phase_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_budget_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
@@ -86,6 +92,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   attempted_cascades:string list ->
   estimated_input_tokens:int ->
   max_turns:int ->
+  ?time_spent_in_turn_s:float ->
   remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision

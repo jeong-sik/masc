@@ -1192,6 +1192,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~estimated_input_tokens:
                         prompt_timeout_estimate_tokens
                       ~max_turns
+                      ~time_spent_in_turn_s:
+                        (timeout_sec -. remaining_turn_budget_s ())
                       ~remaining_turn_budget_s:(remaining_turn_budget_s ())
                       err
                   with
@@ -1255,6 +1257,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         degraded_retry.next_cascade
                         degraded_retry.fallback_reason
                         (remaining_turn_budget_s ())
+                        (short_preview (Agent_sdk.Error.to_string err));
+                      mark_terminal_error err;
+                      Error err
+                  | Degraded_retry_slot_phase_exhausted degraded_retry ->
+                      Log.Keeper.warn
+                        "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but productive slot phase budget %.1fs is exhausted after %.1fs; ending this cycle to release the outer turn slot: %s"
+                        meta.name execution_cascade_name
+                        degraded_retry.next_cascade
+                        degraded_retry.fallback_reason
+                        degraded_retry_slot_phase_budget_sec
+                        (timeout_sec -. remaining_turn_budget_s ())
                         (short_preview (Agent_sdk.Error.to_string err));
                       mark_terminal_error err;
                       Error err

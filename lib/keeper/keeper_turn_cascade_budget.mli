@@ -89,6 +89,16 @@ val oas_retry_budget_available_for_turn :
   remaining_turn_budget_s:float ->
   bool
 
+val degraded_retry_slot_phase_budget_sec : float
+(** Maximum outer-slot hold time before degraded cascade rotation is
+    suppressed. This is a guardrail for #12888: once the productive
+    phase has already consumed this much wall clock, rotation should end
+    the cycle instead of holding the same slot for another provider
+    attempt. *)
+
+val degraded_retry_slot_phase_available :
+  time_spent_in_turn_s:float -> bool
+
 val reclassify_oas_timeout_for_attempt :
   timeout_budget:oas_timeout_budget_resolution option ->
   Agent_sdk.Error.sdk_error ->
@@ -96,6 +106,7 @@ val reclassify_oas_timeout_for_attempt :
 
 type degraded_retry_budget_decision =
   | No_degraded_retry
+  | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_budget_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
@@ -107,6 +118,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   attempted_cascades:string list ->
   estimated_input_tokens:int ->
   max_turns:int ->
+  ?time_spent_in_turn_s:float ->
   remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision

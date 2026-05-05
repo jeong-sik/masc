@@ -765,6 +765,12 @@ let build_keeper_snapshot
       @ cascade_findings @ audit_findings;
   }
 
+(* The safe-autonomy screen renders one row per keeper.  This probe is
+   intentionally much shorter than interactive sandbox-status calls; otherwise
+   a slow Docker daemon costs [timeout * keeper_count] before the dashboard can
+   return any bytes. *)
+let sandbox_live_probe_timeout_sec = 0.25
+
 let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let meta = snapshot.meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -772,7 +778,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:false
-      ~config ~meta ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dashboard ()) ~verbose:false ()
+      ~config ~meta ~timeout_sec:sandbox_live_probe_timeout_sec ~verbose:false ()
   in
   let domains =
     [

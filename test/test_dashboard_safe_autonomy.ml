@@ -44,6 +44,13 @@ let write_file path contents =
   | Ok () -> ()
   | Error err -> fail ("save_file_atomic failed: " ^ err)
 
+let write_slow_fake_docker () =
+  let dir = tmpdir "safe_autonomy_fake_docker" in
+  let path = Filename.concat dir "docker.sh" in
+  write_file path "sleep 2\nexit 0\n";
+  Unix.chmod path 0o755;
+  path
+
 let make_meta ?(name = "bench-analyst") ?(trace_id = "trace-safe-autonomy") () =
   match
     KT.meta_of_json
@@ -54,6 +61,8 @@ let make_meta ?(name = "bench-analyst") ?(trace_id = "trace-safe-autonomy") () =
           ("trace_id", `String trace_id);
           ("cascade_name", `String Keeper_config.default_cascade_name);
           ("last_model_used", `String "openai:gpt-5.4");
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "inherit");
           ("goal", `String "Keep autonomy safe and observable");
           ("short_goal", `String "Handle code work with approval and sandbox guardrails");
           ("mid_goal", `String "Keep the keeper queue healthy");
@@ -98,6 +107,21 @@ let persist_keeper config =
       Fs_compat.mkdir_p repo_path;
       meta
   | Error err -> fail ("write_meta failed: " ^ err)
+
+let persist_docker_keeper config ~name =
+  let meta =
+    {
+      (make_meta ~name ~trace_id:("trace-" ^ name) ()) with
+      agent_name = KT.keeper_agent_name name;
+      sandbox_profile = KT.Docker;
+      network_mode = KT.Network_none;
+    }
+  in
+  match KT.write_meta ~force:true config meta with
+  | Ok () ->
+      Fs_compat.mkdir_p (Keeper_sandbox.host_root_abs_of_meta ~config meta);
+      meta
+  | Error err -> fail ("write docker keeper meta failed: " ^ err)
 
 let write_manifest path =
   write_file path
@@ -185,6 +209,19 @@ let test_history_dedupes_identical_payloads () =
       check bool "latest file is valid json" true
         (match latest_json with `Assoc _ -> true | _ -> false)))
 
+let test_sandbox_live_probe_is_bounded_per_keeper () =
+  with_safe_autonomy_store @@ fun config ->
+  ignore (persist_docker_keeper config ~name:"docker-a");
+  ignore (persist_docker_keeper config ~name:"docker-b");
+  let fake_docker = write_slow_fake_docker () in
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" (Some fake_docker) (fun () ->
+    let started_at = Unix.gettimeofday () in
+    let json = Dashboard_safe_autonomy.json ~config () in
+    let elapsed_sec = Unix.gettimeofday () -. started_at in
+    check bool "slow docker probe is bounded" true (elapsed_sec < 1.5);
+    let per_keeper = Yojson.Safe.Util.(json |> member "per_keeper" |> to_list) in
+    check int "docker keeper count" 2 (List.length per_keeper))
+
 let () =
   run "dashboard_safe_autonomy"
     [
@@ -194,5 +231,7 @@ let () =
             test_json_emits_scorecard_and_artifacts;
           test_case "artifact history dedupes identical payloads" `Quick
             test_history_dedupes_identical_payloads;
+          test_case "sandbox live probe is bounded per keeper" `Quick
+            test_sandbox_live_probe_is_bounded_per_keeper;
         ] );
     ]

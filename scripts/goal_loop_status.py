@@ -103,7 +103,9 @@ def summarize_observe(observe: dict[str, Any] | None) -> PhaseStatus:
     status = (
         "critical"
         if critical_matches > 0
-        else "warning" if warning_matches > 0 else "ok"
+        else "warning"
+        if warning_matches > 0
+        else "ok"
     )
     return PhaseStatus(
         status=status,
@@ -136,7 +138,9 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
     status = (
         "critical"
         if critical_present > 0
-        else "warning" if evidence_present > 0 else "ok"
+        else "warning"
+        if evidence_present > 0
+        else "ok"
     )
     present_findings = []
     findings = orient.get("findings", [])
@@ -171,8 +175,12 @@ def decide_next_action(decide: dict[str, Any] | None) -> dict[str, Any] | None:
     decisions = decide.get("decisions", [])
     if not isinstance(decisions, list) or not decisions:
         return None
-    first = decisions[0]
-    return first if isinstance(first, dict) else None
+    typed_decisions = [decision for decision in decisions if isinstance(decision, dict)]
+    for status in ("ACT_MISSING", "ACT_UNMAPPED"):
+        for decision in typed_decisions:
+            if decision.get("act_status") == status:
+                return decision
+    return typed_decisions[0] if typed_decisions else None
 
 
 def summarize_decide(decide: dict[str, Any] | None) -> PhaseStatus:
@@ -183,11 +191,7 @@ def summarize_decide(decide: dict[str, Any] | None) -> PhaseStatus:
     p0_count = as_int(decide.get("p0_count"))
     act_missing_count = as_int(decide.get("act_missing_count"), default=-1)
     act_linked_count = as_int(decide.get("act_linked_count"), default=-1)
-    status = (
-        "critical"
-        if p0_count > 0
-        else "warning" if decisions_total > 0 else "ok"
-    )
+    status = "critical" if p0_count > 0 else "warning" if decisions_total > 0 else "ok"
     summary: dict[str, Any] = {
         "decisions_total": decisions_total,
         "p0_count": p0_count,
@@ -211,7 +215,9 @@ def summarize_act(decide: dict[str, Any] | None) -> PhaseStatus:
         status = (
             "critical"
             if act_missing_count > 0
-            else "ok" if decisions_total == 0 or act_linked_count > 0 else "warning"
+            else "ok"
+            if decisions_total == 0 or act_linked_count > 0
+            else "warning"
         )
         return PhaseStatus(
             status=status,
@@ -273,9 +279,7 @@ def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
             "cas_retry": pattern_count(observe, "cas_retry"),
         },
         "governance_patterns": {
-            "governance_unparseable": pattern_count(
-                observe, "governance_unparseable"
-            ),
+            "governance_unparseable": pattern_count(observe, "governance_unparseable"),
             "lenient_json_fallback": pattern_count(observe, "lenient_json_fallback"),
         },
     }
@@ -322,7 +326,9 @@ def report_to_text(report: GoalLoopStatus) -> str:
     ]
     for name in ("observe", "orient", "decide", "act", "verify"):
         phase = report.phases[name]
-        lines.append(f"- {name}: {phase.status} {json.dumps(phase.summary, sort_keys=True)}")
+        lines.append(
+            f"- {name}: {phase.status} {json.dumps(phase.summary, sort_keys=True)}"
+        )
     if report.next_action:
         decision_id = report.next_action.get("decision_id", "unknown")
         action = report.next_action.get("action", "unknown")

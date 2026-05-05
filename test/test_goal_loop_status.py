@@ -116,6 +116,38 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.phases["act"].status, "ok")
         self.assertIsNone(report.next_action)
 
+    def test_next_action_prefers_missing_act_over_linked_decision(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe=None,
+            orient=None,
+            decide={
+                "decisions_total": 2,
+                "p0_count": 2,
+                "act_missing_count": 1,
+                "act_linked_count": 1,
+                "decisions": [
+                    {
+                        "decision_id": "D-EMERGENCY-2",
+                        "action": "Run bootstrap provider health checks",
+                        "act_status": "ACT_LINKED",
+                    },
+                    {
+                        "decision_id": "D-EMERGENCY-1",
+                        "action": "Slot forced reclaim + credential auto-recovery",
+                        "act_status": "ACT_MISSING",
+                    },
+                ],
+            },
+            verify=None,
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.next_action["decision_id"], "D-EMERGENCY-1")
+        self.assertEqual(
+            report.phases["decide"].summary["next_action"]["decision_id"],
+            "D-EMERGENCY-1",
+        )
+
     def test_missing_inputs_are_unknown(self) -> None:
         report = goal_loop_status.build_status_report(
             observe=None,
@@ -288,6 +320,7 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(payload["loop_iteration"], "#fixture")
         self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 4)
         self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 1)
+        self.assertEqual(payload["next_action"]["decision_id"], "D-EMERGENCY-1")
         self.assertEqual(
             payload["system_health_signals"]["keeper_failure_patterns"][
                 "credential_archived_starvation"

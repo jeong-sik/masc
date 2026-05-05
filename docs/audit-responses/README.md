@@ -55,3 +55,7 @@ false positive를 다시 내지 않게 하는 audit memory 역할을 합니다.
   의 4-phase × 18 action item (16→36 keeper 확장 통합 재설계) 매트릭스. 정량
   클레임 70%가 stale 또는 active 트랙과 중복; 진짜 design idea(생성 CLI/API,
   N+1 batch, 3-Tier disclosure, env unification)는 RFC-0029~0032 후보로 분리.
+- `2026-05-05-goal-loop-completion-audit.md` — GOAL LOOP 원문 0-9 섹션별
+  completion audit. #13124, #13123, #13126, #13138, #13143, #13172, #13178
+  를 실제 ACT/fixture 근거로 연결하고, `D-EMERGENCY-1` credential
+  auto-recovery가 아직 `ACT_MISSING`임을 명시.

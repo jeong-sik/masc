@@ -50,3 +50,23 @@ let run_in_systhread f =
     Eio_unix.run_in_systhread f
   else
     f ()
+
+(** Cooperatively yield without raising [Effect.Unhandled] before
+    [Eio_main.run]. *)
+let yield_if_ready () =
+  if Atomic.get ready then Eio.Fiber.yield ()
+
+type yield_meter = {
+  interval : int;
+  mutable steps : int;
+}
+
+let create_yield_meter ?(interval = 1000) () =
+  { interval = max 1 interval; steps = 0 }
+
+let yield_step meter =
+  meter.steps <- meter.steps + 1;
+  if meter.steps >= meter.interval then begin
+    meter.steps <- 0;
+    yield_if_ready ()
+  end

@@ -755,16 +755,35 @@ let run_keepalive_unified_turn
             ~channel:turn_decision.channel
             ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
+          let reactive_avail = Eio.Semaphore.get_value Keeper_turn_slot.reactive_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
-          let blocker_text =
+          let holder_summary =
+            Keeper_turn_slot.slot_holders_summary ~now:(Time_compat.now ()) ()
+          in
+          (* #13099 review: [last_blocker] gets capped to 200 chars by
+             [cap_blocker] on meta load (narrative budget for dashboards),
+             so the longer holder snapshot would be ellipsized after a
+             restart and lose the diagnostic value.  Split into two
+             strings:
+             - [persisted_blocker]: short narrative the dashboards see
+               and that survives the cap;
+             - [log_diagnostic]: the full holder snapshot, emitted via
+               Log.Keeper.warn (uncapped) so operators tailing logs can
+               still attribute the starvation to specific peers.  *)
+          let persisted_blocker =
             Printf.sprintf
-              "skipped: semaphore wait > %.0fs, peers holding slot \
-               (cascade=%s, autonomous_available=%d turn_available=%d)"
-              wait_sec meta_after_triage.cascade_name auto_avail turn_avail
+              "skipped: semaphore wait > %.0fs (cascade=%s, \
+               autonomous_available=%d reactive_available=%d \
+               turn_available=%d)"
+              wait_sec meta_after_triage.cascade_name auto_avail reactive_avail
+              turn_avail
+          in
+          let log_diagnostic =
+            Printf.sprintf "%s peers=%s" persisted_blocker holder_summary
           in
           Log.Keeper.warn
             "%s: skipping turn (%s)"
-            meta_after_triage.name blocker_text;
+            meta_after_triage.name log_diagnostic;
           Prometheus.inc_counter
             Prometheus.metric_keeper_semaphore_wait_timeout
             ~labels:[("keeper", meta_after_triage.name); ("channel", (Keeper_world_observation.channel_to_string turn_decision.channel))]
@@ -772,7 +791,7 @@ let run_keepalive_unified_turn
           Keeper_types.map_runtime
             (fun rt ->
               { rt with
-                last_blocker = blocker_text;
+                last_blocker = persisted_blocker;
                 last_blocker_class = Some Keeper_types.Autonomous_slot_wait_timeout;
               })
             meta_after_triage)

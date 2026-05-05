@@ -20,10 +20,32 @@ let assert_eq ~msg ~expected ~actual =
   if expected <> actual then
     failwith (Printf.sprintf "%s: expected=%d actual=%d" msg expected actual)
 
+let assert_string_eq ~msg ~expected ~actual =
+  if expected <> actual then
+    failwith (Printf.sprintf "%s: expected=%S actual=%S" msg expected actual)
+
 let test_turn_slot_holders_empty_when_no_slot_held () =
   let now = Time_compat.now () in
   let holders = KK.turn_slot_holders ~now in
   assert_eq ~msg:"turn holders empty" ~expected:0 ~actual:(List.length holders)
+
+let test_format_slot_holders_truncates_and_rounds () =
+  let rendered =
+    KK.format_slot_holders
+      ~limit:2
+      [ "oldest", 12.4; "next", 3.6; "third", 1.0 ]
+  in
+  assert_string_eq
+    ~msg:"holder summary"
+    ~expected:"[oldest/12s, next/4s, +1 more]"
+    ~actual:rendered
+
+let test_slot_holders_summary_empty_pools () =
+  let summary = KK.slot_holders_summary ~now:(Time_compat.now ()) () in
+  assert_string_eq
+    ~msg:"empty holder pool summary"
+    ~expected:"turn_holders=[] autonomous_holders=[] reactive_holders=[]"
+    ~actual:summary
 
 let test_autonomous_slot_holders_records_during_acquire () =
   let result =
@@ -69,15 +91,54 @@ let test_holders_released_after_slot_returned () =
   if List.mem "diag-release" names then
     failwith "diag-release still in reactive holders after release"
 
+(* PR #13099 review: pin that [slot_holders_summary] reflects the holder
+   currently inside [with_keeper_turn_slot_for_test], so a regression where
+   the WARN/last_blocker wiring drops the holder snapshot is caught
+   directly (not just at the formatter level). *)
+let test_slot_holders_summary_reflects_active_holder () =
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name:"diag-summary"
+      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      (fun ~semaphore_wait_ms:_ ->
+        let summary = KK.slot_holders_summary ~now:(Time_compat.now ()) () in
+        let mentions s sub =
+          let ls = String.length s in
+          let lsub = String.length sub in
+          let rec loop i =
+            if i + lsub > ls then false
+            else if String.sub s i lsub = sub then true
+            else loop (i + 1)
+          in
+          loop 0
+        in
+        if not (mentions summary "diag-summary") then
+          failwith
+            (Printf.sprintf
+              "expected slot_holders_summary to mention 'diag-summary'; got %S"
+              summary);
+        ())
+  in
+  match result with
+  | Ok () -> ()
+  | Error (`Semaphore_wait_timeout _) ->
+      failwith "unexpected semaphore wait timeout in test"
+
 let () =
   let cases =
     [
       "turn slot holders empty when nothing held",
         test_turn_slot_holders_empty_when_no_slot_held;
+      "format slot holders truncates and rounds",
+        test_format_slot_holders_truncates_and_rounds;
+      "slot holders summary reports empty pools",
+        test_slot_holders_summary_empty_pools;
       "autonomous slot holders records keeper during acquire",
         test_autonomous_slot_holders_records_during_acquire;
       "holders dropped after with_keeper_turn_slot exits",
         test_holders_released_after_slot_returned;
+      "slot_holders_summary mentions the active holder",
+        test_slot_holders_summary_reflects_active_holder;
     ]
   in
   List.iter

@@ -27,26 +27,26 @@ import type { Agent, Task, Keeper } from '../../types/core'
 
 // ─── Pure helpers (exported for tests) ───────────────────────────────────────
 
-export interface TopologyNode {
+interface TopologyNode {
   id: string
   label: string
   kind: 'agent' | 'keeper' | 'task'
   status: string
 }
 
-export interface TopologyEdge {
+interface TopologyEdge {
   from: string
   to: string
   kind: 'supervised_by' | 'assigned_to'
 }
 
-export interface TopologyGraph {
+interface TopologyGraph {
   nodes: TopologyNode[]
   edges: TopologyEdge[]
 }
 
 /** Map an agent/task status to a vis-network compatible color string. */
-export function topologyNodeColor(kind: 'agent' | 'keeper' | 'task', status: string): string {
+function topologyNodeColor(kind: 'agent' | 'keeper' | 'task', status: string): string {
   if (status === 'offline' || status === 'inactive') {
     return 'var(--color-fg-disabled)'
   }
@@ -141,7 +141,7 @@ function buildTopologyGraph(
 
 // ─── Derived signal ───────────────────────────────────────────────────────────
 
-export const liveTopologyGraph: ReadonlySignal<TopologyGraph> = computed(() =>
+const liveTopologyGraph: ReadonlySignal<TopologyGraph> = computed(() =>
   buildTopologyGraph(agents.value, tasks.value, keepers.value),
 )
 

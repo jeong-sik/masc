@@ -1431,6 +1431,7 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
    derived from that single pass. *)
 
 let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
+  let opt_float = function Some f -> `Float f | None -> `Null in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let entries = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
@@ -1452,8 +1453,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
            ; ("in_tok", `Int (Option.value ~default:0 m.total_input_tokens))
            ; ("out_tok", `Int (Option.value ~default:0 m.total_output_tokens))
            ; ("cost", `Float (Option.value ~default:0.0 m.total_cost_usd))
-           ; ("p50_ms", `Float (Option.value ~default:0.0 m.p50_latency_ms))
-           ; ("p95_ms", `Float (Option.value ~default:0.0 m.p95_latency_ms))
+           ; ("p50_ms", opt_float m.p50_latency_ms)
+           ; ("p95_ms", opt_float m.p95_latency_ms)
            ])
   in
 
@@ -1500,12 +1501,12 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   in
   Array.sort Float.compare all_latencies;
   let global_p50 =
-    if Array.length all_latencies = 0 then 0.0
-    else percentile all_latencies 50.0
+    if Array.length all_latencies = 0 then None
+    else Some (percentile all_latencies 50.0)
   in
   let global_p95 =
-    if Array.length all_latencies = 0 then 0.0
-    else percentile all_latencies 95.0
+    if Array.length all_latencies = 0 then None
+    else Some (percentile all_latencies 95.0)
   in
 
   (* total cost across all models *)
@@ -1534,8 +1535,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
           ; ("grid", `List grid)
           ] )
     ; ("latencyBuckets", `List (List.map latency_bucket_to_json latency_buckets))
-    ; ("p50", `Float global_p50)
-    ; ("p95", `Float global_p95)
+    ; ("p50", opt_float global_p50)
+    ; ("p95", opt_float global_p95)
     ; ("total_cost_usd", `Float total_cost_usd)
     ; ("window_minutes", `Int window_minutes)
     ; ("generated_at", `Float (Time_compat.now ()))

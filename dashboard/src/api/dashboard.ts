@@ -2985,8 +2985,8 @@ export interface CostPerAgentRow {
   in_tok: number
   out_tok: number
   cost: number
-  p50_ms: number
-  p95_ms: number
+  p50_ms: number | null
+  p95_ms: number | null
 }
 
 export interface CostMatrix {
@@ -3005,8 +3005,8 @@ export interface CostLatencyResponse {
   perAgent: CostPerAgentRow[]
   matrix: CostMatrix
   latencyBuckets: CostLatencyBucket[]
-  p50: number
-  p95: number
+  p50: number | null
+  p95: number | null
   total_cost_usd: number
   window_minutes: number
   generated_at: number
@@ -3021,8 +3021,8 @@ function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
     in_tok: asNumber(raw.in_tok) ?? 0,
     out_tok: asNumber(raw.out_tok) ?? 0,
     cost: asNumber(raw.cost) ?? 0,
-    p50_ms: asNumber(raw.p50_ms) ?? 0,
-    p95_ms: asNumber(raw.p95_ms) ?? 0,
+    p50_ms: asNumber(raw.p50_ms) ?? null,
+    p95_ms: asNumber(raw.p95_ms) ?? null,
   }
 }
 
@@ -3058,8 +3058,8 @@ function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
             n: asNumber(b.n) ?? 0,
           }))
       : [],
-    p50: asNumber(raw.p50) ?? 0,
-    p95: asNumber(raw.p95) ?? 0,
+    p50: asNumber(raw.p50) ?? null,
+    p95: asNumber(raw.p95) ?? null,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
     window_minutes: asNumber(raw.window_minutes) ?? 1440,
     generated_at: asNumber(raw.generated_at) ?? 0,

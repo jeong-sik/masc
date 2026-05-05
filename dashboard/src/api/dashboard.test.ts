@@ -5,6 +5,7 @@ import {
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
   fetchDashboardTools,
+  fetchCostLatency,
   fetchKeeperConfig,
   fetchRuntimeModelMetrics,
   fetchTlcResults,
@@ -1024,5 +1025,49 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.coverage_stage).toBe('oas')
     expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
     expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
+  })
+})
+
+describe('fetchCostLatency', () => {
+  it('preserves missing latency percentiles as null instead of zero', async () => {
+    const rawResponse = {
+      perAgent: [
+        {
+          agent: 'unlatenced-model',
+          in_tok: 100,
+          out_tok: 50,
+          cost: 0.01,
+          p50_ms: null,
+          p95_ms: null,
+        },
+      ],
+      matrix: {
+        providers: ['local'],
+        models: ['unlatenced-model'],
+        grid: [[0.01]],
+      },
+      latencyBuckets: [],
+      p50: null,
+      p95: null,
+      total_cost_usd: 0.01,
+      window_minutes: 60,
+      generated_at: 1,
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCostLatency(60)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cost-latency?window=60')
+    expect(result.p50).toBeNull()
+    expect(result.p95).toBeNull()
+    expect(result.perAgent[0]?.p50_ms).toBeNull()
+    expect(result.perAgent[0]?.p95_ms).toBeNull()
   })
 })

@@ -41,6 +41,8 @@ import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
+import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
+import { globalShortcutManager } from './lib/global-shortcut-manager'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -90,6 +92,14 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
 }
 
 export function App() {
+  // RFC-0012 §3.2: bind a single document-level keydown listener once at
+  // the app root. Registry starts empty; per RFC §8 each ad-hoc keydown
+  // owner (command palette, modal Escape, IDE multi-keeper pin promote /
+  // unpin) migrates onto `globalShortcutManager` in its own PR. The
+  // manager's `dispatch` returns `false` on no-match so the host does not
+  // `preventDefault`, leaving existing element-scoped listeners working.
+  useKeyboardShortcutHost(globalShortcutManager)
+
   useEffect(() => {
     let cancelled = false
     // Resolved once per mount; runtime changes require a reload.  The

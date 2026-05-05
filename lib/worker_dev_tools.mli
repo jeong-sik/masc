@@ -119,11 +119,32 @@ val attribution_of_validation :
 
 (** {1 OAS tool factories} *)
 
-(** Per-call observer hook invoked at the end of every tool execution,
-    receiving the tool name, success flag, and elapsed wall-clock
-    duration. *)
+(** Per-call observer hook invoked at the end of every tool execution.
+
+    Receives the tool name, success flag, elapsed wall-clock duration,
+    and (on failure) a categorized [error_kind] tag plus the
+    operator-visible [error_message].  Both error fields are
+    [None] on success and on legacy failure paths that have not yet
+    been wired (the consumer should treat absence as
+    [error_kind="unknown"] in metric labels).
+
+    The categorized tags this module produces are:
+    - [path_blocked] — file_read/file_write path outside allowed dirs
+    - [file_read_error] — Sys_error from In_channel.with_open_text
+    - [file_write_error] — Sys_error from Out_channel.with_open_bin
+    - [command_blocked] — shell_exec command failed validate_command
+    - [shell_error] — non-zero exit / Sys_error during shell exec
+
+    Issue #10358: closes the 17.3% blank-error gap for tool_called
+    rows fed via [worker_container.build_local_shell_tools]. *)
 type tool_exec_observer =
-  tool_name:string -> success:bool -> duration_ms:int -> unit
+  tool_name:string ->
+  success:bool ->
+  duration_ms:int ->
+  ?error_kind:string ->
+  ?error_message:string ->
+  unit ->
+  unit
 
 val make_tools :
   proc_mgr:_ Eio.Process.mgr ->

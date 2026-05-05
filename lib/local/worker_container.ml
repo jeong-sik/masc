@@ -329,12 +329,21 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
 let build_local_shell_tools ~room_config ~worker_name ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
-      let on_exec ~tool_name ~success ~duration_ms =
+      (* #10358: forward error_kind / error_message from Worker_dev_tools
+         observers to the Telemetry_eio.track_tool_called row so the
+         ledger no longer carries blank-error failures from the local
+         worker tool path. *)
+      let on_exec ~tool_name ~success ~duration_ms
+          ?error_kind ?error_message () =
         (match room_config, Fs_compat.get_fs_opt () with
         | Some config, Some fs -> (
             try
+              let kind =
+                Option.map Telemetry_eio.error_kind_of_string error_kind
+              in
               Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
-                ~duration_ms ~agent_id:worker_name ()
+                ~duration_ms ~agent_id:worker_name
+                ?error_kind:kind ?error_message ()
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.LocalWorker.warn "telemetry error for %s/%s: %s"
                 worker_name tool_name (Printexc.to_string exn))

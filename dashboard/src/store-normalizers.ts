@@ -564,6 +564,8 @@ export function normalizeDashboardRuntimeResolution(
     resolved_base_path: resolvedBasePath,
     data_root: dataRoot,
     prompt_markdown_dir: promptMarkdownDir,
+    server_repo_path: normalizeDashboardConfigResolutionItem(raw.server_repo_path),
+    server_repo_git_commit: asString(raw.server_repo_git_commit) ?? null,
     workspace_git_commit: asString(raw.workspace_git_commit) ?? null,
     resolved_base_git_commit: asString(raw.resolved_base_git_commit) ?? null,
     source_mismatch: asBoolean(raw.source_mismatch) ?? false,

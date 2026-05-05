@@ -74,7 +74,9 @@ val of_fields :
     - [candidates <> []]
     - [min_tier] is not strictly above [Preferred] (i.e. [min_tier] is
       not "better than the most preferred candidate")
-    - all [candidate.provider] strings are distinct
+    - all [(candidate.provider, candidate.model)] pairs are distinct.
+      A policy may list the same provider more than once for explicit
+      model fallback within that provider.
     - [weight >= 1] (default 1; persona-level priority for WFQ) *)
 
 val parse_admission_json :

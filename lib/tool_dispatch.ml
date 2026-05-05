@@ -244,6 +244,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Transition
     | Update_priority -> Some Mod_task
     | Agent_fitness
+    | Agent_card
     | Agent_update
     | Agents
     | Get_metrics

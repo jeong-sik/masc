@@ -42,9 +42,8 @@ let contains_casefold haystack needle =
    at [Log.Error], including normal policy/workflow rejections like
    [awaiting_approval] (governance critical-risk pending),
    [Join required] (keeper called masc_transition before masc_join),
-   [egress_blocked] (network policy denial), [path_outside_sandbox]
-   (sandbox boundary), and [team memory is disabled] (config-disabled
-   scope).  Single 24h window: 41 such events at ERROR, polluting
+   [egress_blocked] (network policy denial), and [path_outside_sandbox]
+   (sandbox boundary).  Single 24h window: 41 such events at ERROR, polluting
    alert ROC, supervisor escape-valve heuristics (#10887 SP cohort
    detection counts ERROR rate), and the dashboard red counter that
    operators use to triage genuine system errors.
@@ -58,7 +57,6 @@ let classify_tool_failure_severity error_detail : Log.level =
      || contains_casefold detail "join required"
      || contains_casefold detail "egress_blocked"
      || contains_casefold detail "path_outside_sandbox"
-     || contains_casefold detail "team memory is disabled"
   then Log.Warn
   else Log.Error
 

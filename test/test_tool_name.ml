@@ -18,7 +18,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Voice_sessions; Voice_speak; Write ]
 
 let all_masc : Tool_name.Masc.t list =
-  [ Add_task; Agent_fitness; Agent_update; Agents
+  [ Add_task; Agent_fitness; Agent_update; Agent_card; Agents
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
   ; Autoresearch_record_finding; Autoresearch_search_findings
   ; Autoresearch_status; Autoresearch_stop

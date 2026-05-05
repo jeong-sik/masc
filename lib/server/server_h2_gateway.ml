@@ -236,6 +236,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json ~status h2_reqd body ~extra_headers:cors
 
+      | `GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
+          h2_respond_json h2_reqd
+            (Server_routes_http_runtime.agent_card_json httpun_request
+             |> Yojson.Safe.to_string)
+            ~extra_headers:cors
+
       | `GET, "/ws" ->
           let body =
             Server_routes_http_runtime.websocket_discovery_json httpun_request

@@ -206,8 +206,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_messages", readonly_tool);
     ("masc_who", readonly_tool);
     ("masc_agents", readonly_tool);
+    ( "masc_agent_card",
+      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
     ("masc_dashboard", readonly_tool);
-    ("masc_agent_card", readonly_tool);
     ("masc_board_list", readonly_tool);
     ("masc_board_get", readonly_tool);
     ("masc_tool_help", readonly_tool);
@@ -474,6 +475,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Start ->
       Some Main_worktree_write
   | TN.Masc TM.Agent_fitness
+  | TN.Masc TM.Agent_card
   | TN.Masc TM.Agents
   | TN.Masc TM.Autoresearch_search_findings
   | TN.Masc TM.Autoresearch_status
@@ -687,7 +689,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Autoresearch_status
       | TM.Autoresearch_stop ) ->
       Some Masc_autoresearch
-  | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agents) ->
+  | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agent_card | TM.Agents) ->
       Some Masc_agent
   | TN.Masc
       ( TM.Add_task

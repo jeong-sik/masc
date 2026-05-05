@@ -91,6 +91,12 @@ let probe_git_commit () =
          | Some root -> git_probe_from_root root
          | None -> None)
 
+let probe_repo_root () =
+  pick_repo_candidates
+    ~exe_dir:(executable_dir ())
+    ~cwd:(Sys.getcwd ())
+  |> List.find_map find_git_root
+
 (** Probe the unix timestamp of [commit] from the same git repo we
     resolved [commit] against.  Best-effort: returns [None] if [commit]
     is [None], the repo cannot be located, or git fails / output is
@@ -149,6 +155,10 @@ let commit =
   resolve_commit
     ~env_value:(Env_config_core.build_git_commit_opt ())
     ~probe:probe_git_commit
+
+let resolved_repo_root = probe_repo_root ()
+
+let repo_root () = resolved_repo_root
 
 let commit_unix_ts = probe_commit_unix_ts commit
 

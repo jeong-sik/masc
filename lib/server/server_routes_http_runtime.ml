@@ -80,6 +80,46 @@ let transport_json request =
   in
   Transport_read_model.transport_status_json ctx
 
+let agent_card_json request =
+  let (host, port) = advertised_host_port request in
+  let base_url = Printf.sprintf "http://%s:%d" host port in
+  let build = Build_identity.current () in
+  `Assoc
+    [
+      ("schema", `String "masc.agent_card.v1");
+      ("name", `String "MASC-MCP");
+      ("description", `String "MASC multi-agent coordination MCP server");
+      ("url", `String base_url);
+      ("version", `String build.release_version);
+      ( "build",
+        `Assoc
+          [
+            ( "commit",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                build.commit );
+            ("started_at", `String build.started_at);
+            ("uptime_seconds", `Int build.uptime_seconds);
+          ] );
+      ( "endpoints",
+        `Assoc
+          [
+            ("mcp", `String (base_url ^ "/mcp"));
+            ("health", `String (base_url ^ "/health"));
+            ("dashboard", `String (base_url ^ "/dashboard/"));
+            ("websocket", `String (base_url ^ "/ws"));
+          ] );
+      ("transport", Transport_bridge.agent_card_transports_json ~host ~port);
+      ( "capabilities",
+        `Assoc
+          [
+            ("coordination", `Bool true);
+            ("task_backlog", `Bool true);
+            ("keeper_runtime", `Bool true);
+            ("dashboard", `Bool true);
+            ("graphql_readonly", `Bool true);
+          ] );
+    ]
+
 let health_path_diagnostics () =
   match current_server_state_opt () with
   | Some state ->

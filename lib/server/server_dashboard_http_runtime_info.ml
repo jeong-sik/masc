@@ -369,6 +369,8 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
 let runtime_resolution_json (config : Coord.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.commit in
+  let server_repo_path = Build_identity.repo_root () in
+  let server_repo_commit = Option.bind server_repo_path git_rev_parse_short in
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
@@ -384,8 +386,10 @@ let runtime_resolution_json (config : Coord.config) =
     && not (String.equal prompt_markdown_dir expected_prompt_dir)
   in
   let source_mismatch =
-    match runtime_commit, workspace_commit with
-    | Some runtime, Some workspace -> not (String.equal runtime workspace)
+    match runtime_commit, server_repo_commit, workspace_commit with
+    | Some runtime, Some server_repo, _ ->
+        not (String.equal runtime server_repo)
+    | Some runtime, None, Some workspace -> not (String.equal runtime workspace)
     | _ -> false
   in
   let diagnostics, signal_count, repair_count, agent_issue_count =
@@ -396,10 +400,15 @@ let runtime_resolution_json (config : Coord.config) =
     |> fun acc ->
     if source_mismatch then
       let runtime = Option.value ~default:"unknown" runtime_commit in
-      let workspace = Option.value ~default:"unknown" workspace_commit in
-      (Printf.sprintf
-         "Runtime build commit (%s) differs from workspace HEAD (%s). Rebuild/restart from the intended worktree."
-         runtime workspace)
+      let source_label, source_commit =
+        match server_repo_commit with
+        | Some commit -> ("server repo HEAD", commit)
+        | None ->
+            ("workspace HEAD", Option.value ~default:"unknown" workspace_commit)
+      in
+      Printf.sprintf
+        "Runtime build commit (%s) differs from %s (%s). Rebuild/restart from the intended server worktree."
+        runtime source_label source_commit
       :: acc
     else acc
     |> fun acc ->
@@ -442,6 +451,21 @@ let runtime_resolution_json (config : Coord.config) =
       ("resolved_base_path", path_item_json ~source:"resolved_base" config.base_path);
       ("data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config));
       ("prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir);
+      ( "server_repo_path",
+        match server_repo_path with
+        | Some path -> path_item_json ~source:"server_binary" path
+        | None ->
+            `Assoc
+              [
+                ("path", `Null);
+                ("exists", `Bool false);
+                ("source", `String "server_binary");
+              ] );
+      ( "server_repo_git_commit",
+        Option.fold
+          ~none:`Null
+          ~some:(fun value -> `String value)
+          server_repo_commit );
       ( "workspace_git_commit",
         Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit
       );

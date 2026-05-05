@@ -109,12 +109,17 @@ let with_env name value f =
 let with_temp_masc_base_path prefix f =
   let base = temp_dir prefix in
   let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let previous_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Fun.protect
     ~finally:(fun () ->
       (match previous with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match previous_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir base)
     f
 
@@ -1874,6 +1879,8 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
 let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-bound-no-token" @@ fun _base_path ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
@@ -1908,6 +1915,49 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
   | Ok (_, None) ->
       Alcotest.fail
         "expected codex_cli keeper-bound public MCP tools to keep safe runtime lane"
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+
+let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-bound-token" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper-bound tool preserved for codex_cli"
+        [ "masc_status"; "masc_claim_next" ] policy.allowed_tool_names;
+      Alcotest.(check (option string)) "codex_cli uses per-keeper bearer"
+        (Some "Bearer keeper-bearer-xyz")
+        (Option.bind masc_headers (List.assoc_opt "Authorization"));
+      Alcotest.(check (option string)) "codex_cli preserves agent identity header"
+        (Some "keeper-sangsu-agent")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
+      Alcotest.(check (option string)) "codex_cli strips internal token" None
+        (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected codex_cli keeper-bound public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
@@ -2078,6 +2128,8 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
 let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-internal-no-token" @@ fun _base_path ->
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
@@ -2091,26 +2143,41 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_reject
       Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
-let test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects () =
+let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
+    () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
-  with_temp_masc_base_path "codex-keeper-claim" @@ fun () ->
+  with_temp_masc_base_path "codex-internal-token" @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
-  seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-abc";
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_task_claim" ] ()
+      ~tools:[ make_named_noop_tool "keeper_bash" ] ()
   with
-  | Ok _ ->
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper internal tool preserved"
+        [ "keeper_bash" ] policy.allowed_tool_names;
+      Alcotest.(check (option string)) "codex_cli uses per-keeper bearer"
+        (Some "Bearer keeper-bearer-abc")
+        (Option.bind masc_headers (List.assoc_opt "Authorization"));
+      Alcotest.(check (option string)) "codex_cli strips internal token" None
+        (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
+  | Ok (_, None) ->
       Alcotest.fail
-        "expected codex_cli to reject required keeper_task_claim despite per-keeper token auth"
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
-      Alcotest.(check string) "field" "tool_support" field;
-      Alcotest.(check bool) "detail mentions keeper_task_claim" true
-        (contains_substring ~needle:"keeper_task_claim" detail)
+        "expected codex_cli keeper-internal tools with per-keeper token to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
@@ -2166,6 +2233,8 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-filter-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
@@ -2230,7 +2299,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       Alcotest.failf "expected only kimi_cli provider to remain, got %d"
         (List.length filtered)
 
-let test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token
+let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper_token
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
@@ -2251,14 +2320,16 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper
       [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
   in
   Alcotest.(check (list string))
-    "codex remains rejected even when bearer auth can be sourced"
-    [ "kimi_cli:kimi-for-coding" ]
+    "codex remains when bearer auth can be sourced"
+    [ "codex_cli:codex"; "kimi_cli:kimi-for-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
 let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-header-capable-no-token" @@ fun _base_path ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2286,6 +2357,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-priority" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2316,6 +2388,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-index" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2360,6 +2433,7 @@ let count_swap_metric ~detail =
 let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-metric-success" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2389,6 +2463,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
 let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-metric-rejection" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2427,6 +2502,8 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
 let test_classify_filter_rejection_codex_keeper_bound_actor () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-classify-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
@@ -2449,6 +2526,34 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   Alcotest.(check (option string))
     "codex_cli with bound-actor policy classified as keeper_bound_actor"
     (Some "codex_keeper_bound_actor_required")
+    (Option.map
+       Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
+
+let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-classify-token" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let reason =
+    Masc_mcp.Oas_worker_named.classify_filter_rejection
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      (make_codex_cli_provider_cfg ())
+  in
+  Alcotest.(check (option string))
+    "codex_cli passes keeper-bound policy when per-keeper bearer exists"
+    None
     (Option.map
        Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
 
@@ -4372,6 +4477,10 @@ let () =
         "keeper-bound public MCP tools on codex_cli omit request-scoped tools"
         `Quick
         test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools;
+      Alcotest.test_case
+        "keeper-bound public MCP tools on codex_cli use per-keeper bearer"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools;
       Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
@@ -4397,9 +4506,9 @@ let () =
         `Quick
         test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects;
       Alcotest.test_case
-        "keeper_task_claim on codex_cli with keeper actor is rejected"
+        "keeper-internal tools on codex_cli with per-keeper bearer use runtime MCP"
         `Quick
-        test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects;
+        test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp;
       Alcotest.test_case "keeper-internal tools on kimi_cli are rejected" `Quick
         test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects;
       Alcotest.test_case "optional keeper-internal tools on codex_cli drop to text" `Quick
@@ -4411,9 +4520,9 @@ let () =
         `Quick
         test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools;
       Alcotest.test_case
-        "provider-normalized filter drops codex bound actor despite per-keeper token"
+        "provider-normalized filter keeps codex bound actor with per-keeper token"
         `Quick
-        test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token;
+        test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper_token;
       Alcotest.test_case
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick
@@ -4437,6 +4546,10 @@ let () =
       Alcotest.test_case
         "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
         `Quick test_classify_filter_rejection_codex_keeper_bound_actor;
+      Alcotest.test_case
+        "classify_filter_rejection: codex bound-actor policy passes with per-keeper bearer"
+        `Quick
+        test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token;
       Alcotest.test_case
         "classify_filter_rejection: returns None when provider passes"
         `Quick test_classify_filter_rejection_passes_when_provider_supported;

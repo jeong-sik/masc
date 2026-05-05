@@ -207,7 +207,6 @@ let test_sandbox_policy_resync () =
 goal = "test"
 sandbox_profile = "docker"
 network_mode = "none"
-shared_memory_scope = "room"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -220,7 +219,6 @@ shared_memory_scope = "room"
             ("trace_id", `String "trace-sandbox-policy-resync");
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
-            ("shared_memory_scope", `String "disabled");
           ])
     with
     | Ok meta -> meta
@@ -251,7 +249,6 @@ let test_keeper_up_create_uses_profile_default_sandbox_policy () =
 goal = "test"
 sandbox_profile = "docker"
 network_mode = "inherit"
-shared_memory_scope = "room"
 |};
   let config = Coord.default_config room_dir in
   ignore (Coord.init config ~agent_name:(Some "operator"));

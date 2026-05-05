@@ -1,6 +1,5 @@
-import { signal } from '@preact/signals'
-export const activeIdeFile = signal<string>('package.json')
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
@@ -12,7 +11,6 @@ import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
-import { WorldVisualizer } from '../world-visualizer'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -20,6 +18,8 @@ import {
   parseActive,
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
+
+export const activeIdeFile = signal<string>('package.json')
 
 type ViewTab = IdeEditorView
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
@@ -93,36 +93,19 @@ export function IdeShell() {
       class="ide-plane-shell"
       role="region"
       aria-label="Code IDE shell"
-      style=${{
-        display: 'grid',
-        gridTemplateRows: terminalOpen
-          ? 'auto auto auto minmax(0, 1fr) auto auto'
-          : 'auto auto auto minmax(0, 1fr) auto',
-        background: 'var(--color-bg-page)',
-        color: 'var(--color-fg-primary)',
-        minHeight: 'calc(100vh - var(--h-topbar) - var(--h-kpi))',
-      }}
+      data-terminal-open=${terminalOpen ? 'true' : 'false'}
     >
       <header
-        style=${{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sp-3)',
-          padding: 'var(--sp-2) var(--sp-3)',
-          background: 'var(--color-bg-surface)',
-          borderBottom: '1px solid var(--color-border-default)',
-          font: 'var(--type-eyebrow)',
-          color: 'var(--color-fg-muted)',
-        }}
+        class="ide-plane-statusbar"
       >
-        <span style=${{ color: 'var(--color-fg-secondary)' }}>MASC IDE</span>
+        <span class="ide-plane-statusbar-title">MASC IDE</span>
         <span>·</span>
         <span
           class="chip sm is-brass"
           style=${{ flexShrink: 0 }}
         >LIVE WORKSPACE</span>
         <${IdePresenceStrip} />
-        <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok)' }}>● mcp · connected</span>
+        <span class="ide-plane-connection">● mcp · connected</span>
       </header>
       <${IdeToolbar}
         activeView=${activeView}
@@ -130,15 +113,9 @@ export function IdeShell() {
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
       />
-      <div class="border-b border-solid border-[var(--color-border-divider)]">
-        <${WorldVisualizer} />
-      </div>
       <div
         class="ide-plane-grid"
         role="presentation"
-        style=${{
-          minHeight: 0,
-        }}
       >
         <div class="ide-plane-tree">
           <${IdeExplorer}
@@ -154,11 +131,6 @@ export function IdeShell() {
         </div>
         <div
           class="ide-plane-editor"
-          style=${{
-            display: 'grid',
-            gridTemplateRows: 'minmax(280px, 1fr) minmax(260px, 38vh)',
-            minHeight: 0,
-          }}
         >
           <${IdeEditor}
             activeView=${activeView}

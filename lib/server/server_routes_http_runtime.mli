@@ -90,6 +90,11 @@ val transport_json : Httpun.Request.t -> Yojson.Safe.t
     JSON (HTTP + WS + protocol set).  Sub-projection used by
     {!make_health_json}'s [transport] field. *)
 
+val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
+(** [agent_card_json request] returns the public well-known MASC server
+    card served from [/.well-known/agent.json].  This route is public
+    discovery metadata; mutable operations still require normal tool auth. *)
+
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :

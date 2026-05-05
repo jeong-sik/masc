@@ -197,6 +197,7 @@ export function App() {
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
   const topbarNavItems = DASHBOARD_NAV_ITEMS.filter(item => item.id !== 'code')
+  const isCodeSurface = currentTab === 'code'
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
@@ -284,7 +285,7 @@ export function App() {
         </aside>
 
         <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
-          <div class="h-full overflow-y-auto p-4">
+          <div class=${isCodeSurface ? 'h-full overflow-hidden p-0' : 'h-full overflow-y-auto p-4'}>
             <${DashboardMain} />
           </div>
         </main>

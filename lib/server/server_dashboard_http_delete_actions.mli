@@ -11,6 +11,6 @@
 
 (** [add_delete_action_routes router] returns [router] with the five
     delete/sweep endpoints appended. Each route requires
-    {!Types.CanAdmin} via [Server_auth.with_token_permission_auth]. *)
+    {!Masc_domain.CanAdmin} via [Server_auth.with_token_permission_auth]. *)
 val add_delete_action_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t

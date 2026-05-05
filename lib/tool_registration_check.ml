@@ -32,7 +32,7 @@ let add_names names tbl =
 
 let raw_masc_tool_names () =
   Config.raw_all_tool_schemas
-  |> List.filter_map (fun (schema : Types.tool_schema) ->
+  |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
     if String.starts_with ~prefix:"masc_" schema.name then Some schema.name
     else None)
 

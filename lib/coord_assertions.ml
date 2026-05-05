@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Coord_assertions - State inspection and assertion-based verification *)
 
-open Types
+open Masc_domain
 open Coord_types
 
 type agent_state = {

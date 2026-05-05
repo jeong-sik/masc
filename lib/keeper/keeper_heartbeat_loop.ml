@@ -79,11 +79,11 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta) 
 
 let keeper_agent_status (meta : keeper_meta) =
   if meta.paused
-  then Types.Inactive
+  then Masc_domain.Inactive
   else (
     match meta.current_task_id with
-    | Some _ -> Types.Busy
-    | None -> Types.Active)
+    | Some _ -> Masc_domain.Busy
+    | None -> Masc_domain.Active)
 ;;
 
 (** Reset stale turn failures so the keeper can exit Failing phase.

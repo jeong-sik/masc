@@ -14,7 +14,7 @@ type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
 val register : tool_name:string -> handler:handler -> unit
 (** Register a single tool name to handler mapping. *)
 
-val register_module : schemas:Types.tool_schema list -> handler:handler -> unit
+val register_module : schemas:Masc_domain.tool_schema list -> handler:handler -> unit
 (** Bulk-register every tool name from a schema list to the same handler. *)
 
 (** {1 Dispatch} *)
@@ -118,7 +118,7 @@ type module_tag =
   | Mod_autoresearch
   | Mod_shard
 
-val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit
+val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)
 
 val register_name_tag : tool_name:string -> tag:module_tag -> unit

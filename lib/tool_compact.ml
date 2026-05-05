@@ -6,7 +6,7 @@
     @since 2.95.0 — Issue #1441 *)
 
 (* All schemas removed — tool pruned *)
-let schemas : Types.tool_schema list = []
+let schemas : Masc_domain.tool_schema list = []
 
 type tool_result = bool * string
 

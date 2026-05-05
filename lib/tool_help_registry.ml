@@ -260,7 +260,7 @@ let derived_details name original =
         ^ String.concat "\n" (List.map (fun item -> "- " ^ item) extra_constraints);
       ]
 
-let entry_of_schema (schema : Types.tool_schema) : help_entry =
+let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
   match manual_help_entry schema.name with
   | Some entry -> entry
   | None ->
@@ -274,12 +274,12 @@ let entry_of_schema (schema : Types.tool_schema) : help_entry =
         prompt_hints = help_prompt_hints schema.name;
       }
 
-let find_entry (schemas : Types.tool_schema list) name =
+let find_entry (schemas : Masc_domain.tool_schema list) name =
   schemas
-  |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+  |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
   |> Option.map entry_of_schema
 
-let canonicalize_schema (schema : Types.tool_schema) : Types.tool_schema =
+let canonicalize_schema (schema : Masc_domain.tool_schema) : Masc_domain.tool_schema =
   let entry = entry_of_schema schema in
   { schema with description = entry.short_description }
 
@@ -394,17 +394,17 @@ let entry_markdown (entry : help_entry) =
     (header @ replacement_lines @ when_lines @ constraint_lines @ detail_lines
    @ doc_lines @ prompt_lines @ workflow_lines)
 
-let index_json (schemas : Types.tool_schema list) =
+let index_json (schemas : Masc_domain.tool_schema list) =
   `Assoc
     [
       ("count", `Int (List.length schemas));
       ("tools", `List (List.map (fun schema -> entry_json (entry_of_schema schema)) schemas));
     ]
 
-let index_markdown (schemas : Types.tool_schema list) =
+let index_markdown (schemas : Masc_domain.tool_schema list) =
   let rows =
     schemas
-    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
            String.compare a.name b.name)
     |> List.map (fun schema ->
            let entry = entry_of_schema schema in

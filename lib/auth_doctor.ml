@@ -1,4 +1,4 @@
-open Types
+open Masc_domain
 
 type status =
   | Ok

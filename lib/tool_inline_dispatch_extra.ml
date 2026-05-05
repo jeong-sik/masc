@@ -287,7 +287,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("content", `String (String.sub content 0 (min 200 (String.length content))));
           ("post_id", `String (Option.value post_id ~default:"unknown"));
-          ("timestamp", `String (Types.now_iso ()));
+          ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
         emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted) ~actor:author
@@ -348,7 +348,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("post_id", `String post_id);
           ("content", `String (String.sub content 0 (min 200 (String.length content))));
-          ("timestamp", `String (Types.now_iso ()));
+          ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
         emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented) ~actor:author
@@ -426,7 +426,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let notification = `Assoc [
           ("type", `String "masc/board_delete");
           ("post_id", `String post_id);
-          ("timestamp", `String (Types.now_iso ()));
+          ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
         emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted) ~actor:agent_name

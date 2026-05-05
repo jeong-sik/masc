@@ -9,7 +9,7 @@ module Meas = Masc_mcp.Keeper_measurement
 module Keeper_types = Masc_mcp.Keeper_types
 module KET = Masc_mcp.Keeper_exec_tools
 module KEC = Masc_mcp.Keeper_exec_context
-module Types = Types
+module Types = Masc_domain
 
 let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_targets () =
   let json =

@@ -13,7 +13,7 @@ open Alcotest
 
 module Auth = Masc_mcp.Auth
 module Prometheus = Masc_mcp.Prometheus
-module Types = Types
+module Types = Masc_domain
 
 (* ============================================================
    generate_token Tests

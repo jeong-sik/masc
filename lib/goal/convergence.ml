@@ -51,23 +51,23 @@ let title_has_goal_marker ~goal_id title =
     done;
     !found
 
-let task_has_goal_id ~goal_id (task : Types.task) =
+let task_has_goal_id ~goal_id (task : Masc_domain.task) =
   match task.goal_id with
   | Some linked_goal_id -> String.equal linked_goal_id goal_id
   | None -> false
 
 (** A task belongs to a goal when its structured goal_id matches or its title
     carries the legacy [goal:<id>] marker. *)
-let task_matches_goal ~goal_id (task : Types.task) =
+let task_matches_goal ~goal_id (task : Masc_domain.task) =
   match task.goal_id with
   | Some _ -> task_has_goal_id ~goal_id task
   | None -> title_has_goal_marker ~goal_id task.title
 
-let is_terminal (task : Types.task) =
-  Types.task_status_is_terminal task.task_status
+let is_terminal (task : Masc_domain.task) =
+  Masc_domain.task_status_is_terminal task.task_status
 
-let is_completed (task : Types.task) =
-  Types.task_status_is_done task.task_status
+let is_completed (task : Masc_domain.task) =
+  Masc_domain.task_status_is_done task.task_status
 
 let check_convergence ~goal_id ~tasks ?(stagnation_threshold = 5)
     ~iterations_without_progress () =

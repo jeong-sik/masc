@@ -443,7 +443,7 @@ let json ?surface_id () =
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("proof_bar", `String "fixture+live_spotcheck");
       ("surfaces", `List (List.map entry_json surfaces));
     ]

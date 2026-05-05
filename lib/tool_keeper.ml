@@ -1589,7 +1589,7 @@ let tool_required_permission = function
   | "masc_persona_list" | "masc_persona_schema" | "masc_keeper_list"
   | "masc_keeper_status" | "masc_keeper_persona_audit"
   | "masc_keeper_sandbox_status" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_persona_generate" | "masc_persona_save"
   | "masc_keeper_create_from_persona" | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
@@ -1597,12 +1597,12 @@ let tool_required_permission = function
   | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop"
   | "masc_keeper_down" | "masc_keeper_reset"
   | "masc_keeper_compact" | "masc_keeper_clear" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

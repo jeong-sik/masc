@@ -48,7 +48,7 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  required_permission : Types.permission option;
+  required_permission : Masc_domain.permission option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -73,7 +73,7 @@ val create :
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
-  ?required_permission:Types.permission ->
+  ?required_permission:Masc_domain.permission ->
   ?effect_domain:Tool_catalog.effect_domain ->
   ?requires_actor_binding:bool ->
   unit -> t
@@ -98,8 +98,8 @@ val register_all : t list -> unit
 
 (** {1 Conversion} *)
 
-val to_tool_schema : t -> Types.tool_schema
-(** Convert to [Types.tool_schema] for interop with existing schema-based APIs. *)
+val to_tool_schema : t -> Masc_domain.tool_schema
+(** Convert to [Masc_domain.tool_schema] for interop with existing schema-based APIs. *)
 
 (** {1 Boot-time verification} *)
 

@@ -380,7 +380,7 @@ let tool_definitions = [
   ]);
 ]
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   (* masc_library_list *)
   {
     name = "masc_library_list";
@@ -505,7 +505,7 @@ Pair with masc_library_read to fetch matching documents in full.";
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

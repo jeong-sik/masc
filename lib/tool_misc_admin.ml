@@ -71,7 +71,7 @@ let int_arg_opt args key =
 
 let permission_to_json tool_name =
   match Auth.permission_for_tool tool_name with
-  | Some permission -> `String (Types.show_permission permission)
+  | Some permission -> `String (Masc_domain.show_permission permission)
   | None -> `Null
 
 let auth_snapshot_json ctx =
@@ -81,13 +81,13 @@ let auth_snapshot_json ctx =
   let http_auth_strict = Server_auth.http_auth_strict_enabled () in
   let credentials =
     Auth.list_credentials ctx.config.base_path
-    |> List.sort (fun (left : Types.agent_credential) right ->
+    |> List.sort (fun (left : Masc_domain.agent_credential) right ->
            String.compare left.agent_name right.agent_name)
-    |> List.map (fun (cred : Types.agent_credential) ->
+    |> List.map (fun (cred : Masc_domain.agent_credential) ->
            `Assoc
              [
                ("agent_name", `String cred.agent_name);
-               ("admin", `Bool ((=) cred.role Types.Admin));
+               ("admin", `Bool ((=) cred.role Masc_domain.Admin));
                ("created_at", `String cred.created_at);
                ("expires_at", json_string_option cred.expires_at);
              ])
@@ -118,7 +118,7 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
     if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev)
   in
   Config.raw_all_tool_schemas
-  |> List.iter (fun (schema : Types.tool_schema) ->
+  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
          if Tool_catalog.is_public_mcp schema.name then
            add_surface schema.name "public_mcp");
   List.iter
@@ -130,13 +130,13 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
     (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
   let schemas =
     Config.raw_all_tool_schemas
-    |> List.filter (fun (schema : Types.tool_schema) ->
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
            Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
-    |> List.sort (fun (left : Types.tool_schema) right -> String.compare left.name right.name)
+    |> List.sort (fun (left : Masc_domain.tool_schema) right -> String.compare left.name right.name)
   in
   let rows =
     schemas
-    |> List.map (fun (schema : Types.tool_schema) ->
+    |> List.map (fun (schema : Masc_domain.tool_schema) ->
            let help_entry = Tool_help_registry.entry_of_schema schema in
            let metadata_fields =
              Tool_catalog.metadata_to_fields schema.name
@@ -274,7 +274,7 @@ let handle_tool_admin_snapshot ctx args =
     `Assoc
       [
         ("status", `String "ok");
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ("auth", auth_snapshot_json ctx);
         ( "tool_inventory",
           tool_inventory_json ctx ~include_hidden ~include_deprecated );

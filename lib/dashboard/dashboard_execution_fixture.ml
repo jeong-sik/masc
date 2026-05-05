@@ -1,7 +1,7 @@
 include Dashboard_execution_helpers
 
 let execution_smoke_fixture_json () =
-  let generated_at = Types.now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   let command_handoff =
     handoff_json
       ~surface:"command"

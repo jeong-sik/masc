@@ -190,8 +190,8 @@ let cascade_rotation_attempt_to_json attempt =
 
 let receipt_duration_ms receipt =
   match
-    Types.parse_iso8601_opt receipt.started_at,
-    Types.parse_iso8601_opt receipt.ended_at
+    Masc_domain.parse_iso8601_opt receipt.started_at,
+    Masc_domain.parse_iso8601_opt receipt.ended_at
   with
   | Some started_at, Some ended_at ->
     max 0.0 ((ended_at -. started_at) *. 1000.0)

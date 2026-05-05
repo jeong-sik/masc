@@ -235,13 +235,19 @@ module Metrics = struct
   let default_error ~model_id:_ ~error:_ = ()
   let default_http_status ~provider:_ ~model_id:_ ~status:_ = ()
   let default_capability_drop ~model_id:_ ~field:_ = ()
+  let default_retry ~provider:_ ~model_id:_ ~attempt:_ = ()
+
+  let default_token_usage ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_
+      =
+    ()
 
   let make ?(on_cache_hit = default_model_hook)
       ?(on_cache_miss = default_model_hook)
       ?(on_request_start = default_model_hook)
       ?(on_request_end = default_request_end) ?(on_error = default_error)
       ?(on_http_status = default_http_status)
-      ?(on_capability_drop = default_capability_drop) ()
+      ?(on_capability_drop = default_capability_drop)
+      ?(on_retry = default_retry) ?(on_token_usage = default_token_usage) ()
       : Llm_provider.Metrics.t =
     {
       on_cache_hit;
@@ -251,5 +257,7 @@ module Metrics = struct
       on_error;
       on_http_status;
       on_capability_drop;
+      on_retry;
+      on_token_usage;
     }
 end

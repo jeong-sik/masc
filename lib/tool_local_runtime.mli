@@ -136,15 +136,15 @@ val dispatch :
     Returns [None] for unrecognised names so the caller can fall
     through to other dispatchers. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** Two schemas pinned at the contract seam:
     [masc_runtime_verify] (4 optional properties: [runtime_pool],
     [expected_model], [expected_slots], [expected_ctx]) and
     [masc_runtime_ollama_probe] (9 optional properties).  Adding a
     new tool requires extending both this list and {!dispatch}. *)
 
-val tool_required_permission : string -> Types.permission option
+val tool_required_permission : string -> Masc_domain.permission option
 (** [tool_required_permission name] returns
-    [Some Types.CanReadState] for both [masc_runtime_verify] and
+    [Some Masc_domain.CanReadState] for both [masc_runtime_verify] and
     [masc_runtime_ollama_probe], else [None].  Consumed during
     {!Tool_spec.register} setup at module init. *)

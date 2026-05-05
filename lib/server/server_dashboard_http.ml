@@ -4,7 +4,7 @@ include Server_dashboard_http_core
 include Server_dashboard_http_runtime_info
 include Server_dashboard_http_execution_surfaces
 include Server_dashboard_http_namespace_truth
-open Types
+open Masc_domain
 open Server_utils
 
 (* Wire task mutation hook: invalidate execution cache on any task
@@ -63,7 +63,7 @@ let dashboard_board_json ?hearth ?author_filter
     in
     `Assoc
       [
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ( "summary",
           `Assoc
             [
@@ -188,7 +188,7 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ( "hebbian", hebbian );
       ( "episodes",
         `Assoc
@@ -344,8 +344,8 @@ let dashboard_verification_resolve_http_json
   in
   let* action =
     match decision_name with
-    | "approve" -> Ok Types.Approve_verification
-    | "reject"  -> Ok Types.Reject_verification
+    | "approve" -> Ok Masc_domain.Approve_verification
+    | "reject"  -> Ok Masc_domain.Reject_verification
     | "" -> Error "decision is required (approve | reject)"
     | other ->
         Error (Printf.sprintf
@@ -374,17 +374,17 @@ let dashboard_verification_resolve_http_json
       ~notes:reason ~reason ()
   in
   match fsm_result with
-  | Error err -> Error (Types.masc_error_to_string err)
+  | Error err -> Error (Masc_domain.masc_error_to_string err)
   | Ok _ ->
       (match action with
-       | Types.Approve_verification ->
+       | Masc_domain.Approve_verification ->
            Verification_protocol.notify_approve_verification
              ~task_id ~verifier ~verification_id ~notes:reason
-       | Types.Reject_verification ->
+       | Masc_domain.Reject_verification ->
            Verification_protocol.notify_reject_verification
              ~task_id ~verifier ~verification_id ~reason
-       | Types.Claim | Types.Start | Types.Done_action | Types.Cancel
-       | Types.Release | Types.Submit_for_verification -> ());
+       | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
+       | Masc_domain.Release | Masc_domain.Submit_for_verification -> ());
       Ok (`Assoc [
         ("ok", `Bool true);
         ("task_id", `String task_id);
@@ -399,7 +399,7 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
-         (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
+         (fun (todo, claimed, running, done_count, cancelled) (task : Masc_domain.task) ->
            match task.task_status with
            | Todo -> (todo + 1, claimed, running, done_count, cancelled)
            | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
@@ -411,7 +411,7 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
   let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("goals", `List (List.map Goal_store.goal_to_yojson goals));
       ("rollup", Goal_store.rollup_to_yojson rollup);
       ( "task_backlog",
@@ -596,7 +596,7 @@ let composite_latest_activity_epoch snapshot execution =
   in
   let receipt_epoch =
     match json_string "recorded_at" execution with
-    | Some raw -> Types.parse_iso8601_opt raw
+    | Some raw -> Masc_domain.parse_iso8601_opt raw
     | None -> None
   in
   match last_outcome_epoch, receipt_epoch with

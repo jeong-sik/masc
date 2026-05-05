@@ -7,4 +7,4 @@
     [masc_plan_get], [masc_plan_delete], [masc_notes_append],
     [masc_notes_get], [masc_deliverable_write],
     [masc_deliverable_read]. *)
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

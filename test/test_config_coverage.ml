@@ -10,6 +10,7 @@ module Auth = Masc_mcp.Auth
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Tool_help_registry = Masc_mcp.Tool_help_registry
 module Tool_shard = Masc_mcp.Tool_shard
+module Types = Masc_domain
 
 let dummy_schema name : Types.tool_schema =
   {

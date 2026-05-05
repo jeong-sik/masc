@@ -79,8 +79,8 @@ val dispatch :
     [None] when [name] is not [masc_agent_timeline] — caller
     treats that as "not my tool". *)
 
-val schemas : Types.tool_schema list
-(** [schemas] is the [Types.tool_schema list] registered with the
+val schemas : Masc_domain.tool_schema list
+(** [schemas] is the [Masc_domain.tool_schema list] registered with the
     MCP catalog (consumed by {!Config.visible_tool_schemas}).
     Used by the side-effect block at module load via
     {!Tool_spec.register}. *)

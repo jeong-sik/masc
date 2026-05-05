@@ -1,5 +1,5 @@
 
-open Types
+open Masc_domain
 open Server_utils
 open Server_auth
 
@@ -66,7 +66,7 @@ let with_dashboard_timeout ~clock compute =
         ("error", `String "timeout");
         ("partial", `Bool true);
         ("message", `String (Printf.sprintf "Dashboard computation timed out after %.0fs." dashboard_request_timeout_s));
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
       ]
 
 let cache_partition_segment (_config : Coord.config) = "default"
@@ -91,7 +91,7 @@ let projection_diagnostics_json ~surface ~started_at ~extra json =
        ("surface", `String surface);
        ("build_ms", `Int build_ms);
        ("payload_bytes", `Int payload_bytes);
-       ("generated_at", `String (Types.now_iso ()));
+       ("generated_at", `String (Masc_domain.now_iso ()));
      ]
     @ extra)
 
@@ -154,18 +154,18 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);
         ("governance_feed_ok", `Bool governance_feed_ok);
-        ("last_sync_at", `String (Types.now_iso ()));
+        ("last_sync_at", `String (Masc_domain.now_iso ()));
       ]);
     ]
   in
   let tasks_json =
-    List.map (fun (t : Types.task) ->
+    List.map (fun (t : Masc_domain.task) ->
       let base_fields =
         [
           ("id", `String t.id);
           ("title", `String t.title);
           ("description", `String t.description);
-          ("status", `String (Types.string_of_task_status t.task_status));
+          ("status", `String (Masc_domain.string_of_task_status t.task_status));
           ("priority", `Int t.priority);
           ( "assignee",
             match t.task_status with
@@ -184,21 +184,21 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
       in
       `Assoc (base_fields @ projection_fields))
       (List.filter
-         (fun (t : Types.task) ->
+         (fun (t : Masc_domain.task) ->
            match t.task_status with
-           | Types.Cancelled _ -> false
-           | Types.Done _ -> not compact
-           | Types.Todo -> true
-           | Types.Claimed _ | Types.InProgress _ -> true
-           | Types.AwaitingVerification _ -> true)
+           | Masc_domain.Cancelled _ -> false
+           | Masc_domain.Done _ -> not compact
+           | Masc_domain.Todo -> true
+           | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> true
+           | Masc_domain.AwaitingVerification _ -> true)
          tasks)
   in
   let agents_json =
-    List.map (fun (a : Types.agent) ->
+    List.map (fun (a : Masc_domain.agent) ->
       let profile = Dashboard_execution_helpers.get_agent_profile a.name in
       `Assoc [
         ("name", `String a.name);
-        ("status", `String (Types.string_of_agent_status a.status));
+        ("status", `String (Masc_domain.string_of_agent_status a.status));
         ("current_task", Json_util.string_opt_to_json a.current_task);
         ("last_seen", `String a.last_seen);
         ("emoji", `String profile.emoji);
@@ -216,7 +216,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
   in
   let msgs_json =
     List.map
-      (fun (m : Types.message) ->
+      (fun (m : Masc_domain.message) ->
         `Assoc [
           ("from", `String m.from_agent);
           ("content", `String m.content);
@@ -260,11 +260,11 @@ let _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
 
 let _operator_snapshot_cache =
   create_cached_surface
-    (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
+    (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Masc_domain.now_iso ())) ])
 
 let _operator_digest_cache =
   create_cached_surface
-    (`Assoc [ ("health", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
+    (`Assoc [ ("health", `String "initializing"); ("generated_at", `String (Masc_domain.now_iso ())) ])
 
 let _operator_refresh_interval_s =
   float_of_env_default
@@ -452,7 +452,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
         `Assoc [
           ("error", `String "timeout");
           ("message", `String "Operator snapshot timed out after 30s");
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
         ]
   end
 
@@ -517,7 +517,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
                    [
                      ("error", `String "validation_error");
                      ("message", `String err);
-                     ("generated_at", `String (Types.now_iso ()));
+                     ("generated_at", `String (Masc_domain.now_iso ()));
                    ]))
     ) with
     | Ok json ->
@@ -534,7 +534,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
             [
               ("error", `String "timeout");
               ("message", `String "Operator digest timed out after 30s");
-              ("generated_at", `String (Types.now_iso ()));
+              ("generated_at", `String (Masc_domain.now_iso ()));
             ])
 
 (* --- Mission proactive refresh ----------------------------------------
@@ -547,7 +547,7 @@ let _mission_cache =
   create_cached_surface
     (`Assoc
       [
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ("summary", `Assoc [("room_health", `String "initializing")]);
         ("incidents", `List []);
         ("recommended_actions", `List []);
@@ -648,7 +648,7 @@ let dashboard_session_http_json ~state ~sw ~clock request =
   | _ ->
       `Assoc
         [
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
           ("session_id", `Null);
           ("session", `Null);
           ("timeline", `List []);
@@ -698,20 +698,20 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
       ("build", Build_identity.to_yojson build);
     ]
 
-let dashboard_task_assignee (task : Types.task) =
+let dashboard_task_assignee (task : Masc_domain.task) =
   match task.task_status with
   | Claimed { assignee; _ } | InProgress { assignee; _ }
   | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
       Some assignee
   | Todo | Cancelled _ -> None
 
-let dashboard_task_json config (task : Types.task) =
+let dashboard_task_json config (task : Masc_domain.task) =
   let base_fields =
     [
       ("id", `String task.id);
       ("title", `String task.title);
       ("description", `String task.description);
-      ("status", `String (Types.string_of_task_status task.task_status));
+      ("status", `String (Masc_domain.string_of_task_status task.task_status));
       ("priority", `Int task.priority);
       ("assignee", Json_util.string_opt_to_json (dashboard_task_assignee task));
       ("created_at", `String task.created_at);
@@ -724,7 +724,7 @@ let dashboard_task_json config (task : Types.task) =
   in
   `Assoc (base_fields @ projection_fields)
 
-let dashboard_agent_json (agent : Types.agent) =
+let dashboard_agent_json (agent : Masc_domain.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
   `Assoc
@@ -733,7 +733,7 @@ let dashboard_agent_json (agent : Types.agent) =
       ("agent_type", `String agent.agent_type);
       ("keeper_name", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)));
       ("keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id)));
-      ("status", `String (Types.string_of_agent_status agent.status));
+      ("status", `String (Masc_domain.string_of_agent_status agent.status));
       ("current_task", Json_util.string_opt_to_json agent.current_task);
       ("joined_at", `String agent.joined_at);
       ("last_seen", `String agent.last_seen);
@@ -747,7 +747,7 @@ let dashboard_agent_json (agent : Types.agent) =
       ("primaryValue", Json_util.string_opt_to_json profile.primary_value);
     ]
 
-let dashboard_message_json (message : Types.message) =
+let dashboard_message_json (message : Masc_domain.message) =
   `Assoc
     [
       ("from", `String message.from_agent);
@@ -767,7 +767,7 @@ let dashboard_agents_safe config =
 let dashboard_messages_safe config ~since_seq ~limit =
   Coord.get_messages_raw config ~since_seq ~limit
 
-let is_keeper_agent (agent : Types.agent) =
+let is_keeper_agent (agent : Masc_domain.agent) =
   String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
 
 let dashboard_general_agent_count agents =
@@ -922,7 +922,7 @@ let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   |> Server_base_path_diagnostics.to_yojson
 
 let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
-  let generated_at = Types.now_iso () in
+  let generated_at = Masc_domain.now_iso () in
   let started_at = Unix.gettimeofday () in
   `Assoc
     [
@@ -1025,7 +1025,7 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
   let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("status", status_json);
       ("paths", dashboard_shell_paths_json config);
       ( "counts",
@@ -1069,12 +1069,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     String.length needle > 0 && String_util.contains_substring haystack needle
   in
   let dashboard_auth_error_code = function
-    | Types.Auth (Types.Auth_error.InvalidToken _) -> Some "invalid_token"
-    | Types.Auth (Types.Auth_error.TokenExpired _) -> Some "token_expired"
-    | Types.Auth (Types.Auth_error.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
+    | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Some "invalid_token"
+    | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Some "token_expired"
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
         Some "same_origin_blocked"
-    | Types.Auth (Types.Auth_error.Forbidden _) -> Some "insufficient_role"
-    | Types.Auth (Types.Auth_error.Unauthorized reason) ->
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Some "insufficient_role"
+    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized reason) ->
         let normalized = String.lowercase_ascii reason in
         if contains_substring normalized "bearer token belongs to" then
           Some "actor_mismatch"
@@ -1103,7 +1103,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
   in
   let token_agent =
     match token_credential_result with
-    | Some (Ok cred) -> Some cred.Types.agent_name
+    | Some (Ok cred) -> Some cred.Masc_domain.agent_name
     | _ -> None
   in
   let resolved_agent_name_result =
@@ -1112,7 +1112,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | None ->
         if auth_cfg.enabled && auth_cfg.require_token && token_present then
           Error
-            (Types.Auth (Types.Auth_error.Unauthorized
+            (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
                "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
         else
           Ok "dashboard"
@@ -1141,7 +1141,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
             ~endpoint:"HTTP tool access for masc_keeper_msg" auth_cfg
         with
         | Ok _ -> Ok ()
-        | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg)))
+        | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)))
   in
   let keeper_authorization_result =
     match endpoint_gate_result with
@@ -1156,22 +1156,22 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
   let can_keeper_msg, keeper_msg_error =
     match keeper_authorization_result with
     | Ok () -> (true, None)
-    | Error err -> (false, Some (Types.masc_error_to_string err))
+    | Error err -> (false, Some (Masc_domain.masc_error_to_string err))
   in
   let effective_admin =
     match effective_role_result with
-    | Ok role -> Some (role = Types.Admin)
+    | Ok role -> Some (role = Masc_domain.Admin)
     | Error _ -> None
   in
   let effective_role =
     match effective_role_result with
-    | Ok role -> Some (Types.agent_role_to_string role)
+    | Ok role -> Some (Masc_domain.agent_role_to_string role)
     | Error _ -> None
   in
   let auth_error =
     match token_credential_result with
-    | Some (Error (Types.Auth (Types.Auth_error.InvalidToken _) as err)) -> Some err
-    | Some (Error (Types.Auth (Types.Auth_error.TokenExpired _) as err)) -> Some err
+    | Some (Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) as err)) -> Some err
+    | Some (Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) as err)) -> Some err
     | Some (Error err) -> Some err
     | _ -> (
         match keeper_authorization_result with
@@ -1197,7 +1197,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
         | None -> `Null );
       ( "auth_error_detail",
         match auth_error with
-        | Some err -> `String (Types.masc_error_to_string err)
+        | Some err -> `String (Masc_domain.masc_error_to_string err)
         | None -> `Null );
       ("effective_admin", Json_util.bool_opt_to_json effective_admin);
       ("can_keeper_msg", `Bool can_keeper_msg);

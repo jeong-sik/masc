@@ -896,7 +896,7 @@ let handle_keeper_status ctx args : tool_result =
              (`List (apply_tail_order tail_order tail), total)
         in
         let all_internal_tools =
-          keeper_model_tools |> List.map (fun tool -> tool.Types.name)
+          keeper_model_tools |> List.map (fun tool -> tool.Masc_domain.name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let allowed_tool_preview =

@@ -375,7 +375,7 @@ let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities 
   match Coord.read_json_opt config agent_file with
   | None -> true
   | Some json -> (
-      match Types.agent_of_yojson json with
+      match Masc_domain.agent_of_yojson json with
       | Ok agent -> agent.capabilities <> capabilities
       | Error _ -> true)
 

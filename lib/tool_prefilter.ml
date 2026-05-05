@@ -280,7 +280,7 @@ let tokenize (text : string) : string list =
 type sparse_vec = (string * float) list
 
 (** Build a document (token list) for a tool schema. *)
-let build_document (schema : Types.tool_schema) : string list =
+let build_document (schema : Masc_domain.tool_schema) : string list =
   let name_words =
     schema.name
     |> String.split_on_char '_'
@@ -370,8 +370,8 @@ let cosine (a : sparse_vec) (b : sparse_vec) : float =
 (* Public API                                                       *)
 (* ================================================================ *)
 
-let filter_with_scores ~(tools : Types.tool_schema list) ~(query : string)
-    ~(k : int) : (Types.tool_schema * float) list =
+let filter_with_scores ~(tools : Masc_domain.tool_schema list) ~(query : string)
+    ~(k : int) : (Masc_domain.tool_schema * float) list =
   let query_tokens = tokenize query in
   if Stdlib.List.length query_tokens = 0 then []
   else
@@ -394,8 +394,8 @@ let filter_with_scores ~(tools : Types.tool_schema list) ~(query : string)
       in
       take k sorted
 
-let filter ~(tools : Types.tool_schema list) ~(query : string) ~(k : int)
-    : Types.tool_schema list =
+let filter ~(tools : Masc_domain.tool_schema list) ~(query : string) ~(k : int)
+    : Masc_domain.tool_schema list =
   filter_with_scores ~tools ~query ~k
   |> List.map fst
 

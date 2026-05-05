@@ -477,7 +477,7 @@ let append_claim (config : Coord_query.config) (event : claim_event) =
 let append_resolution (config : Coord_query.config) (event : resolution_event) =
   Dated_jsonl.append (get_store config) (resolution_event_to_json event)
 
-let resolution_for_claim ?(resolved_at = Types.now_iso ()) ?reason ~status
+let resolution_for_claim ?(resolved_at = Masc_domain.now_iso ()) ?reason ~status
     ~evidence_refs (claim : claim_event) =
   {
     claim_id = claim.claim_id;
@@ -494,8 +494,8 @@ let resolution_for_claim ?(resolved_at = Types.now_iso ()) ?reason ~status
 
 let task_title_for_id (config : Coord_query.config) task_id =
   Coord_query.get_tasks_safe config
-  |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
-  |> Option.map (fun (task : Types.task) -> task.title)
+  |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  |> Option.map (fun (task : Masc_domain.task) -> task.title)
 
 let create_task_commitment config ~agent_name ~task_id ~surface =
   let now = Time_compat.now () in
@@ -510,7 +510,7 @@ let create_task_commitment config ~agent_name ~task_id ~surface =
   with
   | Some _ -> ()
   | None ->
-      let created_at = Types.now_iso () in
+      let created_at = Masc_domain.now_iso () in
       append_claim config
         {
           claim_id =
@@ -561,7 +561,7 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
         (resolution_for_claim snapshot.claim ~status:Supported
            ~reason:"task_done" ~evidence_refs)
   | None ->
-      let created_at = Types.now_iso () in
+      let created_at = Masc_domain.now_iso () in
       let claim_id =
         make_claim_id ~agent_name ~kind:Completion_claim ~subject:title
           ~task_id:(Some task_id) ~created_at
@@ -587,44 +587,44 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
         (resolution_for_claim claim ~resolved_at:created_at ~status:Supported
            ~reason:"task_done" ~evidence_refs)
 
-(* #8605 family: exhaustive on [Types.task_action]. The previous
+(* #8605 family: exhaustive on [Masc_domain.task_action]. The previous
    string match silently no-oped for typos and any future transition
    string. With the variant the compiler now forces a deliberate
    decision for every task_action constructor; verification-related
    actions explicitly produce no commitment side effects -- their
    accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
-    ~(transition : Types.task_action) ~details =
+    ~(transition : Masc_domain.task_action) ~details =
   if not (is_keeper_agent_name agent_name) then
     (* #10314: drop is now visible. *)
     record_emit_skip ~kind:"task_transition" ~reason:"not_keeper_agent_name"
   else
     match transition with
-    | Types.Claim | Types.Start ->
+    | Masc_domain.Claim | Masc_domain.Start ->
         create_task_commitment config ~agent_name ~task_id
           ~surface:"task_transition"
-    | Types.Done_action ->
+    | Masc_domain.Done_action ->
         let base_refs = [ "task:" ^ task_id ] in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Supported ~reason:(Some "task_done")
           ~evidence_refs:base_refs ~max_age_sec:task_commitment_expiry_sec;
         maybe_support_recent_completion_claim config ~agent_name ~task_id
           ~evidence_refs:base_refs
-    | Types.Release | Types.Cancel ->
+    | Masc_domain.Release | Masc_domain.Cancel ->
         let reason =
           match json_string_opt "reason" details with
           | Some value ->
               let trimmed = String.trim value in
               if trimmed <> "" then Some trimmed
-              else Some (Types.task_action_to_string transition)
-          | None -> Some (Types.task_action_to_string transition)
+              else Some (Masc_domain.task_action_to_string transition)
+          | None -> Some (Masc_domain.task_action_to_string transition)
         in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Partial ~reason
           ~evidence_refs:[ "task:" ^ task_id ] ~max_age_sec:task_commitment_expiry_sec
-    | Types.Submit_for_verification
-    | Types.Approve_verification
-    | Types.Reject_verification -> ()
+    | Masc_domain.Submit_for_verification
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification -> ()
 
 let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
   normalize_refs
@@ -661,7 +661,7 @@ let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_na
         match recent_existing with
         | Some snapshot -> snapshot.claim
         | None ->
-            let created_at = Types.now_iso () in
+            let created_at = Masc_domain.now_iso () in
             let claim_id =
               make_claim_id ~agent_name ~kind:Completion_claim ~subject
                 ~task_id:normalized_task_id ~created_at

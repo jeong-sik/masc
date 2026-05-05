@@ -718,7 +718,13 @@ let mkdir_p path _perm =
   Fs_compat.mkdir_p path
 
 type tool_exec_observer =
-  tool_name:string -> success:bool -> duration_ms:int -> unit
+  tool_name:string ->
+  success:bool ->
+  duration_ms:int ->
+  ?error_kind:string ->
+  ?error_message:string ->
+  unit ->
+  unit
 
 (* --- Tool implementations --- *)
 

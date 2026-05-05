@@ -7,7 +7,7 @@ let string_option_json = option_to_yojson (fun value -> `String value)
 let timestamp_option_json value unix_value =
   match value, unix_value with
   | Some iso, _ -> `String iso
-  | None, Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+  | None, Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
   | None, None -> `Null
 
 let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot) =
@@ -106,7 +106,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("summary", summary_json_of_runtime ~base_path runtime);
       ("items", `List []);
       ("activity", `List []);

@@ -359,7 +359,7 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("refreshed_at_unix", refreshed_at_json);
       ("cache_ttl_sec", `Float dashboard_runtime_probe_cache_ttl_sec);
       ("cache_age_sec", cache_age_json);
@@ -465,7 +465,7 @@ let dashboard_tools_http_json ?actor (config : Coord.config) : Yojson.Safe.t =
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("config_resolution", Config_dir_resolver.(resolve () |> to_json));
       ("runtime_resolution", runtime_resolution_json config);
       ( "tool_inventory",
@@ -789,7 +789,7 @@ let dashboard_perf_http_json (config : Coord.config) : Yojson.Safe.t =
   | None ->
       `Assoc
         [
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
           ("status", `String "empty");
           ("benchmarks", `List []);
           ("comparison", `Null);
@@ -817,7 +817,7 @@ let dashboard_perf_http_json (config : Coord.config) : Yojson.Safe.t =
       in
       `Assoc
         [
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
           ("status", `String "ok");
           ( "source",
             benchmark_source_json config ~results_dir ~result_file ~meta_file

@@ -190,7 +190,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
   | _ -> None
 
 let compute_judgments
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
@@ -252,7 +252,7 @@ let should_backoff ~sw ~net =
     false
 
 let refresh_once ~sw ~net
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(config : Coord.config) ~build_facts =
   let st = get_state config.base_path in
@@ -296,7 +296,7 @@ let refresh_once ~sw ~net
   end
 
 let start ~sw ~clock ~net ~(config : Coord.config)
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
   let st = get_state config.base_path in

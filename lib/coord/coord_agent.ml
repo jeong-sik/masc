@@ -3,7 +3,7 @@
     Read/write operations on agent state: status listing, capability
     broadcasting, agent metadata updates, and capability-based search. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 
@@ -76,8 +76,8 @@ let register_capabilities config ~agent_name ~capabilities =
 
 (** Update agent metadata (status/capabilities).
     Since #4638 agent metadata always lives under the root agents_dir. *)
-let update_agent_r config ~agent_name ?status ?capabilities () : string Types.masc_result =
-  if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized)
+let update_agent_r config ~agent_name ?status ?capabilities () : string Masc_domain.masc_result =
+  if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else match validate_agent_name_r agent_name with
     | Error e -> Error e
     | Ok _ ->
@@ -86,34 +86,34 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
         (* Since #4638 rooms are flattened; agents always in root agents_dir *)
         let agent_file = Filename.concat (agents_dir config) filename in
         if not (Sys.file_exists agent_file) then
-          Error (Types.Agent (Types.Agent_error.NotFound actual_name))
+          Error (Masc_domain.Agent (Masc_domain.Agent_error.NotFound actual_name))
         else
           let locked =
             with_file_lock_r config agent_file (fun () ->
               match read_agent_with_repair config agent_file with
-              | Error _ -> Error (Types.System (Types.System_error.InvalidJson "Invalid agent file"))
+              | Error _ -> Error (Masc_domain.System (Masc_domain.System_error.InvalidJson "Invalid agent file"))
               | Ok agent ->
                   let status_opt =
                     match status with
                     | None -> Ok None
                     | Some s ->
-                        (match Types.agent_status_of_string_opt (String.lowercase_ascii s) with
+                        (match Masc_domain.agent_status_of_string_opt (String.lowercase_ascii s) with
                          | Some st -> Ok (Some st)
-                         | None -> Error (Types.System (Types.System_error.InvalidJson ("Unknown status: " ^ s))))
+                         | None -> Error (Masc_domain.System (Masc_domain.System_error.InvalidJson ("Unknown status: " ^ s))))
                   in
                   (match status_opt with
                    | Error e -> Error e
                    | Ok maybe_status ->
                        let invalid =
                          match agent.current_task, maybe_status with
-                         | Some _, Some Types.Inactive ->
+                         | Some _, Some Masc_domain.Inactive ->
                              Some "Cannot set inactive while a task is assigned"
-                         | None, Some Types.Busy ->
+                         | None, Some Masc_domain.Busy ->
                              Some "Cannot set busy without an active task"
                          | _ -> None
                        in
                        (match invalid with
-                        | Some msg -> Error (Types.Task (Types.Task_error.InvalidState msg))
+                        | Some msg -> Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg))
                         | None ->
                             let updated_caps =
                               match capabilities with
@@ -135,7 +135,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
                             log_event config (`Assoc [
                               ("type", `String "agent_update");
                               ("agent", `String actual_name);
-                              ("status", `String (Types.agent_status_to_string updated_status));
+                              ("status", `String (Masc_domain.agent_status_to_string updated_status));
                               ("capabilities", `List (List.map (fun s -> `String s) updated_caps));
                               ("ts", `String (now_iso ()));
                             ]);

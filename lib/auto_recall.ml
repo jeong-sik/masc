@@ -116,7 +116,7 @@ let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_c
     ~since_seq:0
     ~limit:config.max_broadcasts
   in
-  List.mapi (fun i (msg : Types.message) ->
+  List.mapi (fun i (msg : Masc_domain.message) ->
     (* More recent messages get higher relevance *)
     let relevance = 1.0 -. (float_of_int i /. float_of_int (max 1 (List.length messages))) in
     {

@@ -205,20 +205,20 @@ let safe_is_zombie_agent ~agent_name last_seen =
       false
 
 let todo_task_has_completed_deliverable_conflict (ctx : context)
-    (task : Types.task) =
+    (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Todo -> (
+  | Masc_domain.Todo -> (
       match Planning_eio.load ctx.config ~task_id:task.id with
       | Ok plan_ctx ->
           Coord_status_rendering.deliverable_claims_completion
             ~task_id:task.id plan_ctx.deliverable
       | Error _ -> false)
-  | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
-  | Types.Done _ | Types.Cancelled _ -> false
+  | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
 
 let todo_completed_deliverable_conflicts (ctx : context) tasks =
   List.filter_map
-    (fun ((task : Types.task)) ->
+    (fun ((task : Masc_domain.task)) ->
       Coord_query.safe_yield ();
       if todo_task_has_completed_deliverable_conflict ctx task then Some task.id
       else None)
@@ -271,7 +271,7 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
   }
 
 let planning_context_state (ctx : context) (binding : current_binding)
-    (active_tasks : Types.task list) =
+    (active_tasks : Masc_domain.task list) =
   match binding.primary_owned with
   | None ->
       { planning_missing_task = None; deliverable_conflict_task = None }
@@ -282,12 +282,12 @@ let planning_context_state (ctx : context) (binding : current_binding)
       | Ok plan_ctx ->
           let deliverable_conflict_task =
             match
-              List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+              List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
                 active_tasks
             with
               | Some
                   {
-                    task_status = (Types.Claimed _ | Types.InProgress _);
+                    task_status = (Masc_domain.Claimed _ | Masc_domain.InProgress _);
                     _;
                   }
               when
@@ -335,12 +335,12 @@ let status_summary_string (ctx : context) =
   let effective_cluster_name = effective_cluster_name ctx.config in
   let agents =
     safe_get_agents ctx
-    |> List.sort (fun (a : Types.agent) (b : Types.agent) ->
+    |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
            String.compare a.name b.name)
   in
   let agents_with_state =
     List.map
-      (fun (agent : Types.agent) ->
+      (fun (agent : Masc_domain.agent) ->
         Coord_query.safe_yield ();
         let is_zombie =
           safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
@@ -358,25 +358,25 @@ let status_summary_string (ctx : context) =
     List.fold_left
       (fun
          (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
-         (task : Types.task) ->
+         (task : Masc_domain.task) ->
         Coord_query.safe_yield ();
         match task.task_status with
-        | Types.Todo ->
+        | Masc_domain.Todo ->
             (task :: active, todo_cnt + 1, claimed_cnt, in_progress_cnt,
              done_cnt, cancelled_cnt)
-        | Types.Claimed _ ->
+        | Masc_domain.Claimed _ ->
             (task :: active, todo_cnt, claimed_cnt + 1, in_progress_cnt,
              done_cnt, cancelled_cnt)
-        | Types.InProgress _ ->
+        | Masc_domain.InProgress _ ->
             (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
              done_cnt, cancelled_cnt)
-        | Types.Done _ ->
+        | Masc_domain.Done _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt + 1,
              cancelled_cnt)
-        | Types.AwaitingVerification _ ->
+        | Masc_domain.AwaitingVerification _ ->
             (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
              done_cnt, cancelled_cnt)
-        | Types.Cancelled _ ->
+        | Masc_domain.Cancelled _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt,
              cancelled_cnt + 1))
       ([], 0, 0, 0, 0, 0)
@@ -391,7 +391,7 @@ let status_summary_string (ctx : context) =
   in
   let assigned_task_ids =
     List.filter_map
-      (fun (task : Types.task) ->
+      (fun (task : Masc_domain.task) ->
         match Coord_status_rendering.active_task_assignee task.task_status with
         | Some assignee when matches_you assignee -> Some task.id
         | Some _ | None -> None)
@@ -699,19 +699,19 @@ let tool_required_permission = function
   | "masc_status" | "masc_workflow_guide" | "masc_check"
   | "masc_coordination_fsm_snapshot"
   | "masc_goal_list" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_goal_upsert" | "masc_goal_review"
   | "masc_goal_transition" | "masc_goal_verify" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | "masc_heartbeat" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | "masc_reset" ->
-      Some Types.CanReset
+      Some Masc_domain.CanReset
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create

@@ -1,4 +1,4 @@
-(** Closed-enum classification of [Types.t] for auth-related logging
+(** Closed-enum classification of [Masc_domain.t] for auth-related logging
     and prometheus metric labels. See [auth_error_kind.ml] for the
     rationale and migration scope. *)
 
@@ -20,10 +20,10 @@ val to_string : t -> string
     than collapsing to [Other], so callers can detect contract drift. *)
 val of_string : string -> t option
 
-(** Map a [Types.t] value to its label. Constructors not modelled here
+(** Map a [Masc_domain.t] value to its label. Constructors not modelled here
     fall through to [Other]; add an explicit arm rather than relying on
     that fallback when introducing a new auth-relevant error. *)
-val classify : Types.t -> t
+val classify : Masc_domain.t -> t
 
 (** All inhabitants in declaration order. Used by exhaustiveness tests. *)
 val all : t list

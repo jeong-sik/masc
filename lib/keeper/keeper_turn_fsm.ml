@@ -336,11 +336,11 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
    already terminated must not re-enter execution paths — was previously
    only guarded by reviewer-eye inspection of call sites. *)
 
-let require_active_state : type a. a turn_state -> (unit, Types.masc_error) result = fun s ->
+let require_active_state : type a. a turn_state -> (unit, Masc_domain.masc_error) result = fun s ->
   match s with
   | Done | Failed _ | Cancelled _ ->
       Error
-        (Types.Task (Types.Task_error.InvalidState
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf "Terminal state %s cannot re-enter active paths"
               (turn_state_label s))))
   | _ -> Ok ()

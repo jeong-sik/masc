@@ -126,8 +126,8 @@ val dispatch :
 
 (** {1 MCP schemas} *)
 
-val schemas : Types.tool_schema list
-(** [schemas] is the 5-entry [Types.tool_schema] list registered
+val schemas : Masc_domain.tool_schema list
+(** [schemas] is the 5-entry [Masc_domain.tool_schema] list registered
     with the MCP catalog.  Used by [Tool_spec.register] in this
     module's side-effect block at module load.  External
     callers (e.g. [Tools.ml]) read it for catalog enumeration. *)

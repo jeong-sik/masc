@@ -167,12 +167,12 @@ let approval_rule_to_yojson (rule : approval_rule) =
       ("request_fingerprint_preview", `String rule.request_fingerprint_preview);
       ("max_risk", `String (risk_level_to_string rule.max_risk));
       ("created_at", `Float rule.created_at);
-      ("created_at_iso", `String (Types.iso8601_of_unix_seconds rule.created_at));
+      ("created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds rule.created_at));
       ("created_by", Json_util.string_opt_to_json rule.created_by);
       ("last_matched_at", Json_util.float_opt_to_json rule.last_matched_at);
       ( "last_matched_at_iso",
         match rule.last_matched_at with
-        | Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
         | None -> `Null );
       ("match_count", `Int rule.match_count);
       ("source_approval_id", Json_util.string_opt_to_json rule.source_approval_id);
@@ -674,7 +674,7 @@ let pending_entry_json_fields ?(include_requested_at_iso = false)
     ("disposition_reason", Json_util.string_opt_to_json entry.disposition_reason);
   ]
   @ (if include_requested_at_iso then
-       [ ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at)) ]
+       [ ("requested_at_iso", `String (Masc_domain.iso8601_of_unix_seconds entry.requested_at)) ]
      else [])
   @ (if include_runtime_contract then
        [

@@ -47,7 +47,7 @@ val vote_direction_enum_strings : string list
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
-  tools : Types.tool_schema list;
+  tools : Masc_domain.tool_schema list;
   read_only_tools : string list;
   (** Tool names within this shard that have no side effects.
       Used by [Keeper_tool_registry] to derive the read-only set
@@ -81,7 +81,7 @@ val default_shard_names : string list
 (** Default shards for a new keeper: base, board, filesystem, shell,
     library, taskboard, coding, autoresearch. *)
 
-val tools_of_shards : string list -> Types.tool_schema list
+val tools_of_shards : string list -> Masc_domain.tool_schema list
 (** Combine tools from multiple shard names. *)
 
 (** {1 Dynamic Shard Management} *)
@@ -123,37 +123,37 @@ val remove_agent_shards : string -> unit
 
 (** {1 Tool Definitions} *)
 
-val base_tools : Types.tool_schema list
+val base_tools : Masc_domain.tool_schema list
 (** Core tools: time_now, context_status, memory_search. *)
 
-val board_tools : Types.tool_schema list
+val board_tools : Masc_domain.tool_schema list
 (** Board tools: board_post, board_list, board_comment, board_vote. *)
 
 (** {1 MCP Interface} *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
     Agent shard state is tracked in-memory per agent. *)
 
-val autoresearch_keeper_tools : Types.tool_schema list
+val autoresearch_keeper_tools : Masc_domain.tool_schema list
 (** Autoresearch tools for keeper use.
     (Earlier revisions excluded now-removed orchestration front doors.) *)
 
 val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)
 
-val coding_tools : Types.tool_schema list
+val coding_tools : Masc_domain.tool_schema list
 (** Coding shard tools (keeper_bash + worktree/code inspection).
     keeper_shell with op=gh provides GitHub CLI access.
     Not in default shards. *)
 
-val keeper_preflight_tools : Types.tool_schema list
+val keeper_preflight_tools : Masc_domain.tool_schema list
 (** Pre-flight validation tool schema. *)
 
-val all_keeper_tool_schemas : Types.tool_schema list
+val all_keeper_tool_schemas : Masc_domain.tool_schema list
 (** #10101: every keeper-facing tool schema exposed by this
     module, built from [all_shards] (so new shard categories
     flow through automatically) plus the non-shard lists
@@ -162,11 +162,11 @@ val all_keeper_tool_schemas : Types.tool_schema list
     [Tool_help_registry.find_entry] can resolve every shard
     tool.  Duplicates are possible; dedupe at consumer. *)
 
-val keeper_pr_review_tools : Types.tool_schema list
+val keeper_pr_review_tools : Masc_domain.tool_schema list
 (** PR review tools (read, comment, reply) schemas. *)
 
 val shard_coding : shard
 (** Coding shard: github/shell bridge + worktree/code inspection. *)
 
-val keeper_model_tools : Types.tool_schema list
+val keeper_model_tools : Masc_domain.tool_schema list
 (** Default tool set from default shards — excludes coding tools. *)

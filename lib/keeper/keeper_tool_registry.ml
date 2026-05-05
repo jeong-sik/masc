@@ -339,18 +339,18 @@ let all_tools_reconcile_safe (names : string list) : bool =
 
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 
-let masc_schemas_ref : Types.tool_schema list ref = ref []
+let masc_schemas_ref : Masc_domain.tool_schema list ref = ref []
 
 let injected_masc_tool_names () =
   !masc_schemas_ref
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 (* ── keeper_tool_search schema ───────────────────────────────── *)
 
 (** SSOT schema for keeper_tool_search.  Defined here because this is
     the keeper tool registry — the canonical owner of keeper-internal tool
     metadata.  Consumed by [keeper_tool_policy.keeper_default_model_tools]. *)
-let keeper_tool_search_schema : Types.tool_schema =
+let keeper_tool_search_schema : Masc_domain.tool_schema =
   {
     name = Tool_name.(to_string (Keeper Tool_search));
     description =

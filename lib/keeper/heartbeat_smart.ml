@@ -60,7 +60,7 @@ let should_emit ~config ~agent_status ~last_activity ~last_heartbeat =
   let now = Time_compat.now () in
 
   (* Rule 1: Skip if busy and busy_skip is enabled *)
-  if config.busy_skip && agent_status = Types.Busy then
+  if config.busy_skip && agent_status = Masc_domain.Busy then
     Skip_busy
   else
     let interval = effective_interval ~config ~last_activity in

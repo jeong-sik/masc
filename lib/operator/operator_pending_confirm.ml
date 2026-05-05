@@ -168,7 +168,7 @@ let write_pending_confirms config (entries : pending_confirm list) =
 
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
-  | Some exp -> Types.now_iso () > exp
+  | Some exp -> Masc_domain.now_iso () > exp
   | None -> false
 
 let read_pending_confirms config : pending_confirm list =

@@ -43,7 +43,7 @@ let ctx_compacting       = Env_config.Dashboard.ctx_compacting
     SSOT: [Env_config.Dashboard] module. *)
 let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 
-let task_assignee (task : Types.task) =
+let task_assignee (task : Masc_domain.task) =
   match task.task_status with
   | Claimed { assignee; _ } | InProgress { assignee; _ }
   | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
@@ -53,9 +53,9 @@ let task_assignee (task : Types.task) =
 let last_message_map messages =
   let table = Hashtbl.create 32 in
   List.iter
-    (fun (message : Types.message) ->
+    (fun (message : Masc_domain.message) ->
       let key = String.lowercase_ascii (String.trim message.from_agent) in
-      let ts = Types.parse_iso8601 message.timestamp in
+      let ts = Masc_domain.parse_iso8601 message.timestamp in
       match Hashtbl.find_opt table key with
       | Some (existing_ts, _) when existing_ts >= ts -> ()
       | _ -> Hashtbl.replace table key (ts, message))
@@ -64,7 +64,7 @@ let last_message_map messages =
 
 let active_task_count tasks agent_name =
   List.fold_left
-    (fun acc (task : Types.task) ->
+    (fun acc (task : Masc_domain.task) ->
       match task.task_status, task_assignee task with
       | (Claimed _ | InProgress _), Some assignee when assignee = agent_name -> acc + 1
       | _ -> acc)
@@ -72,10 +72,10 @@ let active_task_count tasks agent_name =
 
 let worker_state_of_agent
     ~(now_ts : float)
-    ~(messages_by_agent : (string, float * Types.message) Hashtbl.t)
-    ~(tasks : Types.task list)
+    ~(messages_by_agent : (string, float * Masc_domain.message) Hashtbl.t)
+    ~(tasks : Masc_domain.task list)
     ?related_session_id ?related_operation_id
-    (agent : Types.agent) : worker_context =
+    (agent : Masc_domain.agent) : worker_context =
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
   let last_seen_ts =
@@ -126,14 +126,14 @@ let worker_state_of_agent
     Option.is_some (trim_to_option (Option.value ~default:"" agent.current_task))
     || active_task_count > 0
   in
-  let status_string = Types.string_of_agent_status agent.status in
+  let status_string = Masc_domain.string_of_agent_status agent.status in
   let (state, tone, note) =
     match agent.status with
-    | Types.Inactive ->
+    | Masc_domain.Inactive ->
         ( "offline",
           Tone_bad,
           if last_signal_ts > 0.0 then "Offline or inactive" else "No recent presence" )
-    | Types.Busy | Types.Active | Types.Listening ->
+    | Masc_domain.Busy | Masc_domain.Active | Masc_domain.Listening ->
         if signal_age_s > signal_stale_sec then
           ( "quiet",
             Tone_bad,
@@ -385,41 +385,41 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
    future code needs status-based severity, re-introduce with a Variant
    input + exhaustive match instead of a string. *)
 
-let task_operation_status (task : Types.task) =
+let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Some "active"
-  | Types.AwaitingVerification _ -> Some "paused"
-  | Types.Done _ | Types.Cancelled _ -> None
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
+  | Masc_domain.AwaitingVerification _ -> Some "paused"
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
-let task_operation_severity (task : Types.task) =
+let task_operation_severity (task : Masc_domain.task) =
   match task.task_status with
-  | Types.AwaitingVerification _ -> Tone_warn
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Tone_ok
-  | Types.Done _ | Types.Cancelled _ -> Tone_ok
+  | Masc_domain.AwaitingVerification _ -> Tone_warn
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
 
-let task_operation_updated_at (task : Types.task) =
+let task_operation_updated_at (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Done { completed_at; _ } -> completed_at
-  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Types.InProgress { started_at; _ } -> started_at
-  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Types.Claimed { claimed_at; _ } -> claimed_at
-  | Types.Todo -> task.created_at
+  | Masc_domain.Done { completed_at; _ } -> completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.InProgress { started_at; _ } -> started_at
+  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Todo -> task.created_at
 
-let task_operation_links (task : Types.task) =
+let task_operation_links (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> contract.links
-  | None -> { Types.operation_id = None; session_id = None; autoresearch_loop_id = None }
+  | None -> { Masc_domain.operation_id = None; session_id = None; autoresearch_loop_id = None }
 
-let task_operation_id (task : Types.task) =
+let task_operation_id (task : Masc_domain.task) =
   let links = task_operation_links task in
   match trim_to_option (Option.value ~default:"" links.operation_id) with
   | Some operation_id -> operation_id
   | None -> task.id
 
-let build_operation_contexts ~(tasks : Types.task list) =
+let build_operation_contexts ~(tasks : Masc_domain.task list) =
   tasks
-  |> List.filter_map (fun (task : Types.task) ->
+  |> List.filter_map (fun (task : Masc_domain.task) ->
          match task_operation_status task with
          | None -> None
          | Some status ->
@@ -446,7 +446,7 @@ let build_operation_contexts ~(tasks : Types.task list) =
                    [
                      ("operation_id", `String operation_id);
                      ("status", `String status);
-                     ("task_status", `String (Types.task_status_to_string task.task_status));
+                     ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
                      ("stage", json_string_option stage);
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
@@ -470,12 +470,12 @@ let build_operation_contexts ~(tasks : Types.task list) =
          if by_tone <> 0 then by_tone
          else Float.compare right.last_seen_ts left.last_seen_ts)
 
-let build_worker_support_briefs ~(now_ts : float) ~(tasks : Types.task list)
-    ~(agents : Types.agent list) ~(messages : Types.message list) session_contexts :
+let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task list)
+    ~(agents : Masc_domain.agent list) ~(messages : Masc_domain.message list) session_contexts :
     worker_context list =
   let messages_by_agent = last_message_map messages in
   agents
-  |> List.map (fun (agent : Types.agent) ->
+  |> List.map (fun (agent : Masc_domain.agent) ->
          let related =
            related_session_for_member session_contexts agent.name
          in

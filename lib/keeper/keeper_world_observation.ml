@@ -172,7 +172,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
   let rec consume_room_messages remaining last_processed mentions scope_messages =
     function
     | [] -> (`Done, remaining, last_processed, List.rev mentions, List.rev scope_messages)
-    | (msg : Types.message) :: rest ->
+    | (msg : Masc_domain.message) :: rest ->
         let author = String.trim msg.from_agent in
         if author = ""
            || List.exists
@@ -238,7 +238,7 @@ let apply_message_cursor_updates (meta : keeper_meta)
 
 let backlog_updated_since_last_scheduled_autonomous
     ~(meta : keeper_meta)
-    ~(backlog : Types.backlog) : bool =
+    ~(backlog : Masc_domain.backlog) : bool =
   let last_ts = meta.runtime.proactive_rt.last_ts in
   if last_ts <= 0.0 then backlog.tasks <> []
   else
@@ -254,7 +254,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
     let backlog = Coord.read_backlog config in
     let unclaimed_tasks =
       List.filter
-        (fun (t : Types.task) -> t.task_status = Types.Todo)
+        (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
@@ -278,21 +278,21 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
     let failed =
       List.length
         (List.filter
-           (fun (t : Types.task) ->
+           (fun (t : Masc_domain.task) ->
              match t.task_status with
-             | Types.Cancelled _ -> true
-             | Types.Todo | Types.Claimed _ | Types.InProgress _
-             | Types.AwaitingVerification _ | Types.Done _ -> false)
+             | Masc_domain.Cancelled _ -> true
+             | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+             | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> false)
            backlog.tasks)
     in
     let pending_verification =
       List.length
         (List.filter
-           (fun (t : Types.task) ->
+           (fun (t : Masc_domain.task) ->
              match t.task_status with
-             | Types.AwaitingVerification _ -> true
-             | Types.Todo | Types.Claimed _ | Types.InProgress _
-             | Types.Done _ | Types.Cancelled _ -> false)
+             | Masc_domain.AwaitingVerification _ -> true
+             | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+             | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false)
            backlog.tasks)
     in
     let backlog_updated_since_last_scheduled_autonomous =

@@ -216,7 +216,7 @@ let purge_keeper_artifacts config requested_name
 let add_delete_action_routes router =
   router
   |> Http.Router.post "/api/v1/dashboard/board/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -242,7 +242,7 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -260,7 +260,7 @@ let add_delete_action_routes router =
              | Error err ->
                  Http.Response.json ~status:`Not_found ~request:req
                    (Printf.sprintf {|{"ok":false,"error":"task delete failed: %s"}|}
-                      (String.escaped (Types.masc_error_to_string err)))
+                      (String.escaped (Masc_domain.masc_error_to_string err)))
                    reqd
            with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
@@ -269,7 +269,7 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -295,7 +295,7 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/agents/purge" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -347,7 +347,7 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name _req reqd ->
          let config = state.Mcp_server.room_config in
          let result = Goal_janitor.run config in

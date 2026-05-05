@@ -203,7 +203,7 @@ let extract_ts (json : Yojson.Safe.t) : float =
     in
     let try_iso_field name =
       match List.assoc_opt name fields with
-      | Some (`String iso) -> Types.parse_iso8601_opt iso
+      | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
       | _ -> None
     in
     let rec first_some f = function
@@ -291,7 +291,7 @@ let freshness_fields ~now latest_ts =
     let age = max 0.0 (now -. ts) in
     [
       ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
       ("latest_age_s", `Float age);
     ]
   | None ->
@@ -1026,7 +1026,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     List.fold_left (fun acc (_json, count) -> acc + count) 0 source_summaries
   in
   `Assoc [
-    ("generated_at", `String (Types.now_iso ()));
+    ("generated_at", `String (Masc_domain.now_iso ()));
     ("sources", `List (List.map fst source_summaries));
     ("coverage_gaps", `List coverage_gaps);
     ("total_entries", `Int total_entries);

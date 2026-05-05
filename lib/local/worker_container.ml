@@ -298,9 +298,9 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
   Result.map
     (fun schemas ->
       schemas
-      |> List.filter (fun (schema : Types.tool_schema) ->
+      |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name allowed_names)
-      |> List.map (fun (schema : Types.tool_schema) ->
+      |> List.map (fun (schema : Masc_domain.tool_schema) ->
              let call_fn input =
                let args =
                  input

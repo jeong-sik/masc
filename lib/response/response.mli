@@ -153,7 +153,7 @@ val handoff_verified : similarity:float -> t
 
 (** {1 Task-specific responses}
 
-    These route status strings through [Types.task_status_to_string]
+    These route status strings through [Masc_domain.task_status_to_string]
     so the value returned here matches what other emitters/parsers
     see — see the comment in the implementation (issues #8364, #8412)
     for why this matters. *)

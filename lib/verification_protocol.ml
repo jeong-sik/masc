@@ -48,7 +48,7 @@ let deliverable_claims_completion ~task_id deliverable =
         normalized
       || String.starts_with ~prefix:"completed" normalized)
 
-let submit_request_spec ~(config : Coord.config) ~(task : Types.task)
+let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
     match Planning_eio.load config ~task_id:task.id with
@@ -94,7 +94,7 @@ let submit_request_spec ~(config : Coord.config) ~(task : Types.task)
   ; board_content
   }
 
-let warn_contract_gap (task : Types.task) =
+let warn_contract_gap (task : Masc_domain.task) =
   (* Observability for #8272: tasks submitted without a contract land in
      storage with empty completion_contract + empty evidence, which the
      dashboard renders as "—". Surface this as a warn so operators can
@@ -114,7 +114,7 @@ let warn_contract_gap (task : Types.task) =
    | Some _ -> ())
 
 let create_submit_request ~(config : Coord.config)
-    ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
+    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
   warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
@@ -130,7 +130,7 @@ let create_submit_request ~(config : Coord.config)
     Error e
 
 let notify_submit_for_verification ~(config : Coord.config)
-    ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
+    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
   let meta_json = `Assoc [
     ("type", `String spec.board_type);
@@ -170,7 +170,7 @@ let notify_submit_for_verification ~(config : Coord.config)
   ()
 
 let on_submit_for_verification ~(config : Coord.config)
-    ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
+    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   match create_submit_request ~config ~task ~assignee ~verification_id ~evidence_refs with
   | Error e -> Error e
   | Ok () ->
@@ -321,10 +321,10 @@ let check_timeouts ~(config : Coord.config) =
     try
       let backlog = Coord.read_backlog config in
       let now = Time_compat.now () in
-      List.iter (fun (task : Types.task) ->
+      List.iter (fun (task : Masc_domain.task) ->
         match task.task_status with
-        | Types.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
-          (match Types.parse_iso8601_opt dl with
+        | Masc_domain.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
+          (match Masc_domain.parse_iso8601_opt dl with
            | Some deadline_ts when now > deadline_ts ->
              let () =
                match Board_dispatch.create_post
@@ -380,7 +380,7 @@ let check_timeouts ~(config : Coord.config) =
                 Log.Task.error
                   "verification timeout transition failed (task=%s vrf=%s): %s"
                   task.id verification_id
-                  (Types.show_masc_error e))
+                  (Masc_domain.show_masc_error e))
            | Some _ -> ()
            | None -> ())
         | Todo | Claimed _ | InProgress _ | AwaitingVerification { deadline = None; _ } | Done _ | Cancelled _ -> ()

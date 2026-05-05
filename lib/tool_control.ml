@@ -109,13 +109,13 @@ let dispatch ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let tool_required_permission = function
-  | "masc_pause_status" -> Some Types.CanReadState
-  | "masc_pause" | "masc_resume" -> Some Types.CanBroadcast
+  | "masc_pause_status" -> Some Masc_domain.CanReadState
+  | "masc_pause" | "masc_resume" -> Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

@@ -535,7 +535,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
         | Some v -> Some v
         | None ->
             (match List.assoc_opt "timestamp" fields with
-             | Some (`String s) -> Types.parse_iso8601_opt s
+             | Some (`String s) -> Masc_domain.parse_iso8601_opt s
              | _ -> None)
       in
       (match ts with

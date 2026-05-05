@@ -6,7 +6,7 @@
     that depend on bindings from all three.  All bindings are part of the
     public [Coord] interface via [include Coord_task] in [lib/coord.ml]. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
@@ -30,10 +30,10 @@ let transition_task_r
       ?handoff_context
       ?(force = false)
       ()
-  : string Types.masc_result
+  : string Masc_domain.masc_result
   =
   let open Result.Syntax in
-  let* () = if not (is_initialized config) then Error (Types.System Types.System_error.NotInitialized) else Ok () in
+  let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -50,13 +50,13 @@ let transition_task_r
   with_file_lock config backlog_path (fun () ->
     try
       match read_backlog_r config with
-      | Error msg -> Error (Types.System (Types.System_error.IoError msg))
+      | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
       | Ok backlog ->
         let* () =
           match expected_version with
           | Some v when backlog.version <> v ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf
                     "Version mismatch (expected %d, got %d)"
                     v
@@ -66,33 +66,33 @@ let transition_task_r
         let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
         let* task =
           match task_opt with
-          | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
+          | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
         let* () =
           match action with
-          | Types.Claim ->
+          | Masc_domain.Claim ->
             required_tool_claim_guard config ~agent_name ?agent_tool_names task
-          | Types.Release
-          | Types.Start
-          | Types.Submit_for_verification
-          | Types.Approve_verification
-          | Types.Reject_verification
-          | Types.Done_action
-          | Types.Cancel ->
+          | Masc_domain.Release
+          | Masc_domain.Start
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel ->
             Ok ()
         in
         let* () =
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
-          | Types.Claim, Some r ->
+          | Masc_domain.Claim, Some r ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
           | _ -> Ok ()
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
-        let action_s = Types.task_action_to_string action in
+        let action_s = Masc_domain.task_action_to_string action in
         let* decision =
           match
             Coord_task_lifecycle.decide
@@ -112,15 +112,15 @@ let transition_task_r
           | Ok decision -> Ok decision
           | Error Coord_task_lifecycle.Self_approval ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  "Self-approval not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Self_rejection ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  "Self-rejection not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Verification_disabled ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
           | Error Coord_task_lifecycle.Invalid_transition ->
             let assignee_hint =
@@ -149,40 +149,40 @@ let transition_task_r
                 | _ -> false
               in
               match task.task_status, action with
-              | Types.Todo, Types.Release ->
+              | Masc_domain.Todo, Masc_domain.Release ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first, then action=release once you own it."
-              | Types.Todo, (Types.Done_action | Types.Cancel) ->
+              | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim then action=start before trying to finish or cancel it."
-              | Types.Todo, Types.Start ->
+              | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
-              | Types.Claimed _, Types.Release when not own_assignee ->
+              | Masc_domain.Claimed _, Masc_domain.Release when not own_assignee ->
                 " Remediation: this task is claimed by another keeper. Use \
                  masc_board_post to ask that agent to release/hand off, or claim a \
                  different task with masc_claim_next."
-              | Types.Claimed _, Types.Done_action when not own_assignee ->
+              | Masc_domain.Claimed _, Masc_domain.Done_action when not own_assignee ->
                 " Remediation: only the current assignee can mark a task done. Pick a \
                  different task or coordinate via masc_board_post."
-              | (Types.Claimed _ | Types.InProgress _), Types.Cancel when not own_assignee
+              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Cancel when not own_assignee
                 ->
                 " Remediation: cancellation requires owning the task. Use \
                  masc_board_post to ask the current assignee to cancel or release, or \
                  claim a different task with masc_claim_next."
-              | Types.InProgress _, Types.Claim ->
+              | Masc_domain.InProgress _, Masc_domain.Claim ->
                 " Remediation: task is already in_progress under someone. Use \
                  masc_claim_next for unclaimed work."
-              | Types.Done _, _ ->
+              | Masc_domain.Done _, _ ->
                 " Remediation: task is already in a terminal state (done). Use \
                  masc_add_task for new work or masc_tasks to find claimable items."
-              | Types.Cancelled _, _ ->
+              | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
               | _ -> ""
             in
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf
                     "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
                     (task_status_to_string task.task_status)
@@ -197,9 +197,9 @@ let transition_task_r
         let set_current = decision.set_current in
         let* () =
           match action, task.task_status, new_status, prepare_verification_request with
-          | ( Types.Submit_for_verification,
+          | ( Masc_domain.Submit_for_verification,
               _,
-              Types.AwaitingVerification { assignee; verification_id; _ },
+              Masc_domain.AwaitingVerification { assignee; verification_id; _ },
               Some prepare ) ->
             let evidence_refs =
               match task.contract with
@@ -210,39 +210,39 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.System (Types.System_error.IoError
+                 (Masc_domain.System (Masc_domain.System_error.IoError
                     (Printf.sprintf
                        "verification request creation failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
                        e))))
-          | Types.Submit_for_verification, _, _, Some _ ->
+          | Masc_domain.Submit_for_verification, _, _, Some _ ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf
                     "submit_for_verification did not produce AwaitingVerification \
                      for task %s"
                     task_id)))
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Approve_verification
-            | Types.Reject_verification ),
+          | ( Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Done_action
+            | Masc_domain.Cancel
+            | Masc_domain.Release
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification ),
             _,
             _,
             Some _ ->
             Ok ()
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Approve_verification
-            | Types.Reject_verification
-            | Types.Submit_for_verification ),
+          | ( Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Done_action
+            | Masc_domain.Cancel
+            | Masc_domain.Release
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification
+            | Masc_domain.Submit_for_verification ),
             _,
             _,
             None ->
@@ -250,8 +250,8 @@ let transition_task_r
         in
         let* () =
           match action, task.task_status, prepare_verification_verdict with
-          | ( Types.Approve_verification,
-              Types.AwaitingVerification { verification_id; _ },
+          | ( Masc_domain.Approve_verification,
+              Masc_domain.AwaitingVerification { verification_id; _ },
               Some prepare ) ->
             (match
                prepare
@@ -263,15 +263,15 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.System (Types.System_error.IoError
+                 (Masc_domain.System (Masc_domain.System_error.IoError
                     (Printf.sprintf
                        "verification verdict persistence failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
                        e))))
-          | ( Types.Reject_verification,
-              Types.AwaitingVerification { verification_id; _ },
+          | ( Masc_domain.Reject_verification,
+              Masc_domain.AwaitingVerification { verification_id; _ },
               Some prepare ) ->
             let reject_reason = if notes <> "" then notes else reason in
             (match
@@ -284,37 +284,37 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Types.System (Types.System_error.IoError
+                 (Masc_domain.System (Masc_domain.System_error.IoError
                     (Printf.sprintf
                        "verification verdict persistence failed before status transition \
                         (task=%s vrf=%s): %s"
                        task_id
                        verification_id
                        e))))
-          | (Types.Approve_verification | Types.Reject_verification), _, Some _ ->
+          | (Masc_domain.Approve_verification | Masc_domain.Reject_verification), _, Some _ ->
             Error
-              (Types.Task (Types.Task_error.InvalidState
+              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf
                     "verification verdict action did not start from AwaitingVerification \
                      for task %s"
                     task_id)))
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Submit_for_verification ),
+          | ( Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Done_action
+            | Masc_domain.Cancel
+            | Masc_domain.Release
+            | Masc_domain.Submit_for_verification ),
             _,
             Some _ ->
             Ok ()
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Submit_for_verification
-            | Types.Approve_verification
-            | Types.Reject_verification ),
+          | ( Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Done_action
+            | Masc_domain.Cancel
+            | Masc_domain.Release
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification ),
             _,
             None ->
             Ok ()
@@ -349,28 +349,28 @@ let transition_task_r
            [Done]; emit goes through [task_completion_path_observed_fn]
            so [masc_coord] keeps no direct [Prometheus] dep. *)
         (match new_status with
-         | Types.Done _ ->
+         | Masc_domain.Done _ ->
            let contract_state = classify_contract_state task.contract in
            let path =
              classify_completion_path ~action ~drift:decision.drift ~force
            in
            (Atomic.get Coord_hooks.task_completion_path_observed_fn)
              ~path ~contract_state ~agent_name
-         | Types.Todo | Types.Claimed _ | Types.InProgress _
-         | Types.AwaitingVerification _ | Types.Cancelled _ -> ());
+         | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+         | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _ -> ());
         (match action, task.task_status with
-         | Types.Release, Types.Todo ->
+         | Masc_domain.Release, Masc_domain.Todo ->
            (* Idempotent: already in backlog, nothing to release.
               Logged at debug so that callers passing a wrong task_id
               (e.g. confused the target of a multi-task release) can
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
-       | Types.Claim, _ | Types.Start, _ | Types.Done_action, _ | Types.Cancel, _
-       | Types.Submit_for_verification, _ | Types.Approve_verification, _
-       | Types.Reject_verification, _
-       | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
-       | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
-       | Types.Release, Types.Cancelled _ -> ());
+       | Masc_domain.Claim, _ | Masc_domain.Start, _ | Masc_domain.Done_action, _ | Masc_domain.Cancel, _
+       | Masc_domain.Submit_for_verification, _ | Masc_domain.Approve_verification, _
+       | Masc_domain.Reject_verification, _
+       | Masc_domain.Release, Masc_domain.Claimed _ | Masc_domain.Release, Masc_domain.InProgress _
+       | Masc_domain.Release, Masc_domain.AwaitingVerification _ | Masc_domain.Release, Masc_domain.Done _
+       | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
         (* #10719: surface tasks that have crossed oscillation thresholds
            so dashboards/triage can pick them up before they reach 20+
            cycles with zero progress.  Production observation
@@ -385,7 +385,7 @@ let transition_task_r
            release of the same task.  Pure observation: does not block
            the release. *)
         (match action with
-         | Types.Release ->
+         | Masc_domain.Release ->
            let cc = task.cycle_count + 1 in
            let escalation =
              if task.cycle_count = 19 then Some ("severe", 20)
@@ -410,10 +410,10 @@ let transition_task_r
                  for triage; consider reformulation or human escalation \
                  if level=severe)"
                 level task_id agent_name cc threshold)
-         | Types.Claim | Types.Start
-         | Types.Done_action | Types.Cancel
-         | Types.Submit_for_verification | Types.Approve_verification
-         | Types.Reject_verification -> ());
+         | Masc_domain.Claim | Masc_domain.Start
+         | Masc_domain.Done_action | Masc_domain.Cancel
+         | Masc_domain.Submit_for_verification | Masc_domain.Approve_verification
+         | Masc_domain.Reject_verification -> ());
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
@@ -430,40 +430,40 @@ let transition_task_r
                  then (
                    let t =
                      match action with
-                     | Types.Claim -> clear_soft_do_not_reclaim_reason t
-                     | Types.Release
-                     | Types.Start
-                     | Types.Done_action
-                     | Types.Cancel
-                     | Types.Submit_for_verification
-                     | Types.Approve_verification
-                     | Types.Reject_verification -> t
+                     | Masc_domain.Claim -> clear_soft_do_not_reclaim_reason t
+                     | Masc_domain.Release
+                     | Masc_domain.Start
+                     | Masc_domain.Done_action
+                     | Masc_domain.Cancel
+                     | Masc_domain.Submit_for_verification
+                     | Masc_domain.Approve_verification
+                     | Masc_domain.Reject_verification -> t
                    in
                    let cycle_count, do_not_reclaim_reason =
                      match action with
-                     | Types.Release ->
+                     | Masc_domain.Release ->
                        ( t.cycle_count + 1
                        , derive_release_do_not_reclaim_reason t handoff_context )
-                     | Types.Claim
-                     | Types.Start
-                     | Types.Done_action
-                     | Types.Cancel
-                     | Types.Submit_for_verification
-                     | Types.Approve_verification
-                     | Types.Reject_verification -> t.cycle_count, t.do_not_reclaim_reason
+                     | Masc_domain.Claim
+                     | Masc_domain.Start
+                     | Masc_domain.Done_action
+                     | Masc_domain.Cancel
+                     | Masc_domain.Submit_for_verification
+                     | Masc_domain.Approve_verification
+                     | Masc_domain.Reject_verification -> t.cycle_count, t.do_not_reclaim_reason
                    in
                    { t with
                      task_status = new_status
                    ; handoff_context =
                        (match action with
-                        | Types.Release -> handoff_context
-                        | Types.Claim
-                        | Types.Start
-                        | Types.Done_action
-                        | Types.Cancel
-                        | Types.Submit_for_verification
-                        | Types.Approve_verification
-                        | Types.Reject_verification -> None)
+                        | Masc_domain.Release -> handoff_context
+                        | Masc_domain.Claim
+                        | Masc_domain.Start
+                        | Masc_domain.Done_action
+                        | Masc_domain.Cancel
+                        | Masc_domain.Submit_for_verification
+                        | Masc_domain.Approve_verification
+                        | Masc_domain.Reject_verification -> None)
                    ; cycle_count
                    ; do_not_reclaim_reason
                    })
@@ -498,25 +498,25 @@ let transition_task_r
                   ?reason:(trim_opt (Some reason))
                   ?handoff_context:
                     (match handoff_context with
-                     | Some _ when action = Types.Release -> handoff_context
+                     | Some _ when action = Masc_domain.Release -> handoff_context
                      | _ -> None)
                   ());
           (match action with
-           | Types.Claim ->
+           | Masc_domain.Claim ->
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Types.Start ->
+           | Masc_domain.Start ->
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Types.Done_action ->
+           | Masc_domain.Done_action ->
              emit_task_activity
                config
                ~agent_name
@@ -527,7 +527,7 @@ let transition_task_r
                      [ "task_id", `String task_id
                      ; ("notes", if notes = "" then `Null else `String notes)
                      ])
-           | Types.Cancel ->
+           | Masc_domain.Cancel ->
              emit_task_activity
                config
                ~agent_name
@@ -538,7 +538,7 @@ let transition_task_r
                      [ "task_id", `String task_id
                      ; ("reason", if reason = "" then `Null else `String reason)
                      ])
-           | Types.Release ->
+           | Masc_domain.Release ->
              emit_task_activity
                config
                ~agent_name
@@ -551,24 +551,24 @@ let transition_task_r
                       match handoff_context with
                       | Some handoff_context ->
                         [ ( "handoff_context"
-                          , Types.task_handoff_context_to_yojson handoff_context )
+                          , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
                       | None -> []))
-           | Types.Submit_for_verification ->
+           | Masc_domain.Submit_for_verification ->
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Types.Approve_verification ->
+           | Masc_domain.Approve_verification ->
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
                ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Types.Reject_verification ->
+           | Masc_domain.Reject_verification ->
              emit_task_activity
                config
                ~agent_name
@@ -577,18 +577,18 @@ let transition_task_r
                ~payload:(`Assoc [ "task_id", `String task_id ]));
           let duration_ms =
             match action with
-            | Types.Done_action | Types.Cancel ->
+            | Masc_domain.Done_action | Masc_domain.Cancel ->
               Some
                 (max
                    0
                    (int_of_float
                       ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
-            | Types.Claim
-            | Types.Start
-            | Types.Release
-            | Types.Submit_for_verification
-            | Types.Approve_verification
-            | Types.Reject_verification -> None
+            | Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Release
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification -> None
           in
           observe_task_transition
             config
@@ -629,7 +629,7 @@ let transition_task_r
                    Log.RoomTask.warn
                      "%s worktree auto-cleanup failed \
                       (best-effort, suppressed): %s"
-                     reason_label (Types.masc_error_to_string e)
+                     reason_label (Masc_domain.masc_error_to_string e)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
@@ -639,7 +639,7 @@ let transition_task_r
                    reason_label (Printexc.to_string exn))
           in
           (match action with
-           | Types.Done_action ->
+           | Masc_domain.Done_action ->
              (* Completion rewards are tied to the real state-changing done path;
                 idempotent done no-ops return before this block. *)
              (try
@@ -686,7 +686,7 @@ let transition_task_r
                 canonical lifecycle event; filesystem GC must not
                 fail the task transition. *)
              cleanup_worktree_for_transition "task_done"
-           | Types.Cancel ->
+           | Masc_domain.Cancel ->
              (try
                 let workers = working_agents config in
                 (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn)
@@ -702,7 +702,7 @@ let transition_task_r
              (* Cancel is terminal: no future claimant will pick up the
                 worktree, so cleanup unconditionally. *)
              cleanup_worktree_for_transition "task_cancel"
-           | Types.Release ->
+           | Masc_domain.Release ->
              (* Release returns the task to claimable.  The releasing
                 keeper's worktree is orphaned because the next claimant
                 (potentially a different keeper) will create its own
@@ -710,11 +710,11 @@ let transition_task_r
                 keeper's worktree to prevent the leak observed in
                 #10899 (5d / 7 keepers / 3.4 GB). *)
              cleanup_worktree_for_transition "task_release"
-           | Types.Claim
-           | Types.Start
-           | Types.Submit_for_verification
-           | Types.Approve_verification
-           | Types.Reject_verification -> ());
+           | Masc_domain.Claim
+           | Masc_domain.Start
+           | Masc_domain.Submit_for_verification
+           | Masc_domain.Approve_verification
+           | Masc_domain.Reject_verification -> ());
           Ok
             (Printf.sprintf
                "%s %s → %s"
@@ -723,18 +723,18 @@ let transition_task_r
                (task_status_to_string new_status)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e))))
+    | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
 ;;
 
 (** Release task back to backlog - transition wrapper *)
 let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context ()
-  : string Types.masc_result
+  : string Masc_domain.masc_result
   =
   transition_task_r
     config
     ~agent_name
     ~task_id
-    ~action:Types.Release
+    ~action:Masc_domain.Release
     ?expected_version
     ?handoff_context
     ()
@@ -742,25 +742,25 @@ let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_contex
 
 (** Force-release a task regardless of assignee. Keeper privilege. *)
 let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
-  : string Types.masc_result
+  : string Masc_domain.masc_result
   =
   transition_task_r
     config
     ~agent_name
     ~task_id
-    ~action:Types.Release
+    ~action:Masc_domain.Release
     ?handoff_context
     ~force:true
     ()
 ;;
 
 (** Force-done a task regardless of assignee. Keeper privilege. *)
-let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
+let force_done_task_r config ~agent_name ~task_id ~notes () : string Masc_domain.masc_result =
   transition_task_r
     config
     ~agent_name
     ~task_id
-    ~action:Types.Done_action
+    ~action:Masc_domain.Done_action
     ~notes
     ~force:true
     ()
@@ -771,46 +771,46 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_
     [AwaitingVerification] tasks whose verifier deadline has passed,
     so the FSM does not stall and re-emit Timeout posts forever. *)
 let force_cancel_task_r config ~agent_name ~task_id ~reason ()
-  : string Types.masc_result =
+  : string Masc_domain.masc_result =
   transition_task_r
     config
     ~agent_name
     ~task_id
-    ~action:Types.Cancel
+    ~action:Masc_domain.Cancel
     ~reason
     ~force:true
     ()
 ;;
 
 (** Cancel a task - A2A compatible *)
-let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
+let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
-  then Error (Types.System Types.System_error.NotInitialized)
+  then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
     let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
         match read_backlog_r config with
-        | Error msg -> Error (Types.System (Types.System_error.IoError msg))
+        | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
         | Ok backlog ->
           let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
           (match task_opt with
-           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
+           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task ->
              (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
              let can_cancel =
                match task.task_status with
-               | Types.Todo -> true
-               | Types.Claimed { assignee; _ }
-               | Types.InProgress { assignee; _ }
-               | Types.AwaitingVerification { assignee; _ } -> assignee = agent_name
-               | Types.Done _ | Types.Cancelled _ -> false
+               | Masc_domain.Todo -> true
+               | Masc_domain.Claimed { assignee; _ }
+               | Masc_domain.InProgress { assignee; _ }
+               | Masc_domain.AwaitingVerification { assignee; _ } -> assignee = agent_name
+               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
              in
              if not can_cancel
              then
                Error
-                 (Types.Task (Types.Task_error.InvalidState
+                 (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                     (Printf.sprintf
                        "Cannot cancel task %s (already done/cancelled or owned by \
                         another agent)"
@@ -840,7 +840,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                         in
                         { t with
                           task_status =
-                            Types.Cancelled
+                            Masc_domain.Cancelled
                               { cancelled_by = agent_name
                               ; cancelled_at = now_iso ()
                               ; reason = (if reason = "" then None else Some reason)
@@ -887,7 +887,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                        ~task_id
                        ~from_status:task.task_status
                        ~to_status:
-                         (Types.Cancelled
+                         (Masc_domain.Cancelled
                             { cancelled_by = agent_name
                             ; cancelled_at = now_iso ()
                             ; reason = (if reason = "" then None else Some reason)
@@ -898,12 +898,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                  config
                  ~agent_name
                  ~task_id
-                 ~transition:Types.Cancel
+                 ~transition:Masc_domain.Cancel
                  ~details:
                    (task_transition_details
                       ~from_status:task.task_status
                       ~to_status:
-                        (Types.Cancelled
+                        (Masc_domain.Cancelled
                            { cancelled_by = agent_name
                            ; cancelled_at = now_iso ()
                            ; reason = (if reason = "" then None else Some reason)
@@ -933,12 +933,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                Ok (Printf.sprintf "%s cancelled %s" agent_name task_id)))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
+      | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
 ;;
 
 (* Scheduling functions are in Coord_task_schedule.
    Re-export claim_next_result from Types for backward compatibility. *)
-type claim_next_result = Types.claim_next_result =
+type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of
       { task_id : string
       ; title : string
@@ -957,19 +957,19 @@ let link_task_execution_artifacts_r
       ?operation_id
       ?autoresearch_loop_id
       ()
-  : string Types.masc_result
+  : string Masc_domain.masc_result
   =
   if not (is_initialized config)
-  then Error (Types.System Types.System_error.NotInitialized)
+  then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try
         match read_backlog_r config with
-        | Error msg -> Error (Types.System (Types.System_error.IoError msg))
+        | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
         | Ok backlog ->
           (match List.find_opt (fun (task : task) -> task.id = task_id) backlog.tasks with
-           | None -> Error (Types.Task (Types.Task_error.NotFound task_id))
+           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task ->
              let existing_contract =
                ensure_task_contract_for_verification
@@ -1047,5 +1047,5 @@ let link_task_execution_artifacts_r
              Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.System (Types.System_error.IoError (Printexc.to_string e)))))
+      | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
 ;;

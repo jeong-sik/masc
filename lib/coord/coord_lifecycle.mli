@@ -1,7 +1,7 @@
 (** Coord lifecycle — agent join / leave and registry parse-error
     diagnostics. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 open Coord_broadcast

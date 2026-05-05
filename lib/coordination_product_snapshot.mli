@@ -11,7 +11,7 @@ type severity_counts =
 
 type observed_state =
   { goals : Goal_store.goal list
-  ; tasks : Types.task list
+  ; tasks : Masc_domain.task list
   ; posts : Board.post list
   ; transactions : Agent_economy.transaction list
   ; telemetry_events : Telemetry_eio.event_record list

@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Coord_status_rendering - Logic for masc_status rendering *)
 
-open Types
+open Masc_domain
 open Coord_types
 
 let bool_flag value = if value then "yes" else "no"
@@ -35,31 +35,31 @@ let take_items limit items =
   loop limit [] items
 
 let task_status_badge = function
-  | Types.Todo -> ("📋", "todo")
-  | Types.Claimed _ -> ("🟡", "claimed")
-  | Types.InProgress _ -> ("🟢", "in_progress")
-  | Types.AwaitingVerification _ -> ("🔍", "awaiting_verification")
-  | Types.Done _ -> ("✅", "done")
-  | Types.Cancelled _ -> ("🚫", "cancelled")
+  | Masc_domain.Todo -> ("📋", "todo")
+  | Masc_domain.Claimed _ -> ("🟡", "claimed")
+  | Masc_domain.InProgress _ -> ("🟢", "in_progress")
+  | Masc_domain.AwaitingVerification _ -> ("🔍", "awaiting_verification")
+  | Masc_domain.Done _ -> ("✅", "done")
+  | Masc_domain.Cancelled _ -> ("🚫", "cancelled")
 
 let task_assignee = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ }
-  | Types.Done { assignee; _ } -> assignee
-  | Types.Cancelled { cancelled_by; _ } -> cancelled_by
-  | Types.Todo -> "unclaimed"
+  | Masc_domain.Claimed { assignee; _ }
+  | Masc_domain.InProgress { assignee; _ }
+  | Masc_domain.AwaitingVerification { assignee; _ }
+  | Masc_domain.Done { assignee; _ } -> assignee
+  | Masc_domain.Cancelled { cancelled_by; _ } -> cancelled_by
+  | Masc_domain.Todo -> "unclaimed"
 
 let active_task_assignee = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ } ->
+  | Masc_domain.Claimed { assignee; _ }
+  | Masc_domain.InProgress { assignee; _ }
+  | Masc_domain.AwaitingVerification { assignee; _ } ->
       Some assignee
-  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let assigned_task_ids ~matches_you tasks =
   List.filter_map
-    (fun (task : Types.task) ->
+    (fun (task : Masc_domain.task) ->
       match active_task_assignee task.task_status with
       | Some assignee when matches_you assignee -> Some task.id
       | Some _ | None -> None)
@@ -67,15 +67,15 @@ let assigned_task_ids ~matches_you tasks =
 
 let agent_status_icon ~is_zombie = function
   | _ when is_zombie -> "💀"
-  | Types.Busy -> "🔴"
-  | Types.Active -> "🟢"
-  | Types.Listening -> "🎧"
-  | Types.Inactive -> "⚫"
+  | Masc_domain.Busy -> "🔴"
+  | Masc_domain.Active -> "🟢"
+  | Masc_domain.Listening -> "🎧"
+  | Masc_domain.Inactive -> "⚫"
 
-let agent_focus_label ~is_zombie (agent : Types.agent) =
+let agent_focus_label ~is_zombie (agent : Masc_domain.agent) =
   if is_zombie then "stale"
   else option_or_dash agent.current_task |> function
-    | "-" -> Types.agent_status_to_string agent.status
+    | "-" -> Masc_domain.agent_status_to_string agent.status
     | task -> task
 
 let task_id_list_label = function
@@ -108,8 +108,8 @@ let status_summary_string
     ~(current_task : string option)
     ~(worktree_active : bool)
     ~(effective_cluster_name : string)
-    ~(agents_with_state : (Types.agent * bool) list)
-    ~(active_tasks : Types.task list)
+    ~(agents_with_state : (Masc_domain.agent * bool) list)
+    ~(active_tasks : Masc_domain.task list)
     ~(todo_count : int)
     ~(claimed_count : int)
     ~(in_progress_count : int)
@@ -120,8 +120,8 @@ let status_summary_string
     ~(planning_state : planning_context_state)
     ~(suggested_next : string list)
     ~(attention_items : string list)
-    ~(state : Types.room_state)
-    ~(backlog : Types.backlog) =
+    ~(state : Masc_domain.room_state)
+    ~(backlog : Masc_domain.backlog) =
   
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -197,7 +197,7 @@ let status_summary_string
       Buffer.add_string buf "  (no agents)\n"
   | _ ->
       List.iter
-        (fun ((agent : Types.agent), is_zombie) ->
+        (fun ((agent : Masc_domain.agent), is_zombie) ->
           Coord_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
           let you_marker =
@@ -214,7 +214,7 @@ let status_summary_string
              (agent_count - max_agents_display)));
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter
-    (fun (task : Types.task) ->
+    (fun (task : Masc_domain.task) ->
       Coord_query.safe_yield ();
       let (status_icon, status_label) =
         if List.exists (String.equal task.id) todo_conflict_task_ids then

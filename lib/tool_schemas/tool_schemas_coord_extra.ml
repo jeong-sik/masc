@@ -1,7 +1,7 @@
 (** MCP tool schemas for shared goal planning and goal lifecycle
     operations. *)
 
-open Types
+open Masc_domain
 
 let goal_horizon_enum = [ "short"; "mid"; "long" ]
 let goal_status_enum = [ "active"; "paused"; "done"; "dropped" ]

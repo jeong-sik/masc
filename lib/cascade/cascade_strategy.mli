@@ -18,6 +18,55 @@
     @since 0.9.6
     @since 0.9.7 Phase B (Priority_tier / Sticky / Round_robin) *)
 
+(** {1 Scoring parameters — configurable per-cascade} *)
+
+(** Configurable scoring parameters for the [Weighted_random] strategy.
+
+    Each field has a documented default matching the pre-existing
+    hardcoded values.  Values can be overridden per-cascade via TOML
+    profile fields (e.g. [latency_baseline_ms], [rate_limit_decay_base])
+    or globally via the corresponding [MASC_CASCADE_*] environment
+    variables.
+
+    @since 0.184.0 *)
+type scoring_params = {
+  latency_baseline_ms : float;
+  (** Milliseconds.  Provider p50 above this value incurs a fractional
+      score penalty.  Default 2000.0.  Env var:
+      [MASC_CASCADE_LATENCY_BASELINE_MS]. *)
+
+  rate_limit_recency_window_s : float;
+  (** Seconds.  Lookback window for counting recent 429 events.
+      Default 60.0.  Set to 0.0 to disable.  Env var:
+      [MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S]. *)
+
+  rate_limit_decay_base : float;
+  (** Per-event decay multiplier in (0.0, 1.0).  Default 0.5.  Env var:
+      [MASC_CASCADE_RATE_LIMIT_DECAY_BASE]. *)
+
+  rate_limit_skip_after : int;
+  (** Hard-skip threshold for 429 events.  Default 3.  Env var:
+      [MASC_CASCADE_RATE_LIMIT_SKIP_AFTER]. *)
+
+  server_error_recency_window_s : float;
+  (** Seconds.  Lookback window for counting recent 5xx events.
+      Default 120.0.  Set to 0.0 to disable.  Env var:
+      [MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S]. *)
+
+  server_error_decay_base : float;
+  (** Per-event decay multiplier in (0.0, 1.0).  Default 0.6.  Env var:
+      [MASC_CASCADE_SERVER_ERROR_DECAY_BASE]. *)
+
+  server_error_skip_after : int;
+  (** Hard-skip threshold for 5xx events.  Default 4.  Env var:
+      [MASC_CASCADE_SERVER_ERROR_SKIP_AFTER]. *)
+}
+
+val default_scoring_params : scoring_params
+(** Default scoring parameters using env-var overrides with compiled
+    fallbacks.  This is the value used by {!failover} and by callers
+    that do not load a TOML profile. *)
+
 (** {1 Signal context — what the strategy can read} *)
 
 type signal_ctx = {
@@ -240,6 +289,13 @@ type t = {
       the strategy is [Sticky]; ignored otherwise.  Values [<= 0]
       effectively disable affinity (every call is a fresh Failover).
       @since 0.9.7 *)
+
+  scoring : scoring_params;
+  (** Scoring parameters used by [Weighted_random] to compute per-provider
+      weight multipliers.  Defaults to {!default_scoring_params}.
+      Configurable per-cascade via TOML profile fields.
+      Stateless strategies ([Failover], [Capacity_aware]) ignore
+      this field. *)
 }
 
 val failover : t

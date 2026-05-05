@@ -12,36 +12,87 @@ type signal_ctx = {
 let signal_cascade_name ctx =
   Keeper_cascade_profile.runtime_name_to_string ctx.cascade_name
 
-(* ── Latency-aware weight scaling (Phase: PR3 of cascade resilience) ──
+(* ── Scoring parameters (configurable via TOML / env vars) ─────────
 
-   The cascade's effective weight has historically been
-   [config_weight × success_rate], so two providers with comparable
-   reliability rank identically even if one is 10× slower than the other.
-   When latency samples are available (post-PR2 ring buffer), the
-   weighted_random strategy multiplies in a [0.0–1.0] latency factor so
-   the faster provider wins ties without zeroing out the slow one
-   (which would create a thrashing single-provider cascade).
+   These parameters control how the [Weighted_random] strategy scores
+   providers based on latency, rate-limit recency, and server-error
+   recency.  Each has a documented default that preserves the
+   pre-existing behaviour when no override is provided.
 
-   Formula (intentionally simple, easy to predict):
+   Resolution order: TOML profile field → env var → compiled default.
 
-     [latency_score = min 1.0 (latency_baseline_ms / max(p50, 1.0))]
+   The [scoring_params] record is carried inside {!t} so each cascade
+   can have independent tuning.  The module-level env-var-backed
+   defaults remain as fallbacks for callers that construct strategies
+   without a TOML profile (e.g. {!failover}). *)
 
-   - p50 ≤ baseline → score = 1.0 (no penalty).
-   - p50 = 2 × baseline → score = 0.5.
-   - p50 = 10 × baseline → score = 0.1.
-   - Unknown / no samples / [latency_ring_size <= 0] → score = 1.0
-     (optimistic default — same convention as success_rate for unknown
-     providers).
-   - p50 < 1 ms is clamped at 1 ms in the denominator to avoid
-     overflowing the score above 1.0 on extremely fast local providers
-     (ollama on warm cache).
+(** Configurable scoring parameters for the [Weighted_random] strategy.
 
-   The baseline (default 2000 ms) is tuned for cloud LLM tiers — claude
-   / gpt / gemini typical p50 lands in the 1–3 second range.  Local
-   providers (ollama) are typically far below baseline, so they get full
-   weight; slow tail tiers (kimi cli, gemini cli) get fractional weight
-   when their p50 drifts above baseline. *)
-let latency_baseline_ms =
+    Each field documents its default, meaning, and the env-var fallback
+    used when the TOML profile does not override it. *)
+type scoring_params = {
+  (* ── Latency scoring ──
+
+     Formula: [latency_score = min 1.0 (baseline / max(p50, 1.0))]
+
+     - p50 ≤ baseline → score = 1.0 (no penalty).
+     - p50 = 2 × baseline → score = 0.5.
+     - Unknown / no samples → score = 1.0 (optimistic default).
+     - p50 < 1 ms clamped at 1 ms in denominator to avoid overflow. *)
+  latency_baseline_ms : float;
+  (** Milliseconds.  Provider p50 above this value incurs a fractional
+      score penalty.  Default 2000.0 (tuned for cloud LLM tiers:
+      claude/gpt/gemini typical p50 is 1–3 s).  Env var fallback:
+      [MASC_CASCADE_LATENCY_BASELINE_MS]. *)
+
+  (* ── Rate-limit recency scoring ──
+
+     Every recent [Soft_rate_limited] (HTTP 429) event in the window
+     decays the provider's weight by [rate_limit_decay_base ^ count].
+     A provider reaching [rate_limit_skip_after] events gets weight 0.0
+     (skipped entirely). *)
+  rate_limit_recency_window_s : float;
+  (** Seconds.  Lookback window for counting recent 429 events.
+      Default 60.0 (short enough for recovery within a minute, long
+      enough to span more than one cascade cycle).  Set to 0.0 to
+      disable the factor.  Env var: [MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S]. *)
+
+  rate_limit_decay_base : float;
+  (** Per-event decay multiplier in (0.0, 1.0).  Default 0.5 (each
+      recent 429 halves the weight).  Out-of-range values fall back to
+      the default.  Env var: [MASC_CASCADE_RATE_LIMIT_DECAY_BASE]. *)
+
+  rate_limit_skip_after : int;
+  (** Hard-skip threshold.  Provider with ≥ this many recent 429s
+      within the window gets weight 0.0.  Default 3.  Set to 0 to
+      disable hard-skip (only decay applies).  Env var:
+      [MASC_CASCADE_RATE_LIMIT_SKIP_AFTER]. *)
+
+  (* ── Server-error recency scoring (#12797) ──
+
+     Mirrors the rate-limit factor but for [Failure] events (HTTP 5xx).
+     Window is wider because 5xx errors tend to clear more slowly than
+     transient rate limits. *)
+  server_error_recency_window_s : float;
+  (** Seconds.  Lookback window for counting recent 5xx events.
+      Default 120.0 (wider than the 429 window).  Set to 0.0 to
+      disable.  Env var:
+      [MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S]. *)
+
+  server_error_decay_base : float;
+  (** Per-event decay multiplier in (0.0, 1.0).  Default 0.6 (less
+      aggressive than 429 to avoid over-penalising brief blips).
+      Env var: [MASC_CASCADE_SERVER_ERROR_DECAY_BASE]. *)
+
+  server_error_skip_after : int;
+  (** Hard-skip threshold.  Default 4 (more forgiving than the 429
+      threshold of 3).  Env var:
+      [MASC_CASCADE_SERVER_ERROR_SKIP_AFTER]. *)
+}
+
+(* ── Env-var fallbacks (used when no TOML override is provided) ── *)
+
+let env_latency_baseline_ms =
   match Sys.getenv_opt "MASC_CASCADE_LATENCY_BASELINE_MS" with
   | None -> 2000.0
   | Some raw ->
@@ -56,37 +107,7 @@ let latency_baseline_ms =
           raw;
         2000.0
 
-let latency_score_of_p50 p50 =
-  let denom = Float.max p50 1.0 in
-  Float.min 1.0 (latency_baseline_ms /. denom)
-
-let latency_score_for_provider health ~provider_key =
-  match Cascade_health_tracker.provider_info health ~provider_key with
-  | None -> 1.0
-  | Some info ->
-    (match info.p50_latency_ms with
-     | None -> 1.0
-     | Some p50 -> latency_score_of_p50 p50)
-
-(* ── Rate-limit recency factor (PR3b of cascade resilience) ──────────
-
-   PR1 (#11341) introduced [Soft_rate_limited] outcomes that fire a
-   short cooldown on every HTTP 429.  Once that cooldown expires the
-   provider is back at full weight even if it has been hammering us
-   with 429s — there is no signal carried forward.  This factor adds
-   that signal: every recent [Soft_rate_limited] event in the
-   {!rate_limit_recency_window_s} window decays the provider's weight
-   by [rate_limit_decay_base] (default 0.5 → halve).
-
-   The window is intentionally narrow (default 60s — short enough that
-   a recovered provider is back at full weight within a minute, long
-   enough to span more than one cascade attempt cycle, see
-   {!default_cycle_policy}).
-
-   Set [MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S=0] to disable the
-   factor entirely — it is the kill switch for this PR if the
-   weighting turns out to be too aggressive. *)
-let rate_limit_recency_window_s =
+let env_rate_limit_recency_window_s =
   match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S" with
   | None -> 60.0
   | Some raw ->
@@ -101,11 +122,7 @@ let rate_limit_recency_window_s =
            using default 60.0" raw;
         60.0
 
-(* Decay base in (0.0, 1.0).  At default 0.5, score = 0.5^count so 1
-   recent 429 halves the weight, 2 quarters it, etc.  Out-of-range
-   values fail closed to the default rather than silently disabling
-   the signal. *)
-let rate_limit_decay_base =
+let env_rate_limit_decay_base =
   match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_DECAY_BASE" with
   | None -> 0.5
   | Some raw ->
@@ -120,7 +137,7 @@ let rate_limit_decay_base =
            (must be in (0.0, 1.0)), using default 0.5" raw;
         0.5
 
-let rate_limit_skip_after =
+let env_rate_limit_skip_after =
   match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_SKIP_AFTER" with
   | None -> 3
   | Some raw ->
@@ -135,35 +152,7 @@ let rate_limit_skip_after =
           raw;
         3
 
-let rate_limit_score_for_provider health ~provider_key =
-  if rate_limit_recency_window_s <= 0.0 then 1.0
-  else
-    let count =
-      Cascade_health_tracker.recent_outcome_count
-        health
-        ~provider_key
-        ~outcome:Cascade_health_tracker.Outcome_soft_rate_limited
-        ~window_s:rate_limit_recency_window_s
-    in
-    if count <= 0 then 1.0
-    else if rate_limit_skip_after > 0 && count >= rate_limit_skip_after then 0.0
-    else Float.pow rate_limit_decay_base (float_of_int count)
-
-(* ── Server-error recency factor (#12797) ────────────────────────────
-
-   Complements the rate-limit recency factor: every recent [Failure]
-   event (which covers HTTP 5xx server errors) in a narrow window
-   decays the provider's weight, making the ranker prefer providers
-   that have been responding cleanly.
-
-   Window: 120 s (wider than the 429 window — 5xx errors tend to clear
-   more slowly than transient rate limits).
-   Decay: 0.6 per failure (less aggressive than 429 to avoid
-   over-penalising brief provider blips).
-   Skip threshold: 4 recent failures → weight 0.0 (skip entirely).
-
-   Set [MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S=0] to disable. *)
-let server_error_recency_window_s =
+let env_server_error_recency_window_s =
   match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_RECENCY_WINDOW_S" with
   | None -> 120.0
   | Some raw ->
@@ -178,7 +167,7 @@ let server_error_recency_window_s =
            using default 120.0" raw;
         120.0
 
-let server_error_decay_base =
+let env_server_error_decay_base =
   match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_DECAY_BASE" with
   | None -> 0.6
   | Some raw ->
@@ -193,7 +182,7 @@ let server_error_decay_base =
            (must be in (0.0, 1.0)), using default 0.6" raw;
         0.6
 
-let server_error_skip_after =
+let env_server_error_skip_after =
   match Sys.getenv_opt "MASC_CASCADE_SERVER_ERROR_SKIP_AFTER" with
   | None -> 4
   | Some raw ->
@@ -208,24 +197,119 @@ let server_error_skip_after =
           raw;
         4
 
+(** Default scoring params using env-var overrides, falling back to
+    compiled defaults when the env var is unset/invalid.  This is the
+    value used by {!failover} and by callers that do not load a TOML
+    profile. *)
+let default_scoring_params = {
+  latency_baseline_ms = env_latency_baseline_ms;
+  rate_limit_recency_window_s = env_rate_limit_recency_window_s;
+  rate_limit_decay_base = env_rate_limit_decay_base;
+  rate_limit_skip_after = env_rate_limit_skip_after;
+  server_error_recency_window_s = env_server_error_recency_window_s;
+  server_error_decay_base = env_server_error_decay_base;
+  server_error_skip_after = env_server_error_skip_after;
+}
+
+(* ── Scoring functions (parameterised) ──────────────────────────── *)
+
+let latency_score_of_p50 ~baseline p50 =
+  let denom = Float.max p50 1.0 in
+  Float.min 1.0 (baseline /. denom)
+
+let latency_score_for_provider health ~provider_key =
+  (* Public API: uses the env-var-backed global default baseline so
+     external callers (e.g. Cascade_inventory) do not need to thread
+     a [scoring_params] record. *)
+  match Cascade_health_tracker.provider_info health ~provider_key with
+  | None -> 1.0
+  | Some info ->
+    (match info.p50_latency_ms with
+     | None -> 1.0
+     | Some p50 -> latency_score_of_p50 ~baseline:env_latency_baseline_ms p50)
+
+let latency_score_for_provider_with ~baseline health ~provider_key =
+  (* Internal: parameterised version used by [weighted_shuffle]. *)
+  match Cascade_health_tracker.provider_info health ~provider_key with
+  | None -> 1.0
+  | Some info ->
+    (match info.p50_latency_ms with
+     | None -> 1.0
+     | Some p50 -> latency_score_of_p50 ~baseline p50)
+
+let rate_limit_score_for_provider health ~provider_key =
+  (* Public API: uses env-var-backed global defaults. *)
+  if env_rate_limit_recency_window_s <= 0.0 then 1.0
+  else
+    let count =
+      Cascade_health_tracker.recent_outcome_count
+        health
+        ~provider_key
+        ~outcome:Cascade_health_tracker.Outcome_soft_rate_limited
+        ~window_s:env_rate_limit_recency_window_s
+    in
+    if count <= 0 then 1.0
+    else if env_rate_limit_skip_after > 0 && count >= env_rate_limit_skip_after then 0.0
+    else Float.pow env_rate_limit_decay_base (float_of_int count)
+
+let rate_limit_score_for_provider_with
+    ~window_s ~decay_base ~skip_after
+    health ~provider_key =
+  (* Internal: parameterised version. *)
+  if window_s <= 0.0 then 1.0
+  else
+    let count =
+      Cascade_health_tracker.recent_outcome_count
+        health
+        ~provider_key
+        ~outcome:Cascade_health_tracker.Outcome_soft_rate_limited
+        ~window_s
+    in
+    if count <= 0 then 1.0
+    else if skip_after > 0 && count >= skip_after then 0.0
+    else Float.pow decay_base (float_of_int count)
+
 let server_error_score_for_provider health ~provider_key =
-  if server_error_recency_window_s <= 0.0 then 1.0
+  (* Public API: uses env-var-backed global defaults. *)
+  if env_server_error_recency_window_s <= 0.0 then 1.0
   else
     let count =
       Cascade_health_tracker.recent_outcome_count
         health
         ~provider_key
         ~outcome:Cascade_health_tracker.Outcome_failure
-        ~window_s:server_error_recency_window_s
+        ~window_s:env_server_error_recency_window_s
     in
     if count <= 0 then 1.0
-    else if server_error_skip_after > 0 && count >= server_error_skip_after then begin
+    else if env_server_error_skip_after > 0 && count >= env_server_error_skip_after then begin
       Prometheus.inc_counter
         Prometheus.metric_cascade_server_error_skip_total
         ~labels:[("provider_key", provider_key)] ();
       0.0
     end else
-      Float.pow server_error_decay_base (float_of_int count)
+      Float.pow env_server_error_decay_base (float_of_int count)
+
+let server_error_score_for_provider_with
+    ~window_s ~decay_base ~skip_after
+    health ~provider_key =
+  (* Internal: parameterised version. *)
+  if window_s <= 0.0 then 1.0
+  else
+    let count =
+      Cascade_health_tracker.recent_outcome_count
+        health
+        ~provider_key
+        ~outcome:Cascade_health_tracker.Outcome_failure
+        ~window_s
+    in
+    if count <= 0 then 1.0
+    else if skip_after > 0 && count >= skip_after then begin
+      Prometheus.inc_counter
+        Prometheus.metric_cascade_server_error_skip_total
+        ~labels:[("provider_key", provider_key)] ();
+      0.0
+    end else
+      Float.pow decay_base (float_of_int count)
 
 type cycle_policy = {
   max_cycles : int;
@@ -305,6 +389,13 @@ type t = {
   cycle : cycle_policy;
   tiers : string list list;
   sticky_ttl_ms : int;
+  scoring : scoring_params;
+  (** Scoring parameters used by [Weighted_random] to compute per-provider
+      weight multipliers.  Defaults to {!default_scoring_params} (env-var
+      overrides → compiled defaults).  Configurable per-cascade via TOML
+      profile fields ([latency_baseline_ms], [rate_limit_recency_window_s],
+      etc.).  Stateless strategies ([Failover], [Capacity_aware]) ignore
+      this field. *)
 }
 
 let failover = {
@@ -312,6 +403,7 @@ let failover = {
   cycle = default_cycle_policy;
   tiers = [];
   sticky_ttl_ms = 0;
+  scoring = default_scoring_params;
 }
 
 type 'a adapter = {
@@ -344,7 +436,7 @@ let filter_cooldown adapter ctx cands =
    candidate is cooled down, return [[]] so the caller can surface the
    filtered-empty state instead of reviving a provider that was
    intentionally put into cooldown (e.g. hard quota exhausted). *)
-let weighted_shuffle adapter ctx cands =
+let weighted_shuffle ~scoring adapter ctx cands =
   (* Compute health-adjusted weight per candidate.
 
      Base weight is [config_weight × success_rate] (cooldown → 0).  Three
@@ -352,13 +444,13 @@ let weighted_shuffle adapter ctx cands =
      pick:
 
        - [lat] — latency score, decays as p50 climbs above
-         {!latency_baseline_ms}.  Providers without samples get 1.0.
+         {!scoring.latency_baseline_ms}.  Providers without samples get 1.0.
        - [rl]  — rate-limit recency score, decays as
          [decay_base ^ count] for [Soft_rate_limited] events in the
-         {!rate_limit_recency_window_s} window.  Providers with no
+         {!scoring.rate_limit_recency_window_s} window.  Providers with no
          recent 429 hit get 1.0.
        - [se]  — server-error recency score (#12797), decays for recent
-         [Failure] events (5xx) in {!server_error_recency_window_s}.
+         [Failure] events (5xx) in {!scoring.server_error_recency_window_s}.
 
      Cooled-down providers stay at 0.  Latency never zeroes a provider,
      but a sustained rate-limit burst or server-error storm may return
@@ -375,9 +467,19 @@ let weighted_shuffle adapter ctx cands =
          let final =
            if ew <= 0 then 0
            else
-             let lat = latency_score_for_provider ctx.health ~provider_key in
-             let rl  = rate_limit_score_for_provider ctx.health ~provider_key in
-             let se  = server_error_score_for_provider ctx.health ~provider_key in
+             let lat = latency_score_for_provider_with
+                 ~baseline:scoring.latency_baseline_ms
+                 ctx.health ~provider_key in
+             let rl  = rate_limit_score_for_provider_with
+                 ~window_s:scoring.rate_limit_recency_window_s
+                 ~decay_base:scoring.rate_limit_decay_base
+                 ~skip_after:scoring.rate_limit_skip_after
+                 ctx.health ~provider_key in
+             let se  = server_error_score_for_provider_with
+                 ~window_s:scoring.server_error_recency_window_s
+                 ~decay_base:scoring.server_error_decay_base
+                 ~skip_after:scoring.server_error_skip_after
+                 ctx.health ~provider_key in
              if lat <= 0.0 || rl <= 0.0 || se <= 0.0 then 0
              else max 1 (int_of_float (float_of_int ew *. lat *. rl *. se))
          in
@@ -496,7 +598,7 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
   | Capacity_aware ->
     filter_capacity adapter ctx cands
   | Weighted_random ->
-    weighted_shuffle adapter ctx cands
+    weighted_shuffle ~scoring:t.scoring adapter ctx cands
   | Circuit_breaker_cycling ->
     let cooled = filter_cooldown adapter ctx cands in
     (* Starvation guard: same pattern as priority_tier_order.  When all

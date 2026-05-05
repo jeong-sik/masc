@@ -256,8 +256,8 @@ function kpiCollect(D) {
       : "no PR feed",
   };
 
-  const goalDone = goals.reduce((sum, goal) => sum + (Number(goal && goal.progress) || 0), 0);
-  const goalTotal = goals.reduce((sum, goal) => sum + (Number(goal && goal.total) || 0), 0);
+  const goalDone = goals.reduce((sum, goal) => sum + (Number(goal && (goal.task_done_count ?? goal.progress)) || 0), 0);
+  const goalTotal = goals.reduce((sum, goal) => sum + (Number(goal && (goal.task_count ?? goal.total)) || 0), 0);
   const goalMetric = {
     value: goalTotal ? goalDone : empty,
     unit: goalTotal ? "/" + goalTotal : "",
@@ -269,9 +269,16 @@ function kpiCollect(D) {
     unit: keepers.length ? "/" + keepers.length : "",
     note: activeKeepers.length ? kpiList(activeKeepers, k => kpiText(k && k.id), "active") : "no active keepers",
   };
+  const stalledTaskFor = (keeperId) => tasks.find(t => t && t.keeper === keeperId && (kpiNorm(t && t.status) === "stalled" || kpiNorm(t && t.status) === "blocked"));
+  const keeperStallNote = (k) => {
+    const id = kpiText(k && k.id);
+    if (k && k.t) return id + " · " + k.t;
+    const linked = stalledTaskFor(k && k.id);
+    return linked && linked.t ? id + " · " + linked.t : id;
+  };
   const stalledMetric = {
     value: keepers.length ? stalledKeepers.length : empty,
-    note: stalledKeepers.length ? kpiList(stalledKeepers, k => kpiText(k && k.id) + (k && k.t ? " · " + k.t : ""), "stalled") : "clear",
+    note: stalledKeepers.length ? kpiList(stalledKeepers, keeperStallNote, "stalled") : "clear",
   };
 
   let spot = { label: "Tokens/sec", value: tps.value, unit: tps.unit, tone: "brass", note: tps.note, urgent: false };

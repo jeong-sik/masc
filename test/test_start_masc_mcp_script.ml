@@ -757,6 +757,55 @@ exit 0
       check bool "stderr explains stdio dashboard skip" true
         (contains_substring stderr "Skipping SPA build in stdio mode."))
 
+let test_http_preflight_waits_for_port_to_clear_before_build () =
+  with_temp_dir "start-masc-script-port-wait" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let fake_bin = Filename.concat dir "fake-bin" in
+      let lsof_seen = Filename.concat dir "lsof-seen" in
+      let capture = Filename.concat dir "captured-port-wait.txt" in
+      copy_script (script_path ()) script;
+      ignore (make_config_root dir);
+      mkdir_p fake_bin;
+      write_executable (Filename.concat fake_bin "lsof")
+        (Printf.sprintf
+           {|
+#!/bin/sh
+case "$*" in
+  *9954*)
+    if [ ! -f %s ]; then
+      echo "4242"
+      : > %s
+      exit 0
+    fi
+    ;;
+esac
+exit 1
+|}
+           (quote lsof_seen) (quote lsof_seen));
+      make_fake_eio_exe dir;
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", dir);
+              ("MASC_ALLOW_PORT_REUSE", "0");
+              ("MASC_PORT_PREFLIGHT_WAIT_MAX_SEC", "1");
+              ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+            ]
+          (Printf.sprintf "%s --http --port 9954 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "server started after transient port conflict" true
+        (contains_substring captured "FAKE_EXE_MARKER=eio");
+      check bool "preflight waited before build" true
+        (contains_substring stderr
+           "HTTP Port 9954 in use, waiting before build/init"))
+
 let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
     =
   with_temp_dir "start-loopback-script" (fun dir ->
@@ -855,6 +904,8 @@ let () =
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
+          test_case "HTTP preflight waits for transient port conflict" `Quick
+            test_http_preflight_waits_for_port_to_clear_before_build;
           test_case "zshenv absolute base path is preserved" `Quick
             test_zshenv_absolute_base_path_is_preserved;
           test_case "shared-root env base path is preserved" `Quick

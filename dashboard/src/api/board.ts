@@ -399,6 +399,10 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const author = asString(raw.author, '').trim()
   if (!id || !author) return null
   const parentId = asString(raw.parent_id, '').trim() || null
+  const votesUp = asNumber(raw.votes_up, 0)
+  const votesDown = asNumber(raw.votes_down, 0)
+  const score = asNumber(raw.score, votesUp - votesDown)
+  const votes = asNumber(raw.votes, score)
   return {
     id,
     post_id: postId,
@@ -407,6 +411,10 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     author_identity: normalizeBoardActorIdentity(raw.author_identity, author),
     content: asString(raw.content, ''),
     created_at: toIsoTimestamp(raw.created_at) ?? '',
+    votes,
+    vote_balance: score,
+    votes_up: votesUp,
+    votes_down: votesDown,
   }
 }
 
@@ -462,6 +470,15 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
 export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
+    direction,
+    vote: direction,
+    voter: defaultBoardVoter(),
+  })
+}
+
+export function voteComment(commentId: string, direction: 'up' | 'down'): Promise<unknown> {
+  return post('/api/v1/tools/masc_board_comment_vote', {
+    comment_id: commentId,
     direction,
     vote: direction,
     voter: defaultBoardVoter(),

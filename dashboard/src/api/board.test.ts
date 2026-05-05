@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   derivePostTitle,
   fetchBoard,
+  fetchBoardPost,
   sanitizeBoardTitle,
+  voteComment,
   asNullableIsoTimestamp,
   normalizePendingConfirmation,
   normalizeKeeperApprovalQueueItem,
@@ -465,6 +467,75 @@ describe('fetchBoard', () => {
       raw: 'keeper-analyst-agent',
       source: 'keeper_alias_contract',
       runtime_agent_name: 'keeper-analyst-agent',
+    })
+  })
+})
+
+describe('fetchBoardPost', () => {
+  it('normalizes comment vote fields from the server detail payload', async () => {
+    const rawResponse = {
+      post: {
+        id: 'post-1',
+        author: 'analyst',
+        title: 'Status',
+        body: 'Working',
+        created_at: 1_713_000_000,
+        updated_at: 1_713_000_000,
+      },
+      comments: [
+        {
+          id: 'comment-1',
+          post_id: 'post-1',
+          author: 'reviewer',
+          content: 'Useful',
+          created_at: 1_713_000_100,
+          votes_up: 5,
+          votes_down: 2,
+          score: 3,
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardPost('post-1')
+
+    expect(result.comments[0]).toMatchObject({
+      id: 'comment-1',
+      votes: 3,
+      vote_balance: 3,
+      votes_up: 5,
+      votes_down: 2,
+    })
+  })
+})
+
+describe('voteComment', () => {
+  it('posts to the comment vote tool with the dashboard voter', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await voteComment('comment-1', 'down')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/tools/masc_board_comment_vote')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      comment_id: 'comment-1',
+      direction: 'down',
+      vote: 'down',
+      voter: 'dashboard-reviewer',
     })
   })
 })

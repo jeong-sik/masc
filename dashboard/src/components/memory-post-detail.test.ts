@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -52,10 +52,12 @@ vi.mock('./memory-state', () => ({
   visibilityBadgeColor: () => '',
   boardPostKind: () => 'direct',
   votePost: vi.fn(),
+  voteComment: vi.fn().mockResolvedValue(undefined),
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread, PostDetail, filterCommentTree } from './memory-post-detail'
+import { CommentThread, PostDetail, countCommentDescendants, filterCommentTree } from './memory-post-detail'
+import { voteComment } from './memory-state'
 import type { BoardComment } from '../types/core'
 
 afterEach(() => {
@@ -87,6 +89,65 @@ describe('CommentThread', () => {
 
     expect(screen.getByText('orphan reply still visible')).toBeInTheDocument()
     expect(screen.getByText(/댓글 1개/)).toBeInTheDocument()
+  })
+
+  it('collapses and expands a reply subtree from the thread control', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'root-agent', content: 'root comment', created_at: '2026-04-02T00:00:00Z' },
+      { id: 'c2', post_id: 'post-1', parent_id: 'c1', author: 'child-agent', content: 'child reply', created_at: '2026-04-02T00:01:00Z' },
+      { id: 'c3', post_id: 'post-1', parent_id: 'c2', author: 'grandchild-agent', content: 'grandchild reply', created_at: '2026-04-02T00:02:00Z' },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '답글 2개 접기' }))
+    expect(screen.queryByText('child reply')).not.toBeInTheDocument()
+    expect(screen.getByText('답글 2개 접힘')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '답글 2개 펼치기' }))
+    expect(screen.getByText('child reply')).toBeInTheDocument()
+  })
+
+  it('keeps replies past depth five behind an explicit continue control', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'agent', content: 'level 0', created_at: '2026-04-02T00:00:00Z' },
+      { id: 'c2', post_id: 'post-1', parent_id: 'c1', author: 'agent', content: 'level 1', created_at: '2026-04-02T00:01:00Z' },
+      { id: 'c3', post_id: 'post-1', parent_id: 'c2', author: 'agent', content: 'level 2', created_at: '2026-04-02T00:02:00Z' },
+      { id: 'c4', post_id: 'post-1', parent_id: 'c3', author: 'agent', content: 'level 3', created_at: '2026-04-02T00:03:00Z' },
+      { id: 'c5', post_id: 'post-1', parent_id: 'c4', author: 'agent', content: 'level 4', created_at: '2026-04-02T00:04:00Z' },
+      { id: 'c6', post_id: 'post-1', parent_id: 'c5', author: 'agent', content: 'level 5', created_at: '2026-04-02T00:05:00Z' },
+      { id: 'c7', post_id: 'post-1', parent_id: 'c6', author: 'agent', content: 'level 6 hidden', created_at: '2026-04-02T00:06:00Z' },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByText('level 5')).toBeInTheDocument()
+    expect(screen.queryByText('level 6 hidden')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /스레드 계속 펼치기/ }))
+    expect(screen.getByText('level 6 hidden')).toBeInTheDocument()
+  })
+
+  it('sends comment votes through the board comment vote tool', async () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'vote on me',
+        created_at: '2026-04-02T00:00:00Z',
+        vote_balance: 4,
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '댓글 추천' }))
+    await Promise.resolve()
+
+    expect(voteComment).toHaveBeenCalledWith('c1', 'up')
+    expect(screen.getByText('4')).toBeInTheDocument()
   })
 })
 
@@ -122,6 +183,12 @@ describe('filterCommentTree', () => {
     ['c11', [c111]],
     ['r2', [c21]],
   ])
+
+  it('counts all descendants for collapse labels', () => {
+    expect(countCommentDescendants('r1', childrenMap)).toBe(2)
+    expect(countCommentDescendants('r2', childrenMap)).toBe(1)
+    expect(countCommentDescendants('missing', childrenMap)).toBe(0)
+  })
 
   it('returns original references on empty query (ref-equal)', () => {
     const out = filterCommentTree(roots, childrenMap, '')

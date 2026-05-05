@@ -580,6 +580,40 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
+        (* RFC-0026 PR-E-2 shadow probe.  Calls the new admission glue
+           but does NOT yet act on its result; the probe runs even
+           when [MASC_ADMISSION_USE_NEW] is unset (in that case the
+           glue returns [Legacy_path] immediately).  Buckets and the
+           policy registry are intentionally empty in this PR — the
+           registry loader and per-provider bucket population land in
+           later PRs (PR-E-3 / PR-E-4).  Until those land, [decide]
+           reports [Legacy_path] for every keeper, which is
+           semantically identical to the existing semaphore path.
+           The counter is what we want: a baseline distribution we
+           can diff against once the loader is wired. *)
+        let admission_path_label =
+          let empty_buckets : Keeper_admission_router.bucket_lookup =
+            fun _ -> None
+          in
+          let empty_policies : Keeper_admission_glue.policy_lookup =
+            fun _ -> None
+          in
+          match
+            Keeper_admission_glue.decide
+              ~keeper_id:meta_after_triage.name
+              ~policies:empty_policies
+              ~buckets:empty_buckets
+          with
+          | Keeper_admission_glue.Legacy_path -> "legacy"
+          | Keeper_admission_glue.New_admission (Dispatch _) -> "new_dispatch"
+          | Keeper_admission_glue.New_admission Wait -> "new_wait"
+          | Keeper_admission_glue.New_admission (Surface _) -> "new_surface"
+        in
+        Prometheus.inc_counter Prometheus.metric_keeper_admission_path
+          ~labels:[
+            ("keeper", meta_after_triage.name);
+            ("path", admission_path_label);
+          ] ();
         (* Admission wait happens before [mark_turn_started], so the stale
            watchdog would otherwise see an idle keeper while the fiber is
            legitimately blocked behind turn-capacity backpressure. *)

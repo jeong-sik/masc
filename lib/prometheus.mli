@@ -84,6 +84,13 @@ val metric_keeper_contract_violations : string
     Labels: keeper. *)
 val metric_keeper_alive_but_stuck : string
 
+val metric_keeper_admission_path : string
+(** RFC-0026 PR-E-2 shadow probe.  Increments on every turn entry
+    with the path the new admission router *would* have taken.
+    Labels: [keeper, path] where [path] is one of
+    [legacy] / [new_dispatch] / [new_wait] / [new_surface].
+    Behaviour is unchanged — this counter only observes. *)
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.

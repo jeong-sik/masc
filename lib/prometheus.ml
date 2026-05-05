@@ -248,6 +248,17 @@ let metric_keeper_contract_violations =
 let metric_keeper_alive_but_stuck =
   "masc_keeper_alive_but_stuck_total"
 
+(* RFC-0026 PR-E-2 shadow probe.  Records the admission decision path
+   for every turn entry, even when [MASC_ADMISSION_USE_NEW] is unset
+   (in which case [Keeper_admission_glue.decide] returns [Legacy_path]
+   immediately).  This lets us measure how often the new router would
+   fire BEFORE wiring its [Dispatch] / [Wait] / [Surface] outcomes to
+   actual semaphore-bypass behaviour.  Labels: [keeper, path] where
+   [path] is one of [legacy] / [new_dispatch] / [new_wait] /
+   [new_surface]. *)
+let metric_keeper_admission_path =
+  "masc_keeper_admission_path_total"
+
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent

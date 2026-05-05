@@ -136,7 +136,6 @@ let direct_turn_observation (meta : keeper_meta) :
     backlog_updated_since_last_scheduled_autonomous = false;
     active_agent_count = 0;
     last_turn_budget = None;
-    last_tools_used = [];
     work_discovery_due = false;
   }
 

@@ -75,8 +75,7 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
   else if
     o.has_discovered_work_section
     && has_any_tool
-         [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task";
-           "keeper_board_post"; "masc_add_task"; "keeper_tasks_audit";
+         [ "keeper_board_post"; "masc_add_task"; "keeper_tasks_audit";
            "keeper_shell"; "keeper_bash"; "masc_code_git"; "keeper_fs_read" ]
   then Has_discovered_work
   else No_actionable_signal

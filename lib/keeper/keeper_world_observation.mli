@@ -87,10 +87,6 @@ type world_observation = {
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
 
-  last_tools_used : string list;
-  (** Tools used in the previous cycle. Empty on first cycle or when unavailable.
-      Used by the prompt builder to generate data-driven anti-repetition hints. *)
-
   work_discovery_due : bool;
 }
 

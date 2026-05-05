@@ -87,6 +87,48 @@ let test_line_ring_drops_old_stdout_lines () =
           check string "retains last two lines" "two\nthree\n" s.stdout_since;
           check bool "reports dropped bytes" true (s.bytes_dropped_stdout > 0))
 
+let line_count s =
+  let n = ref 0 in
+  String.iter (fun ch -> if ch = '\n' then incr n) s;
+  if String.length s > 0 && s.[String.length s - 1] <> '\n' then incr n;
+  !n
+
+let test_sixteen_keepers_keep_bounded_shell_rings () =
+  let previous_limit = Sys.getenv_opt "MASC_KEEPER_SHELL_RING_LINES" in
+  Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "3";
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_limit with
+      | Some value -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" value
+      | None -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "")
+    (fun () ->
+      let tasks =
+        List.init 16 (fun i ->
+          let keeper = Printf.sprintf "kp-sustained-%02d" i in
+          let script =
+            Printf.sprintf
+              "i=0; while [ $i -lt 20 ]; do printf '%s-line-%%02d\\n' $i; i=$((i+1)); done"
+              keeper
+          in
+          (keeper, sp ~keeper [ "/bin/sh"; "-c"; script ]))
+      in
+      List.iter
+        (fun (_keeper, tid) ->
+          check bool "sustained keeper task closed" true (poll_for_closed tid))
+        tasks;
+      List.iter
+        (fun (keeper, tid) ->
+          match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+          | Error _ -> failf "read failed for %s" keeper
+          | Ok s ->
+              check bool
+                (keeper ^ " retained at most 3 stdout lines")
+                true (line_count s.stdout_since <= 3);
+              check bool
+                (keeper ^ " reports dropped bytes")
+                true (s.bytes_dropped_stdout > 0))
+        tasks)
+
 let test_kill_closes_task () =
   let tid = sp ~keeper:"kp3" [ "/bin/sleep"; "30" ] in
   (* let child actually establish its pgroup *)
@@ -228,6 +270,8 @@ let () =
             test_reap_orphans_returns_zero;
           test_case "line ring drops old stdout lines" `Quick
             test_line_ring_drops_old_stdout_lines;
+          test_case "16 keepers keep bounded shell rings" `Quick
+            test_sixteen_keepers_keep_bounded_shell_rings;
         ] );
       ( "persistence",
         [

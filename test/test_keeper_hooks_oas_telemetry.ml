@@ -600,6 +600,155 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check bool "on_context_compacted inactive" false
     (slot json "on_context_compacted" |> member "active" |> to_bool)
 
+let pr_review_event ~tool_name ~input ~output_text =
+  Hooks.For_testing.pr_review_action_metric_event_of_tool_io
+    ~tool_name ~input ~output_text ~transport_success:true
+
+let require_pr_review_event label = function
+  | Some event -> event
+  | None -> failf "expected PR review action event for %s" label
+
+let test_pr_review_action_metric_extracts_approve () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
+      ~output_text:
+        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu"}|}
+    |> require_pr_review_event "approve"
+  in
+  check string "action from output" "APPROVE" event.action;
+  check (option int) "pr number" (Some 13177) event.pr_number;
+  check bool "success" true event.success
+
+let test_pr_review_action_metric_marks_structured_failure () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 42); ("event", `String "approve") ])
+      ~output_text:{|{"ok":false,"error":"gh_failed"}|}
+    |> require_pr_review_event "failed approve"
+  in
+  check string "action fallback from input" "APPROVE" event.action;
+  check (option int) "number fallback" (Some 42) event.pr_number;
+  check bool "structured ok=false wins" false event.success
+
+let test_pr_review_action_metric_extracts_reply () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_reply"
+      ~input:(`Assoc [ ("pr_number", `Int 9); ("comment_id", `Int 1234) ])
+      ~output_text:{|{"ok":true,"pr_number":9,"comment_id":1234}|}
+    |> require_pr_review_event "reply"
+  in
+  check string "reply action" "REPLY" event.action;
+  check (option int) "reply pr" (Some 9) event.pr_number;
+  check (option int) "comment id" (Some 1234) event.comment_id
+
+let pr_work_events ~tool_name ~input ~output_text =
+  Hooks.For_testing.pr_work_action_metric_events_of_tool_io
+    ~tool_name ~input ~output_text ~transport_success:true
+
+let work_actions events = List.map (fun e -> e.Hooks.work_action) events
+
+let test_pr_work_action_metric_extracts_masc_code_git_push () =
+  let events =
+    pr_work_events
+      ~tool_name:"masc_code_git"
+      ~input:(`Assoc [ ("action", `String "push") ])
+      ~output_text:{|{"status":"ok","action":"push"}|}
+  in
+  check (list string) "actions" [ "GIT_PUSH" ] (work_actions events);
+  let event =
+    match events with
+    | [ event ] -> event
+    | _ -> failf "expected one git push event"
+  in
+  check string "source" "masc_code_git" event.work_source;
+  check bool "success" true event.success
+
+let test_pr_work_action_metric_extracts_gh_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [ ("op", `String "gh");
+            ("cmd", `String "pr create --draft --title t") ])
+      ~output_text:{|{"ok":true,"op":"gh","command":"gh pr create --draft"}|}
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events)
+
+let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [ ( "cmd",
+              `String "git add lib/foo.ml && git commit -m x && git push origin feat/x" );
+          ])
+      ~output_text:{|{"ok":false,"cmd":"git push origin feat/x"}|}
+  in
+  check (list string) "git action sequence"
+    [ "GIT_ADD" ]
+    (work_actions events);
+  check bool "failure propagated to every action" true
+    (List.for_all (fun e -> not e.Hooks.success) events)
+
+let test_pr_work_action_metric_ignores_quoted_command_words () =
+  let bash_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                "git commit -m \"revert git push\" && gh issue comment 1 --body \"please pr create later\""
+            );
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "quoted command words do not add actions"
+    [ "GIT_COMMIT" ] (work_actions bash_events);
+  let gh_events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "issue comment 1 --body \"please pr create later\"");
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
+
+let test_pr_work_action_metric_skips_shell_control_flow_segments () =
+  let and_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:(`Assoc [ ("cmd", `String "false && git push origin feat/x") ])
+      ~output_text:{|{"ok":false}|}
+  in
+  check (list string) "skipped && segment" [] (work_actions and_events);
+  let or_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                "git commit -m reviewed || gh pr create --draft --title retry" );
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "skipped || fallback segment" [ "GIT_COMMIT" ]
+    (work_actions or_events)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -649,5 +798,25 @@ let () =
     ; ( "hook_introspection",
         [ test_case "reports current runtime slots" `Quick
             test_hook_introspection_reports_current_runtime_slots
+        ] )
+    ; ( "pr_review_action",
+        [ test_case "extracts approve event from structured output" `Quick
+            test_pr_review_action_metric_extracts_approve
+        ; test_case "marks structured gh failure as not successful" `Quick
+            test_pr_review_action_metric_marks_structured_failure
+        ; test_case "extracts reply action" `Quick
+            test_pr_review_action_metric_extracts_reply
+        ] )
+    ; ( "pr_work_action",
+        [ test_case "extracts masc_code_git push" `Quick
+            test_pr_work_action_metric_extracts_masc_code_git_push
+        ; test_case "extracts keeper_shell gh pr create" `Quick
+            test_pr_work_action_metric_extracts_gh_pr_create
+        ; test_case "extracts conservative bash git failure" `Quick
+            test_pr_work_action_metric_extracts_bash_git_sequence_failure
+        ; test_case "ignores quoted command words" `Quick
+            test_pr_work_action_metric_ignores_quoted_command_words
+        ; test_case "skips conditional control-flow segments" `Quick
+            test_pr_work_action_metric_skips_shell_control_flow_segments
         ] )
     ]

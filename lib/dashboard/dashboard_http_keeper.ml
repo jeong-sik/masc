@@ -599,17 +599,22 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if compact then (`Null, `Null)
             else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
           in
+          let pr_action_metrics_lines =
+            let action_store =
+              Keeper_types.keeper_pr_action_metrics_store config m.name
+            in
+            Dated_jsonl.read_recent_lines action_store metrics_cap
+          in
           let metrics_lines = all_metrics_lines in
           let parsed_metrics =
             List.filter_map (fun line ->
               try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-            ) metrics_lines
+            ) (metrics_lines @ pr_action_metrics_lines)
           in
-	          let last_metrics =
-	            match List.rev parsed_metrics with
-	            | latest :: _ -> Some latest
-	            | [] -> None
-	          in
+          let last_metrics =
+            List.find_opt metrics_row_has_context_snapshot
+              (List.rev parsed_metrics)
+          in
 	          let (last_skill_primary, last_skill_secondary, last_skill_reason) =
 	            let open Yojson.Safe.Util in
 	            let rec find_latest = function

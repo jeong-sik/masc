@@ -947,7 +947,351 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   in
   loop 0 (List.rev entries)
 
+type pr_review_action_metric_event = {
+  action : string;
+  pr_number : int option;
+  comment_id : int option;
+  success : bool;
+}
+
+type pr_work_action_metric_event = {
+  work_action : string;
+  work_source : string;
+  command : string option;
+  success : bool;
+}
+
+let normalize_pr_review_action raw =
+  let trimmed = String.trim raw |> String.uppercase_ascii in
+  match trimmed with
+  | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
+  | _ -> None
+
+let json_int_opt key json = Safe_ops.json_int_opt key json
+
+let first_some a b =
+  match a with
+  | Some _ -> a
+  | None -> b
+
+let output_json_opt output_text =
+  match
+    Safe_ops.parse_json_safe
+      ~context:"Keeper_hooks_oas.pr_review_action_metric.output"
+      output_text
+  with
+  | Ok json -> Some json
+  | Error _ -> None
+
+let output_success ~transport_success = function
+  | Some json ->
+      (match Safe_ops.json_bool_opt "ok" json with
+       | Some value -> value
+       | None ->
+           let status =
+             Safe_ops.json_string ~default:"" "status" json
+             |> String.trim |> String.lowercase_ascii
+           in
+           if status = "ok" then true else transport_success)
+  | None -> transport_success
+
+let pr_review_action_metric_event_of_tool_io
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool) =
+  match tool_name with
+  | "keeper_pr_review_comment" ->
+      let output_json = output_json_opt output_text in
+      let action =
+        match output_json with
+        | Some json -> Safe_ops.json_string_opt "event" json
+        | None -> None
+      in
+      let action =
+        match action with
+        | Some value -> Some value
+        | None -> Safe_ops.json_string_opt "event" input
+      in
+      let success =
+        output_success ~transport_success output_json
+      in
+      Option.map
+        (fun action ->
+             {
+               action;
+               pr_number =
+                 first_some
+                   (first_some
+                      (match output_json with
+                       | Some json -> json_int_opt "pr_number" json
+                       | None -> None)
+                      (json_int_opt "pr_number" input))
+                   (json_int_opt "number" input);
+               comment_id = None;
+               success;
+             })
+        (Option.bind action normalize_pr_review_action)
+  | "keeper_pr_review_reply" ->
+      let output_json = output_json_opt output_text in
+      let success =
+        output_success ~transport_success output_json
+      in
+      Some
+        {
+          action = "REPLY";
+          pr_number =
+            first_some
+              (first_some
+                 (match output_json with
+                  | Some json -> json_int_opt "pr_number" json
+                  | None -> None)
+                 (json_int_opt "pr_number" input))
+              (json_int_opt "number" input);
+          comment_id =
+            first_some
+              (match output_json with
+               | Some json -> json_int_opt "comment_id" json
+               | None -> None)
+              (json_int_opt "comment_id" input);
+          success;
+        }
+  | _ -> None
+
+let split_top_level_command_segments command =
+  let len = String.length command in
+  let push_segment unconditional start stop acc =
+    let segment = String.sub command start (stop - start) |> String.trim in
+    if segment = "" then acc else (unconditional, segment) :: acc
+  in
+  let rec loop acc unconditional start i in_single in_double escaped =
+    if i >= len then List.rev (push_segment unconditional start len acc)
+    else
+      let c = command.[i] in
+      if escaped then loop acc unconditional start (i + 1) in_single in_double false
+      else
+        match c with
+        | '\\' when not in_single ->
+            loop acc unconditional start (i + 1) in_single in_double true
+        | '\'' when not in_double ->
+            loop acc unconditional start (i + 1) (not in_single) in_double false
+        | '"' when not in_single ->
+            loop acc unconditional start (i + 1) in_single (not in_double) false
+        | '&' when (not in_single) && (not in_double) && i + 1 < len
+                   && command.[i + 1] = '&' ->
+            let acc = push_segment unconditional start i acc in
+            loop acc false (i + 2) (i + 2) in_single in_double false
+        | '|' when (not in_single) && (not in_double) && i + 1 < len
+                   && command.[i + 1] = '|' ->
+            let acc = push_segment unconditional start i acc in
+            loop acc false (i + 2) (i + 2) in_single in_double false
+        | '\n' when (not in_single) && not in_double ->
+            let acc = push_segment unconditional start i acc in
+            loop acc true (i + 1) (i + 1) in_single in_double false
+        | ';' when (not in_single) && not in_double ->
+            let acc = push_segment unconditional start i acc in
+            loop acc true (i + 1) (i + 1) in_single in_double false
+        | _ ->
+            loop acc unconditional start (i + 1) in_single in_double false
+  in
+  loop [] true 0 0 false false false
+
+let pr_work_action_of_git_action raw =
+  match String.trim raw |> String.lowercase_ascii with
+  | "add" -> Some "GIT_ADD"
+  | "commit" -> Some "GIT_COMMIT"
+  | "push" -> Some "GIT_PUSH"
+  | _ -> None
+
+let pr_work_actions_of_git_segment segment =
+  match Masc_exec_bash_parser.Bash.parse_string segment with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
+    when String.equal
+           (Masc_exec.Bin.to_string simple.bin |> String.lowercase_ascii)
+           "git" ->
+      (match simple.args with
+       | Masc_exec.Shell_ir.Lit action :: _ ->
+           pr_work_action_of_git_action action |> Option.to_list
+       | _ -> [])
+  | _ -> []
+
+let pr_work_actions_of_gh_segment segment =
+  match Keeper_gh_shared.parse_simple_gh_command segment with
+  | Ok cmd ->
+      (match Keeper_gh_shared.gh_simple_command_argv cmd with
+       | subcommand :: action :: _
+         when String.equal (String.lowercase_ascii subcommand) "pr"
+              && String.equal (String.lowercase_ascii action) "create" ->
+           [ "PR_CREATE" ]
+       | _ -> [])
+  | Error _ -> []
+
+let pr_work_actions_of_command command =
+  split_top_level_command_segments command
+  |> List.concat_map (fun (unconditional, segment) ->
+       (* Shell conditionals can skip later segments at runtime.  Without
+          per-segment exit data, count only top-level segments that are
+          unconditionally reached. *)
+       if not unconditional then []
+       else
+         match pr_work_actions_of_gh_segment segment with
+         | [] -> pr_work_actions_of_git_segment segment
+         | actions -> actions)
+
+let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
+  match tool_name with
+  | "keeper_shell" ->
+      let op =
+        Safe_ops.json_string ~default:"" "op" input
+        |> String.trim |> String.lowercase_ascii
+      in
+      if op = "gh" then
+        Safe_ops.json_string_opt "cmd" input
+        |> Option.map (fun cmd -> "gh " ^ String.trim cmd)
+      else None
+  | "keeper_bash" ->
+      Safe_ops.json_string_opt "cmd" input
+  | "masc_code_shell" ->
+      Safe_ops.json_string_opt "command" input
+  | _ -> None
+
+let pr_work_action_metric_events_of_tool_io
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool) =
+  let output_json = output_json_opt output_text in
+  let success = output_success ~transport_success output_json in
+  match tool_name with
+  | "masc_code_git" ->
+      let action =
+        match output_json with
+        | Some json -> Safe_ops.json_string_opt "action" json
+        | None -> None
+      in
+      let action =
+        match action with
+        | Some value -> Some value
+        | None -> Safe_ops.json_string_opt "action" input
+      in
+      (match Option.bind action pr_work_action_of_git_action with
+       | None -> []
+       | Some work_action ->
+           [
+             {
+               work_action;
+               work_source = "masc_code_git";
+               command = None;
+               success;
+             };
+           ])
+  | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
+      (match command_input_of_tool ~tool_name input with
+       | None -> []
+       | Some command ->
+           pr_work_actions_of_command command
+           |> List.map (fun work_action ->
+                {
+                  work_action;
+                  work_source = tool_name;
+                  command = Some command;
+                  success;
+                }))
+  | _ -> []
+
+let append_pr_review_action_metric
+    ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta)
+    ~(generation : int)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool)
+    ~(duration_ms : float)
+    () =
+  match
+    pr_review_action_metric_event_of_tool_io
+      ~tool_name ~input ~output_text ~transport_success
+  with
+  | None -> ()
+  | Some event ->
+      let now = Time_compat.now () in
+      let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
+      let snapshot =
+        `Assoc
+          [
+            ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
+            ("ts_unix", `Float now);
+            ("channel", `String "tool_event");
+            ("metric_event", `String "keeper_pr_review_action");
+            ("name", `String meta.name);
+            ("agent_name", `String meta.agent_name);
+            ( "trace_id",
+              `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+            ("generation", `Int generation);
+            ("tool_name", `String tool_name);
+            ("pr_review_action", `String event.action);
+            ("pr_review_action_success", `Bool event.success);
+            ("tool_call_count", `Int 0);
+            ("tools_used", `List []);
+            ("pr_number", Json_util.int_opt_to_json event.pr_number);
+            ("comment_id", Json_util.int_opt_to_json event.comment_id);
+            ("duration_ms", `Float duration_ms);
+          ]
+      in
+      Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
+
+let append_pr_work_action_metrics
+    ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta)
+    ~(generation : int)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool)
+    ~(duration_ms : float)
+    () =
+  let events =
+    pr_work_action_metric_events_of_tool_io
+      ~tool_name ~input ~output_text ~transport_success
+  in
+  match events with
+  | [] -> ()
+  | _ ->
+      let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
+      List.iter
+        (fun event ->
+           let now = Time_compat.now () in
+           let snapshot =
+             `Assoc
+               [
+                 ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
+                 ("ts_unix", `Float now);
+                 ("channel", `String "tool_event");
+                 ("metric_event", `String "keeper_pr_work_action");
+                 ("name", `String meta.name);
+                 ("agent_name", `String meta.agent_name);
+                 ( "trace_id",
+                   `String
+                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+                 ("generation", `Int generation);
+                 ("tool_name", `String tool_name);
+                 ("pr_work_action", `String event.work_action);
+                 ("pr_work_action_source", `String event.work_source);
+                 ("pr_work_action_success", `Bool event.success);
+                 ( "pr_work_command",
+                   Json_util.string_opt_to_json event.command );
+                 ("tool_call_count", `Int 0);
+                 ("tools_used", `List []);
+                 ("duration_ms", `Float duration_ms);
+               ]
+           in
+           Dated_jsonl.append store
+             (Inference_utils.sanitize_json_utf8 snapshot))
+        events
+
 let make_hooks
+    ~(config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
@@ -1318,6 +1662,56 @@ let make_hooks
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
+        (try
+           append_pr_review_action_metric
+             ~config
+             ~meta:(!meta_ref)
+             ~generation
+             ~tool_name
+             ~input
+             ~output_text
+             ~transport_success:(outcome = "ok")
+             ~duration_ms
+             ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:
+                 [
+                   ("keeper", (!meta_ref).name);
+                   ("callback", "pr_review_action_metrics_append");
+                 ]
+               ();
+             Log.Keeper.warn
+               "keeper:%s tool=%s pr_review_action metric append failed: %s"
+               (!meta_ref).name tool_name (Printexc.to_string exn));
+        (try
+           append_pr_work_action_metrics
+             ~config
+             ~meta:(!meta_ref)
+             ~generation
+             ~tool_name
+             ~input
+             ~output_text
+             ~transport_success:(outcome = "ok")
+             ~duration_ms
+             ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:
+                 [
+                   ("keeper", (!meta_ref).name);
+                   ("callback", "pr_work_action_metrics_append");
+                 ]
+               ();
+             Log.Keeper.warn
+               "keeper:%s tool=%s pr_work_action metric append failed: %s"
+               (!meta_ref).name tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -1474,6 +1868,14 @@ let make_hooks
      guard_chain only; non_gate_hooks has it None, so Hooks.compose
      keeps guard_chain's pre_tool_use verbatim. *)
   Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
+
+module For_testing = struct
+  let pr_review_action_metric_event_of_tool_io =
+    pr_review_action_metric_event_of_tool_io
+
+  let pr_work_action_metric_events_of_tool_io =
+    pr_work_action_metric_events_of_tool_io
+end
 
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,

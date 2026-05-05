@@ -98,6 +98,13 @@ val top_count_name_and_count :
     for the highest-count entry, [None] when [tbl] is empty.
     Convenience for the "primary model / tool" badge. *)
 
+(** {1 Metrics-row classification (cascade-visible)} *)
+
+val metrics_row_has_context_snapshot : Yojson.Safe.t -> bool
+(** [metrics_row_has_context_snapshot row] is true when [row] carries
+    turn/heartbeat context fields used by context health panels. Sparse
+    [tool_event] rows intentionally do not qualify. *)
+
 (** {1 24h-window aggregation (cascade-visible)} *)
 
 val keeper_metrics_24h_json :

@@ -230,6 +230,21 @@ let create_keeper_24h_bucket_stats () : keeper_24h_bucket_stats =
     proactive_fallback_count = 0;
   }
 
+let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
+  let open Yojson.Safe.Util in
+  let has_int = function
+    | `Int _ -> true
+    | _ -> false
+  in
+  let has_ratio = function
+    | `Float _ | `Int _ -> true
+    | _ -> false
+  in
+  has_ratio (member "context_ratio" j)
+  && has_int (member "context_tokens" j)
+  && has_int (member "context_max" j)
+  && has_int (member "message_count" j)
+
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
     ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
@@ -245,7 +260,9 @@ let keeper_metrics_24h_json
       try
         let j = Yojson.Safe.from_string line in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-        if ts_unix >= start_ts && ts_unix <= (now_ts +. 60.0) then begin
+        if ts_unix >= start_ts && ts_unix <= (now_ts +. 60.0)
+           && metrics_row_has_context_snapshot j
+        then begin
           incr sample_points;
           let bucket_ts =
             int_of_float (floor (ts_unix /. 3600.0) *. 3600.0)

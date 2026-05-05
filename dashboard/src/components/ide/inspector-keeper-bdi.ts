@@ -1,8 +1,9 @@
-import { signal } from '@preact/signals'
+import { computed } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
+import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
 
 export interface KeeperBdiTokenSpend {
   readonly ts_unix: number | null
@@ -43,11 +44,24 @@ interface InspectorKeeperPin {
   readonly line: number | null
 }
 
-export const inspectorKeeperPin = signal<InspectorKeeperPin | null>(null)
+/**
+ * RFC-0027 PR-α backward-compat: legacy single-pin signal is now a derived
+ * projection over the head of `pinnedKeepers` (max-4 LRU store). Reads stay
+ * identical; mutators move to `pinKeeper` / `clearPins` from
+ * `multi-keeper-pin-store.ts`.
+ */
+export const inspectorKeeperPin = computed<InspectorKeeperPin | null>(() => {
+  const head = headPinnedKeeper.value
+  return head ? { keeperName: head.keeperName, line: head.line } : null
+})
 
 export function pinInspectorKeeper(keeperName: string, line: number | null): void {
   const trimmed = keeperName.trim()
-  inspectorKeeperPin.value = trimmed ? { keeperName: trimmed, line } : null
+  if (trimmed) {
+    pinKeeper(trimmed, line)
+  } else {
+    clearPins()
+  }
 }
 
 function normalizeTokenSpend(raw: unknown): KeeperBdiTokenSpend | null {

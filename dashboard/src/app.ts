@@ -43,6 +43,7 @@ import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
+import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -99,6 +100,13 @@ export function App() {
   // manager's `dispatch` returns `false` on no-match so the host does not
   // `preventDefault`, leaving existing element-scoped listeners working.
   useKeyboardShortcutHost(globalShortcutManager)
+
+  // RFC-0027 PR-γ-2: 5 multi-keeper-pin shortcuts (Mod+Shift+1..4
+  // promote, Mod+Shift+W unpin head). First consumer of the global
+  // shortcut manager (RFC-0012 §8 consumer-migration pattern). Chord
+  // namespace deliberately distinct from RFC-0012 §4 default IDE set
+  // (Mod+1..9 reserved for tab switching, Mod+W for tab close).
+  useKeeperPinShortcuts(globalShortcutManager)
 
   useEffect(() => {
     let cancelled = false

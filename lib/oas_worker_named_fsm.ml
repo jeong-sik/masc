@@ -153,6 +153,47 @@ let enrich_sdk_error ~cascade_name
          })
   | _ -> err
 
+(** CLI-wrapped error variants where quota signals may appear serialized as
+    text.  AuthError, NotFound, ContextOverflow, and Timeout never carry
+    quota information — excluding them avoids unnecessary substring scans
+    and makes the structural filter explicit. *)
+let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
+    : string option =
+  match api_err with
+  | Llm_provider.Retry.RateLimited { message; _ } ->
+    (* Structured hard-quota check is handled separately by
+       [Llm_provider.Retry.is_hard_quota]; this extractor is for the
+       CLI-wrapped fallback path only.  RateLimited messages are included
+       here so the compound CLI-exit-code heuristic can still fire on
+       messages that [is_hard_quota] does not cover. *)
+    Some message
+  | Llm_provider.Retry.NetworkError { message; _ } -> Some message
+  | Llm_provider.Retry.Overloaded { message } -> Some message
+  | Llm_provider.Retry.ServerError { message; _ } -> Some message
+  (* InvalidRequest covers Anthropic's HTTP 400 user-set monthly cap
+     ("You have reached your specified API usage limits...").  Without
+     this branch, direct (non-CLI) API calls treat the cap as a
+     retryable client error and the cascade burns its full turn budget
+     on a permanent failure.  Observed 2026-04-29. *)
+  | Llm_provider.Retry.InvalidRequest { message } -> Some message
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.Timeout _ ->
+    None
+
+(** Substring indicators for hard-quota signals in CLI-wrapped error text.
+
+    These are necessary because CLI transports (Gemini CLI, Claude Code CLI)
+    serialize provider errors as plain text in [NetworkError.message] or
+    [InvalidRequest.message].  The structured [Llm_provider.Retry.is_hard_quota]
+    only inspects the [RateLimited] variant, so CLI-wrapped messages require
+    text-level pattern matching.
+
+    [Llm_provider.Retry.is_hard_quota_message] exists in the external library
+    but is not exposed in its .mli, so these indicators cannot delegate to it.
+    If it becomes public in a future agent_sdk release, this list can be
+    replaced with a call to that function plus the CLI-specific extras. *)
 let cli_wrapped_hard_quota_indicators = [
   "hard_quota";
   "terminalquotaerror";
@@ -310,26 +351,18 @@ let sdk_error_is_terminal_provider_runtime_failure
 let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api api_err ->
+    (* Layer 1: structured variant check — [is_hard_quota] inspects the
+       [RateLimited] variant for known hard-quota message patterns. *)
     Llm_provider.Retry.is_hard_quota api_err
     ||
-    (match[@warning "-8"] api_err with
-     | Llm_provider.Retry.NetworkError { message; _ }
-     | Llm_provider.Retry.Overloaded { message }
-     | Llm_provider.Retry.ServerError { message; _ }
-     (* InvalidRequest covers Anthropic's HTTP 400 user-set monthly cap
-        ("You have reached your specified API usage limits...").  Without
-        this branch, direct (non-CLI) API calls treat the cap as a
-        retryable client error and the cascade burns its full turn budget
-        on a permanent failure.  Observed 2026-04-29.  CLI-wrapped form
-        already lands in [NetworkError] above. *)
-     | Llm_provider.Retry.InvalidRequest { message } ->
+    (* Layer 2: CLI-wrapped fallback — extract message from variants that
+       may carry serialized CLI output, then scan for quota indicators.
+       Variants excluded by [api_error_message_for_quota_scan] (AuthError,
+       NotFound, ContextOverflow, Timeout) never carry quota signals. *)
+    (match api_error_message_for_quota_scan api_err with
+     | Some message ->
        message_looks_like_cli_wrapped_hard_quota message
-     | Llm_provider.Retry.RateLimited _
-     | Llm_provider.Retry.AuthError _
-     | Llm_provider.Retry.NotFound _
-     | Llm_provider.Retry.ContextOverflow _
-     | Llm_provider.Retry.Timeout _ ->
-       false)
+     | None -> false)
   | _ -> false
 
 let provider_label provider =

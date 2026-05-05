@@ -18,6 +18,7 @@ export type SSEEventType =
   | 'comment_added'
   | 'post_voted'
   | 'comment_voted'
+  | 'reaction_changed'
   | 'heartbeat'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
@@ -141,6 +142,11 @@ export interface SSEEvent {
   voter?: string
   voter_identity?: BoardActorIdentity | null
   direction?: 'up' | 'down' | string
+  target_type?: 'post' | 'comment' | string
+  target_id?: string
+  user_id?: string
+  emoji?: string
+  reacted?: boolean
   post_kind?: BoardPost['post_kind'] | string
   hearth?: string
   agent_name?: string

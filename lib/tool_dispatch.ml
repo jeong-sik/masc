@@ -264,6 +264,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_list
     | Board_post
     | Board_profile
+    | Board_reaction
     | Board_search
     | Board_stats
     | Board_vote

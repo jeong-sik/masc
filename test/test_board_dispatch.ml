@@ -480,6 +480,135 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Switch.fail sw Exit)
   with Exit -> ()
 
+(** {1 Reaction Operations} *)
+
+let test_reaction_toggle_and_summary () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"reactable post" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      (match
+         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+           ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok result ->
+           Alcotest.(check bool) "reacted" true result.reacted;
+           Alcotest.(check int) "summary length" 1 (List.length result.summary);
+           (match result.summary with
+            | summary :: _ ->
+                Alcotest.(check string) "summary emoji" "🚀" summary.emoji;
+                Alcotest.(check int) "summary count" 1 summary.count;
+                Alcotest.(check bool) "summary reacted" true summary.reacted
+            | [] -> Alcotest.fail "expected reaction summary"));
+      (match
+         Board_dispatch.list_reactions ~target_type:Board.Reaction_post
+           ~target_id:post_id ~user_id:"reactor" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok summaries ->
+           Alcotest.(check int) "listed summary length" 1
+             (List.length summaries));
+      (match
+         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+           ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok result ->
+           Alcotest.(check bool) "reacted after untoggle" false
+             result.reacted;
+           Alcotest.(check int) "summary empty after untoggle" 0
+             (List.length result.summary))
+
+let test_comment_reaction_survives_restart () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"comment reaction parent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      let comment_id =
+        match
+          Board_dispatch.add_comment ~post_id ~author:"commenter"
+            ~content:"reactable comment" ()
+        with
+        | Error e -> Alcotest.fail (Board.show_board_error e)
+        | Ok comment -> Board.Comment_id.to_string comment.id
+      in
+      (match
+         Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+           ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok _ -> ());
+      Board.reset_global_for_test ();
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
+      match
+        Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
+          ~target_id:comment_id ~user_id:"reactor" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok summaries ->
+          Alcotest.(check int) "restored summary length" 1
+            (List.length summaries);
+          match summaries with
+          | summary :: _ ->
+              Alcotest.(check string) "restored emoji" "👏" summary.emoji;
+              Alcotest.(check int) "restored count" 1 summary.count;
+              Alcotest.(check bool) "restored reacted" true summary.reacted
+          | [] -> Alcotest.fail "expected restored reaction summary"
+
+let test_board_sse_reaction_changed () =
+  let post_id =
+    match
+      Board_dispatch.create_post ~author:"reaction-author"
+        ~content:"sse reaction parent" ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  let seen = ref None in
+  Board_dispatch.set_board_sse_hook (fun event -> seen := Some event);
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       ~target_id:post_id ~user_id:"reactor" ~emoji:"🔥"
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  match !seen with
+  | Some
+      (Board_dispatch.Reaction_changed
+         { target_type; target_id; user_id; emoji; reacted }) ->
+      Alcotest.(check string) "target type" "post"
+        (Board.reaction_target_type_to_string target_type);
+      Alcotest.(check string) "target id" post_id target_id;
+      Alcotest.(check string) "user" "reactor" user_id;
+      Alcotest.(check string) "emoji" "🔥" emoji;
+      Alcotest.(check bool) "reacted" true reacted
+  | Some _ -> Alcotest.fail "expected reaction_changed SSE event"
+  | None -> Alcotest.fail "expected board SSE event"
+
+let test_reaction_rejects_unsupported_emoji () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"unsupported reaction parent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+          ~target_id:post_id ~user_id:"reactor" ~emoji:"😄"
+      with
+      | Ok _ -> Alcotest.fail "expected Validation_error"
+      | Error (Board.Validation_error _) -> ()
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats () =
@@ -608,6 +737,16 @@ let () =
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
+    ];
+    "reactions", [
+      Alcotest.test_case "toggle and summary" `Quick
+        (with_eio test_reaction_toggle_and_summary);
+      Alcotest.test_case "comment reaction survives restart" `Quick
+        (with_eio test_comment_reaction_survives_restart);
+      Alcotest.test_case "SSE reaction_changed" `Quick
+        (with_eio test_board_sse_reaction_changed);
+      Alcotest.test_case "unsupported emoji rejected" `Quick
+        (with_eio test_reaction_rejects_unsupported_emoji);
     ];
     "misc", [
       Alcotest.test_case "stats" `Quick (with_eio test_stats);

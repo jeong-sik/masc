@@ -377,6 +377,14 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                   ("voter", `String voter);
                   ("voter_identity", Server_utils.board_actor_identity_json voter);
                   ("direction", `String dir)]
+      | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
+          `Assoc [("type", `String "reaction_changed");
+                  ("target_type", `String (Board.reaction_target_type_to_string target_type));
+                  ("target_id", `String target_id);
+                  ("user_id", `String user_id);
+                  ("user_identity", Server_utils.board_actor_identity_json user_id);
+                  ("emoji", `String emoji);
+                  ("reacted", `Bool reacted)]
     in
     Sse.broadcast (`Assoc [
       ("jsonrpc", `String "2.0");
@@ -421,6 +429,18 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
            `Assoc [("comment_id", `String comment_id); ("voter", `String voter);
                    ("voter_identity", Server_utils.board_actor_identity_json voter);
                    ("direction", `String dir)])
+      | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
+          (Event_kind.Board.to_string Event_kind.Board.Voted,
+           Server_utils.board_actor_entity user_id,
+           Some (Activity_graph.entity
+                   ~kind:(Board.reaction_target_type_to_string target_type)
+                   target_id),
+           `Assoc [("target_type", `String (Board.reaction_target_type_to_string target_type));
+                   ("target_id", `String target_id);
+                   ("user_id", `String user_id);
+                   ("user_identity", Server_utils.board_actor_identity_json user_id);
+                   ("emoji", `String emoji);
+                   ("reacted", `Bool reacted)])
     in
     (* P2 silent-failure fix: Activity_graph.emit failures (Discord
        webhook, audit trail writes, etc.) were previously ignored

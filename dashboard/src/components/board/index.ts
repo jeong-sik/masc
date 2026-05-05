@@ -6,3 +6,4 @@ export {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
+export { ReactionBar } from './reaction-bar'

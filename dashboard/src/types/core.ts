@@ -163,6 +163,23 @@ export interface BoardComment {
   votes_down?: number
 }
 
+export type BoardReactionTargetType = 'post' | 'comment'
+
+export interface BoardReactionSummary {
+  emoji: string
+  count: number
+  reacted: boolean
+}
+
+export interface BoardReactionToggleResult {
+  target_type: BoardReactionTargetType
+  target_id: string
+  user_id: string
+  emoji: string
+  reacted: boolean
+  summary: BoardReactionSummary[]
+}
+
 // --- Keeper Metrics ---
 
 export interface InferenceTelemetry {

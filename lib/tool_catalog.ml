@@ -533,6 +533,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_comment_vote
   | TN.Masc TM.Board_delete
   | TN.Masc TM.Board_post
+  | TN.Masc TM.Board_reaction
   | TN.Masc TM.Board_vote
   | TN.Masc TM.Broadcast
   | TN.Masc TM.Cancel_task
@@ -651,6 +652,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_list
       | TM.Board_post
       | TM.Board_profile
+      | TM.Board_reaction
       | TM.Board_search
       | TM.Board_stats
       | TM.Board_vote ) ->

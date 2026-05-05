@@ -70,6 +70,13 @@ type board_sse_event =
       voter : string;
       direction : Board.vote_direction;
     }
+  | Reaction_changed of {
+      target_type : Board.reaction_target_type;
+      target_id : string;
+      user_id : string;
+      emoji : string;
+      reacted : bool;
+    }
 
 val set_keeper_board_signal_hook : (keeper_board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post} and
@@ -191,6 +198,20 @@ val vote_comment :
   comment_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
+
+val toggle_reaction :
+  target_type:Board.reaction_target_type ->
+  target_id:string ->
+  user_id:string ->
+  emoji:string ->
+  (Board.reaction_toggle_result, Board.board_error) Result.t
+
+val list_reactions :
+  target_type:Board.reaction_target_type ->
+  target_id:string ->
+  ?user_id:string ->
+  unit ->
+  (Board.reaction_summary list, Board.board_error) Result.t
 
 (** {1 Karma} *)
 

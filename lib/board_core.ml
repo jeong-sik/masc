@@ -38,6 +38,7 @@ let create_store () = {
   karma_cache = None;
   sorted_posts_cache = None;
   comments_by_post = Hashtbl.create 1024;
+  reactions = Hashtbl.create 4096;
   dirty_posts = false;
   dirty_comments = false;
   dirty_post_ids = Hashtbl.create 256;
@@ -216,6 +217,9 @@ let persist_path () =
 let comments_path () =
   Filename.concat (board_masc_dir ()) "board_comments.jsonl"
 
+let reactions_path () =
+  Filename.concat (board_masc_dir ()) "board_reactions.jsonl"
+
 let ensure_dir path =
   if String.equal path "" || String.equal path "." || String.equal path "/" then ()
   else Fs_compat.mkdir_p path
@@ -288,6 +292,71 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
     ("score", `Int (c.votes_up - c.votes_down));
   ]
 
+let reaction_target_type_to_string = function
+  | Reaction_post -> "post"
+  | Reaction_comment -> "comment"
+
+let reaction_target_type_of_string_opt raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "post" -> Some Reaction_post
+  | "comment" -> Some Reaction_comment
+  | _ -> None
+
+let valid_reaction_target_type_strings = [ "post"; "comment" ]
+
+let board_reaction_emojis =
+  [ "👍"; "❤️"; "🎉"; "🚀"; "👀"; "😕"; "👏"; "🔥" ]
+
+let reaction_key ~target_type ~target_id ~user_id ~emoji =
+  String.concat ":"
+    [ reaction_target_type_to_string target_type; target_id; user_id; emoji ]
+
+let reaction_to_yojson (r : reaction) : Yojson.Safe.t =
+  `Assoc [
+    ("target_type", `String (reaction_target_type_to_string r.target_type));
+    ("target_id", `String r.target_id);
+    ("user_id", `String (Agent_id.to_string r.user_id));
+    ("emoji", `String r.emoji);
+    ("created_at", `Float r.created_at);
+  ]
+
+let reaction_summary_to_yojson (summary : reaction_summary) : Yojson.Safe.t =
+  `Assoc [
+    ("emoji", `String summary.emoji);
+    ("count", `Int summary.count);
+    ("reacted", `Bool summary.reacted);
+  ]
+
+let reaction_toggle_result_to_yojson (result : reaction_toggle_result) :
+    Yojson.Safe.t =
+  `Assoc [
+    ("target_type", `String (reaction_target_type_to_string result.target_type));
+    ("target_id", `String result.target_id);
+    ("user_id", `String result.user_id);
+    ("emoji", `String result.emoji);
+    ("reacted", `Bool result.reacted);
+    ("summary", `List (List.map reaction_summary_to_yojson result.summary));
+  ]
+
+let reaction_of_yojson (json : Yojson.Safe.t) : reaction option =
+  match
+    Safe_ops.json_string_opt "target_type" json,
+    Safe_ops.json_string_opt "target_id" json,
+    Safe_ops.json_string_opt "user_id" json,
+    Safe_ops.json_string_opt "emoji" json,
+    Safe_ops.json_float_opt "created_at" json
+  with
+  | Some target_type_raw, Some target_id, Some user_id_raw, Some emoji,
+    Some created_at ->
+      (match
+         reaction_target_type_of_string_opt target_type_raw,
+         Agent_id.of_string user_id_raw
+       with
+       | Some target_type, Ok user_id ->
+           Some { target_type; target_id; user_id; emoji; created_at }
+       | _ -> None)
+  | _ -> None
+
 (** {1 Rewrite Helpers} *)
 
 let rewrite_posts store =
@@ -317,6 +386,31 @@ let rewrite_comments store =
      | Ok () -> ()
      | Error msg -> record_persist_error ~where:"rewrite_comments" msg)
   with Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+
+let reactions_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (reaction_to_yojson reaction));
+       Buffer.add_char buf '\n')
+    store.reactions;
+  Buffer.contents buf
+
+let save_reactions_jsonl content =
+  try
+    ensure_masc_dir ();
+    let path = reactions_path () in
+    (match Fs_compat.save_file_atomic path content with
+     | Ok () -> ()
+     | Error msg -> record_persist_error ~where:"rewrite_reactions" msg)
+  with Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
+
+let rewrite_reactions_unlocked store =
+  save_reactions_jsonl (reactions_jsonl_unlocked store)
+
+let rewrite_reactions store =
+  let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
+  with_persist_lock store (fun () -> save_reactions_jsonl content)
 
 (** {1 Append Helpers} *)
 
@@ -733,5 +827,130 @@ let list_comments store ?(limit=1000) () : comment list =
     ) all in
     List.filteri (fun i _ -> i < limit) sorted
   )
+
+(** {1 Reactions} *)
+
+let normalize_reaction_emoji raw =
+  let emoji = String.trim raw in
+  if List.exists (String.equal emoji) board_reaction_emojis then Ok emoji
+  else
+    Error
+      (Validation_error
+         (Printf.sprintf "Unsupported board reaction emoji: %s" emoji))
+
+let ensure_reaction_target_unlocked store ~target_type ~target_id =
+  match target_type with
+  | Reaction_post ->
+      (match Post_id.of_string target_id with
+       | Error e -> Error e
+       | Ok pid ->
+           if Hashtbl.mem store.posts (Post_id.to_string pid) then Ok ()
+           else Error (Post_not_found target_id))
+  | Reaction_comment ->
+      (match Comment_id.of_string target_id with
+       | Error e -> Error e
+       | Ok cid ->
+           if Hashtbl.mem store.comments (Comment_id.to_string cid) then Ok ()
+           else Error (Comment_not_found target_id))
+
+let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
+  let counts = Hashtbl.create 8 in
+  let reacted = Hashtbl.create 8 in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       if (=) reaction.target_type target_type
+          && String.equal reaction.target_id target_id
+       then begin
+         let current =
+           Hashtbl.find_opt counts reaction.emoji |> Option.value ~default:0
+         in
+         Hashtbl.replace counts reaction.emoji (current + 1);
+         match user_id with
+         | Some user when String.equal (Agent_id.to_string reaction.user_id) user ->
+             Hashtbl.replace reacted reaction.emoji true
+         | Some _ | None -> ()
+       end)
+    store.reactions;
+  List.filter_map
+    (fun emoji ->
+       let count = Hashtbl.find_opt counts emoji |> Option.value ~default:0 in
+       if count = 0 then None
+       else
+         Some
+           {
+             emoji;
+             count;
+             reacted =
+               Hashtbl.find_opt reacted emoji |> Option.value ~default:false;
+           })
+    board_reaction_emojis
+
+let list_reactions store ~target_type ~target_id ?user_id () =
+  maybe_sweep store;
+  let user_id =
+    match user_id with
+    | Some user when not (String.equal (String.trim user) "") ->
+        Some (String.trim user)
+    | Some _ | None -> None
+  in
+  with_lock store (fun () ->
+      match ensure_reaction_target_unlocked store ~target_type ~target_id with
+      | Error e -> Error e
+      | Ok () ->
+          Ok
+            (reaction_summaries_unlocked store ~target_type ~target_id ?user_id
+               ()))
+
+let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
+    (reaction_toggle_result, board_error) Result.t =
+  maybe_sweep store;
+  match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
+  | Error e, _ -> Error e
+  | _, Error e -> Error e
+  | Ok user_id, Ok emoji ->
+      let user_id_string = Agent_id.to_string user_id in
+      let result =
+        with_lock store (fun () ->
+            match ensure_reaction_target_unlocked store ~target_type ~target_id with
+            | Error e -> Error e
+            | Ok () ->
+                let key =
+                  reaction_key ~target_type ~target_id ~user_id:user_id_string
+                    ~emoji
+                in
+                let reacted =
+                  match Hashtbl.find_opt store.reactions key with
+                  | Some _ ->
+                      Hashtbl.remove store.reactions key;
+                      false
+                  | None ->
+                      Hashtbl.replace store.reactions key
+                        {
+                          target_type;
+                          target_id;
+                          user_id;
+                          emoji;
+                          created_at = Time_compat.now ();
+                        };
+                      true
+                in
+                let summary =
+                  reaction_summaries_unlocked store ~target_type ~target_id
+                    ~user_id:user_id_string ()
+                in
+                Ok
+                  {
+                    target_type;
+                    target_id;
+                    user_id = user_id_string;
+                    emoji;
+                    reacted;
+                    summary;
+                  })
+      in
+      (match result with
+       | Ok _ -> rewrite_reactions store
+       | Error _ -> ());
+      result
 
 (** {1 Voting - Deduplicated} *)

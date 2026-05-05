@@ -103,6 +103,33 @@ type comment = {
   votes_down : int;
 }
 
+type reaction_target_type =
+  | Reaction_post
+  | Reaction_comment
+
+type reaction = {
+  target_type : reaction_target_type;
+  target_id : string;
+  user_id : Agent_id.t;
+  emoji : string;
+  created_at : float;
+}
+
+type reaction_summary = {
+  emoji : string;
+  count : int;
+  reacted : bool;
+}
+
+type reaction_toggle_result = {
+  target_type : reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+  summary : reaction_summary list;
+}
+
 (** {1 Limits — Enforced, Not Optional}
 
     All values resolved from [MASC_BOARD_*] env vars at module init,
@@ -147,6 +174,8 @@ type store = {
   (** [None] = stale. *)
   comments_by_post : (string, string list) Hashtbl.t;
   (** post_id -> comment_id list. *)
+  reactions : (string, reaction) Hashtbl.t;
+  (** Unique reactions keyed by target type, target id, user id, and emoji. *)
   mutable dirty_posts : bool;
   mutable dirty_comments : bool;
   dirty_post_ids : (string, unit) Hashtbl.t;

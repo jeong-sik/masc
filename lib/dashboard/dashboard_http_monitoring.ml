@@ -215,6 +215,49 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
     ("judge_online", `Bool runtime.judge_online);
   ], true)
 
+let keeper_turn_slots_json () : Yojson.Safe.t =
+  let now = Unix.gettimeofday () in
+  let take_top n xs =
+    let rec aux acc i = function
+      | [] -> List.rev acc
+      | _ when i >= n -> List.rev acc
+      | x :: tl -> aux (x :: acc) (i + 1) tl
+    in
+    aux [] 0 xs
+  in
+  let pool_json (label, holders) =
+    let count = List.length holders in
+    let max_held =
+      match holders with
+      | [] -> 0.0
+      | (_, held_for) :: _ -> held_for
+    in
+    let top =
+      take_top 3 holders
+      |> List.map (fun (name, held_for) ->
+        `Assoc
+          [ ("keeper", `String name);
+            ("held_for_sec", `Float held_for);
+          ])
+    in
+    `Assoc
+      [ ("pool", `String label);
+        ("held_count", `Int count);
+        ("max_held_seconds", `Float max_held);
+        ("top_holders", `List top);
+      ]
+  in
+  `Assoc
+    [ ("generated_at", `Float now);
+      ("pools",
+        `List
+          (List.map pool_json
+            [ "turn", Keeper_keepalive.turn_slot_holders ~now;
+              "autonomous", Keeper_keepalive.autonomous_slot_holders ~now;
+              "reactive", Keeper_keepalive.reactive_slot_holders ~now;
+            ]));
+    ]
+
 let slot_monitoring_json () : Yojson.Safe.t =
   try
     let idle = Discovery_cache.idle_slot_count () in

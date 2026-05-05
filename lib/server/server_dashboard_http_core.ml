@@ -150,6 +150,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
         ("room_state", Coord_eio.state_health_counters ());
         ("executor", executor_outcomes_json config);
         ("slots", slot_monitoring_json ());
+        ("keeper_turn_slots", keeper_turn_slots_json ());
       ]);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);

@@ -739,6 +739,24 @@ export interface GoalDetailTimelineEvent {
   severity: 'ok' | 'warn' | 'bad' | string
 }
 
+/** One pool's snapshot of the keeper turn-slot semaphore. Operators
+    consult this when WARN "semaphore wait > 180s" fires to identify
+    the actual blocker keeper.
+
+    pool ∈ "turn" | "autonomous" | "reactive". top_holders is sorted
+    by descending hold time; first entry has held_for_sec === max_held_seconds. */
+export interface KeeperTurnSlotPool {
+  pool: 'turn' | 'autonomous' | 'reactive' | string
+  held_count: number
+  max_held_seconds: number
+  top_holders: Array<{ keeper: string; held_for_sec: number }>
+}
+
+export interface KeeperTurnSlotsSnapshot {
+  generated_at: number
+  pools: KeeperTurnSlotPool[]
+}
+
 export interface DashboardGoalDetailResponse {
   generated_at?: string
   goal: GoalTreeNode
@@ -783,6 +801,7 @@ export interface ServerStatus {
   monitoring?: {
     board?: BoardMonitoring
     governance?: GovernanceMonitoring
+    keeper_turn_slots?: KeeperTurnSlotsSnapshot
   }
   data_quality?: {
     board_contract_ok?: boolean

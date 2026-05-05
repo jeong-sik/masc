@@ -25,6 +25,14 @@ val governance_monitoring_json :
 (** Point-in-time slot occupancy / queue depth snapshot. *)
 val slot_monitoring_json : unit -> Yojson.Safe.t
 
+(** Diagnostic snapshot of keeper turn-slot semaphore holders.
+    Returns one entry per pool (turn / autonomous / reactive) with
+    [held_count], [max_held_seconds], and the top-3 holders sorted by
+    descending hold time. Operators consult this when WARN
+    "semaphore wait > 180s" fires to identify the actual fleet
+    blocker keeper. *)
+val keeper_turn_slots_json : unit -> Yojson.Safe.t
+
 (** Per-executor outcome counts (success / failure / cancelled)
     aggregated from the audit log. *)
 val executor_outcomes_json : Coord.config -> Yojson.Safe.t

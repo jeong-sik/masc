@@ -81,6 +81,7 @@ export const replyingTo = signal<string | null>(null)
 export const showNewPostForm = signal(false)
 export const newPostTitle = signal('')
 export const newPostContent = signal('')
+export const newPostHearth = signal('')
 export const newPostSubmitting = signal(false)
 
 // ── Pagination ─────────────────────────────────────────────────────
@@ -364,15 +365,18 @@ export async function submitComment(postId: string, parentId?: string) {
 export async function submitNewPost() {
   const title = newPostTitle.value.trim()
   const content = newPostContent.value.trim()
+  const hearth = newPostHearth.value.trim() || boardHearthFilter.value.trim()
   if (!title || !content) return
   newPostSubmitting.value = true
   try {
-    await createPost(title, content, commentAuthor.value)
+    await createPost(title, content, commentAuthor.value, { hearth: hearth || undefined })
     newPostTitle.value = ''
     newPostContent.value = ''
+    newPostHearth.value = ''
     showNewPostForm.value = false
     showToast('글을 등록했습니다', 'success')
     refreshBoard()
+    void refreshBoardHearths()
   } catch (err) {
     console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
     showToast('글 등록에 실패했습니다', 'error')

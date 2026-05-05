@@ -14,6 +14,7 @@ import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
+import { registerBoardHearthsRefresh } from '../../sse-store'
 import { PostDetail } from './post-detail'
 import {
   boardActorAvatarKey,
@@ -598,6 +599,9 @@ function PostCard({ post }: { post: BoardPost }) {
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
+  useEffect(() => registerBoardHearthsRefresh(() => {
+    void refreshBoardHearths()
+  }), [])
   useEffect(() => {
     if (boardHearths.value.length === 0) void refreshBoardHearths()
   }, [])

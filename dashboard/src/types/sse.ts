@@ -1,4 +1,4 @@
-import type { BoardActorIdentity } from './core'
+import type { BoardActorIdentity, BoardPost } from './core'
 
 // --- SSE Events ---
 
@@ -141,6 +141,7 @@ export interface SSEEvent {
   voter?: string
   voter_identity?: BoardActorIdentity | null
   direction?: 'up' | 'down' | string
+  post_kind?: BoardPost['post_kind'] | string
   hearth?: string
   agent_name?: string
   keeper_name?: string

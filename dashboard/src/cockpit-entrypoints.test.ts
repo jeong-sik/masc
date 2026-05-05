@@ -87,4 +87,21 @@ describe('cockpit entrypoint registry', () => {
       params: { section: 'ide-shell', view: 'source', find: 'open' },
     })
   })
+
+  it('routes covered C3 composer variants to focused quick intervention modes', () => {
+    const variants = [
+      ['cm-bc', 'broadcast'],
+      ['cm-mn', 'mention'],
+      ['cm-st', 'state'],
+    ] as const
+
+    for (const [alias, focus] of variants) {
+      const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes(alias))
+      expect(entrypoint?.coverage).toBe('covered')
+      expect(cockpitTargetForParams({ mode: 'Comms', tab: alias })).toEqual({
+        tab: 'command',
+        params: { section: 'operations', view: 'ops', focus },
+      })
+    }
+  })
 })

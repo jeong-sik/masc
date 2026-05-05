@@ -205,6 +205,58 @@ describe('QuickIntervene', () => {
     })
   }, 15000)
 
+  it('filters mention autocomplete from @draft text and applies the selected keeper', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'broadcast'
+    quickMessage.value = 'Please verify @nick'
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [
+        { name: 'improver', status: 'online' },
+        { name: 'nick0cave', status: 'busy' },
+        { name: 'runtime', status: 'online' },
+      ],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    const listbox = container.querySelector('div[role="listbox"]')
+    const nickOption = Array.from(listbox?.querySelectorAll('button[role="option"]') ?? [])
+      .find(button => button.textContent?.includes('@nick0cave')) as HTMLButtonElement | undefined
+    const runtimeOption = Array.from(listbox?.querySelectorAll('button[role="option"]') ?? [])
+      .find(button => button.textContent?.includes('@runtime'))
+
+    expect(listbox?.getAttribute('aria-label')).toBe('Mention autocomplete (1 matches)')
+    expect(nickOption).not.toBeUndefined()
+    expect(runtimeOption).toBeUndefined()
+
+    await act(async () => { nickOption?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await flushUi()
+
+    const editor = container.querySelector('textarea[name="quick_intervene_message"]') as HTMLTextAreaElement | null
+    expect(quickTarget.value).toBe('keeper:nick0cave')
+    expect(editor?.value).toContain('@nick0cave')
+    expect(quickMessage.value).toContain('@nick0cave')
+    expect(container.querySelector('div[aria-label="Will mention: @nick0cave"]')).not.toBeNull()
+  }, 15000)
+
   it('disables keeper DM send when no keepers are online', async () => {
     const {
       QuickIntervene,

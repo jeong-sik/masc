@@ -53,10 +53,13 @@ RUN chmod +x /app/masc-mcp
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
-# Create data directory for JSONL fallback
+# Runtime state lives under MASC_BASE_PATH=/app, which resolves durable JSONL
+# storage to /app/.masc. Keep it separate from the immutable config seed below.
 RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
 
 # Copy all config files. CI may generate additional JSON alongside tracked files.
+# MASC_CONFIG_DIR points here, so this is the image-baked config root, not
+# the mutable runtime storage root.
 COPY config/ /app/config/
 
 # Copy the built dashboard SPA from the build stage.  lib/web_dashboard.ml
@@ -68,6 +71,8 @@ RUN chown -R appuser:appgroup /app/assets
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
 ENV MASC_CONFIG_DIR=/app/config
+
+VOLUME ["/app/.masc"]
 
 EXPOSE 8080
 

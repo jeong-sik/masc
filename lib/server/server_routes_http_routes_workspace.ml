@@ -128,46 +128,63 @@ let excluded_dirs =
 let default_tree_node_limit = 750
 let max_tree_node_limit = 2000
 
+(* Strict numeric validator.  OCaml's [int_of_string] accepts forms
+   that we want to reject ("1_" -> 1, "1__2" -> 12) because they let
+   malformed inputs request meaningful tree sizes.  This validator
+   mirrors what an operator would reasonably expect of a [limit=]
+   query parameter: optional sign, at least one decimal digit,
+   underscores only between digits.  When this returns [false] we
+   fall back to the default regardless of what [int_of_string_opt]
+   would have produced. *)
+let is_strict_decimal_int_string s =
+  let len = String.length s in
+  if len = 0 then false
+  else
+    let start = if s.[0] = '-' || s.[0] = '+' then 1 else 0 in
+    if start >= len then false
+    else if Char.equal s.[start] '_' || Char.equal s.[len - 1] '_' then false
+    else
+      let ok = ref true in
+      let has_digit = ref false in
+      let prev_was_underscore = ref false in
+      for i = start to len - 1 do
+        let c = s.[i] in
+        if c >= '0' && c <= '9' then begin
+          has_digit := true;
+          prev_was_underscore := false
+        end else if c = '_' then begin
+          if !prev_was_underscore then ok := false;
+          prev_was_underscore := true
+        end else begin
+          ok := false;
+          prev_was_underscore := false
+        end
+      done;
+      !ok && !has_digit
+
 let tree_node_limit_of_query = function
-  | Some raw -> (
-      match int_of_string_opt raw with
-      | Some n -> max 1 (min max_tree_node_limit n)
-      | None ->
-          (* Issue #13191 follow-up: a request like
-             [?limit=99999999999999999999] makes [int_of_string] raise
-             on overflow, which previously fell back to
-             [default_tree_node_limit] (750) instead of clamping to
-             [max_tree_node_limit] (2000).  Clients asking for a "very
-             large" limit therefore unexpectedly got fewer nodes than
-             a smaller-but-valid request would.  When the raw value is
-             purely numeric (with an optional sign / underscores /
-             leading zeros), treat the parse failure as overflow and
-             clamp to the documented maximum.  Non-numeric junk still
-             falls back to the default. *)
-          let classify_overflow s =
-            let len = String.length s in
-            if len = 0 then `Junk
-            else
-              let is_negative = s.[0] = '-' in
-              let start =
-                if s.[0] = '-' || s.[0] = '+' then 1 else 0
-              in
-              if start >= len then `Junk
-              else
-                let ok = ref true in
-                for i = start to len - 1 do
-                  let c = s.[i] in
-                  if not ((c >= '0' && c <= '9') || c = '_') then
-                    ok := false
-                done;
-                if !ok then
-                  if is_negative then `NegativeOverflow else `PositiveOverflow
-                else `Junk
-          in
-          (match classify_overflow raw with
-           | `PositiveOverflow -> max_tree_node_limit
-           | `NegativeOverflow -> 1
-           | `Junk -> default_tree_node_limit))
+  | Some raw ->
+      (* Reject malformed numerics up front so that "1_" / "1__2" /
+         "_1" are treated as junk and fall back to default, even
+         though [int_of_string_opt] would otherwise accept them. *)
+      if not (is_strict_decimal_int_string raw) then default_tree_node_limit
+      else (
+        match int_of_string_opt raw with
+        | Some n -> max 1 (min max_tree_node_limit n)
+        | None ->
+            (* Issue #13191 follow-up: parse failure on a strict
+               numeric input means the value overflowed [int].  A
+               request like [?limit=99999999999999999999] used to fall
+               back to [default_tree_node_limit] (750) instead of
+               clamping to [max_tree_node_limit] (2000), so clients
+               asking for "very large" got fewer nodes than a
+               smaller-but-valid request would.  Positive overflow
+               clamps to the maximum; negative overflow mirrors the
+               existing in-range "clamps low" behaviour and pins to 1. *)
+            let is_negative =
+              String.length raw > 0 && Char.equal raw.[0] '-'
+            in
+            if is_negative then 1 else max_tree_node_limit)
   | None -> default_tree_node_limit
 
 let safe_path base requested =

@@ -302,7 +302,6 @@ let metric_word_tokens raw =
   in
   let is_lower c = c >= 'a' && c <= 'z' in
   let is_upper c = c >= 'A' && c <= 'Z' in
-  let is_alpha c = is_lower c || is_upper c in
   let next_at i = if i + 1 < len then Some raw.[i + 1] else None in
   let prev_at i = if i > 0 then Some raw.[i - 1] else None in
   for i = 0 to len - 1 do
@@ -312,18 +311,19 @@ let metric_word_tokens raw =
         let prev_lower =
           match prev_at i with Some c -> is_lower c | None -> false
         in
+        let prev_upper =
+          match prev_at i with Some c -> is_upper c | None -> false
+        in
         let next_lower =
           match next_at i with Some c -> is_lower c | None -> false
-        in
-        let prev_was_alpha =
-          match prev_at i with Some c -> is_alpha c | None -> false
         in
         (* Split before this uppercase letter when:
            1. Previous char was lowercase (camelCase: aA boundary)
            2. Previous char was uppercase AND next char is lowercase
-              (acronym→word: end-of-acronym boundary) *)
+              (acronym→word: end-of-acronym boundary, e.g. APIRatio
+              splits between [I] and [R]) *)
         if prev_lower then flush ()
-        else if prev_was_alpha && next_lower then flush ();
+        else if prev_upper && next_lower then flush ();
         Buffer.add_char current (Char.lowercase_ascii ch)
     | 'a' .. 'z' | '0' .. '9' ->
         Buffer.add_char current ch

@@ -134,16 +134,23 @@ type cascade_metrics_capture
     {!cascade_observation_with_metrics}. *)
 
 val cascade_attempt_terminal_event_json :
+  ?slot_release_at_phase:string ->
+  ?productive_phase_elapsed_ms:int ->
+  ?retry_phase_elapsed_ms:int ->
   model_id:string ->
   model_label:string option ->
   latency_ms:int option ->
   error:string option ->
+  unit ->
   Yojson.Safe.t
 (** Builds the structured JSON payload emitted to system_log for one
     cascade candidate's terminal state. Exposed for tests so the shape
     contract (`event`, `model_id`, `model_label`, `latency_ms`, `outcome`,
-    `error_message`) is locked against silent drift; downstream operators
-    grep on these field names when tracing why a cascade exhausted. *)
+    `error_message`, `slot_release_at_phase`,
+    `productive_phase_elapsed_ms`, `retry_phase_elapsed_ms`) is locked
+    against silent drift; downstream operators grep on these field names
+    when tracing why a cascade exhausted or why a keeper released its turn
+    slot instead of scheduling another degraded retry. *)
 
 val cascade_metrics_for_candidates :
   candidate_cfgs:Llm_provider.Provider_config.t list ->

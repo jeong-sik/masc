@@ -83,6 +83,9 @@ type cascade_rotation_attempt =
   ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
+  ; slot_release_at_phase : string option
+  ; productive_phase_elapsed_ms : int option
+  ; retry_phase_elapsed_ms : int option
   ; error_kind : error_kind option
   ; error_message : string option
   ; recorded_at : string
@@ -182,6 +185,15 @@ let cascade_rotation_attempt_to_json attempt =
       ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
       ("reason", `String attempt.reason);
       ("outcome", `String attempt.outcome);
+      ("slot_release_at_phase", string_opt_json attempt.slot_release_at_phase);
+      ( "productive_phase_elapsed_ms",
+        match attempt.productive_phase_elapsed_ms with
+        | Some value -> `Int value
+        | None -> `Null );
+      ( "retry_phase_elapsed_ms",
+        match attempt.retry_phase_elapsed_ms with
+        | Some value -> `Int value
+        | None -> `Null );
       ( "error_kind",
         string_opt_json (Option.map error_kind_to_string attempt.error_kind) );
       ("error_message", string_opt_json attempt.error_message);

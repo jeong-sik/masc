@@ -761,6 +761,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let degraded_retry_info = ref None in
       let cascade_rotation_attempts = ref [] in
       let record_cascade_rotation_attempt
+          ?slot_release_at_phase
+          ?productive_phase_elapsed_ms
+          ?retry_phase_elapsed_ms
           ~(from_cascade : Keeper_execution_receipt.cascade_name)
           ~(retry : EC.degraded_retry)
           ~(outcome : string)
@@ -772,6 +775,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_execution_receipt.cascade_name_of_string retry.next_cascade;
             reason = retry.fallback_reason;
             outcome;
+            slot_release_at_phase;
+            productive_phase_elapsed_ms;
+            retry_phase_elapsed_ms;
             error_kind =
               Some
                 (Keeper_execution_receipt.error_kind_of_string
@@ -822,9 +828,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Keeper_runtime_resolved.turn_timeout_sec ()
           in
           start_background_turn_event_bus_drain ~clock;
-          let turn_deadline = Eio.Time.now clock +. timeout_sec in
+          let turn_started_at = Eio.Time.now clock in
+          let turn_deadline = turn_started_at +. timeout_sec in
           let remaining_turn_budget_s () =
             Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
+          in
+          let retry_phase_started_at = ref None in
+          let elapsed_ms seconds =
+            int_of_float (Float.max 0.0 seconds *. 1000.0)
+          in
+          let current_turn_phase_elapsed_ms () =
+            let now = Eio.Time.now clock in
+            match !retry_phase_started_at with
+            | None -> (elapsed_ms (now -. turn_started_at), Some 0)
+            | Some retry_started_at ->
+                ( elapsed_ms (retry_started_at -. turn_started_at),
+                  Some (elapsed_ms (now -. retry_started_at)) )
           in
           let keeper_profile =
             Keeper_types_profile.load_keeper_profile_defaults meta.name
@@ -1204,7 +1223,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             (KCP.Runtime_name degraded_retry.next_cascade)
                       with
                       | Error fail_open_err ->
+                          let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+                            current_turn_phase_elapsed_ms ()
+                          in
                           record_cascade_rotation_attempt
+                            ~slot_release_at_phase:"retry_setup_failed"
+                            ~productive_phase_elapsed_ms
+                            ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
                             ~retry:degraded_retry
                             ~outcome:"setup_failed"
@@ -1222,7 +1247,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             KCP.runtime_name_to_string
                               next_execution.cascade_name
                           in
+                          if Option.is_none !retry_phase_started_at then
+                            retry_phase_started_at := Some (Eio.Time.now clock);
+                          let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+                            current_turn_phase_elapsed_ms ()
+                          in
                           record_cascade_rotation_attempt
+                            ~productive_phase_elapsed_ms
+                            ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
                             ~retry:degraded_retry
                             ~outcome:"retry_scheduled"
@@ -1266,7 +1298,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          evidence trail is captured by
                          [cascade_rotation_attempts] (with outcome
                          label) regardless. *)
+                      let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+                        current_turn_phase_elapsed_ms ()
+                      in
                       record_cascade_rotation_attempt
+                        ~slot_release_at_phase:"retry_budget_exhausted"
+                        ~productive_phase_elapsed_ms
+                        ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name
                         ~retry:degraded_retry
                         ~outcome:"budget_exhausted"
@@ -1288,7 +1326,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          "slot_phase_exhausted" outcome label), but
                          [degraded_retry_info] is NOT flipped because
                          no rotation was actually applied. *)
+                      let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+                        current_turn_phase_elapsed_ms ()
+                      in
                       record_cascade_rotation_attempt
+                        ~slot_release_at_phase:"productive_phase_exhausted"
+                        ~productive_phase_elapsed_ms
+                        ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name
                         ~retry:degraded_retry
                         ~outcome:"slot_phase_exhausted"

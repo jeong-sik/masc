@@ -46,9 +46,12 @@ type weighted_entry = {
       [None] = legacy single-track entry.
 
       JSON key: ["secondary"] inside the per-entry object.  Whitespace
-      is trimmed.  Unknown / invalid provider schemes in [secondary]
-      are not detected at parse time — the resolver surfaces them as
-      a normal provider-not-found error when fallback fires. *)
+      is trimmed.  An empty or whitespace-only string is treated as
+      absent (the loader yields [None]); the loader does not reject
+      such input as malformed.  Unknown / invalid provider schemes in
+      [secondary] are not detected at parse time — the resolver
+      surfaces them as a normal provider-not-found error when
+      fallback fires. *)
   secondary_supports_tool_choice: bool option;
   (** Per-entry capability override for [secondary], analogous to
       [supports_tool_choice].  [None] when [secondary] is [None] or

@@ -148,9 +148,11 @@ let parse_supports_tool_choice_field = function
   | `Bool b -> Some b
   | _ -> None
 
-(* Trim and reject empty/whitespace-only secondary; an empty string in JSON
-   should behave identically to the field being absent rather than producing
-   an invalid provider scheme downstream. *)
+(* Trim, then treat empty / whitespace-only secondary as absent (None) —
+   identical to the field being missing.  Returning None rather than an
+   error keeps the JSON loader permissive (typed materializer is the
+   strict source of truth) and avoids producing an invalid provider
+   scheme downstream. *)
 let parse_secondary_field = function
   | `String s ->
     let trimmed = String.trim s in

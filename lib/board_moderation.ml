@@ -99,10 +99,16 @@ let max_note_length = 500
 
 let global_store : store option ref = ref None
 
+let default_flag_rate_limit_sec = 1.0
+
+let sanitize_flag_rate_limit_sec value =
+  if Float.is_finite value then Float.max 0.0 value
+  else default_flag_rate_limit_sec
+
 let flag_rate_limit_sec () =
-  Env_config_core.get_float ~default:1.0
+  Env_config_core.get_float ~default:default_flag_rate_limit_sec
     "MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC"
-  |> Float.max 0.0
+  |> sanitize_flag_rate_limit_sec
 
 let make_store () : store =
   { queue = Hashtbl.create 64; audit = ref [] }

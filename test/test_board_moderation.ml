@@ -167,6 +167,25 @@ let test_flag_rate_limit_allows_different_reporters () =
     | Ok _, Ok _ -> ()
     | _ -> fail "different reporters should not rate-limit each other")
 
+let test_flag_rate_limit_non_finite_falls_back () =
+  let check_non_finite value target_a target_b =
+    reset ();
+    with_flag_rate_limit value (fun () ->
+      (match BM.flag ~target_kind:BM.Target_post ~target_id:target_a
+               ~reporter:"agent-nonfinite" ~reason:BM.Spam with
+       | Ok _ -> ()
+       | Error m -> fail ("first flag failed: " ^ m));
+      match BM.flag ~target_kind:BM.Target_comment ~target_id:target_b
+              ~reporter:"agent-nonfinite" ~reason:BM.Off_topic with
+      | Error m ->
+          check bool ("fallback rate-limit " ^ value) true
+            (String.starts_with
+               ~prefix:"reporter agent-nonfinite is rate limited" m)
+      | Ok _ -> fail ("non-finite rate limit should fall back: " ^ value))
+  in
+  check_non_finite "nan" "rl-nan-1" "rl-nan-2";
+  check_non_finite "+inf" "rl-inf-1" "rl-inf-2"
+
 (* ── get_queue filtering ─────────────────────────────────────────── *)
 
 let test_get_queue_unresolved () =
@@ -361,7 +380,9 @@ let () =
           test_case "same reporter rate limited" `Quick
             test_flag_rate_limited_same_reporter;
           test_case "different reporters bypass rate limit" `Quick
-            test_flag_rate_limit_allows_different_reporters ] );
+            test_flag_rate_limit_allows_different_reporters;
+          test_case "non-finite rate limit falls back" `Quick
+            test_flag_rate_limit_non_finite_falls_back ] );
       ( "get_queue",
         [ test_case "unresolved filter"      `Quick test_get_queue_unresolved;
           test_case "all entries"            `Quick test_get_queue_all;

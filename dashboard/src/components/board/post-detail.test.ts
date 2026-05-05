@@ -272,6 +272,38 @@ describe('CommentThread', () => {
     expect(screen.getByRole('button', { name: '댓글 비추천' })).toHaveAttribute('aria-pressed', 'false')
   })
 
+  it('announces nested reply collapse state with aria-expanded', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'root',
+        created_at: '2026-04-02T00:00:00Z',
+      },
+      {
+        id: 'c2',
+        post_id: 'post-1',
+        parent_id: 'c1',
+        author: 'agent',
+        content: 'child',
+        created_at: '2026-04-02T00:01:00Z',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    const toggle = screen.getByRole('button', { name: '답글 1개 접기' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.click(toggle)
+
+    const collapsedToggle = screen.getByRole('button', { name: '답글 1개 펼치기' })
+    expect(collapsedToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('답글 1개 접힘')).toBeInTheDocument()
+  })
+
   it('toggles a comment reaction from the thread', async () => {
     const comments = [
       {

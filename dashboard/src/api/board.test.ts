@@ -433,6 +433,61 @@ describe('normalizeGovernanceJudgeSummary', () => {
 // ================================================================
 
 describe('fetchBoard', () => {
+  it('pins the Phase 1 list contract for votes and embedded reaction previews', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-1',
+            author: 'analyst',
+            title: 'Status',
+            body: 'Working',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            votes: 2,
+            current_vote: 'up',
+            has_voted: true,
+            comment_count: 4,
+            reactions: [
+              {
+                emoji: '🚀',
+                count: 2,
+                reacted: true,
+                recent_user_ids: ['dashboard-reviewer'],
+              },
+            ],
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts).toHaveLength(1)
+    expect(result.posts[0]).toMatchObject({
+      id: 'post-1',
+      votes: 2,
+      current_vote: 'up',
+      has_voted: true,
+      comment_count: 4,
+      reactions: [{
+        emoji: '🚀',
+        count: 2,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['dashboard-reviewer'],
+      }],
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/board?')
+    expect(url).toContain('voter=')
+  })
+
   it('preserves board actor identity provenance from the server', async () => {
     const rawResponse = {
       posts: [
@@ -568,6 +623,75 @@ describe('fetchBoardHearths', () => {
 })
 
 describe('fetchBoardPost', () => {
+  it('pins the Phase 1 detail contract for post and comment reaction summaries', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        post: {
+          id: 'post-1',
+          author: 'analyst',
+          title: 'Status',
+          body: 'Working',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          reactions: [{
+            emoji: '👍',
+            count: 1,
+            has_reacted: false,
+            recent_user_ids: ['agent-a'],
+          }],
+        },
+        comments: [
+          {
+            id: 'comment-1',
+            post_id: 'post-1',
+            parent_id: null,
+            author: 'reviewer',
+            content: 'Useful',
+            created_at: 1_713_000_100,
+            current_vote: 'down',
+            has_voted: true,
+            reactions: [{
+              emoji: '👏',
+              count: 3,
+              has_reacted: true,
+              recent_user_ids: ['dashboard-reviewer'],
+            }],
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardPost('post-1')
+
+    expect(result.reactions).toEqual([{
+      emoji: '👍',
+      count: 1,
+      reacted: false,
+      has_reacted: false,
+      recent_user_ids: ['agent-a'],
+    }])
+    expect(result.comments[0]).toMatchObject({
+      id: 'comment-1',
+      parent_id: null,
+      current_vote: 'down',
+      has_voted: true,
+      reactions: [{
+        emoji: '👏',
+        count: 3,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['dashboard-reviewer'],
+      }],
+    })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('format=flat')
+    expect(url).toContain('voter=')
+  })
+
   it('normalizes comment vote fields from the server detail payload', async () => {
     const rawResponse = {
       post: {

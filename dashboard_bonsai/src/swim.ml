@@ -247,50 +247,6 @@ let view_lane_of_keeper (k : Keepers_types.keeper) =
     ~frames:fs
 ;;
 
-(** Static fallback — matches the hand-coded mock before live wiring. *)
-let view_static () =
-  [ view_lane
-      ~name:"luna"
-      ~stat:"reading"
-      ~status:`Live
-      ~frames:
-        [ frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
-        ; frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
-        ; frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
-        ; frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
-        ; frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
-        ]
-  ; view_lane
-      ~name:"brass-owl"
-      ~stat:"retrying"
-      ~status:`Warn
-      ~frames:
-        [ frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
-        ; frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
-        ; frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
-        ; frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
-        ]
-  ; view_lane
-      ~name:"moth"
-      ~stat:"idle · listening"
-      ~status:`Live
-      ~frames:
-        [ frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
-        ; frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
-        ; frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
-        ]
-  ; view_lane
-      ~name:"ash-hound"
-      ~stat:"crashed t-34"
-      ~status:`Dead
-      ~frames:
-        [ frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
-        ; frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
-        ; frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
-        ]
-  ]
-;;
-
 let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let axis_ticks =
     List.init 6 ~f:(fun i ->
@@ -305,19 +261,38 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
             [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
         ])
   in
-  let lanes =
-    match keepers.keepers with
-    | [] -> view_static ()
-    | live_keepers -> List.map live_keepers ~f:view_lane_of_keeper
+  let is_empty = List.is_empty keepers.keepers in
+  let lanes = List.map keepers.keepers ~f:view_lane_of_keeper in
+  let aria_label =
+    if is_empty
+    then "Keeper activity timeline (no keeper data)"
+    else "Keeper activity timeline"
+  in
+  let root_attrs =
+    let base =
+      [ Style.swim; Attr.role "list"; Attr.create "aria-label" aria_label ]
+    in
+    if is_empty then Attr.create "data-empty" "true" :: base else base
+  in
+  let empty_notice =
+    if is_empty
+    then
+      [ Node.div
+          ~attrs:[ Style.axis_sp ]
+          [ Node.text "no keeper data" ]
+      ]
+    else []
   in
   Node.div
-    ~attrs:[ Style.swim; Attr.role "list"; Attr.create "aria-label" "Keeper activity timeline" ]
+    ~attrs:root_attrs
     ([ Node.div
          ~attrs:[ Style.axis ]
-         [ Node.div
-             ~attrs:[ Style.axis_sp ]
-             [ Node.text "keeper · cycle" ]
-         ; Node.div ~attrs:[ Style.axis_ax ] axis_ticks
-         ]
-     ] @ lanes)
+         ([ Node.div
+              ~attrs:[ Style.axis_sp ]
+              [ Node.text "keeper · cycle" ]
+          ; Node.div ~attrs:[ Style.axis_ax ] axis_ticks
+          ]
+          @ empty_notice)
+     ]
+     @ lanes)
 ;;

@@ -205,24 +205,34 @@ let view_slot_of_keeper (k : Keepers_types.keeper) =
     ~when_
 ;;
 
-(** 서버 응답이 비었을 때 보이는 fixture. 4명 1-row, 4개 상태 다 노출. *)
-let view_static () =
-  [ view_slot ~sigil:"P" ~name:"keeper · poe" ~state:`Live
-      ~state_label:"speaking" ~when_:"3s"
-  ; view_slot ~sigil:"J" ~name:"janitor" ~state:`Thinking
-      ~state_label:"thinking" ~when_:"12s"
-  ; view_slot ~sigil:"G" ~name:"governance" ~state:`Idle
-      ~state_label:"idle · ok" ~when_:"2m"
-  ; view_slot ~sigil:"I" ~name:"improver" ~state:`Failed
-      ~state_label:"paused · auth" ~when_:"7m"
-  ]
+(** Empty-state placeholder slot — rendered when no keeper response is
+    available. Replaces the prior fictional fixture (poe/janitor/governance/
+    improver) per audit response 2026-05-05 §1.1. Mirrors cockpit-kit
+    Spark/Heartbeat empty branch: communicate absence explicitly. *)
+let empty_slot () =
+  view_slot
+    ~sigil:"·"
+    ~name:"no keeper data"
+    ~state:`Idle
+    ~state_label:"awaiting telemetry"
+    ~when_:"—"
 ;;
 
 let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
+  let is_empty = List.is_empty keepers.keepers in
   let slots =
-    match keepers.keepers with
-    | [] -> view_static ()
-    | live -> List.map live ~f:view_slot_of_keeper
+    if is_empty
+    then [ empty_slot () ]
+    else List.map keepers.keepers ~f:view_slot_of_keeper
   in
-  Node.div ~attrs:[ Style.roster; Attr.role "list"; Attr.create "aria-label" "Keeper slots" ] slots
+  let aria_label =
+    if is_empty then "Keeper slots (no keeper data)" else "Keeper slots"
+  in
+  let root_attrs =
+    let base =
+      [ Style.roster; Attr.role "list"; Attr.create "aria-label" aria_label ]
+    in
+    if is_empty then Attr.create "data-empty" "true" :: base else base
+  in
+  Node.div ~attrs:root_attrs slots
 ;;

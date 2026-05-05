@@ -303,6 +303,59 @@ let test_tree_node_limit_clamps_high () =
 let test_tree_node_limit_accepts_valid () =
   Alcotest.(check int) "valid" 42 (W.tree_node_limit_of_query (Some "42"))
 
+(* Issue #13191 follow-up: numeric overflow on [int_of_string] used to
+   fall back to the default (750) instead of clamping to the documented
+   maximum (2000), so a client asking for "very large" got fewer nodes
+   than asking for 9000. *)
+let test_tree_node_limit_overflow_clamps_to_max () =
+  Alcotest.(check int) "huge numeric input clamps to max"
+    2000
+    (W.tree_node_limit_of_query (Some "99999999999999999999"))
+
+let test_tree_node_limit_overflow_with_underscores () =
+  Alcotest.(check int) "huge underscore-separated digits clamp to max"
+    2000
+    (W.tree_node_limit_of_query (Some "99_999_999_999_999_999_999"))
+
+let test_tree_node_limit_negative_overflow_clamps_low () =
+  Alcotest.(check int) "huge negative value clamps to 1"
+    1
+    (W.tree_node_limit_of_query (Some "-99999999999999999999"))
+
+let test_tree_node_limit_non_numeric_still_default () =
+  Alcotest.(check int) "non-numeric junk falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "9000abc"))
+
+(* Reviewer #13222: malformed underscore forms must classify as junk and
+   fall back to the default, not be promoted to overflow.  These mirror
+   OCaml's int_of_string rejection: underscores are only valid between
+   digits, never leading/trailing/adjacent. *)
+let test_tree_node_limit_lone_underscore_is_junk () =
+  Alcotest.(check int) "'_' falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "_"))
+
+let test_tree_node_limit_trailing_underscore_is_junk () =
+  Alcotest.(check int) "'1_' falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "1_"))
+
+let test_tree_node_limit_leading_underscore_is_junk () =
+  Alcotest.(check int) "'_1' falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "_1"))
+
+let test_tree_node_limit_double_underscore_is_junk () =
+  Alcotest.(check int) "'1__2' falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "1__2"))
+
+let test_tree_node_limit_signed_lone_underscore_is_junk () =
+  Alcotest.(check int) "'+_' falls back to default"
+    750
+    (W.tree_node_limit_of_query (Some "+_"))
+
 (* ─── valid_git_ref (option-injection guard) ────────────────────── *)
 
 let test_valid_ref_main () =
@@ -394,6 +447,15 @@ let () =
         ; Alcotest.test_case "limit clamps low" `Quick test_tree_node_limit_clamps_low
         ; Alcotest.test_case "limit clamps high" `Quick test_tree_node_limit_clamps_high
         ; Alcotest.test_case "limit accepts valid" `Quick test_tree_node_limit_accepts_valid
+        ; Alcotest.test_case "limit overflow clamps to max" `Quick test_tree_node_limit_overflow_clamps_to_max
+        ; Alcotest.test_case "limit overflow with underscores clamps to max" `Quick test_tree_node_limit_overflow_with_underscores
+        ; Alcotest.test_case "limit negative overflow clamps to 1" `Quick test_tree_node_limit_negative_overflow_clamps_low
+        ; Alcotest.test_case "limit non-numeric falls back to default" `Quick test_tree_node_limit_non_numeric_still_default
+        ; Alcotest.test_case "limit lone underscore is junk" `Quick test_tree_node_limit_lone_underscore_is_junk
+        ; Alcotest.test_case "limit trailing underscore is junk" `Quick test_tree_node_limit_trailing_underscore_is_junk
+        ; Alcotest.test_case "limit leading underscore is junk" `Quick test_tree_node_limit_leading_underscore_is_junk
+        ; Alcotest.test_case "limit double underscore is junk" `Quick test_tree_node_limit_double_underscore_is_junk
+        ; Alcotest.test_case "limit signed lone underscore is junk" `Quick test_tree_node_limit_signed_lone_underscore_is_junk
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

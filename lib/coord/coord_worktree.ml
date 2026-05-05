@@ -1283,11 +1283,14 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
       match find_matching_clone repos_dir with
       | Some root -> Ok root
       | None ->
+        (* #13302 P2-1: distinguish metadata-vs-disk drift from generic
+           IO failure. Best-effort cleanup callers (release/cancel
+           transitions) demote this to INFO since "already absent" is
+           the desired end state; explicit-deletion callers still see
+           a typed error. *)
         Error
-          (System (System_error.IoError
-             (Printf.sprintf
-                "Worktree %s not found under sandbox repo clones in %s"
-                worktree_name repos_dir)))
+          (System (System_error.WorktreeNotFound
+             { worktree = worktree_name; searched_in = repos_dir }))
     in
     match resolve_existing_worktree_root () with
     | Error e -> Error e

@@ -635,6 +635,17 @@ let transition_task_r
                  | Ok msg ->
                    Log.RoomTask.info
                      "%s worktree auto-cleanup: %s" reason_label msg
+                 | Error
+                     (Masc_domain.System
+                        (Masc_domain.System_error.WorktreeNotFound
+                           { worktree; searched_in })) ->
+                   (* #13302 P2-1: metadata-vs-disk drift is the desired
+                      end state for best-effort cleanup. Demote to INFO
+                      so it doesn't drown legitimate failures. *)
+                   Log.RoomTask.info
+                     "%s worktree auto-cleanup: skipped (already absent: \
+                      worktree=%s searched_in=%s)"
+                     reason_label worktree searched_in
                  | Error e ->
                    Log.RoomTask.warn
                      "%s worktree auto-cleanup failed \

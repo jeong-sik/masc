@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Comprehensive coverage tests for Coord module
 
     Target: 35+ additional tests covering:

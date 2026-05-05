@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coverage tests for auto_recall (pure functions) and activity_feed (JSON roundtrip).
     Also covers filesystem-backed activity_feed read-path regressions. *)
 

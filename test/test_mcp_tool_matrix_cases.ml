@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
 

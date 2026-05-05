@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (* test/test_tool_help_registry_shard_coverage_10101.ml
 
    #10101: [Config.raw_all_tool_schemas] is the authoritative

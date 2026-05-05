@@ -1530,11 +1530,16 @@ let init () =
     Counter;
   add metric_keeper_event_queue_override
     "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced \
-     Heartbeat_smart.Emit because the Event Layer queue \
-     (Keeper_registry.event_queue_snapshot) was non-empty. Pairs with \
-     masc_keeper_skip_idle_wake_resumed: skip-idle-resumed measures the \
-     fiber_wakeup hint path, this measures the queue payload path. \
-     Labels: keeper."
+     Heartbeat_smart.Emit. The [reason] label disambiguates the two \
+     override paths: [event_queue] = the Event Layer queue \
+     (Keeper_registry.event_queue_snapshot) held an unprocessed \
+     stimulus; [durable_state] = the queue was empty but a durable \
+     world-observation signal (#13078) called for a cycle resume \
+     before the stale-watchdog deadline. Pairs with \
+     masc_keeper_skip_idle_wake_resumed: skip-idle-resumed measures \
+     the fiber_wakeup hint path, this measures the queue / \
+     durable-signal payload paths. Labels: keeper, reason \
+     (event_queue|durable_state)."
     Counter;
   add metric_keeper_stimulus_consumed
     "Total stimuli consumed at turn entry, classified by stimulus_class. \

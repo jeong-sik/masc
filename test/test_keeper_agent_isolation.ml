@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for keeper-agent tool isolation.
 
     Validates the structural invariant that keeper tools and agent

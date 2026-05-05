@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Structural linter: verifies tool registration consistency.
 
     1. Every tool referenced in Workflow_guide must exist in Config.all_tool_schemas.

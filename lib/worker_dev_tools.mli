@@ -137,11 +137,20 @@ val attribution_of_validation :
 
     Issue #10358: closes the 17.3% blank-error gap for tool_called
     rows fed via [worker_container.build_local_shell_tools]. *)
+type tool_exec_error_kind = private Tool_exec_error_kind of string
+(** Typed boundary wrapper for the observer's categorized error label.
+
+    Keep raw strings at the telemetry/wire boundary; do not expose
+    raw-string error-kind callback signatures from this module. *)
+
+val tool_exec_error_kind_of_string : string -> tool_exec_error_kind
+val tool_exec_error_kind_to_string : tool_exec_error_kind -> string
+
 type tool_exec_observer =
   tool_name:string ->
   success:bool ->
   duration_ms:int ->
-  ?error_kind:string ->
+  ?error_kind:tool_exec_error_kind ->
   ?error_message:string ->
   unit ->
   unit

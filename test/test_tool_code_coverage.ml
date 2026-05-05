@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coverage tests for Tool_code — Code search, symbols, and file reading
 
     Tests dispatch routing, input validation, and error paths

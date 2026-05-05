@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Goal tool coverage — shared Goal Store surface through Tool_coord. *)
 
 open Alcotest

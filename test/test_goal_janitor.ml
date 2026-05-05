@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Goal_janitor — stale goal cleanup. *)
 
 open Alcotest

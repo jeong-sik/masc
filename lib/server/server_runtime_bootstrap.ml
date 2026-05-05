@@ -1592,6 +1592,26 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               (Printexc.to_string exn));
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
+      (* 2026-05-05 deploy-gap audit (#12943 follow-up): warn loudly when
+         the running binary is more than [stale_threshold_hours] behind
+         the resolved git commit timestamp.  The 2026-05-05 fleet-stuck
+         recurrence chain spent 7 prompt cycles before noticing the
+         server had been running an 8-hour-old build.  /health already
+         exposes [build.commit_age_seconds]; this WARN forces the same
+         signal into the operator-visible startup log so the next deploy
+         gap is caught at restart instead of after the next outage. *)
+      let stale_threshold_hours = 12 in
+      let build = Build_identity.current () in
+      (match build.commit_age_seconds with
+       | Some age when age > stale_threshold_hours * 3600 ->
+         let hours = age / 3600 in
+         Log.Server.warn
+           "Server binary commit %s is %d hours old (>%dh threshold). \
+            Rebuild + restart recommended to pick up newer fixes; see \
+            /health build.commit_age_seconds."
+           (Option.value build.commit ~default:"<unknown>")
+           hours stale_threshold_hours
+       | _ -> ());
       Server_bootstrap_loops.install_tooling ~governance_level state;
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
       (state, path_diagnostics, catalog_validation_error)

@@ -7,6 +7,18 @@
 type t = {
   release_version : string;
   commit : string option;
+  commit_unix_ts : float option;
+    (** Unix timestamp of the resolved git commit (probed at startup
+        via [git log -1 --format=%ct <commit>]).  [None] when commit
+        could not be resolved or git probe failed.  Exposed on
+        [/health] so operators / dashboards can compute
+        [now - commit_unix_ts] and surface stale-binary deploy gaps
+        without an external git fetch from the dashboard side. *)
+  commit_age_seconds : int option;
+    (** Convenience field: [Some (now - commit_unix_ts)] when both
+        are available, [None] otherwise.  Recomputed on every
+        [current ()] call so the value tracks wall clock as the
+        process keeps running on a stale binary. *)
   started_at : string;
   uptime_seconds : int;
 }

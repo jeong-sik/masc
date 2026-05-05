@@ -698,6 +698,20 @@ let test_keeper_direct_reply_contracts () =
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "Keeper_prompt.append_direct_reply_mode_prompt")
 
+let test_keeper_list_cache_atomic_contracts () =
+  check bool "keeper list cache uses atomic snapshot storage" true
+    (file_contains_pattern "lib/tool_keeper.ml"
+       "let _keeper_list_cache = Atomic.make empty_text_cache");
+  check bool "keeper list cache invalidation publishes whole snapshot" true
+    (file_contains_pattern "lib/tool_keeper.ml"
+       "let invalidate_keeper_list_cache () = Atomic.set _keeper_list_cache empty_text_cache");
+  check bool "keeper list cache no longer mutates key field in place" true
+    (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.key <-");
+  check bool "keeper list cache no longer mutates value field in place" true
+    (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.value <-");
+  check bool "keeper list cache no longer mutates expiry field in place" true
+    (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.expires_at <-")
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1400,6 +1414,8 @@ let () =
              test_tool_admin_snapshot_auth_contracts;
            test_case "keeper direct reply contracts" `Quick
              test_keeper_direct_reply_contracts;
+           test_case "keeper list cache atomic contracts" `Quick
+             test_keeper_list_cache_atomic_contracts;
            test_case "dashboard warm hydration contracts" `Quick
              test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

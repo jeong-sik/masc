@@ -5,12 +5,9 @@ import {
   statusTone,
   statusLabel,
   normalizeSummary,
-  normalizeDomain,
   normalizeKeeper,
-  normalizeFinding,
   normalizeTimelineItem,
   normalizePayload,
-  type DomainStatus,
 } from "./safe-autonomy"
 
 describe("statusTone", () => {
@@ -68,37 +65,6 @@ describe("normalizeSummary", () => {
   })
 })
 
-describe("normalizeDomain", () => {
-  it("returns defaults for empty input", () => {
-    const d = normalizeDomain({})
-    expect(d.id).toBe("domain")
-    expect(d.label).toBe("Domain")
-    expect(d.status).toBe("warn")
-    expect(d.score).toBe(0)
-    expect(d.summary).toBe("")
-    expect(d.weight).toBeUndefined()
-    expect(d.evidence_refs).toEqual([])
-  })
-
-  it("preserves provided fields", () => {
-    const d = normalizeDomain({
-      id: "d1",
-      label: "Tests",
-      status: "pass",
-      score: 95,
-      summary: "good",
-      weight: 0.3,
-      evidence_refs: [{ ref: 1 }],
-    })
-    expect(d.id).toBe("d1")
-    expect(d.label).toBe("Tests")
-    expect(d.status).toBe("pass")
-    expect(d.score).toBe(95)
-    expect(d.summary).toBe("good")
-    expect(d.weight).toBe(0.3)
-    expect(d.evidence_refs).toEqual([{ ref: 1 }])
-  })
-})
 
 describe("normalizeKeeper", () => {
   it("returns defaults for empty input", () => {
@@ -156,37 +122,6 @@ describe("normalizeKeeper", () => {
   })
 })
 
-describe("normalizeFinding", () => {
-  it("returns defaults for empty input", () => {
-    const f = normalizeFinding({})
-    expect(f.reason_code).toBe("unknown")
-    expect(f.domain_id).toBe("unknown")
-    expect(f.severity).toBe("warn")
-    expect(f.keeper_name).toBeNull()
-    expect(f.summary).toBe("")
-    expect(f.human_action_required).toBe(false)
-    expect(f.suggested_next_action).toBe("")
-  })
-
-  it("preserves provided fields", () => {
-    const f = normalizeFinding({
-      reason_code: "R1",
-      domain_id: "D1",
-      severity: "fail",
-      keeper_name: "k1",
-      summary: "bad",
-      human_action_required: true,
-      suggested_next_action: "fix",
-    })
-    expect(f.reason_code).toBe("R1")
-    expect(f.domain_id).toBe("D1")
-    expect(f.severity).toBe("fail")
-    expect(f.keeper_name).toBe("k1")
-    expect(f.summary).toBe("bad")
-    expect(f.human_action_required).toBe(true)
-    expect(f.suggested_next_action).toBe("fix")
-  })
-})
 
 describe("normalizeTimelineItem", () => {
   it("returns defaults for empty input", () => {

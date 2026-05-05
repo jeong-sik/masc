@@ -27,7 +27,7 @@ import { formatTimeHms } from '../lib/format-time'
  * `model_id` and any `top_tools[].tool` name. Empty/whitespace query
  * returns the input reference unchanged (ref-equal). No mutation.
  */
-export function filterModelMetrics(
+function filterModelMetrics(
   models: readonly DashboardRuntimeModelMetric[],
   query: string,
 ): readonly DashboardRuntimeModelMetric[] {
@@ -51,7 +51,7 @@ export function filterModelMetrics(
  * 4. model_id asc
  * Returns a new array; does not mutate the input.
  */
-export function sortModelMetricsByUrgency(
+function sortModelMetricsByUrgency(
   models: readonly DashboardRuntimeModelMetric[],
 ): readonly DashboardRuntimeModelMetric[] {
   return [...models].sort((a, b) => {
@@ -118,7 +118,7 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
 // Orthogonal to cascade-config-panel.ts:providerTone which scores historical
 // performance (success_rate, cooldown). Both signals can be shown together
 // without being duplicates.
-export function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
+function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
   const advertised = provider.status?.trim().toLowerCase()
   if (advertised === 'missing_auth' || advertised === 'unsupported' || advertised === 'offline') {
     return 'bad'
@@ -132,7 +132,7 @@ export function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot):
   return 'warn'
 }
 
-export function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
+function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
   if ((metric.entry_count ?? 0) <= 0) return 'warn'
   const success = metric.success_count ?? metric.entry_count ?? 0
   const errors = metric.error_count ?? 0
@@ -147,7 +147,7 @@ export function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
 }
 
 
-export function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
+function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   const success = metric.success_count ?? metric.entry_count ?? 0
   const errors = metric.error_count ?? 0
   const total = success + errors
@@ -233,7 +233,7 @@ function fmtCoverageAwareCost(metric: DashboardRuntimeModelMetric, value?: numbe
   return formatted !== '--' ? formatted : metricMissingLabel(metric)
 }
 
-export function recentEntryMissingLabel(
+function recentEntryMissingLabel(
   entry: NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number],
 ): string {
   // Order: most-specific to least-specific.
@@ -289,7 +289,7 @@ function recentEntryDetail(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-export function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null {
+function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null {
   if (metric.coverage_status === 'full' && metric.primary_coverage_reason == null) return null
   if (metric.coverage_status === 'error_only') return 'error-only window'
   const successCount = metric.success_count ?? 0

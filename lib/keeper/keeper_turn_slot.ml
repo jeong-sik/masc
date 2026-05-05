@@ -80,6 +80,8 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    without requiring three separate tables.  Cardinality is bounded by
    the deployment's keeper count (typically <50). *)
 let holder_table : (string * string, float) Hashtbl.t = Hashtbl.create 32
+let force_released_holders : (string * string, int) Hashtbl.t =
+  Hashtbl.create 32
 let holder_mutex = Eio.Mutex.create ()
 
 let with_holder_lock f =
@@ -89,9 +91,33 @@ let record_holder ~label ~keeper_name ~acquired_at =
   with_holder_lock (fun () ->
     Hashtbl.replace holder_table (label, keeper_name) acquired_at)
 
-let drop_holder ~label ~keeper_name =
+let mark_holder_force_released ~label ~keeper_name =
   with_holder_lock (fun () ->
-    Hashtbl.remove holder_table (label, keeper_name))
+    let key = (label, keeper_name) in
+    if Hashtbl.mem holder_table key then begin
+      Hashtbl.remove holder_table key;
+      let count =
+        Hashtbl.find_opt force_released_holders key
+        |> Option.value ~default:0
+      in
+      Hashtbl.replace force_released_holders key (count + 1);
+      true
+    end else
+      false)
+
+let consume_force_release ~label ~keeper_name =
+  with_holder_lock (fun () ->
+    let key = (label, keeper_name) in
+    match Hashtbl.find_opt force_released_holders key with
+    | Some count when count > 1 ->
+      Hashtbl.replace force_released_holders key (count - 1);
+      true
+    | Some _ ->
+      Hashtbl.remove force_released_holders key;
+      true
+    | None ->
+      Hashtbl.remove holder_table key;
+      false)
 
 (** [snapshot_holders ~label ~now] returns [(keeper_name, held_for_sec)]
     pairs for the given [label] sorted by descending hold time.  Used
@@ -151,6 +177,19 @@ let reactive_turn_semaphore_value_for_test () =
 let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
 let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
+
+let force_release_stale_holder ~keeper_name =
+  let released = ref [] in
+  let release_if_held ~label sem =
+    if mark_holder_force_released ~label ~keeper_name then begin
+      Eio.Semaphore.release sem;
+      released := label :: !released
+    end
+  in
+  release_if_held ~label:"turn" turn_semaphore;
+  release_if_held ~label:"autonomous" autonomous_turn_semaphore;
+  release_if_held ~label:"reactive" reactive_turn_semaphore;
+  List.rev !released
 
 let format_slot_holders ?(limit = 5) holders =
   let limit = max 1 limit in
@@ -396,6 +435,20 @@ let safe_bookkeeping ~op f =
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
       op (Printexc.to_string exn)
 
+let release_recorded_holder ~keeper_name ~label sem =
+  let force_released =
+    try consume_force_release ~label ~keeper_name with exn ->
+      Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
+        label (Printexc.to_string exn);
+      false
+  in
+  if force_released then
+    Log.Keeper.warn
+      "release_keeper_turn_slot: %s holder for %s was already force-released"
+      label keeper_name
+  else
+    Eio.Semaphore.release sem
+
 let release_keeper_turn_slot ~keeper_name state =
   safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
     Option.iter
@@ -405,9 +458,7 @@ let release_keeper_turn_slot ~keeper_name state =
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
-    safe_bookkeeping ~op:"drop_holder turn" (fun () ->
-      drop_holder ~label:"turn" ~keeper_name);
-    Eio.Semaphore.release turn_semaphore
+    release_recorded_holder ~keeper_name ~label:"turn" turn_semaphore
   end;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
@@ -415,14 +466,12 @@ let release_keeper_turn_slot ~keeper_name state =
        when this keeper's heartbeat loops back immediately. *)
     safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
       record_autonomous_completion ~keeper_name);
-    safe_bookkeeping ~op:"drop_holder autonomous" (fun () ->
-      drop_holder ~label:"autonomous" ~keeper_name);
-    Eio.Semaphore.release autonomous_turn_semaphore
+    release_recorded_holder ~keeper_name ~label:"autonomous"
+      autonomous_turn_semaphore
   end;
   if !(state.acquired_reactive) then begin
-    safe_bookkeeping ~op:"drop_holder reactive" (fun () ->
-      drop_holder ~label:"reactive" ~keeper_name);
-    Eio.Semaphore.release reactive_turn_semaphore
+    release_recorded_holder ~keeper_name ~label:"reactive"
+      reactive_turn_semaphore
   end
 
 let reset_autonomous_completion_for_test () : unit =

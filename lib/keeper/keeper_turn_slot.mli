@@ -60,6 +60,15 @@ val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list
 
+(** Force-release semaphore permits held by [keeper_name] after the watchdog
+    has classified the holder as stale. Returns the labels actually released.
+
+    This is intentionally narrower than normal cleanup: it only releases
+    holders still present in the diagnostic holder table, and the normal
+    [with_keeper_turn_slot] finalizer consumes the force-release marker so a
+    late-returning fiber cannot double-release the same permit. *)
+val force_release_stale_holder : keeper_name:string -> string list
+
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)

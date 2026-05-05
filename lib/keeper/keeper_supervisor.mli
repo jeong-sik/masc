@@ -69,6 +69,9 @@ val apply_self_preservation :
     cohort exceeds ratio threshold AND minimum candidate count.
     Returns the filtered list of entries that should proceed with restart. *)
 
+val reset_self_preservation_escape_state : unit -> unit
+(** Reset the self-preservation probe state. Test-only. *)
+
 (** {1 Liveness Recovery} *)
 
 val liveness_recovery_scan : 'a context -> unit

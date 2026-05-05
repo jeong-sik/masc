@@ -4,6 +4,12 @@
 
 open Keeper_types
 
+val slot_holder_age_for_test :
+  now:float -> keeper_name:string -> float option
+(** Test-only view of the watchdog's fallback in-flight signal.  Returns
+    the oldest slot-holder age for [keeper_name] across turn, reactive,
+    and autonomous holder tables. *)
+
 val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.

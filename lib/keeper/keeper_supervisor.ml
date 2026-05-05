@@ -817,6 +817,14 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       ) cohorts ("", [])
     in
     if List.length dominant_entries >= sp_min then begin
+      if String.equal dominant_key "stale_turn_timeout" && ratio < 0.99 then begin
+        reset_self_preservation_escape_state ();
+        Log.Keeper.warn
+          "self-preservation: allowing partial stale_turn_timeout recovery \
+           cohort through (%d/%d, ratio=%.2f)"
+          (List.length dominant_entries) n_total ratio;
+        to_restart
+      end else begin
       (* #10887: track consecutive suppressions of the same dominant
          cohort.  Different cohort -> counter resets to 1; same
          cohort -> counter increments. *)
@@ -910,6 +918,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       List.filter (fun ((e : Keeper_registry.registry_entry), _) ->
         not (List.mem e.name suppressed_names)
       ) to_restart
+      end
     end else begin
       (* Dominant cohort below sp_min — no suppression this cycle,
          so the streak no longer applies to this cohort. *)

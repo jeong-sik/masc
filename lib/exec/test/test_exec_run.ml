@@ -54,7 +54,7 @@ let test_fast_command_completes () =
       ~argv:[ "/bin/sh"; "-c"; "printf hi" ]
       ~cwd:(Sys.getcwd ())
       ~envp:(Unix.environment ())
-      ~timeout_sec:5.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
       ()
   in
   match out with
@@ -81,7 +81,7 @@ let test_slow_command_promotes () =
       ~argv:[ "/bin/sh"; "-c"; "printf early; sleep 5; printf late" ]
       ~cwd:(Sys.getcwd ())
       ~envp:(Unix.environment ())
-      ~timeout_sec:30.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
       ()
   in
   match out with

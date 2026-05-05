@@ -54,6 +54,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ()
     system_fingerprint = None;
     timings;
     reasoning_tokens = None;
+    reasoning_tokens_estimated = false;
     request_latency_ms;
     peak_memory_gb = None;
     provider_kind = None;

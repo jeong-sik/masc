@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 module Cases = Test_mcp_tool_matrix_cases
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 

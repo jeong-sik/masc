@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Dashboard governance regression tests. *)
 
 module Lib = Masc_mcp

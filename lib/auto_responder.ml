@@ -138,7 +138,7 @@ let run_cli_agent ~agent_type ~prompt =
         ~actor:"system/auto_responder"
         ~raw_source
         ~summary:"auto responder cli spawn"
-        ~timeout_sec:120.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Auto_responder ())
         ~stdin_content:prompt
         argv
     in

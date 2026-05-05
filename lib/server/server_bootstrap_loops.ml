@@ -868,7 +868,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (match
              Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                ~base_path:state.room_config.base_path
-               ~timeout_sec:30.0 ()
+               ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Startup ()) ()
            with
            | None -> ()
            | Some result ->

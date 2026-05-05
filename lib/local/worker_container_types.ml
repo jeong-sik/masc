@@ -226,7 +226,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
           ~actor:"system/worker_container_types"
           ~raw_source
           ~summary:"worker container curl fallback"
-          ~timeout_sec:20.0
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
           ~stdin_content:request_body
           argv
       in

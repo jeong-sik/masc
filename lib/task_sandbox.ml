@@ -24,7 +24,7 @@ let git_lines ~cwd args =
     ~actor:"system/task_sandbox"
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"task_sandbox git"
-    ~timeout_sec:30.0
+    ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Task_sandbox_git ())
     argv
   |> String.split_on_char '\n'
   |> List.filter (fun s -> String.trim s <> "")
@@ -37,7 +37,7 @@ let git_exit ~cwd args =
       ~actor:"system/task_sandbox"
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"task_sandbox git"
-      ~timeout_sec:30.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Task_sandbox_git ())
       argv
   with
   | Unix.WEXITED n, _ -> n

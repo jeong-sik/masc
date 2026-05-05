@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Tool_access_role — role-based policy equivalence and properties.
 
     The equivalence test is the critical gate: it verifies that the new

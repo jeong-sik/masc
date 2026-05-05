@@ -1,5 +1,7 @@
 (* #9774: shared helpers for governance / operator judge LLM-output
-   diagnostics. Pure string transforms — no logging, no I/O. *)
+   diagnostics. Formatting remains pure; [record_lenient_fallback]
+   is the explicit metric-emitting wrapper used by production fallback
+   branches. *)
 
 (* Truncate a string to at most [max_bytes] bytes, appending an ellipsis
    marker that records how many bytes were dropped. Byte-count is
@@ -20,3 +22,15 @@ let format_lenient_fallback ~judge_label raw =
     judge_label
     (String.length raw)
     (truncate_with_marker raw)
+
+let record_lenient_fallback ~judge_label raw =
+  let labels = [("judge", String.lowercase_ascii judge_label)] in
+  Prometheus.inc_counter
+    Prometheus.metric_governance_judge_unparseable
+    ~labels
+    ();
+  Prometheus.inc_counter
+    Prometheus.metric_governance_lenient_json_fallback_hit
+    ~labels
+    ();
+  format_lenient_fallback ~judge_label raw

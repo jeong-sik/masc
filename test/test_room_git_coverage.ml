@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coord Git Module Coverage Tests
 
     Tests for git utility functions:

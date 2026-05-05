@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** #10440: pin [Auth.ensure_credential_alias] semantics so the
     short-form alias [<keeper_name>.json] resolves to the same
     UUID file as the canonical long-form

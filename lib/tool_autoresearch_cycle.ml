@@ -226,7 +226,7 @@ let git_diff_patch ~workdir =
       ~actor:"tool/autoresearch_cycle"
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git diff"
-      ~timeout_sec:30.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
       argv
   in
   match status with
@@ -244,7 +244,7 @@ let sync_target_file_to_index ~workdir ~target_file =
       ~actor:"tool/autoresearch_cycle"
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git add"
-      ~timeout_sec:10.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
       argv
   in
   match status with

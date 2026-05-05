@@ -1702,6 +1702,13 @@ legacy_scope = "removed"
 typo_field = 42
 |};
   close_out oc;
+  let unknown_metric () =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+      ~labels:[("file_path", tmp)]
+      ()
+  in
+  let before_unknown_metric = unknown_metric () in
   match KTP.load_keeper_toml tmp with
   | Error e -> Sys.remove tmp; fail e
   | Ok (_, defaults) ->
@@ -1709,7 +1716,11 @@ typo_field = 42
     check (slist string String.compare)
       "unknown keys captured on profile defaults"
       [ "keeper.legacy_scope"; "keeper.typo_field" ]
-      defaults.KTP.unknown_toml_keys
+      defaults.KTP.unknown_toml_keys;
+    check (float 0.0001)
+      "unknown-key metric increments by key count"
+      2.0
+      (unknown_metric () -. before_unknown_metric)
 
 let test_unknown_toml_warning_key_normalizes_unknown_order () =
   let path =

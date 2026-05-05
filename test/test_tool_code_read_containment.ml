@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Coverage tests for #6637 iter11 — per-agent playground containment
     in [Tool_code.validate_read_path].
 

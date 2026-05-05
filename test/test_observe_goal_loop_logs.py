@@ -90,6 +90,7 @@ def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
         body += "214건 감사 결과\nGOAL: 36개 Keeper 동시 운영\n"
     elif source_name == "GOAL_LOOP_INTEGRATION.md":
         body += "206건 감사 결과\n206 findings from audit\n"
+        body += "NEW_FINDING: 8 from live logs\n"
         body += "\n".join(ids) + "\n"
     elif source_name == "fundamental_roadmap.md":
         body += "206건 감사 결과\n"
@@ -236,10 +237,11 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.audit_catalog["source_documents_covered"], 12)
         self.assertEqual(report.audit_catalog["source_documents_status"], "COMPLETE")
         self.assertEqual(report.audit_catalog["external_sources_total"], 12)
-        self.assertEqual(len(report.audit_catalog["aggregate_claims"]), 3)
+        self.assertEqual(len(report.audit_catalog["aggregate_claims"]), 4)
+        self.assertEqual(len(report.audit_catalog["aggregate_reconciliations"]), 1)
         self.assertEqual(len(report.audit_catalog["consistency_findings"]), 1)
         self.assertEqual(report.audit_catalog["consistency_findings_total"], 1)
-        self.assertEqual(report.audit_catalog["consistency_findings_open"], 1)
+        self.assertEqual(report.audit_catalog["consistency_findings_open"], 0)
         self.assertEqual(
             report.audit_catalog["consistency_findings"][0]["finding_id"],
             "CONSISTENCY-1",
@@ -293,8 +295,14 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(
             source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
         )
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 6)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 6)
+        self.assertEqual(
+            source_artifacts["source_aggregate_reconciliation_status"], "COMPLETE"
+        )
+        self.assertEqual(
+            source_artifacts["source_aggregate_reconciliations_verified"], 1
+        )
         self.assertEqual(source_artifacts["source_identity_status"], "INCOMPLETE")
         self.assertEqual(source_artifacts["source_identity_checks_total"], 12)
         self.assertEqual(source_artifacts["source_identity_checks_failed"], 12)
@@ -415,9 +423,16 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(families["R-FATAL"]["total"], 2)
         self.assertEqual(families["NF"]["total"], 8)
         self.assertEqual(source_artifacts["source_aggregate_claim_status"], "COMPLETE")
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 6)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 6)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 0)
+        self.assertEqual(
+            source_artifacts["source_aggregate_reconciliation_status"], "COMPLETE"
+        )
+        self.assertEqual(
+            source_artifacts["source_aggregate_reconciliations_verified"], 1
+        )
+        self.assertEqual(source_artifacts["source_aggregate_reconciliations_failed"], 0)
         self.assertEqual(source_artifacts["source_identity_status"], "NOT_APPLICABLE")
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
@@ -459,6 +474,52 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_identity_checks_failed"], 0)
         self.assertEqual(source_artifacts["source_structured_item_ids_total"], 1)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
+
+    def test_orient_catalog_validates_aggregate_reconciliation_arithmetic(self) -> None:
+        catalog: dict[str, object] = {
+            "aggregate_claims": [
+                {"claim_id": "audit_total_206", "claimed_total": 206},
+                {"claim_id": "new_findings_live_8", "claimed_total": 8},
+                {"claim_id": "audit_total_214", "claimed_total": 214},
+            ],
+            "aggregate_reconciliations": [
+                {
+                    "reconciliation_id": "audit_total_214_equals_206_plus_8_new",
+                    "target_claim_id": "audit_total_214",
+                    "operation": "sum",
+                    "terms": [
+                        {"claim_id": "audit_total_206"},
+                        {"claim_id": "new_findings_live_8"},
+                    ],
+                }
+            ],
+        }
+
+        summary = orient_goal_loop_logs.aggregate_reconciliation_summary(catalog)
+        self.assertEqual(summary["source_aggregate_reconciliation_status"], "COMPLETE")
+        self.assertEqual(summary["source_aggregate_reconciliations_verified"], 1)
+
+        aggregate_claims = catalog["aggregate_claims"]
+        assert isinstance(aggregate_claims, list)
+        new_findings_claim = aggregate_claims[1]
+        assert isinstance(new_findings_claim, dict)
+        new_findings_claim["claimed_total"] = 7
+        summary = orient_goal_loop_logs.aggregate_reconciliation_summary(catalog)
+
+        self.assertEqual(
+            summary["source_aggregate_reconciliation_status"], "INCOMPLETE"
+        )
+        self.assertEqual(summary["source_aggregate_reconciliations_failed"], 1)
+        self.assertEqual(
+            summary["source_aggregate_reconciliation_error_samples"][0]["error"],
+            "arithmetic_mismatch",
+        )
+        self.assertEqual(
+            summary["source_aggregate_reconciliation_error_samples"][0][
+                "computed_total"
+            ],
+            213,
+        )
 
     def test_orient_catalog_groups_uncataloged_structured_source_ids(self) -> None:
         content = "\n".join(
@@ -584,9 +645,9 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(
             source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
         )
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 6)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 0)
-        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 6)
         self.assertEqual(
             source_artifacts["source_aggregate_claim_missing_samples"][0]["claim_id"],
             "audit_total_206",
@@ -656,20 +717,33 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertIn('"source_artifacts_missing": 12', result.stdout)
 
     def test_orient_cli_can_fail_on_open_consistency_finding(self) -> None:
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(ORIENT_SCRIPT_PATH),
-                str(FIXTURE_DIR / "observe.startup.json"),
-                "--audit-catalog",
-                str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
-                "--require-consistency-resolved",
-            ],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
         )
+        assert catalog is not None
+        consistency_findings = catalog["consistency_findings"]
+        assert isinstance(consistency_findings, list)
+        first_finding = consistency_findings[0]
+        assert isinstance(first_finding, dict)
+        first_finding["status"] = "OPEN"
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            catalog_path = Path(raw_dir) / "catalog.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ORIENT_SCRIPT_PATH),
+                    str(FIXTURE_DIR / "observe.startup.json"),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--require-consistency-resolved",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
 
         self.assertEqual(result.returncode, 1)
         self.assertIn('"consistency_findings_open": 1', result.stdout)
@@ -762,7 +836,11 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         )
         self.assertIn('"source_structured_item_id_families"', result.stdout)
         self.assertIn('"source_aggregate_claim_status": "COMPLETE"', result.stdout)
-        self.assertIn('"source_aggregate_claim_sources_verified": 5', result.stdout)
+        self.assertIn('"source_aggregate_claim_sources_verified": 6', result.stdout)
+        self.assertIn(
+            '"source_aggregate_reconciliation_status": "COMPLETE"',
+            result.stdout,
+        )
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

@@ -50,8 +50,11 @@ def complete_status() -> dict[str, object]:
                         "source_identity_checks_verified": 12,
                         "source_identity_checks_failed": 0,
                         "source_aggregate_claim_status": "COMPLETE",
-                        "source_aggregate_claim_sources_verified": 5,
+                        "source_aggregate_claim_sources_verified": 6,
                         "source_aggregate_claim_sources_missing": 0,
+                        "source_aggregate_reconciliation_status": "COMPLETE",
+                        "source_aggregate_reconciliations_verified": 1,
+                        "source_aggregate_reconciliations_failed": 0,
                         "source_itemized_id_status": "COMPLETE",
                         "source_ids_missing_from_catalog": 0,
                         "catalog_ids_missing_from_source": 0,
@@ -200,6 +203,18 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             ],
             187,
         )
+
+    def test_completion_audit_requires_verified_aggregate_reconciliation(self) -> None:
+        status = complete_status()
+        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        audit_catalog["source_aggregate_reconciliation_status"] = "INCOMPLETE"
+        audit_catalog["source_aggregate_reconciliations_verified"] = 0
+        audit_catalog["source_aggregate_reconciliations_failed"] = 1
+
+        audit = goal_loop_completion_audit.build_completion_audit(status)
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("aggregate_consistency_resolved", audit.blockers)
 
     def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
         triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))

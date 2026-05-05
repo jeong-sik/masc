@@ -175,6 +175,11 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             "aggregate_claims_total": len(audit_catalog.get("aggregate_claims", []))
             if isinstance(audit_catalog.get("aggregate_claims"), list)
             else 0,
+            "aggregate_reconciliations_total": len(
+                audit_catalog.get("aggregate_reconciliations", [])
+            )
+            if isinstance(audit_catalog.get("aggregate_reconciliations"), list)
+            else 0,
             "consistency_findings_total": len(consistency_findings),
             "consistency_findings_open": len(open_consistency_findings),
         }
@@ -233,6 +238,17 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             )
             audit_catalog_summary["source_aggregate_claim_sources_missing"] = (
                 source_artifacts.get("source_aggregate_claim_sources_missing")
+            )
+            audit_catalog_summary["source_aggregate_reconciliation_status"] = (
+                source_artifacts.get(
+                    "source_aggregate_reconciliation_status", "unknown"
+                )
+            )
+            audit_catalog_summary["source_aggregate_reconciliations_verified"] = (
+                source_artifacts.get("source_aggregate_reconciliations_verified")
+            )
+            audit_catalog_summary["source_aggregate_reconciliations_failed"] = (
+                source_artifacts.get("source_aggregate_reconciliations_failed")
             )
             audit_catalog_summary["source_identity_status"] = source_artifacts.get(
                 "source_identity_status",

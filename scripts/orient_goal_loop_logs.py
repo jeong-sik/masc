@@ -344,6 +344,18 @@ def aggregate_claim_patterns(claim: dict[str, Any]) -> list[re.Pattern[str]]:
             re.compile(rf"{number}[^\n]{{0,40}}findings?", re.IGNORECASE),
             re.compile(rf"(?:감사|findings?)[^\n]{{0,40}}{number}", re.IGNORECASE),
         ]
+    if "new_findings" in claim_id_text.lower():
+        return [
+            re.compile(
+                rf"(?:NEW_FINDING|NEW|new patterns)[^\n]{{0,80}}{number}",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                rf"{number}[^\n]{{0,80}}"
+                r"(?:NEW_FINDING|NEW|new patterns|from live logs)",
+                re.IGNORECASE,
+            ),
+        ]
     if "keeper" in claim_id_text.lower():
         return [
             re.compile(rf"{number}[^\n]{{0,60}}keepers?", re.IGNORECASE),
@@ -408,6 +420,120 @@ def aggregate_claim_source_summary(
     }
 
 
+def aggregate_claim_totals(catalog: dict[str, Any]) -> dict[str, int]:
+    aggregate_claims_raw = catalog.get("aggregate_claims", [])
+    aggregate_claims = (
+        aggregate_claims_raw if isinstance(aggregate_claims_raw, list) else []
+    )
+    totals: dict[str, int] = {}
+    for claim in aggregate_claims:
+        if not isinstance(claim, dict):
+            continue
+        claim_id = claim.get("claim_id")
+        claimed_total = claim.get("claimed_total")
+        if isinstance(claim_id, str) and isinstance(claimed_total, int):
+            totals[claim_id] = claimed_total
+    return totals
+
+
+def aggregate_reconciliation_summary(catalog: dict[str, Any]) -> dict[str, Any]:
+    reconciliations_raw = catalog.get("aggregate_reconciliations", [])
+    reconciliations = (
+        reconciliations_raw if isinstance(reconciliations_raw, list) else []
+    )
+    claim_totals = aggregate_claim_totals(catalog)
+    verified = 0
+    failed_samples: list[dict[str, Any]] = []
+
+    for reconciliation in reconciliations:
+        if not isinstance(reconciliation, dict):
+            failed_samples.append(
+                {"reconciliation_id": "unknown", "error": "malformed"}
+            )
+            continue
+        reconciliation_id = reconciliation.get("reconciliation_id")
+        target_claim_id = reconciliation.get("target_claim_id")
+        operation = reconciliation.get("operation")
+        terms_raw = reconciliation.get("terms", [])
+        terms = terms_raw if isinstance(terms_raw, list) else []
+        sample: dict[str, Any] = {
+            "reconciliation_id": reconciliation_id
+            if isinstance(reconciliation_id, str)
+            else "unknown",
+            "target_claim_id": target_claim_id,
+        }
+        if not isinstance(target_claim_id, str) or not target_claim_id:
+            sample["error"] = "missing_target_claim_id"
+            failed_samples.append(sample)
+            continue
+        if operation != "sum":
+            sample["error"] = "unsupported_operation"
+            sample["operation"] = operation
+            failed_samples.append(sample)
+            continue
+        target_total = claim_totals.get(target_claim_id)
+        if target_total is None:
+            sample["error"] = "unknown_target_claim"
+            failed_samples.append(sample)
+            continue
+        term_ids: list[str] = []
+        missing_terms: list[str] = []
+        term_total = 0
+        malformed_term = False
+        for term in terms:
+            if not isinstance(term, dict):
+                malformed_term = True
+                continue
+            claim_id = term.get("claim_id")
+            if not isinstance(claim_id, str) or not claim_id:
+                malformed_term = True
+                continue
+            term_ids.append(claim_id)
+            claim_total = claim_totals.get(claim_id)
+            if claim_total is None:
+                missing_terms.append(claim_id)
+                continue
+            term_total += claim_total
+        if malformed_term:
+            sample["error"] = "malformed_term"
+            sample["terms"] = term_ids
+            failed_samples.append(sample)
+            continue
+        if missing_terms:
+            sample["error"] = "unknown_term_claim"
+            sample["missing_terms"] = missing_terms
+            failed_samples.append(sample)
+            continue
+        if not term_ids:
+            sample["error"] = "missing_terms"
+            failed_samples.append(sample)
+            continue
+        if term_total != target_total:
+            sample["error"] = "arithmetic_mismatch"
+            sample["claimed_total"] = target_total
+            sample["computed_total"] = term_total
+            sample["terms"] = term_ids
+            failed_samples.append(sample)
+            continue
+        verified += 1
+
+    total = len(reconciliations)
+    failed = total - verified
+    if total == 0:
+        status = "NOT_APPLICABLE"
+    elif failed == 0:
+        status = "COMPLETE"
+    else:
+        status = "INCOMPLETE"
+    return {
+        "source_aggregate_reconciliation_status": status,
+        "source_aggregate_reconciliations_total": total,
+        "source_aggregate_reconciliations_verified": verified,
+        "source_aggregate_reconciliations_failed": failed,
+        "source_aggregate_reconciliation_error_samples": failed_samples[:10],
+    }
+
+
 def has_source_identity_expectation(source: dict[str, Any]) -> bool:
     return isinstance(source.get("sha256"), str) or isinstance(
         source.get("line_count"), int
@@ -450,6 +576,16 @@ def source_artifact_summary(
             if not isinstance(claim, dict):
                 continue
             source_paths = claim.get("source_paths", [])
+            if isinstance(source_paths, list):
+                for path_raw in source_paths:
+                    add_ref(path_raw)
+
+    aggregate_reconciliations = catalog.get("aggregate_reconciliations", [])
+    if isinstance(aggregate_reconciliations, list):
+        for reconciliation in aggregate_reconciliations:
+            if not isinstance(reconciliation, dict):
+                continue
+            source_paths = reconciliation.get("source_paths", [])
             if isinstance(source_paths, list):
                 for path_raw in source_paths:
                     add_ref(path_raw)
@@ -602,6 +738,10 @@ def source_artifact_summary(
     )
     aggregate_claims = aggregate_claim_source_summary(catalog, resolved_contents)
     source_aggregate_claim_status = aggregate_claims["source_aggregate_claim_status"]
+    aggregate_reconciliations = aggregate_reconciliation_summary(catalog)
+    source_aggregate_reconciliation_status = aggregate_reconciliations[
+        "source_aggregate_reconciliation_status"
+    ]
     for path_text, source_expectation in sorted(source_expectations.items()):
         if path_text in source_identity_checked_paths:
             continue
@@ -625,6 +765,7 @@ def source_artifact_summary(
         and not line_ref_errors
         and source_itemized_id_status == "COMPLETE"
         and source_aggregate_claim_status in {"COMPLETE", "NOT_APPLICABLE"}
+        and source_aggregate_reconciliation_status in {"COMPLETE", "NOT_APPLICABLE"}
         and source_identity_status in {"COMPLETE", "NOT_APPLICABLE"}
         else "INCOMPLETE"
     )
@@ -651,6 +792,7 @@ def source_artifact_summary(
         ),
         "source_structured_item_id_families": source_structured_item_id_families,
         **aggregate_claims,
+        **aggregate_reconciliations,
         "source_identity_status": source_identity_status,
         "source_identity_checks_total": source_identity_checks_total,
         "source_identity_checks_verified": source_identity_checks_verified,
@@ -733,6 +875,7 @@ def audit_catalog_summary(
         "source_documents_status": source_status,
         "external_sources": external_sources,
         "aggregate_claims": catalog.get("aggregate_claims", []),
+        "aggregate_reconciliations": catalog.get("aggregate_reconciliations", []),
         "consistency_findings": consistency_findings,
         "consistency_findings_total": len(consistency_findings),
         "consistency_findings_open": len(open_consistency_findings),
@@ -859,6 +1002,12 @@ def report_to_text(report: OrientReport) -> str:
                 f"{source_artifacts['source_aggregate_claim_status']} "
                 f"verified={source_artifacts['source_aggregate_claim_sources_verified']} "
                 f"missing={source_artifacts['source_aggregate_claim_sources_missing']}"
+            )
+            lines.append(
+                "aggregate_reconciliations: "
+                f"{source_artifacts['source_aggregate_reconciliation_status']} "
+                f"verified={source_artifacts['source_aggregate_reconciliations_verified']} "
+                f"failed={source_artifacts['source_aggregate_reconciliations_failed']}"
             )
             lines.append(
                 "source_identity: "

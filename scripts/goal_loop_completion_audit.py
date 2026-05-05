@@ -286,10 +286,23 @@ def build_completion_audit(
     consistency_evidence = {
         "consistency_findings_total": audit_catalog.get("consistency_findings_total"),
         "consistency_findings_open": audit_catalog.get("consistency_findings_open"),
+        "source_aggregate_reconciliation_status": audit_catalog.get(
+            "source_aggregate_reconciliation_status"
+        ),
+        "source_aggregate_reconciliations_verified": audit_catalog.get(
+            "source_aggregate_reconciliations_verified"
+        ),
+        "source_aggregate_reconciliations_failed": audit_catalog.get(
+            "source_aggregate_reconciliations_failed"
+        ),
     }
     consistency_passed = (
         as_int(consistency_evidence["consistency_findings_total"]) > 0
         and as_int(consistency_evidence["consistency_findings_open"]) == 0
+        and consistency_evidence["source_aggregate_reconciliation_status"] == "COMPLETE"
+        and as_int(consistency_evidence["source_aggregate_reconciliations_verified"])
+        >= 1
+        and as_int(consistency_evidence["source_aggregate_reconciliations_failed"]) == 0
     )
 
     structured_evidence = {

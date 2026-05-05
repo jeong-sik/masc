@@ -88,17 +88,19 @@
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
-  prompt_corpus/GOAL_LOOP --require-source-artifacts` checked at
-  2026-05-06T06:36:35+09:00, confidence High: validates the current local
+  prompt_corpus/GOAL_LOOP --require-source-artifacts
+  --require-consistency-resolved` checked at 2026-05-06T07:14:00+09:00,
+  confidence High: validates the current local
   external source artifacts without committing those documents to the public
   repository, with 12 resolved source artifacts, 19 source-itemized audit IDs,
-  19 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, 5/5
-  aggregate claim source checks verified from resolved documents, and a
-  non-blocking structured-source-ID surface of 91 total IDs with 72 not in the
+  19 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, 6/6
+  aggregate claim source checks verified from resolved documents, and one
+  verified aggregate reconciliation (`206 + 8 = 214`). It also surfaces a
+  non-blocking structured-source-ID set of 91 total IDs with 72 not in the
   strict GOAL LOOP audit catalog, grouped as `F:4`, `NEW:10`, `P-DASH:13`,
   `P-EIO:7`, `P-FSM:10`, `P-HARD:5`, `P-MUT:2`, `P-PROAC:1`, `P-PROV:4`,
-  `P-STR:3`, `P-TURN:3`, and `S:10`, with 260 uncataloged source
-  occurrences sampled by source path and line.
+  `P-STR:3`, `P-TURN:3`, and `S:10`, with 260 uncataloged source occurrences
+  sampled by source path and line.
 - [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and `wc -l
   <GOAL_LOOP_SOURCE_ROOT>/*.md` checked at 2026-05-06T06:23:00+09:00,
   confidence High: the catalog records SHA-256 and line-count identity for all
@@ -107,29 +109,32 @@
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
-  prompt_corpus/GOAL_LOOP --require-source-artifacts --format text` checked at
-  2026-05-06T06:36:35+09:00, confidence High: reports
-  `aggregate_claim_sources: COMPLETE verified=5 missing=0` and
+  prompt_corpus/GOAL_LOOP --require-source-artifacts
+  --require-consistency-resolved --format text` checked at
+  2026-05-06T07:14:00+09:00, confidence High: reports
+  `aggregate_claim_sources: COMPLETE verified=6 missing=0`,
+  `aggregate_reconciliations: COMPLETE verified=1 failed=0`, and
   `source_identity: COMPLETE verified=12 failed=0`, proving the catalog's 206,
-  214, and 36-keeper aggregate claims are present in the resolved source
-  artifacts and that the external files match the checked digest manifest even
-  though the aggregate claims remain mutually inconsistent.
+  8-new, 214, and 36-keeper aggregate claims are present in the resolved
+  source artifacts, reconciled arithmetically, and matched to the checked
+  digest manifest.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
-  --require-consistency-resolved` checked at 2026-05-06T06:10:00+09:00,
-  confidence High: exits non-zero while the 206-vs-214 aggregate-count
-  consistency finding remains open.
+  --require-consistency-resolved` checked at 2026-05-06T07:14:00+09:00,
+  confidence High: exits zero and reports `consistency_findings: 1 open=0`
+  after the catalog records `audit_total_214 = audit_total_206 +
+  new_findings_live_8`.
 - [근거] `python3 scripts/goal_loop_completion_audit.py
   /tmp/goal-loop-status-audit.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T07:02:00+09:00,
+  --require-complete --format text` checked at 2026-05-06T07:14:00+09:00,
   confidence High: exits non-zero with explicit blockers
-  `strict_row_level_catalog_complete`, `aggregate_consistency_resolved`, and
-  `post_act_verify_complete`, while preserving PASS evidence for source
+  `strict_row_level_catalog_complete` and `post_act_verify_complete`, while
+  preserving PASS evidence for source
   manifest coverage, source artifact validation, source identity, aggregate
-  claim source verification, strict source/catalog ID sync, and broader
-  structured-ID ownership triage.
+  claim source verification, aggregate reconciliation, strict source/catalog ID
+  sync, and broader structured-ID ownership triage.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   19 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -168,13 +173,13 @@ fallback, unknown TOML keys, all-zero metrics, linear warmup.
 
 The fixture pins concrete startup evidence for NF-1, NF-2, NF-3, NF-4, and
 NF-6. The external claim catalog itemizes 19 finding IDs from the supplied
-documents and records all 12 prompt-supplied source paths. It also records the
-aggregate-count mismatch: some documents claim a 206-finding audit basis while
-`INTEGRATED_IMPROVEMENT_DESIGN.md` claims 214 findings and 36 related findings.
-It does not yet prove either aggregate from live production state; 187 rows
-remain missing from the 206-itemized corpus, the 214 claim has no row-level
-corpus, and several prompt claims remain evidence-absent in the fixture
-(`NF-5`, `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
+documents and records all 12 prompt-supplied source paths. It now reconciles
+the aggregate-count mismatch: the 214 integrated total is represented as the
+206 baseline audit corpus plus 8 live-log `NEW_FINDING` items. It does not yet
+prove the full row-level aggregate from live production state; 187 rows remain
+missing from the 206-itemized corpus, the 214 claim has no row-level corpus,
+and several prompt claims remain evidence-absent in the fixture (`NF-5`,
+`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
 
 **Verification command**:
 
@@ -252,21 +257,22 @@ current runtime/code state, including 206 findings.
 **Status**: **PARTIAL**.
 
 The Orient skeleton is testable, and the prompt's external 206/214 aggregate
-claims are now machine-visible. The full set is still not encoded: current
+claims are now both machine-visible and reconciled as 206 baseline findings
+plus 8 live-log new findings. The full row-level set is still not encoded:
+current
 catalog replay reports 12/12 source documents named by the manifest, no checked
 source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
 external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
 `--audit-source-strip-prefix`, 19 source-itemized IDs matching the 19
-catalog-itemized findings, 5/5 aggregate claim source checks verified from
-resolved documents, 12/12 source identity checks verified against checked
-SHA-256 and line-count metadata, 91 broader structured source IDs with 72 not
-in the strict audit catalog across 12 uncataloged ID families and 260 source
-occurrences, 187 missing 206-itemized rows, one open
-consistency finding for the 206-vs-214 count mismatch that fails
-`--require-consistency-resolved`, and 9 itemized rows that are not evaluable
-from the startup log patterns. `goal_loop_completion_audit.py --require-complete`
-turns those facts into a closeout gate so the objective cannot be marked
-complete while those blockers remain.
+catalog-itemized findings, 6/6 aggregate claim source checks verified from
+resolved documents, 1/1 aggregate reconciliation verified, 12/12 source
+identity checks verified against checked SHA-256 and line-count metadata, 91
+broader structured source IDs with 72 not in the strict audit catalog across 12
+uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
+rows, and 9 itemized rows that are not evaluable from the startup log patterns.
+`goal_loop_completion_audit.py --require-complete` turns those facts into a
+closeout gate so the objective cannot be marked complete while those blockers
+remain.
 
 ### 4. DECIDE
 
@@ -383,23 +389,22 @@ No convergence claim is valid yet. The only safe current statement is:
 
 1. Attach or check in the full row-level audit corpus. The current
    `audit-corpus.external-claim.json` records all 12 prompt source paths,
-   three aggregate claims, one 206-vs-214 consistency finding, and 19 itemized
-   findings, but `--require-complete-catalog` still fails with 187 missing rows
-   against the 206 claim. The aggregate claims are now source-verified at 5/5,
-   so the remaining gap is row-level completeness and consistency, not whether
-   the aggregate numbers appear in the supplied documents.
+   four aggregate claims, one resolved 206+8=214 aggregate reconciliation, one
+   resolved consistency finding, and 19 itemized findings, but
+   `--require-complete-catalog` still fails with 187 missing rows against the
+   206 claim. The aggregate claims are now source-verified at 6/6 and
+   reconciled at 1/1, so the remaining catalog gap is row-level completeness,
+   not whether the aggregate numbers appear in the supplied documents.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
    passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and
    the checked digest manifest proves source identity, but public-repo replay
    still needs a stable non-user-local artifact distribution policy.
-3. Reconcile whether the governing audit total is 206 or 214 before closing
-   the GOAL LOOP objective so `--require-consistency-resolved` passes.
-4. Re-run Orient against the complete corpus without changing code and update
+3. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
-5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
+4. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
-6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+5. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule
@@ -413,7 +418,6 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
   with `--require-source-artifacts` passing.
 - The replayed external artifact root does not match the checked SHA-256 and
   line-count identity manifest.
-- The 206-vs-214 aggregate-count consistency finding is still open and
-  `--require-consistency-resolved` fails.
-- The 206-vs-214 aggregate-count mismatch is still open.
+- The aggregate reconciliation stops passing with
+  `--require-consistency-resolved`.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.

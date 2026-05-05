@@ -18,7 +18,6 @@ import { StatusBadge } from '../common/status-badge'
 import { ringFocusClasses } from '../common/ring'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
-import { Tk } from '../tk'
 import type {
   DashboardGoalDetailResponse,
   DashboardCoordinationFsmViolation,
@@ -219,6 +218,19 @@ function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
     case 'goal_linkage': return 'Goal 연결'
     case 'stalled': return '정체'
     default: return source
+  }
+}
+
+function humanizeBlockingReason(reason: string): string {
+  switch (reason) {
+    case 'tool_required_unsatisfied': return '필요한 도구가 충족되지 않음'
+    case 'degraded_retry': return '재시도 중 (성능 저하)'
+    case 'reaction_chain_break': return '반응 체인 단절'
+    case 'awaiting_verification': return '검증 대기'
+    case 'awaiting_approval': return '승인 대기'
+    case 'stagnant': return '정체'
+    case 'no_recent_activity': return '최근 활동 없음'
+    default: return reason
   }
 }
 
@@ -542,8 +554,8 @@ function TreeSummary({
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.total_goals}</div>
         <div class="mt-1 ${DECK_LABEL}">전체 목표</div>
       </div>
-      <div class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 p-3 text-center">
-        <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.active_goals}</div>
+      <div class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 p-3 text-center" title="위험·차단·일시정지가 아닌 진행 중 목표">
+        <div class="font-mono text-xl font-semibold text-ok tabular-nums">${summary.on_track_goals}</div>
         <div class="mt-1 font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-ok/80">정상</div>
       </div>
       <div class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 p-3 text-center">
@@ -739,7 +751,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
           ${node.blocking_source !== 'none' && node.blocking_reason ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-muted">
-              ${node.blocking_reason}
+              ${humanizeBlockingReason(node.blocking_reason)}
             </div>
           ` : null}
 
@@ -1064,7 +1076,7 @@ function GoalDetailPanel({
                 ${blockerSourceLabel(selectedNode.blocking_source)}
               </span>
             </div>
-            <div class="text-sm leading-relaxed text-text-body">${selectedNode.blocking_reason || selectedNode.status_reason}</div>
+            <div class="text-sm leading-relaxed text-text-body">${selectedNode.blocking_reason ? humanizeBlockingReason(selectedNode.blocking_reason) : selectedNode.status_reason}</div>
             <div class="mt-3 flex flex-wrap gap-2 text-3xs text-text-muted">
               ${selectedNode.latest_keeper_ref ? html`
                 <span>keeper ${selectedNode.latest_keeper_ref}</span>
@@ -1186,7 +1198,8 @@ export function GoalTree() {
   const visibleTree = useMemo(
     () => {
       if (!data) return []
-      return filterGoalTree(filterGoalTreeByPhase(data.tree, activePhaseFilter), query)
+      const filtered = filterGoalTree(filterGoalTreeByPhase(data.tree, activePhaseFilter), query)
+      return [...filtered].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
     },
     [activePhaseFilter, data, query],
   )
@@ -1256,12 +1269,7 @@ export function GoalTree() {
       <section class=${GOAL_PANEL} aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 관리자</div>
-            <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
-            <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
-              goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
-              신규 태스크는 <${Tk}>goal_id<//>로 직접 연결됩니다.
-            </p>
+            <h3 class="text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 관리자</h3>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             ${data && data.tree.length > 0 ? html`
@@ -1330,7 +1338,7 @@ export function GoalTree() {
       ${loading && !data ? html`
         <${LoadingState}>goal manager 로드 중...<//>
       ` : data && data.tree.length === 0 ? html`
-        <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert로 목표를 등록하세요. 연결 태스크는 task.goal_id가 우선이고, 제목의 [goal:<id>]는 레거시 fallback으로만 읽습니다." />
+        <${EmptyState} message="등록된 목표가 없습니다." />
       ` : data && isFiltering && visibleTree.length === 0 ? html`
         <section class="py-4 text-center text-xs text-text-dim" aria-label="필터 결과 없음">
           필터 결과 없음 (${data.tree.length} 목표)

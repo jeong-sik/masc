@@ -42,6 +42,10 @@ vi.mock('../../api/repositories', () => ({
   }])),
 }))
 
+vi.mock('./ide-conversation-rail-mock', () => ({
+  IdeConversationRailMock: () => null,
+}))
+
 import { IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
@@ -63,11 +67,44 @@ function ideCommandInput(container: HTMLElement): HTMLInputElement {
   return input
 }
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {
+  const url = String(input)
+  if (url.includes('/api/v1/workspace/tree')) return Promise.resolve(jsonResponse([]))
+  if (url.includes('/api/v1/workspace/file')) return Promise.resolve(jsonResponse({ ok: false, content: '' }))
+  if (url.includes('/api/v1/git/blame')) return Promise.resolve(jsonResponse([]))
+  if (url.includes('/api/v1/git/diff')) return Promise.resolve(jsonResponse({ unified: [] }))
+  if (url.includes('/state-diagram')) {
+    return Promise.resolve(jsonResponse({
+      keeper: 'sangsu',
+      current_phase: 'observe',
+      memory_kind_usage: [],
+    }))
+  }
+  if (url.includes('/bdi-snapshot')) {
+    return Promise.resolve(jsonResponse({
+      keeper: 'sangsu',
+      generated_at: '2026-05-06T00:00:00Z',
+      poll_interval_ms: 5000,
+      recent_token_spend: [],
+      source: 'test',
+    }))
+  }
+  return Promise.resolve(jsonResponse({}))
+}
+
 describe('IdeShell', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
     container = document.createElement('div')
+    vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
 
   afterEach(() => {
@@ -137,6 +174,39 @@ describe('IdeShell', () => {
     expect(route.value.params.layers).toBe('explode')
   })
 
+  it('turns focus=review into a unified review workspace with review layers', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('lets explicit review-focus layers override the default review bundle', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'cascade' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('runs view commands from the IDE command bar', async () => {
     route.value = {
       tab: 'code',
@@ -152,6 +222,20 @@ describe('IdeShell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(route.value.params.view).toBe('unified')
+  })
+
+  it('clears review focus when switching away from unified review mode', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    fireEvent.click(buttonByText(container, 'SOURCE'))
+
+    expect(route.value.params.view).toBe('source')
+    expect(route.value.params.focus).toBeUndefined()
   })
 
   it('runs layer commands from the IDE command bar', async () => {

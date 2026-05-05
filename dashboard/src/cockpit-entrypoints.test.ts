@@ -76,6 +76,10 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'cognition', view: 'autoresearch', focus: 'flow' },
     })
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'pr-thread' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+    })
   })
 
   it('routes the covered IDE search entrypoint directly to the find panel', () => {
@@ -107,5 +111,20 @@ describe('cockpit entrypoint registry', () => {
         params: { section: 'operations', view: 'ops', focus },
       })
     }
+  })
+
+  it('marks IDE review entrypoints as covered review focus routes', () => {
+    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const)
+    ))
+
+    expect(byAlias.get('review')).toMatchObject({
+      coverage: 'covered',
+      target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } },
+    })
+    expect(byAlias.get('pr-thread')).toMatchObject({
+      coverage: 'covered',
+      target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } },
+    })
   })
 })

@@ -26,7 +26,10 @@ import {
 export const activeIdeFile = signal<string>('package.json')
 
 type ViewTab = IdeEditorView
+type IdeFocus = 'review'
+
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
+const REVIEW_FOCUS_LAYER_PARAM = 'approve,keeper-trace,notes'
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
   const normalized = raw
@@ -39,7 +42,14 @@ function viewFromRoute(raw: string | null | undefined): ViewTab {
   return 'source'
 }
 
-function layersFromRoute(raw: string | null | undefined): ReadonlySet<string> {
+function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
+  return raw?.trim().toLowerCase() === 'review' ? 'review' : null
+}
+
+function layersFromRoute(raw: string | null | undefined, focus: IdeFocus | null): ReadonlySet<string> {
+  if (focus === 'review' && !raw?.trim()) {
+    return parseActive(REVIEW_FOCUS_LAYER_PARAM, IDE_LAYER_KINDS)
+  }
   return parseActive(raw ?? '', IDE_LAYER_KINDS)
 }
 
@@ -71,8 +81,9 @@ export function IdeShell() {
 
   useEffect(() => () => coordinator.dispose(), [coordinator])
 
+  const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
-  const activeLayers = layersFromRoute(route.value.params.layers)
+  const activeLayers = layersFromRoute(route.value.params.layers, activeFocus)
   const terminalOpen =
     route.value.params.terminal === 'open'
     || Boolean(route.value.params.keeper?.trim())
@@ -86,7 +97,9 @@ export function IdeShell() {
 
   const handleViewChange = (next: ViewTab) => {
     setActiveView(next)
-    navigate('code', { ...route.value.params, section: 'ide-shell', view: next })
+    const nextParams: Record<string, string> = { ...route.value.params, section: 'ide-shell', view: next }
+    if (next !== 'unified' && nextParams.focus === 'review') delete nextParams.focus
+    navigate('code', nextParams)
   }
 
   const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
@@ -150,6 +163,9 @@ export function IdeShell() {
         onTerminalOpen=${handleTerminalOpen}
         onFindOpen=${handleFindOpen}
       />
+      ${activeFocus === 'review'
+        ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
+        : null}
       <div
         class="ide-plane-grid"
         role="presentation"
@@ -209,5 +225,24 @@ export function IdeShell() {
         : null}
       <${IdeInterjectMock} />
     </section>
+  `
+}
+
+function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: ReadonlySet<string> }) {
+  const layerLabels = ['keeper-trace', 'approve', 'notes']
+    .filter(layer => activeLayers.has(layer))
+    .map(layer => layer === 'keeper-trace' ? 'Trace' : layer[0]!.toUpperCase() + layer.slice(1))
+
+  return html`
+    <div
+      data-testid="ide-review-focus"
+      class="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+    >
+      <span class="font-mono uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">review focus</span>
+      <span class="font-mono">UNIFIED</span>
+      <span class="text-[var(--color-fg-disabled)]">·</span>
+      <span class="font-mono">${layerLabels.length > 0 ? layerLabels.join(' / ') : 'custom layers'}</span>
+      <span class="ml-auto font-mono text-[var(--color-fg-disabled)]">branch graph rail</span>
+    </div>
   `
 }

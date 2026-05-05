@@ -105,6 +105,14 @@ let record_cache_desync_cleared ~module_name stale_tasks =
     stale_tasks
 ;;
 
+let stale_active_task_signal_present ~config ~module_name ~content =
+  match terminal_task_mentions ~config ~content with
+  | [] -> false
+  | stale_tasks ->
+    record_cache_desync_cleared ~module_name stale_tasks;
+    true
+;;
+
 let rewrite_broadcast_content ~config ~from_agent ~module_name ~content =
   if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
   then content

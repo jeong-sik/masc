@@ -180,6 +180,13 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
                 (identity_tokens_of_value author)
         then
           consume_room_messages remaining msg.seq mentions scope_messages rest
+        else if
+          Coord_task_cache_invariant.stale_active_task_signal_present
+            ~config
+            ~module_name:"keeper_world_observation"
+            ~content:msg.content
+        then
+          consume_room_messages remaining msg.seq mentions scope_messages rest
         else if exact_direct_mention_present ~targets msg.content then
           if remaining <= 0 then
             (`Saturated, remaining, last_processed, List.rev mentions, List.rev scope_messages)

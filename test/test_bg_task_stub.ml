@@ -71,6 +71,22 @@ let test_since_offset_skips_prefix () =
   | Error _ -> fail "read failed"
   | Ok s -> check string "suffix only" "def\n" s.stdout_since
 
+let test_line_ring_drops_old_stdout_lines () =
+  Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "2";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "")
+    (fun () ->
+      let tid =
+        sp ~keeper:"kp-ring"
+          [ "/bin/sh"; "-c"; "printf 'one\\ntwo\\nthree\\n'" ]
+      in
+      let _ = poll_for_closed tid in
+      match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+      | Error _ -> fail "read failed"
+      | Ok s ->
+          check string "retains last two lines" "two\nthree\n" s.stdout_since;
+          check bool "reports dropped bytes" true (s.bytes_dropped_stdout > 0))
+
 let test_kill_closes_task () =
   let tid = sp ~keeper:"kp3" [ "/bin/sleep"; "30" ] in
   (* let child actually establish its pgroup *)
@@ -210,6 +226,8 @@ let () =
             test_unknown_task_errors;
           test_case "reap_orphans on missing base returns 0" `Quick
             test_reap_orphans_returns_zero;
+          test_case "line ring drops old stdout lines" `Quick
+            test_line_ring_drops_old_stdout_lines;
         ] );
       ( "persistence",
         [

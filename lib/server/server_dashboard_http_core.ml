@@ -147,6 +147,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
       ("monitoring", `Assoc [
         ("board", board_monitor_json);
         ("governance", governance_monitor_json);
+        ("credentials", credential_monitoring_json ());
         ("room_state", Coord_eio.state_health_counters ());
         ("executor", executor_outcomes_json config);
         ("slots", slot_monitoring_json ());

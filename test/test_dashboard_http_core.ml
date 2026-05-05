@@ -275,6 +275,54 @@ let test_dashboard_planning_http_json_includes_coordination_fsm () =
      | `List _ -> true
      | _ -> false)
 
+let credential_archived_starvation_total () =
+  int_of_float
+    (Lib.Prometheus.metric_total
+       Lib.Prometheus.metric_config_credential_archived_starvation)
+
+let record_test_credential_archive () =
+  let keeper_name =
+    Printf.sprintf "goal-loop-monitor-%d-%d"
+      (Unix.getpid ())
+      (Random.bits ())
+  in
+  Lib.Prometheus.inc_counter
+    Lib.Prometheus.metric_config_credential_archived_starvation
+    ~labels:[("keeper_name", keeper_name)]
+    ()
+
+let test_credential_monitoring_json_surfaces_archive_counter () =
+  let before = credential_archived_starvation_total () in
+  record_test_credential_archive ();
+  let json = Lib.Dashboard_http_monitoring.credential_monitoring_json () in
+  let open Yojson.Safe.Util in
+  check int "credential archive total"
+    (before + 1)
+    (json |> member "credential_archived_starvation_total" |> to_int);
+  check string "metric name"
+    Lib.Prometheus.metric_config_credential_archived_starvation
+    (json |> member "metric_name" |> to_string);
+  check string "alert level" "bad"
+    (json |> member "alert_level" |> to_string);
+  check bool "needs attention" true
+    (json |> member "needs_attention" |> to_bool)
+
+let test_dashboard_batch_json_includes_credential_monitoring () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  let before = credential_archived_starvation_total () in
+  record_test_credential_archive ();
+  let json = Lib.Server_dashboard_http_core.dashboard_batch_json config in
+  let open Yojson.Safe.Util in
+  let credentials =
+    json |> member "status" |> member "monitoring" |> member "credentials"
+  in
+  check int "batch credential archive total"
+    (before + 1)
+    (credentials |> member "credential_archived_starvation_total" |> to_int);
+  check string "batch credential alert" "bad"
+    (credentials |> member "alert_level" |> to_string)
+
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -391,6 +439,10 @@ let () =
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
           test_case "planning payload includes coordination FSM" `Quick
             test_dashboard_planning_http_json_includes_coordination_fsm;
+          test_case "credential monitoring surfaces archive counter" `Quick
+            test_credential_monitoring_json_surfaces_archive_counter;
+          test_case "batch payload includes credential monitoring" `Quick
+            test_dashboard_batch_json_includes_credential_monitoring;
           test_case "shell auth canonicalizes token owner" `Quick
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick

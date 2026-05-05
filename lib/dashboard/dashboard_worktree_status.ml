@@ -235,14 +235,6 @@ let list_entries ~base_path =
 (* JSON serialisation                                                   *)
 (* ------------------------------------------------------------------ *)
 
-let opt_int_json = function
-  | Some n -> `Int n
-  | None -> `Null
-
-let opt_string_json = function
-  | Some s -> `String s
-  | None -> `Null
-
 let entry_to_json entry =
   `Assoc
     [
@@ -251,8 +243,8 @@ let entry_to_json entry =
       ("changed_count", `Int entry.changed_count);
       ("staged_count", `Int entry.staged_count);
       ("head_sha", `String entry.head_sha);
-      ("pr_number", opt_int_json entry.pr_number);
-      ("pr_state", opt_string_json entry.pr_state);
+      ("pr_number", Json_util.int_opt_to_json entry.pr_number);
+      ("pr_state", Json_util.string_opt_to_json entry.pr_state);
       ("keeper_attached", `Bool entry.keeper_attached);
     ]
 

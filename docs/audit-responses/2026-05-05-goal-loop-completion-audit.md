@@ -41,6 +41,18 @@
   checked at 2026-05-05T11:27:03Z, confidence High:
   #13178 merged at 2026-05-05T11:23:39Z, merge
   `23887a0101c812907ed2b7348c5cf80351f4939c`.
+- [근거] `gh pr view 13218 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13218 merged at 2026-05-05T12:25:02Z, merge
+  `0dd9de8e0d91808b35b4847d6f36b669679816ac`.
+- [근거] `gh pr view 13231 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13231 merged at 2026-05-05T13:03:23Z, merge
+  `23f81803a7d17d5a4cff740c372ee45bc9dc3fe4`.
+- [근거] `gh pr view 13246 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13246 merged at 2026-05-05T13:40:04Z, merge
+  `0ab0076a14dc64a30ffb79cd461530790e6e98f6`.
 - [근거] `python3 scripts/validate_goal_loop_act_map.py
   test/fixtures/goal_loop/act-map.startup.json --known-prs-json
   test/fixtures/goal_loop/known-prs.startup.json --require-pr-ref --fail-on any`
@@ -246,8 +258,8 @@ system health, next action, and counts.
 **Shipped**:
 
 - `goal_loop_status.py` emits the compact phase status and next action.
-- This audit slice changes `goal_loop_status.py` so `next_action` prefers
-  `ACT_MISSING` / `ACT_UNMAPPED` decisions over already-linked decisions.
+- Current `goal_loop_status.py` prefers `ACT_MISSING` / `ACT_UNMAPPED`
+  decisions over already-linked decisions when choosing `next_action`.
 - `docs/examples/goal-loop-fixture.md` documents text and JSON status replay.
 
 **Status**: **PARTIAL**.

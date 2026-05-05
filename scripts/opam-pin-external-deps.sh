@@ -42,7 +42,7 @@ if [[ "${MASC_OPAM_LOCK:-1}" != "0" \
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   echo "[opam-pin] waiting for opam switch lock ${opam_lock_path}" >&2
   if command -v lockf >/dev/null 2>&1; then
-    exec lockf "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+    exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
     exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   else

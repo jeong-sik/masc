@@ -127,7 +127,7 @@ if _needs_opam_lock; then
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
   if command -v lockf >/dev/null 2>&1; then
-    exec lockf "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+    exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
     exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   else
@@ -267,7 +267,7 @@ fi
 
 printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
 if command -v lockf >/dev/null 2>&1; then
-  exec lockf "$lock_path" "${cmd[@]}"
+  exec lockf -k "$lock_path" "${cmd[@]}"
 elif command -v flock >/dev/null 2>&1; then
   exec flock "$lock_path" "${cmd[@]}"
 else

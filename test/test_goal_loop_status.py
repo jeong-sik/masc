@@ -13,6 +13,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "goal_loop_status.py"
+DECIDE_SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
+FIXTURE_DIR = REPO_ROOT / "test" / "fixtures" / "goal_loop"
 
 spec = importlib.util.spec_from_file_location("goal_loop_status", SCRIPT_PATH)
 assert spec is not None
@@ -81,9 +83,7 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.phases["act"].summary["act_missing_count"], 1)
         self.assertEqual(report.next_action["decision_id"], "D-P1-1")
         self.assertEqual(
-            report.system_health_signals["keeper_failure_patterns"][
-                "alive_but_stuck"
-            ],
+            report.system_health_signals["keeper_failure_patterns"]["alive_but_stuck"],
             2,
         )
 
@@ -126,7 +126,9 @@ class GoalLoopStatusTest(unittest.TestCase):
         )
 
         self.assertEqual(report.overall_status, "unknown")
-        self.assertEqual(report.phases["observe"].summary["reason"], "observe_json_missing")
+        self.assertEqual(
+            report.phases["observe"].summary["reason"], "observe_json_missing"
+        )
         self.assertEqual(report.phases["verify"].status, "unknown")
 
     def test_unknown_phase_prevents_overall_ok(self) -> None:
@@ -239,6 +241,59 @@ class GoalLoopStatusTest(unittest.TestCase):
 
         payload = json.loads(goal_loop_status.report_to_json(report))
         self.assertEqual(payload, asdict(report))
+
+    def test_fixture_bundle_reports_act_gap_from_decide_output(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            decide_path = Path(raw_dir) / "decide.json"
+            decide_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(DECIDE_SCRIPT_PATH),
+                    str(FIXTURE_DIR / "orient.startup.json"),
+                    "--act-map",
+                    str(FIXTURE_DIR / "act-map.startup.json"),
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(decide_result.returncode, 0, decide_result.stderr)
+            decide_path.write_text(decide_result.stdout, encoding="utf-8")
+
+            status_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--observe-json",
+                    str(FIXTURE_DIR / "observe.startup.json"),
+                    "--orient-json",
+                    str(FIXTURE_DIR / "orient.startup.json"),
+                    "--decide-json",
+                    str(decide_path),
+                    "--verify-json",
+                    str(FIXTURE_DIR / "verify.fail.json"),
+                    "--loop-iteration",
+                    "#fixture",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(status_result.returncode, 0, status_result.stderr)
+        payload = json.loads(status_result.stdout)
+        self.assertEqual(payload["overall_status"], "critical")
+        self.assertEqual(payload["loop_iteration"], "#fixture")
+        self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 4)
+        self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 1)
+        self.assertEqual(
+            payload["system_health_signals"]["keeper_failure_patterns"][
+                "credential_archived_starvation"
+            ],
+            14,
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,155 @@
+{
+  "findings": [
+    {
+      "count": 0,
+      "finding_id": "R-FATAL-1",
+      "patterns": [
+        "keeper_skipping_turn"
+      ],
+      "samples": [],
+      "severity": "critical",
+      "status": "EVIDENCE_ABSENT",
+      "title": "keeper_semaphore_wait_no_fallback"
+    },
+    {
+      "count": 0,
+      "finding_id": "CF-1",
+      "patterns": [
+        "pricing_catalog_miss"
+      ],
+      "samples": [],
+      "severity": "critical",
+      "status": "EVIDENCE_ABSENT",
+      "title": "pricing_catalog_miss"
+    },
+    {
+      "count": 55,
+      "finding_id": "NF-1",
+      "patterns": [
+        "provider_health_skipped"
+      ],
+      "samples": [
+        {
+          "line": "{\"status\":\"skipped\",\"error\":\"runtime provider health is advisory; bootstrap skips live probe\"}",
+          "line_no": 4
+        }
+      ],
+      "severity": "critical",
+      "status": "EVIDENCE_PRESENT",
+      "title": "provider_health_skipped_all_models"
+    },
+    {
+      "count": 14,
+      "finding_id": "NF-2",
+      "patterns": [
+        "credential_archived_starvation"
+      ],
+      "samples": [
+        {
+          "line": "[WARN] [Auth] archived credential analyst (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
+          "line_no": 24
+        }
+      ],
+      "severity": "critical",
+      "status": "EVIDENCE_PRESENT",
+      "title": "credential_archived_all_keepers"
+    },
+    {
+      "count": 6,
+      "finding_id": "NF-3",
+      "patterns": [
+        "alive_but_stuck"
+      ],
+      "samples": [
+        {
+          "line": "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s, threshold=1800s)",
+          "line_no": 31
+        }
+      ],
+      "severity": "critical",
+      "status": "EVIDENCE_PRESENT",
+      "title": "alive_but_stuck_no_recovery"
+    },
+    {
+      "count": 2,
+      "finding_id": "NF-4",
+      "patterns": [
+        "governance_unparseable",
+        "lenient_json_fallback"
+      ],
+      "samples": [
+        {
+          "line": "[WARN] [Governance] Governance judge returned unparseable response",
+          "line_no": 49
+        },
+        {
+          "line": "[WARN] [Governance] Lenient_json fallback hit; 3809 chars",
+          "line_no": 50
+        }
+      ],
+      "severity": "warning",
+      "status": "EVIDENCE_PRESENT",
+      "title": "governance_judge_unparseable_fallback"
+    },
+    {
+      "count": 0,
+      "finding_id": "NF-5",
+      "patterns": [
+        "autoboot_warmup"
+      ],
+      "samples": [],
+      "severity": "warning",
+      "status": "EVIDENCE_ABSENT",
+      "title": "autoboot_warmup_delay"
+    },
+    {
+      "count": 2,
+      "finding_id": "NF-6",
+      "patterns": [
+        "config_unknown_key"
+      ],
+      "samples": [
+        {
+          "line": "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
+          "line_no": 58
+        }
+      ],
+      "severity": "warning",
+      "status": "EVIDENCE_PRESENT",
+      "title": "config_unknown_keys_ignored"
+    },
+    {
+      "count": 0,
+      "finding_id": "NF-7",
+      "patterns": [
+        "tool_policy_unknown_tools"
+      ],
+      "samples": [],
+      "severity": "warning",
+      "status": "EVIDENCE_ABSENT",
+      "title": "tool_policy_unknown_tools"
+    },
+    {
+      "count": 0,
+      "finding_id": "NF-8",
+      "patterns": [
+        "keeper_checkpoint_migration_data_loss"
+      ],
+      "samples": [],
+      "severity": "critical",
+      "status": "EVIDENCE_ABSENT",
+      "title": "keeper_checkpoint_migration_data_loss"
+    }
+  ],
+  "matched_lines": 79,
+  "source_files": [
+    "fixtures/live-startup.log"
+  ],
+  "summary": {
+    "critical_present": 3,
+    "evidence_absent": 5,
+    "evidence_present": 5,
+    "findings_total": 10
+  },
+  "total_lines": 50005
+}

@@ -72,7 +72,7 @@ function toneLabel(tone: BudgetGaugeState['tone']): string {
 // ── Per-keeper row ────────────────────────────────────────────────────────
 
 /** Compact inline bar gauge for a single keeper. */
-export function KeeperBudgetGaugeRow({ keeper }: { keeper: Keeper }) {
+function KeeperBudgetGaugeRow({ keeper }: { keeper: Keeper }) {
   const state = deriveBudgetGaugeState(keeper)
   if (!state) return null
 

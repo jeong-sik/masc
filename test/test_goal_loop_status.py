@@ -114,6 +114,7 @@ class GoalLoopStatusTest(unittest.TestCase):
 
         self.assertEqual(report.overall_status, "ok")
         self.assertEqual(report.phases["act"].status, "ok")
+        self.assertEqual(report.phases["verify"].summary["violation_kinds"], [])
         self.assertIsNone(report.next_action)
 
     def test_orient_audit_catalog_gap_keeps_goal_warning(self) -> None:
@@ -359,6 +360,10 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(payload["loop_iteration"], "#fixture")
         self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 5)
         self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 0)
+        self.assertEqual(
+            payload["phases"]["verify"]["summary"]["violation_kinds"],
+            ["post_act_verify_pending"],
+        )
         self.assertNotIn("audit_catalog", payload["phases"]["orient"]["summary"])
         self.assertEqual(payload["next_action"]["decision_id"], "D-EMERGENCY-2")
         self.assertEqual(

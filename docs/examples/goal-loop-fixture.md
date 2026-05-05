@@ -30,6 +30,9 @@ Expected key facts:
   one linked PR artifact.
 - Verify remains `FAIL` because the startup replay is pre-ACT evidence, so the
   loop must not be marked complete until a post-ACT live verify passes.
+- `phases.verify.summary.violation_kinds` includes
+  `post_act_verify_pending`, making the live-runtime proof gap machine-visible
+  in aggregate status output.
 
 Use the JSON status form when another tool needs to consume the replay:
 
@@ -92,4 +95,5 @@ python3 scripts/goal_loop_status.py \
 ```
 
 Expected key fact: `phases.orient.summary.audit_catalog` preserves the
-source-document coverage, missing row count, and open consistency finding.
+source-document coverage, missing row count, and open consistency finding; the
+Verify phase still exposes `post_act_verify_pending` in `violation_kinds`.

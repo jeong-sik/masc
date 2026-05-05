@@ -276,7 +276,20 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
     failing_findings = verify.get("failing_findings", [])
     violations = verify.get("violations", [])
     failing_count = len(failing_findings) if isinstance(failing_findings, list) else 0
-    violation_count = len(violations) if isinstance(violations, list) else 0
+    typed_violations = (
+        [violation for violation in violations if isinstance(violation, dict)]
+        if isinstance(violations, list)
+        else []
+    )
+    violation_count = len(typed_violations)
+    violation_kinds = sorted(
+        {
+            str(kind)
+            for violation in typed_violations
+            for kind in [violation.get("kind")]
+            if isinstance(kind, str)
+        }
+    )
     status = "ok" if verify_status == "PASS" else "critical"
     return PhaseStatus(
         status=status,
@@ -284,6 +297,7 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
             "verify_status": verify_status,
             "failing_findings": failing_count,
             "violations": violation_count,
+            "violation_kinds": violation_kinds,
         },
     )
 

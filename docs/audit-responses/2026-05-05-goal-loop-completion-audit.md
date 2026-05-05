@@ -79,7 +79,7 @@
   High: exits non-zero until the full 206-row corpus is attached or checked in.
 - [근거] `rg --only-matching --no-filename
   "(R-FATAL|CD|CE|CF|NF)-[0-9]+"
-  /Users/dancer/Downloads -g "*.md" -g "*.json" | sort -u` checked at
+  prompt_corpus/GOAL_LOOP -g "*.md" -g "*.json" | sort -u` checked at
   2026-05-05T20:29:28Z, confidence High: the supplied Markdown/JSON corpus
   itemizes only 18 unique audit IDs.
 
@@ -271,6 +271,9 @@ system health, next action, and counts.
 - `goal_loop_status.py` emits the compact phase status and next action.
 - Current `goal_loop_status.py` prefers `ACT_MISSING` / `ACT_UNMAPPED`
   decisions over already-linked decisions when choosing `next_action`.
+- Verify status now preserves violation kinds, including
+  `post_act_verify_pending`, so the missing live post-ACT runtime replay is
+  visible in aggregate status output.
 - When `goal_loop_status.py` receives catalog-enriched Orient JSON, it carries
   the audit catalog summary into `phases.orient.summary.audit_catalog` and
   keeps Orient at least `warning` while the catalog is incomplete or has open

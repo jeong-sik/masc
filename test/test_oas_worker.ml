@@ -2117,6 +2117,16 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
+  let codex_provider = make_codex_cli_provider_cfg () in
+  let skip_log =
+    Masc_mcp.Oas_worker_named.codex_keeper_bound_skip_log_message
+      ~label:"tool_use_strict" ~keeper_name:"sangsu" codex_provider
+      Masc_mcp.Oas_worker_named.Codex_keeper_bound_actor_required
+  in
+  Alcotest.(check (option string)) "codex skip decision log message"
+    (Some
+       "cascade tool_use_strict: skipped provider=codex_cli:codex for keeper=sangsu reason=codex_keeper_bound_actor_required")
+    skip_log;
   let filtered =
     Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
@@ -2124,7 +2134,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+      [ codex_provider; make_kimi_cli_provider_cfg () ]
   in
   match filtered with
   | [ provider_cfg ] ->

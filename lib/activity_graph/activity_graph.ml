@@ -65,6 +65,61 @@ let sanitize_event (value : event) =
     tags = List.map Safe_ops.sanitize_text_utf8 value.tags;
   }
 
+(* P3-4: trace the upstream emitter when sanitize_event actually repairs
+   invalid UTF-8.  We compare field values with physical equality (==)
+   to detect whether sanitization changed any bytes.  sanitize_text_utf8
+   and sanitize_json_utf8 both return the original object unchanged when
+   no repair is needed, so == is a reliable O(1) change detector for
+   string and json values.
+   Note: entity_ref is a record and Option.map / List.map always allocate
+   new wrappers, so actor/subject/tags are compared field-by-field.
+   This surfaces "which kind of event / actor had invalid UTF-8 at the emit
+   site" without requiring post-hoc forensics on the read-path repair log.
+   Log fires once per (kind × actor) via a new call since the Warn channel
+   has no built-in dedup; operators should correlate with the Prometheus
+   repair counter for frequency. *)
+let sanitize_event_traced (value : event) : event =
+  let sanitized = sanitize_event value in
+  (* entity_ref fields: both sanitize_text_utf8 calls return the original
+     string when no repair is needed. *)
+  let entity_ref_changed (sa : entity_ref option) (oa : entity_ref option) =
+    match sa, oa with
+    | None, None -> false
+    | Some sa', Some oa' ->
+        not (sa'.kind == oa'.kind) || not (sa'.id == oa'.id)
+    | _ -> true
+  in
+  (* Fast change detection via physical equality — sanitize_text_utf8 and
+     sanitize_json_utf8 return the original object when no repair is done.
+     List.map always allocates a new list, so tags are compared element-wise. *)
+  let changed =
+    not (sanitized.ts_iso == value.ts_iso)
+    || not (sanitized.room_id == value.room_id)
+    || not (sanitized.kind == value.kind)
+    || entity_ref_changed sanitized.actor value.actor
+    || entity_ref_changed sanitized.subject value.subject
+    || not (sanitized.payload == value.payload)
+    (* tags: List.map preserves length, so exists2 is safe here.  We still
+       handle the length-mismatch case explicitly (returns "changed") in
+       case sanitize_event is ever modified to filter items. *)
+    || (let n = List.length value.tags in
+        if List.length sanitized.tags <> n then true
+        else
+          List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags)
+  in
+  if changed then begin
+    let actor_str = match value.actor with
+      | Some a -> a.id
+      | None -> "<none>"
+    in
+    Log.Misc.warn
+      "[activity_graph] UTF-8 repaired at emit kind=%s actor=%s \
+       — upstream emitter sent invalid UTF-8; trace the caller that \
+       constructs payloads for this (kind, actor) pair"
+      value.kind actor_str
+  end;
+  sanitized
+
 let event_json_string (value : event) =
   value |> sanitize_event |> event_to_yojson |> Yojson.Safe.to_string
 
@@ -183,7 +238,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             payload;
             tags;
           }
-          |> sanitize_event
+          |> sanitize_event_traced
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
         append_line (day_path config) (json_line ^ "\n");

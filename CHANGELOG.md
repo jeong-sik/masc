@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.19.8] - 2026-05-05
+
+### Added
+- RFC-0026 keeper admission router + WFQ overflow + persona policy types (shadow-mode).
+- Per-provider token bucket primitive and cascade confidence ring buffer.
+- Stale-binary warning at startup via `commit_age_seconds` build identity.
+- Dashboard provider color tokens and keeper-aware `/api/v1/git/blame` + `/api/v1/git/diff`.
+
+### Fixed
+- Cap cascade rotation to per-attempt timeout budget.
+- Stamp `Fiber_unresolved` blocker_class and clean up #12910 revert leftovers.
+- Dedup `fallback_cascade` cycle WARN per (config_path, cycle_set).
+- `oas_compat` includes truncated body in all `error_message` fallback paths.
+- Restore missing `metric_keeper_slot_yield_total` and `run_unified_turn` wrapper.
+
+### Changed
+- Unexport ~80 internal helpers across dashboard modules (-3.2k lines).
+- Remove all IDE mock data; connect dashboard to real APIs (Phase 1-3).
+
 ## [0.19.7] - 2026-05-05
 
 ### Added

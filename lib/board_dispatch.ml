@@ -109,6 +109,7 @@ type board_sse_event =
     }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
+let flusher_start_cas_retries = 3
 
 let start_flusher_actor ~sw store =
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -131,10 +132,10 @@ let start_flusher_actor ~sw store =
   )
 
 (** CAS [Active (b, false) -> Active (b, true)] for the current [b], then
-    spawn the flusher daemon.  If the CAS loses (someone else flipped the
-    flag concurrently, or the state went back to [Uninitialized]), bail
-    out without spawning.  On daemon-spawn failure, roll the flag back so
-    a later caller can retry.
+    spawn the flusher daemon.  If the CAS loses to another fiber, retry a
+    bounded number of times while the state still needs a flusher; if
+    another fiber already flipped the flag, return.  On daemon-spawn
+    failure, roll the flag back so a later caller can retry.
 
     Pre-D-7 this was a sibling [Atomic.compare_and_set flusher_started
     false true]; the flag now lives in the variant so it cannot drift
@@ -143,26 +144,35 @@ let ensure_flusher_actor store =
   match Eio_context.get_switch_opt () with
   | None -> ()
   | Some sw ->
-      let current = Atomic.get backend_state in
-      (match current with
-       | Uninitialized -> ()
-       | Active (_, true) -> ()
-       | Active (b, false) ->
-           if Atomic.compare_and_set backend_state current (Active (b, true)) then
-             try start_flusher_actor ~sw store
-             with exn ->
-               (* Roll the flag back so a future caller can retry.  Only
-                  roll back if the state hasn't been swapped out from
-                  under us. *)
-               let _ : bool =
-                 Atomic.compare_and_set backend_state
-                   (Active (b, true)) (Active (b, false))
-               in
-               match exn with
-               | Invalid_argument msg when String.equal msg "Switch finished!" ->
-                   Log.BoardLog.warn
-                     "Skipping board flusher actor startup on finished switch"
-               | _ -> raise exn)
+      let rec loop attempts_left =
+        let current = Atomic.get backend_state in
+        match current with
+        | Uninitialized -> ()
+        | Active (_, true) -> ()
+        | Active (b, false) ->
+            if Atomic.compare_and_set backend_state current (Active (b, true)) then
+              try start_flusher_actor ~sw store
+              with exn ->
+                (* Roll the flag back so a future caller can retry.  Only
+                   roll back if the state hasn't been swapped out from
+                   under us. *)
+                let _ : bool =
+                  Atomic.compare_and_set backend_state
+                    (Active (b, true)) (Active (b, false))
+                in
+                match exn with
+                | Invalid_argument msg when String.equal msg "Switch finished!" ->
+                    Log.BoardLog.warn
+                      "Skipping board flusher actor startup on finished switch"
+                | _ -> raise exn
+            else if attempts_left > 0 then begin
+              Eio.Fiber.yield ();
+              loop (attempts_left - 1)
+            end else
+              Log.BoardLog.warn
+                "Board flusher actor startup CAS contention exhausted; retrying on next backend access"
+      in
+      loop flusher_start_cas_retries
 
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None

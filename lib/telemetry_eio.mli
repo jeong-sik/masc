@@ -166,13 +166,11 @@ val track_task_completed :
   success:bool ->
   unit
 
-val track_handoff :
-  ?fs:'a ->
-  config ->
-  from_agent:string ->
-  to_agent:string ->
-  reason:string ->
-  unit
+(* track_handoff intentionally not exposed: 0 production callers as
+   of #10358 (c2) audit. The Handoff_triggered variant remains in
+   [event] above for wire-schema compatibility but no public emitter
+   exists. Add a new emitter only when masc-mcp introduces a real
+   cascade-routing handoff concept. *)
 
 val track_error :
   ?fs:'a ->

@@ -387,8 +387,14 @@ let track_task_started ?fs config ~task_id ~agent_id =
 let track_task_completed ?fs config ~task_id ~duration_ms ~success =
   track ?fs config (Task_completed { task_id; duration_ms; success })
 
-let track_handoff ?fs config ~from_agent ~to_agent ~reason =
-  track ?fs config (Handoff_triggered { from_agent; to_agent; reason })
+(* [track_handoff] removed: 0 production callers as of #10358 (c2)
+   audit (2026-05-05). masc-mcp has no cascade-routing handoff
+   concept; the [Handoff_triggered] event variant is retained for
+   wire-schema compatibility and exhaustive-match coverage in
+   [coordination_product_snapshot] / [dashboard_http_monitoring],
+   but the public emitter is dropped to prevent new code from
+   reintroducing unused telemetry. Tests construct the variant
+   directly to validate the wire schema. *)
 
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })

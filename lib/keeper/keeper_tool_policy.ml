@@ -60,8 +60,48 @@ let is_masc_write_allowed path =
 (* Loaded by init_policy_config at server startup.
    None = config not yet loaded (init_policy_config not yet called). *)
 let policy_config : Keeper_tool_policy_config.t option ref = ref None
+let policy_config_unloaded_warned : (string, unit) Hashtbl.t = Hashtbl.create 16
+let policy_config_unloaded_mutex = Stdlib.Mutex.create ()
 
 let policy_config_for_validation () = !policy_config
+
+let warn_unloaded_policy_config_once ~accessor =
+  let should_warn =
+    Stdlib.Mutex.lock policy_config_unloaded_mutex;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
+      (fun () ->
+        if Hashtbl.mem policy_config_unloaded_warned accessor then
+          false
+        else (
+          Hashtbl.replace policy_config_unloaded_warned accessor ();
+          true))
+  in
+  if should_warn then
+    Log.Keeper.warn
+      "tool_policy.%s called before init_policy_config loaded config/tool_policy.toml; returning fallback"
+      accessor
+
+let observe_unloaded_policy_config ~accessor =
+  Prometheus.inc_counter Prometheus.metric_tool_policy_unloaded_query
+    ~labels:[("accessor", accessor)]
+    ();
+  warn_unloaded_policy_config_once ~accessor
+
+let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
+  match !policy_config with
+  | None ->
+    observe_unloaded_policy_config ~accessor;
+    on_none ();
+    default
+  | Some cfg -> f cfg
+
+let reset_policy_config_for_test () =
+  policy_config := None;
+  Stdlib.Mutex.lock policy_config_unloaded_mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock policy_config_unloaded_mutex)
+    (fun () -> Hashtbl.clear policy_config_unloaded_warned)
 
 let init_policy_config ~base_path =
   match Keeper_tool_policy_config.load ~base_path with
@@ -99,77 +139,72 @@ let allows_shell_write_for_preset (preset : tool_preset) : bool =
 (* ── Git clone config accessors (config-driven) ──────────────── *)
 
 let git_clone_allowed_orgs () : string list option =
-  match !policy_config with
-  | None -> None
-  | Some cfg -> Some (Keeper_tool_policy_config.git_clone_allowed_orgs cfg)
+  with_policy_config_or ~accessor:"git_clone_allowed_orgs" ~default:None
+    (fun cfg -> Some (Keeper_tool_policy_config.git_clone_allowed_orgs cfg))
 
 let git_clone_denied_repos () : string list option =
-  match !policy_config with
-  | None -> None
-  | Some cfg -> Some (Keeper_tool_policy_config.git_clone_denied_repos cfg)
+  with_policy_config_or ~accessor:"git_clone_denied_repos" ~default:None
+    (fun cfg -> Some (Keeper_tool_policy_config.git_clone_denied_repos cfg))
 
 let clone_depth () : int =
-  match !policy_config with
-  | None -> 0
-  | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
+  with_policy_config_or ~accessor:"clone_depth" ~default:0
+    Keeper_tool_policy_config.clone_depth
 
 let clone_timeout_sec () : float =
-  match !policy_config with
-  | None -> default_clone_timeout_sec
-  | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
+  with_policy_config_or ~accessor:"clone_timeout_sec"
+    ~default:default_clone_timeout_sec
+    Keeper_tool_policy_config.clone_timeout_sec
 
 let push_timeout_sec () : float =
-  match !policy_config with
-  | None -> default_push_timeout_sec
-  | Some cfg -> Keeper_tool_policy_config.push_timeout_sec cfg
+  with_policy_config_or ~accessor:"push_timeout_sec"
+    ~default:default_push_timeout_sec
+    Keeper_tool_policy_config.push_timeout_sec
 
 let pr_create_timeout_sec () : float =
-  match !policy_config with
-  | None -> default_pr_create_timeout_sec
-  | Some cfg -> Keeper_tool_policy_config.pr_create_timeout_sec cfg
+  with_policy_config_or ~accessor:"pr_create_timeout_sec"
+    ~default:default_pr_create_timeout_sec
+    Keeper_tool_policy_config.pr_create_timeout_sec
 
 (* ── GH cache config accessors (config-driven) ─────────────── *)
 
 let gh_cache_ttl_sec () : float =
-  match !policy_config with
-  | None -> default_gh_cache_ttl_sec
-  | Some cfg -> Keeper_tool_policy_config.gh_cache_ttl_sec cfg
+  with_policy_config_or ~accessor:"gh_cache_ttl_sec"
+    ~default:default_gh_cache_ttl_sec
+    Keeper_tool_policy_config.gh_cache_ttl_sec
 
 let gh_cache_fetch_page_size () : int =
-  match !policy_config with
-  | None -> default_gh_cache_fetch_page_size
-  | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_page_size cfg
+  with_policy_config_or ~accessor:"gh_cache_fetch_page_size"
+    ~default:default_gh_cache_fetch_page_size
+    Keeper_tool_policy_config.gh_cache_fetch_page_size
 
 let gh_cache_fetch_timeout_sec () : float =
-  match !policy_config with
-  | None -> default_gh_cache_fetch_timeout_sec
-  | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_timeout_sec cfg
+  with_policy_config_or ~accessor:"gh_cache_fetch_timeout_sec"
+    ~default:default_gh_cache_fetch_timeout_sec
+    Keeper_tool_policy_config.gh_cache_fetch_timeout_sec
 
 let gh_cache_max_alternatives () : int =
-  match !policy_config with
-  | None -> default_gh_cache_max_alternatives
-  | Some cfg -> Keeper_tool_policy_config.gh_cache_max_alternatives cfg
+  with_policy_config_or ~accessor:"gh_cache_max_alternatives"
+    ~default:default_gh_cache_max_alternatives
+    Keeper_tool_policy_config.gh_cache_max_alternatives
 
 let gh_cache_max_output_bytes () : int =
-  match !policy_config with
-  | None -> default_gh_cache_max_output_bytes
-  | Some cfg -> Keeper_tool_policy_config.gh_cache_max_output_bytes cfg
+  with_policy_config_or ~accessor:"gh_cache_max_output_bytes"
+    ~default:default_gh_cache_max_output_bytes
+    Keeper_tool_policy_config.gh_cache_max_output_bytes
 
 (* ── Preset subsumption (config-driven) ──────────────────────── *)
 
 let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =
-  match !policy_config with
-  | None -> false
-  | Some cfg ->
-    Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset
+  with_policy_config_or ~accessor:"preset_can_satisfy" ~default:false
+    (fun cfg ->
+      Keeper_tool_policy_config.preset_can_satisfy cfg ~agent_preset ~required_preset)
 
 (** Return configured preset names (excluding "full") for schema enum generation. *)
 let configured_preset_names () : string list =
-  match !policy_config with
-  | None -> []
-  | Some cfg ->
-    Keeper_tool_policy_config.preset_names cfg
-    |> List.filter (fun n -> not (String.equal n "full"))
+  with_policy_config_or ~accessor:"configured_preset_names" ~default:[]
+    (fun cfg ->
+      Keeper_tool_policy_config.preset_names cfg
+      |> List.filter (fun n -> not (String.equal n "full")))
 
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
@@ -270,9 +305,8 @@ let is_keeper_maintenance_only_tool name =
 
 let keeper_base_candidate_tool_names () =
   let config_tools =
-    match !policy_config with
-    | None -> []
-    | Some cfg -> Keeper_tool_policy_config.all_group_tools cfg
+    with_policy_config_or ~accessor:"keeper_base_candidate_tool_names"
+      ~default:[] Keeper_tool_policy_config.all_group_tools
   in
   dedupe_tool_names
     ( config_tools
@@ -283,15 +317,16 @@ let keeper_base_candidate_tool_names () =
 (** Resolve a named group from tool_policy.toml.  Returns the hardcoded
     fallback when config is not loaded. *)
 let resolve_policy_group ~(fallback : string list) (group_name : string) : string list =
-  match !policy_config with
-  | Some cfg ->
-    (match Keeper_tool_policy_config.resolve_group cfg group_name with
-     | Some tools -> dedupe_tool_names tools
-     | None ->
-       Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
-         group_name (List.length fallback);
-       fallback)
-  | None -> fallback
+  with_policy_config_or
+    ~accessor:("resolve_policy_group." ^ group_name)
+    ~default:fallback
+    (fun cfg ->
+      match Keeper_tool_policy_config.resolve_group cfg group_name with
+      | Some tools -> dedupe_tool_names tools
+      | None ->
+        Log.Keeper.warn "tool_policy group %S not found, using fallback (%d tools)"
+          group_name (List.length fallback);
+        fallback)
 
 (** Optional tools that require explicit opt-in via also_allow.
     Reads [groups.optional] from tool_policy.toml; falls back to
@@ -323,29 +358,28 @@ let explicit_optional_candidate_tool_names (meta : keeper_meta) =
 
 let preset_allowlist preset =
   let name = preset_name_of_tool_preset preset in
-  match !policy_config with
-  | None ->
-    Prometheus.inc_counter
-      Prometheus.metric_keeper_tool_policy_failures
-      ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
-      ();
-    Log.Keeper.error
-      "tool policy config not loaded; preset '%s' returns empty. \
-       Call init_policy_config at startup." name;
-    []
-  | Some cfg ->
-    let injected = injected_masc_tool_names () in
-    let injected_lookup = Hashtbl.create (List.length injected) in
-    List.iter (fun n -> Hashtbl.replace injected_lookup n ()) injected;
-    let masc_filter tool_name = Hashtbl.mem injected_lookup tool_name in
-    match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
-    | Some Keeper_tool_policy_config.All_candidates ->
-      (* all_candidates = true: return full candidate set *)
-      keeper_base_candidate_tool_names ()
-    | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
-    | None ->
-      Log.Keeper.warn "preset '%s' not defined in config/tool_policy.toml, returning empty" name;
-      []
+  with_policy_config_or ~accessor:("preset_allowlist." ^ name) ~default:[]
+    ~on_none:(fun () ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_tool_policy_failures
+        ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
+        ();
+      Log.Keeper.error
+        "tool policy config not loaded; preset '%s' returns empty. \
+         Call init_policy_config at startup." name)
+    (fun cfg ->
+      let injected = injected_masc_tool_names () in
+      let injected_lookup = Hashtbl.create (List.length injected) in
+      List.iter (fun n -> Hashtbl.replace injected_lookup n ()) injected;
+      let masc_filter tool_name = Hashtbl.mem injected_lookup tool_name in
+      match Keeper_tool_policy_config.resolve_preset cfg name ~masc_filter () with
+      | Some Keeper_tool_policy_config.All_candidates ->
+        (* all_candidates = true: return full candidate set *)
+        keeper_base_candidate_tool_names ()
+      | Some (Keeper_tool_policy_config.Subset tools) -> dedupe_tool_names tools
+      | None ->
+        Log.Keeper.warn "preset '%s' not defined in config/tool_policy.toml, returning empty" name;
+        [])
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =

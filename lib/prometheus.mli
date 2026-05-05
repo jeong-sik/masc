@@ -268,6 +268,7 @@ val metric_keeper_rollover_failures : string
 val metric_keeper_task_load_failures : string
 val metric_keeper_tool_selection_failures : string
 val metric_keeper_tool_policy_failures : string
+val metric_tool_policy_unloaded_query : string
 val metric_keeper_reconcile_failures : string
 val metric_keeper_decision_audit_flush_failures : string
 val metric_keeper_oas_cancel : string

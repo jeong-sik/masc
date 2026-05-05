@@ -35,16 +35,28 @@ import {
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
+import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
+import { replaceRoute, route } from '../router'
 
 type ViewMode = 'model' | 'keeper'
+export type CostFocus = 'agent' | 'matrix' | 'latency'
 
 export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
 
 const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
+const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
 
 export function isCostView(v: string | undefined): v is CostView {
   return !!v && (COST_VIEWS as string[]).includes(v)
+}
+
+export function isCostFocus(v: string | undefined): v is CostFocus {
+  return !!v && (COST_FOCUSES as string[]).includes(v)
+}
+
+export function viewModeForCostFocus(focus: CostFocus | null): ViewMode {
+  return focus === 'agent' ? 'keeper' : 'model'
 }
 
 type ModelLoadState =
@@ -97,6 +109,10 @@ const stressState = signal<StressLoadState>({ status: 'idle' })
 const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
+const activeCostFocus = computed<CostFocus | null>(() => {
+  const focus = route.value.params.focus
+  return isCostFocus(focus) ? focus : null
+})
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -106,6 +122,22 @@ const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
 ]
 
 const windowMinutes = signal<number>(60)
+
+function updateCostFocusParam(focus: CostFocus): void {
+  replaceRoute('monitoring', { section: 'runtime', view: 'cost', focus })
+}
+
+function setCostViewMode(mode: ViewMode): void {
+  viewMode.value = mode
+  replaceRoute('monitoring', mode === 'keeper'
+    ? { section: 'runtime', view: 'cost', focus: 'agent' }
+    : { section: 'runtime', view: 'cost' })
+  if (mode === 'model') {
+    void loadModelMetrics(windowMinutes.value)
+  } else {
+    void loadKeeperMetrics(windowMinutes.value)
+  }
+}
 
 async function loadModelMetrics(window: number) {
   modelState.value = { status: 'loading' }
@@ -780,9 +812,45 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
   `
 }
 
+function CostFocusRail({
+  focus,
+  mode,
+  modelCount,
+  keeperCount,
+  bucketCount,
+}: {
+  focus: CostFocus | null
+  mode: ViewMode
+  modelCount: number | null
+  keeperCount: number | null
+  bucketCount: number | null
+}) {
+  const active = focus ?? (mode === 'keeper' ? 'agent' : 'matrix')
+  return html`
+    <div class="flex flex-col gap-2" aria-label="비용 포커스" data-testid="cost-focus-rail">
+      <${FilterChips}
+        chips=${[
+          { key: 'agent', label: 'Keeper별 비용', count: keeperCount, title: 'keeper별 비용 / 토큰 / 지연 테이블' },
+          { key: 'matrix', label: '비용 매트릭스', count: modelCount, title: 'provider x model 비용 heatmap' },
+          { key: 'latency', label: '지연 분포', count: bucketCount, title: 'latency histogram과 p50/p95 분포' },
+        ]}
+        value=${active}
+        onChange=${updateCostFocusParam}
+        size="sm"
+        tone="accent"
+      />
+    </div>
+  `
+}
+
 function CostDashboardContent({ view }: { view: CostView }) {
   if (view === 'cost') {
-    const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
+    const focus = activeCostFocus.value
+    const requestedMode = focus ? viewModeForCostFocus(focus) : viewMode.value
+    if (viewMode.value !== requestedMode) viewMode.value = requestedMode
+
+    const mode = requestedMode
+    const activeState = mode === 'model' ? modelState.value : keeperState.value
 
     if (activeState.status === 'idle') {
       void loadActiveView(windowMinutes.value, view)
@@ -795,47 +863,53 @@ function CostDashboardContent({ view }: { view: CostView }) {
     }
     if (activeState.status !== 'loaded') return null
 
-    const t = viewMode.value === 'model' ? modelTotals.value : keeperTotals.value
+    const t = mode === 'model' ? modelTotals.value : keeperTotals.value
     const data = activeState.data
       .slice()
-      .sort((a, b) => (viewMode.value === 'model'
-        ? (b as DashboardRuntimeModelMetric).total_cost_usd ?? 0 - ((a as DashboardRuntimeModelMetric).total_cost_usd ?? 0)
+      .sort((a, b) => (mode === 'model'
+        ? ((b as DashboardRuntimeModelMetric).total_cost_usd ?? 0) - ((a as DashboardRuntimeModelMetric).total_cost_usd ?? 0)
         : (b as KeeperCostMetric).total_cost_usd - (a as KeeperCostMetric).total_cost_usd))
     const maxCost = Math.max(0, ...data.map(m =>
-      viewMode.value === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : (m as KeeperCostMetric).total_cost_usd))
+      mode === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : (m as KeeperCostMetric).total_cost_usd))
     const maxP95 = Math.max(0, ...data.map(m => {
-      const p95 = viewMode.value === 'model' ? (m as DashboardRuntimeModelMetric).p95_latency_ms : (m as KeeperCostMetric).p95_latency_ms
+      const p95 = mode === 'model' ? (m as DashboardRuntimeModelMetric).p95_latency_ms : (m as KeeperCostMetric).p95_latency_ms
       return p95 ?? 0
     }))
+    const loadedModelCount = modelState.value.status === 'loaded' ? modelState.value.data.length : null
+    const loadedKeeperCount = keeperState.value.status === 'loaded' ? keeperState.value.data.length : null
+    const loadedBucketCount = modelState.value.status === 'loaded' ? modelState.value.latencyBuckets.length : null
+    const showMatrix = mode === 'model' && activeState.status === 'loaded' && (focus == null || focus === 'matrix')
+    const showLatency = mode === 'model' && activeState.status === 'loaded' && (focus == null || focus === 'latency')
+    const showTable = focus !== 'matrix' && focus !== 'latency'
 
     return html`
       <section class="flex flex-col gap-4" aria-label="비용 / 지연 대시보드">
         <header class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-text-strong">비용 / 지연 대시보드</h2>
-            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${viewMode.value === 'model' ? '모델별' : 'Keeper별'} 토큰 / 비용 / latency</p>
+            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${mode === 'model' ? '모델별' : 'Keeper별'} 토큰 / 비용 / latency</p>
           </div>
           <div class="flex items-center gap-2">
             <div class="flex rounded-[var(--r-1)] border border-card-border/40 p-0.5" role="group" aria-label="보기 모드">
               <button
                 type="button"
                 role="radio"
-                aria-checked=${viewMode.value === 'model'}
-                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'model'
+                aria-checked=${mode === 'model'}
+                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${mode === 'model'
                   ? 'bg-[var(--accent-15)] text-accent-fg'
                   : 'text-text-muted hover:text-text-strong'}"
-                onClick=${() => { viewMode.value = 'model'; void loadModelMetrics(windowMinutes.value) }}
+                onClick=${() => { setCostViewMode('model') }}
               >
                 모델
               </button>
               <button
                 type="button"
                 role="radio"
-                aria-checked=${viewMode.value === 'keeper'}
-                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${viewMode.value === 'keeper'
+                aria-checked=${mode === 'keeper'}
+                class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs ${mode === 'keeper'
                   ? 'bg-[var(--accent-15)] text-accent-fg'
                   : 'text-text-muted hover:text-text-strong'}"
-                onClick=${() => { viewMode.value = 'keeper'; void loadKeeperMetrics(windowMinutes.value) }}
+                onClick=${() => { setCostViewMode('keeper') }}
               >
                 Keeper
               </button>
@@ -859,13 +933,21 @@ function CostDashboardContent({ view }: { view: CostView }) {
           </div>
         </header>
 
+        <${CostFocusRail}
+          focus=${focus}
+          mode=${mode}
+          modelCount=${loadedModelCount}
+          keeperCount=${loadedKeeperCount}
+          bucketCount=${loadedBucketCount}
+        />
+
         ${t ? html`
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
               value=${formatCost(t.totalCost)}
               status="ok"
-              delta=${{ direction: 'up', text: `${t.count} ${viewMode.value === 'model' ? 'models' : 'keepers'}` }}
+              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'models' : 'keepers'}` }}
             />
             <${StatTile}
               label="Tokens In / Out"
@@ -874,39 +956,37 @@ function CostDashboardContent({ view }: { view: CostView }) {
             />
             <${StatTile}
               label="p50 Latency (avg)"
-              value=${`${t.p50Avg}ms`}
+              value=${`${Math.round(t.p50Avg)}ms`}
               delta=${{ direction: 'flat', text: 'across entries' }}
             />
             <${StatTile}
               label="p95 Latency (max)"
-              value=${`${t.p95Max}ms`}
+              value=${`${Math.round(t.p95Max)}ms`}
               status=${t.p95Max > 8000 ? 'crit' : undefined}
               delta=${{ direction: t.p95Max > 8000 ? 'down' : 'flat', text: t.p95Max > 8000 ? 'over 8s budget' : 'within budget' }}
             />
           </div>
         ` : null}
 
-        ${viewMode.value === 'model' && activeState.status === 'loaded'
-          ? html`
-            <${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />
-            <${CostLatency}
-              buckets=${(activeState as Extract<ModelLoadState, { status: 'loaded' }>).latencyBuckets}
-              p50=${t?.p50Avg ?? null}
-              p95=${t?.p95Max ?? null}
-            />
-          `
-          : null}
+        ${showMatrix ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />` : null}
+        ${showLatency ? html`
+          <${CostLatency}
+            buckets=${(activeState as Extract<ModelLoadState, { status: 'loaded' }>).latencyBuckets}
+            p50=${t?.p50Avg ?? null}
+            p95=${t?.p95Max ?? null}
+          />
+        ` : null}
 
-        ${data.length === 0 ? html`
+        ${!showTable ? null : data.length === 0 ? html`
           <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
-            이 시간 창에서 기록된 ${viewMode.value === 'model' ? '모델' : 'Keeper'} 비용이 없습니다.
+            이 시간 창에서 기록된 ${mode === 'model' ? '모델' : 'Keeper'} 비용이 없습니다.
           </div>
         ` : html`
           <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-            <table class="w-full" aria-label=${`${data.length}개 ${viewMode.value === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
+            <table class="w-full" aria-label=${`${data.length}개 ${mode === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
               <thead>
                 <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-                  <th scope="col" class="px-2 py-1.5 text-left">${viewMode.value === 'model' ? 'model' : 'keeper'}</th>
+                  <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'model' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>
                   <${ThRight}>$ cost</${ThRight}>
@@ -914,11 +994,11 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <${ThRight}>p50</${ThRight}>
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
-                  ${viewMode.value === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">top model</th>` : null}
+                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">top model</th>` : null}
                 </tr>
               </thead>
               <tbody>
-                ${viewMode.value === 'model'
+                ${mode === 'model'
                   ? data.map(m => html`<${ModelRow} key=${(m as DashboardRuntimeModelMetric).model_id} model=${m as DashboardRuntimeModelMetric} maxCost=${maxCost} maxP95=${maxP95} />`)
                   : data.map(k => html`<${KeeperRow} key=${(k as KeeperCostMetric).keeper_name} keeper=${k as KeeperCostMetric} maxCost=${maxCost} maxP95=${maxP95} />`)}
               </tbody>

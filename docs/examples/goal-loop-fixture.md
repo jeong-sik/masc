@@ -81,10 +81,14 @@ Expected key facts:
 - The source documents disagree on the aggregate audit total: 206 vs 214.
 - The source documents claim 206 findings for the current catalog total, but
   only 18 finding IDs are itemized in the checked artifacts.
+- `consistency_findings: 1 open=1` preserves the unresolved 206-vs-214
+  aggregate mismatch as a separate gate.
 - `source_artifacts` is `INCOMPLETE` while the logical
   `prompt_corpus/GOAL_LOOP/...` source paths are not backed by checked files.
 - `--require-complete-catalog` intentionally exits non-zero until the full
   row-level corpus is attached or checked in.
+- `--require-consistency-resolved` intentionally exits non-zero until the
+  aggregate audit count is reconciled.
 
 Validate that source-artifact gap directly:
 
@@ -99,6 +103,19 @@ python3 scripts/orient_goal_loop_logs.py \
 Expected key fact: this exits non-zero until the catalog's source files exist
 under `prompt_corpus/GOAL_LOOP/...`. That is separate from the row-level
 `--require-complete-catalog` gate.
+
+Validate the aggregate-count consistency gate directly:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-consistency-resolved
+```
+
+Expected key fact: this exits non-zero while the 206-vs-214 consistency finding
+is open. Resolving the source-of-truth aggregate should make this command pass
+without requiring code changes.
 
 Validate against a local external source root without checking the documents
 into the public repository:

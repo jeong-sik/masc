@@ -205,6 +205,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.audit_catalog["external_sources_total"], 12)
         self.assertEqual(len(report.audit_catalog["aggregate_claims"]), 3)
         self.assertEqual(len(report.audit_catalog["consistency_findings"]), 1)
+        self.assertEqual(report.audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(report.audit_catalog["consistency_findings_open"], 1)
         self.assertEqual(
             report.audit_catalog["consistency_findings"][0]["finding_id"],
             "CONSISTENCY-1",
@@ -326,6 +328,58 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn('"source_artifacts_missing": 12', result.stdout)
+
+    def test_orient_cli_can_fail_on_open_consistency_finding(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ORIENT_SCRIPT_PATH),
+                str(FIXTURE_DIR / "observe.startup.json"),
+                "--audit-catalog",
+                str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                "--require-consistency-resolved",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"consistency_findings_open": 1', result.stdout)
+
+    def test_orient_cli_can_pass_when_consistency_finding_resolved(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        consistency_findings = catalog["consistency_findings"]
+        assert isinstance(consistency_findings, list)
+        assert consistency_findings
+        first_finding = consistency_findings[0]
+        assert isinstance(first_finding, dict)
+        first_finding["status"] = "RESOLVED"
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            catalog_path = Path(raw_dir) / "catalog.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ORIENT_SCRIPT_PATH),
+                    str(FIXTURE_DIR / "observe.startup.json"),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--require-consistency-resolved",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"consistency_findings_open": 0', result.stdout)
 
     def test_orient_cli_can_pass_with_external_source_root(self) -> None:
         catalog = orient_goal_loop_logs.load_audit_catalog_input(

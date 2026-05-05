@@ -161,6 +161,15 @@ def pattern_samples(patterns: dict[str, Any], name: str) -> list[dict[str, Any]]
     return [sample for sample in samples if isinstance(sample, dict)]
 
 
+def consistency_finding_is_open(finding: Any) -> bool:
+    if not isinstance(finding, dict):
+        return False
+    status = finding.get("status")
+    if not isinstance(status, str):
+        return True
+    return status.upper() not in {"CLOSED", "COMPLETE", "DONE", "RESOLVED"}
+
+
 def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
     if catalog is None:
         return []
@@ -397,6 +406,13 @@ def audit_catalog_summary(
         status = "COMPLETE"
     else:
         status = "INCOMPLETE"
+    consistency_raw = catalog.get("consistency_findings", [])
+    consistency_findings = consistency_raw if isinstance(consistency_raw, list) else []
+    open_consistency_findings = [
+        finding
+        for finding in consistency_findings
+        if consistency_finding_is_open(finding)
+    ]
     summary = {
         "catalog_id": catalog.get("catalog_id", "unknown"),
         "source_status": catalog.get("source_status", "unknown"),
@@ -410,7 +426,9 @@ def audit_catalog_summary(
         "source_documents_status": source_status,
         "external_sources": external_sources,
         "aggregate_claims": catalog.get("aggregate_claims", []),
-        "consistency_findings": catalog.get("consistency_findings", []),
+        "consistency_findings": consistency_findings,
+        "consistency_findings_total": len(consistency_findings),
+        "consistency_findings_open": len(open_consistency_findings),
     }
     artifacts = source_artifact_summary(
         catalog,
@@ -531,7 +549,11 @@ def report_to_text(report: OrientReport) -> str:
             )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:
-            lines.append(f"consistency_findings: {len(consistency_findings)}")
+            lines.append(
+                "consistency_findings: "
+                f"{report.audit_catalog['consistency_findings_total']} "
+                f"open={report.audit_catalog['consistency_findings_open']}"
+            )
     for finding in report.findings:
         if finding.status == "EVIDENCE_ABSENT":
             continue
@@ -606,6 +628,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "and line references are incomplete."
         ),
     )
+    parser.add_argument(
+        "--require-consistency-resolved",
+        action="store_true",
+        help="Exit non-zero when the audit catalog has open consistency findings.",
+    )
     return parser.parse_args(argv)
 
 
@@ -637,6 +664,11 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(source_artifacts, dict):
             return 1
         if source_artifacts.get("status") != "COMPLETE":
+            return 1
+    if args.require_consistency_resolved:
+        if report.audit_catalog is None:
+            return 1
+        if report.audit_catalog.get("consistency_findings_open") != 0:
             return 1
     return 0
 

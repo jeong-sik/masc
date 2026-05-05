@@ -93,6 +93,12 @@
   external source artifacts without committing those documents to the public
   repository, with 12 resolved source artifacts, 18 source-itemized audit IDs,
   18 catalog-itemized audit IDs, and zero ID mismatch or line-ref errors.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --require-consistency-resolved` checked at 2026-05-06T06:10:00+09:00,
+  confidence High: exits non-zero while the 206-vs-214 aggregate-count
+  consistency finding remains open.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   18 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -221,8 +227,9 @@ source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
 external source artifacts resolvable from `/Users/dancer/Downloads` via
 `--audit-source-strip-prefix`, 18 source-itemized IDs matching the 18
 catalog-itemized findings, 188 missing 206-itemized rows, one open consistency
-finding for the 206-vs-214 count mismatch, and 8 itemized rows that are not
-evaluable from the startup log patterns.
+finding for the 206-vs-214 count mismatch that fails
+`--require-consistency-resolved`, and 8 itemized rows that are not evaluable
+from the startup log patterns.
 
 ### 4. DECIDE
 
@@ -347,7 +354,7 @@ No convergence claim is valid yet. The only safe current statement is:
    passes via `/Users/dancer/Downloads` plus `--audit-source-strip-prefix`, but
    public-repo replay still needs a stable non-user-local artifact policy.
 3. Reconcile whether the governing audit total is 206 or 214 before closing
-   the GOAL LOOP objective.
+   the GOAL LOOP objective so `--require-consistency-resolved` passes.
 4. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
 5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
@@ -364,5 +371,7 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
   `--require-complete-catalog` passing.
 - The catalog source paths are not replayed from a stable agreed artifact root
   with `--require-source-artifacts` passing.
+- The 206-vs-214 aggregate-count consistency finding is still open and
+  `--require-consistency-resolved` fails.
 - The 206-vs-214 aggregate-count mismatch is still open.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.

@@ -180,6 +180,25 @@ let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
         (contains_substring stderr
            "publish/tag v0.2.0 before widening the release train"))
 
+let test_suffixed_release_tag_uses_tagged_package_version () =
+  with_temp_dir "release-train-suffixed-tag" (fun dir ->
+      init_repo_with_release_tags dir;
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"suffixed-release" ~version:"0.2.0"
+           ~message:"reset active line");
+      ignore (run_shell_ok ~cwd:dir "git tag v0.2.0-505");
+      let cmd =
+        Printf.sprintf "/bin/bash %s --base suffixed-release --head suffixed-release"
+          (quote script)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir cmd in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "uses package version from suffixed tag" true
+        (contains_substring stdout
+           "Release train guard OK: base=0.2.0 head=0.2.0 latest_tag=0.2.0"))
+
 let () =
   run "release_train_guard_script"
     [
@@ -193,5 +212,7 @@ let () =
             test_pending_bootstrap_series_warns_without_blocking_same_version;
           test_case "pending bootstrap series blocks next train" `Quick
             test_pending_bootstrap_series_blocks_next_train_until_tagged;
+          test_case "suffixed release tag uses tagged package version" `Quick
+            test_suffixed_release_tag_uses_tagged_package_version;
         ] );
     ]

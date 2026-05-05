@@ -59,6 +59,17 @@ latest_tag_for_major() {
   git tag --list "v${major}.*" --sort=-v:refname | head -n1
 }
 
+version_from_tag() {
+  local tag="$1"
+  local package_version
+  package_version="$(version_from_ref "$tag")"
+  if [[ -n "$package_version" ]]; then
+    printf '%s\n' "$package_version"
+  else
+    printf '%s\n' "${tag#v}"
+  fi
+}
+
 version_gt() {
   local left="$1"
   local right="$2"
@@ -77,7 +88,7 @@ if [[ -z "$base_ref" ]]; then
     exit 0
   fi
 
-  latest_tag_version="${latest_tag#v}"
+  latest_tag_version="$(version_from_tag "$latest_tag")"
   printf 'Release train guard OK: no base ref provided, head=%s latest_tag=%s\n' \
     "$head_package_version" "$latest_tag_version"
   exit 0
@@ -91,7 +102,7 @@ latest_tag="$(latest_tag_for_major "$base_major")"
 if [[ "$head_major" != "$base_major" ]]; then
   head_latest_tag="$(latest_tag_for_major "$head_major")"
   if [[ -n "$head_latest_tag" ]]; then
-    head_latest_tag_version="${head_latest_tag#v}"
+    head_latest_tag_version="$(version_from_tag "$head_latest_tag")"
     if version_gt "$head_latest_tag_version" "$head_package_version"; then
       fail "head ref $head_ref uses package version $head_package_version, which is older than latest tag v$head_latest_tag_version in major $head_major; pick a newer version before crossing release lines"
     fi
@@ -110,7 +121,7 @@ if [[ -z "$latest_tag" ]]; then
   fail "base ref $base_ref starts bootstrap release line $base_package_version with no published v${base_major}.* tag, and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release line"
 fi
 
-latest_tag_version="${latest_tag#v}"
+latest_tag_version="$(version_from_tag "$latest_tag")"
 
 if [[ "$base_package_version" == "$latest_tag_version" ]]; then
   printf 'Release train guard OK: base=%s head=%s latest_tag=%s\n' \

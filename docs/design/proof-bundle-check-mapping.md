@@ -57,7 +57,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 |---|---|---|---|---|---|
 | `contract.json` | OAS | full `runtime_constraints` + opaque `eval_criteria` | yes | no | no |
 | `evidence/mode_violations.json` | OAS | `ts`, `tool_name`, `input_summary`, `effective_mode`, `violation_kind` | no for active checks | yes | insufficient |
-| `evidence/effects.json` | OAS | pre-tool effect decision rows, including allowed / denied / pending evidence | no | advisory only | potential typed effect ledger input |
+| `evidence/effects.json` | OAS | pre-tool effect decision rows, including allowed / denied / pending evidence and Mode_enforcer `source_path` / `source_line` | no | source-path completeness signal for blocked attempts | potential typed effect ledger input |
 | `evidence/token_usage.json` | OAS | turn token snapshots | no | optional annotation | no |
 | `evidence/review_warning.json` | OAS | warning string + effective mode | yes for bridge routing | yes as review tripwire source | still insufficient for full typed review satisfaction |
 | `tool_traces/*.jsonl` | OAS | tool trace rows | only as selected artifact presence | optional | partial, still missing typed join fields |

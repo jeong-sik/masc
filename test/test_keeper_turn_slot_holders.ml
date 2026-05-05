@@ -10,8 +10,11 @@
 
 module KK = Masc_mcp.Keeper_keepalive
 
+exception After_flag_injected
+
 let with_fresh_state body () =
   Eio_main.run @@ fun _env ->
+    KK.set_after_acquire_flag_hook_for_test None;
     KK.reset_autonomous_completion_for_test ();
     KK.reset_autonomous_turn_queue_for_test ();
     body ()
@@ -124,6 +127,36 @@ let test_slot_holders_summary_reflects_active_holder () =
   | Error (`Semaphore_wait_timeout _) ->
       failwith "unexpected semaphore wait timeout in test"
 
+let test_reactive_slot_released_when_hook_raises_after_flag () =
+  let keeper_name = "diag-after-flag" in
+  let before = KK.reactive_turn_semaphore_value_for_test () in
+  KK.set_after_acquire_flag_hook_for_test
+    (Some
+       (fun ~label ~keeper_name:seen ->
+          if label = "reactive" && seen = keeper_name then
+            raise After_flag_injected));
+  let clear_hook () = KK.set_after_acquire_flag_hook_for_test None in
+  (try
+     ignore
+       (KK.with_keeper_turn_slot_for_test
+          ~keeper_name
+          ~channel:Masc_mcp.Keeper_world_observation.Reactive
+          (fun ~semaphore_wait_ms:_ ->
+             failwith "hook should raise before user callback"));
+     clear_hook ();
+     failwith "expected injected hook to raise"
+   with
+   | After_flag_injected -> clear_hook ()
+   | exn ->
+       clear_hook ();
+       raise exn);
+  let after = KK.reactive_turn_semaphore_value_for_test () in
+  assert_eq ~msg:"reactive slot released after injected failure"
+    ~expected:before ~actual:after;
+  let names = List.map fst (KK.reactive_slot_holders ~now:(Time_compat.now ())) in
+  if List.mem keeper_name names then
+    failwith "reactive holder leaked after injected failure"
+
 let () =
   let cases =
     [
@@ -139,6 +172,8 @@ let () =
         test_holders_released_after_slot_returned;
       "slot_holders_summary mentions the active holder",
         test_slot_holders_summary_reflects_active_holder;
+      "reactive slot releases when hook raises after acquired flag",
+        test_reactive_slot_released_when_hook_raises_after_flag;
     ]
   in
   List.iter

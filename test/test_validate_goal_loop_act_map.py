@@ -34,9 +34,9 @@ class ValidateGoalLoopActMapTest(unittest.TestCase):
             require_pr_ref=True,
         )
 
-        self.assertEqual(report.artifact_count, 4)
-        self.assertEqual(report.pr_ref_count, 4)
-        self.assertEqual(report.known_pr_count, 4)
+        self.assertEqual(report.artifact_count, 6)
+        self.assertEqual(report.pr_ref_count, 6)
+        self.assertEqual(report.known_pr_count, 6)
         self.assertEqual(report.missing_pr_count, 0)
         self.assertEqual(report.malformed_artifact_count, 0)
 

@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Coord module *)
 
 open Masc_mcp

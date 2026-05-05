@@ -207,6 +207,8 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
         Masc_mcp.Cascade_config_loader.model = model;
         weight = 1;
         supports_tool_choice = None;
+        secondary = None;
+        secondary_supports_tool_choice = None;
       }
     in
     let first =
@@ -248,6 +250,8 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
         Masc_mcp.Cascade_config_loader.model = model;
         weight = 1;
         supports_tool_choice = None;
+        secondary = None;
+        secondary_supports_tool_choice = None;
       }
     in
     let entries =

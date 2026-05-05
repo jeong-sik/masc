@@ -236,6 +236,7 @@ verify_agent_sdk_switch_artifacts() {
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmi"
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmxa"
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.a"
+  verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk__metric_contract.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmxa"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.a"
@@ -307,7 +308,13 @@ fi
 # `bash scripts/oas-drift-check.sh`. Here we emit one line so that
 # every doctor-oas-pin run surfaces surface-level drift without
 # requiring the operator to remember a second command.
-if [[ -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
+#
+# Skip the surface check entirely under --local-only: oas-drift-check.sh
+# falls back to `git fetch` from OAS_AGENT_SDK_URL when no local
+# checkout is configured, which contradicts the explicit no-network
+# contract.  Local-mode callers (dune-local.sh preflight) get the
+# fingerprint check via the artifact verification above.
+if [[ "${LOCAL_ONLY}" -eq 0 && -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
   if drift_output="$(bash "${SCRIPT_DIR}/oas-drift-check.sh" 2>&1)"; then
     echo "OAS API surface: ✓ matches fingerprint"
   else
@@ -322,4 +329,6 @@ if [[ -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
       echo "OAS API surface: (could not compute — ${drift_exit}; run 'bash scripts/oas-drift-check.sh' for detail)"
     fi
   fi
+elif [[ "${LOCAL_ONLY}" -eq 1 ]]; then
+  echo "OAS API surface: (skipped under --local-only; run 'bash scripts/oas-drift-check.sh' for the network-backed view)"
 fi

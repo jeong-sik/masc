@@ -1,8 +1,7 @@
 (* Recovery — Cycle 23 / Tier B6.
-   Classification surface only; strategy execution (Retry/Fallback/Handoff/
-   Abort) is intentionally deferred — see resilience_runtime.mli §Deferred
-   and docs/audit-responses/2026-05-05-dashboard-heuristic.md §4.
-   See recovery.mli for the design rationale. *)
+   Classification plus callback-driven strategy execution. Keeper-turn
+   lifecycle integration remains outside this module; see recovery.mli for
+   the design rationale. *)
 
 type error_mode =
   | TransientError of {
@@ -13,8 +12,9 @@ type error_mode =
   | PermanentError of { detail : string; fallback_strategy : fallback }
   | ResourceExhausted of {
       resource : [ `Tokens | `Time | `Cost | `Memory | `Disk ];
-      consumed : float;
-      limit : float;
+      consumed : float option;
+      limit : float option;
+      detail : string option;
     }
   | AmbiguityError of { detail : string; branches : string list }
   | ConsensusError of { detail : string; dissenters : string list }
@@ -38,6 +38,137 @@ type _ strategy =
       -> [> `Handoff ] strategy
   | Abort : { reason : string; cleanup : unit -> unit }
       -> [> `Abort ] strategy
+
+type retry_attempt_result =
+  | Retry_success
+  | Retryable_failure of string
+  | Fatal_failure of string
+
+type execution_event =
+  | RetryAttempt of { attempt : int; max_attempts : int }
+  | RetryBackoff of { attempt : int; delay_s : float; error : string }
+  | FallbackApply of { value : string; confidence_delta : float }
+  | HandoffRequest of { message : string; preserve_state : bool }
+  | AbortRun of { reason : string }
+
+type execution_outcome =
+  | RetrySucceeded of { attempts : int }
+  | RetryExhausted of { attempts : int; last_error : string option }
+  | RetryFatal of { attempt : int; error : string }
+  | FallbackApplied of { value : string; confidence_delta : float }
+  | HandoffRequested of { message : string; preserve_state : bool }
+  | Aborted of { reason : string }
+
+type strategy_executor = {
+  run_retry_attempt : attempt:int -> retry_attempt_result;
+  sleep : float -> unit;
+  on_event : execution_event -> unit;
+  apply_fallback :
+    value:string -> confidence_delta:float -> (unit, string) result;
+  request_handoff :
+    message:string -> preserve_state:bool -> (unit, string) result;
+  abort : reason:string -> (unit, string) result;
+}
+
+let clamp_delay_s delay_s =
+  if Float.is_finite delay_s then max 0.0 delay_s else 0.0
+
+(* #13072 — every executor callback (on_event, run_retry_attempt,
+   sleep, apply_fallback, request_handoff, abort) is foreign code
+   from this module's perspective; an exception escaping any of them
+   bypasses [keeper_bridge]'s [Strategy_execution_failed] audit and
+   tears down the keeper turn. Wrap each call in [trap] so executor
+   misbehaviour surfaces as [Error <string>] like the existing
+   [cleanup] arm in [Abort]. Keep this module independent from Eio;
+   cancellation-aware callers should encode cancellation in their
+   executor result rather than adding a scheduler dependency here. *)
+let trap_call ~op f =
+  match f () with
+  | exception exn ->
+      Error (Printf.sprintf "%s raised: %s" op (Printexc.to_string exn))
+  | v -> Ok v
+
+let execute_strategy : type a.
+    strategy_executor ->
+    a strategy ->
+    (execution_outcome, string) result =
+ fun executor strategy ->
+  let ( let* ) = Result.bind in
+  let on_event evt = trap_call ~op:"on_event" (fun () -> executor.on_event evt) in
+  match strategy with
+  | Retry { max_attempts; backoff } ->
+      let max_attempts = max 1 max_attempts in
+      let rec loop attempt =
+        let* () = on_event (RetryAttempt { attempt; max_attempts }) in
+        let* outcome =
+          trap_call ~op:"run_retry_attempt" (fun () ->
+            executor.run_retry_attempt ~attempt)
+        in
+        match outcome with
+        | Retry_success -> Ok (RetrySucceeded { attempts = attempt })
+        | Fatal_failure error ->
+            Ok (RetryFatal { attempt; error })
+        | Retryable_failure error ->
+            if attempt >= max_attempts then
+              Ok
+                (RetryExhausted
+                   { attempts = attempt; last_error = Some error })
+            else
+              (* PR #13072 review: the strategy's [backoff] callback is
+                 part of the public [Retry.t] API and may raise (caller
+                 typo, integer overflow on attempt, etc.).  Without this
+                 trap the exception escaped and tore down the turn,
+                 instead of being converted into the [Error ...] that
+                 [execute_strategy]'s contract promises. *)
+              let* delay_s_raw =
+                trap_call ~op:"backoff" (fun () -> backoff attempt)
+              in
+              let delay_s = clamp_delay_s delay_s_raw in
+              let* () =
+                on_event (RetryBackoff { attempt; delay_s; error })
+              in
+              let* () =
+                trap_call ~op:"sleep" (fun () -> executor.sleep delay_s)
+              in
+              loop (attempt + 1)
+      in
+      loop 1
+  | Fallback { fallback_value; degrade_confidence_by } ->
+      let confidence_delta = degrade_confidence_by in
+      let* () =
+        on_event (FallbackApply { value = fallback_value; confidence_delta })
+      in
+      let* applied =
+        trap_call ~op:"apply_fallback" (fun () ->
+          executor.apply_fallback ~value:fallback_value ~confidence_delta)
+      in
+      Result.map
+        (fun () ->
+          FallbackApplied { value = fallback_value; confidence_delta })
+        applied
+  | Handoff { operator_message; preserve_state } ->
+      let* () =
+        on_event (HandoffRequest { message = operator_message; preserve_state })
+      in
+      let* requested =
+        trap_call ~op:"request_handoff" (fun () ->
+          executor.request_handoff ~message:operator_message ~preserve_state)
+      in
+      Result.map
+        (fun () ->
+          HandoffRequested { message = operator_message; preserve_state })
+        requested
+  | Abort { reason; cleanup } ->
+      let* () =
+        trap_call ~op:"cleanup" (fun () -> cleanup ())
+      in
+      let* () = on_event (AbortRun { reason }) in
+      let* aborted =
+        trap_call ~op:"abort" (fun () -> executor.abort ~reason)
+      in
+      Result.map
+        (fun () -> Aborted { reason })
+        aborted
 
 (* TLA+ taxonomy mirrors for specs/resilience/ResilienceDegradation.tla.
    Payload-bearing constructors cannot use ppx_tla's [all_states], so
@@ -77,7 +208,12 @@ let permanent ~detail ~fallback =
   PermanentError { detail; fallback_strategy = fallback }
 
 let resource_exhausted ~resource ~consumed ~limit =
-  ResourceExhausted { resource; consumed; limit }
+  ResourceExhausted
+    { resource; consumed = Some consumed; limit = Some limit; detail = None }
+
+let resource_exhausted_unknown ~resource ~detail =
+  ResourceExhausted
+    { resource; consumed = None; limit = None; detail = Some detail }
 
 let ambiguity ~detail ~branches = AmbiguityError { detail; branches }
 
@@ -135,7 +271,7 @@ let classify_string (s : string) : error_mode =
         resource_phrases
     with
     | Some (_, resource) ->
-        resource_exhausted ~resource ~consumed:0.0 ~limit:0.0
+        resource_exhausted_unknown ~resource ~detail:s
     | None -> permanent ~detail:s ~fallback:(HumanHandoff s)
 
 (* ── Default strategy selection ───────────────────────────────── *)
@@ -176,7 +312,7 @@ let default_strategy (mode : error_mode) :
                   detail msg;
               preserve_state = true;
             })
-  | ResourceExhausted { resource; consumed; limit } ->
+  | ResourceExhausted { resource; consumed; limit; detail } ->
       let resource_str =
         match resource with
         | `Tokens -> "Tokens"
@@ -185,12 +321,22 @@ let default_strategy (mode : error_mode) :
         | `Memory -> "Memory"
         | `Disk -> "Disk"
       in
+      let measurement =
+        match consumed, limit with
+        | Some consumed, Some limit ->
+            Printf.sprintf "consumed=%.2f limit=%.2f" consumed limit
+        | _ ->
+            match detail with
+            | Some detail ->
+                Printf.sprintf "measurement=unknown detail=%S" detail
+            | None -> "measurement=unknown"
+      in
       Abort
         {
           reason =
             Printf.sprintf
-              "ResourceExhausted: %s consumed=%.2f limit=%.2f"
-              resource_str consumed limit;
+              "ResourceExhausted: %s %s"
+              resource_str measurement;
           cleanup = (fun () -> ());
         }
   | AmbiguityError { detail; branches } ->

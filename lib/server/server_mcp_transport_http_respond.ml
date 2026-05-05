@@ -1,4 +1,38 @@
-(** Server_mcp_transport_http_respond — HTTP response factory functions. *)
+(** Server_mcp_transport_http_respond — HTTP MCP error / not-ready /
+    rate-limit response factories. *)
+
+(** [safe_respond_with_string] guards [Httpun.Reqd.respond_with_string]
+    against the [Failure "invalid state, currently handling error"] race
+    that occurs when a client disconnects while a long OAS turn is in
+    progress and httpun's error_handler has already started responding
+    (2026-05-05 cycle9 FATAL incident). *)
+let safe_respond_with_string reqd response body =
+  (* #13102 follow-up: backtraces are enabled at process start in
+     [bin/main_eio.ml] (Printexc.record_backtrace true), so the
+     unexpected-exception arm attaches the backtrace whenever it is
+     available.  The known-race arm (Failure path) keeps its compact
+     one-line format because the failure mode is well-classified and
+     the surrounding incident note already captures the diagnostic
+     intent — adding a backtrace there would just churn parsers. *)
+  try Httpun.Reqd.respond_with_string reqd response body
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Failure msg ->
+      Log.Server.warn
+        "[mcp-http] respond_with_string skipped (reqd invalid state; \
+         2026-05-05 OAS cancel race): %s"
+        msg
+  | exn ->
+      let backtrace = Printexc.get_backtrace () in
+      let summary = Printexc.to_string exn in
+      if String.trim backtrace = "" then
+        Log.Server.warn
+          "[mcp-http] respond_with_string unexpected exception: %s"
+          summary
+      else
+        Log.Server.warn
+          "[mcp-http] respond_with_string unexpected exception: %s\n%s"
+          summary backtrace
 
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
@@ -25,7 +59,7 @@ let respond_mcp_auth_error ?(extra_headers = []) ~(deps : Server_mcp_transport_h
       @ json_headers ~deps session_id protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Unauthorized in
-  Httpun.Reqd.respond_with_string reqd response body
+  safe_respond_with_string reqd response body
 
 let respond_mcp_internal_error ?(extra_headers = []) ~(deps : Server_mcp_transport_http_types.deps) request reqd
     ~session_id ~protocol_version msg =
@@ -46,7 +80,7 @@ let respond_mcp_internal_error ?(extra_headers = []) ~(deps : Server_mcp_transpo
       @ json_headers ~deps session_id protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Internal_server_error in
-  Httpun.Reqd.respond_with_string reqd response body
+  safe_respond_with_string reqd response body
 
 let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
@@ -74,7 +108,7 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
       @ deps.cors_headers origin)
   in
   let response = Httpun.Response.create ~headers `Service_unavailable in
-  Httpun.Reqd.respond_with_string reqd response body
+  safe_respond_with_string reqd response body
 
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
@@ -98,7 +132,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       :: json_headers ~deps session_id protocol_version origin)
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
-  Httpun.Reqd.respond_with_string reqd response body
+  safe_respond_with_string reqd response body
 
 let mcp_internal_error_json ?id msg =
   `Assoc

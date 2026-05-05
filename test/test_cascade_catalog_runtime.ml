@@ -196,6 +196,10 @@ let require_ok = function
   | Ok value -> value
   | Error detail -> failf "expected Ok, got Error: %s" detail
 
+let require_some label = function
+  | Some value -> value
+  | None -> failf "expected Some for %s" label
+
 let provider_kinds providers =
   List.map
     (fun (cfg : Llm_provider.Provider_config.t) ->
@@ -331,6 +335,13 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
+  let skip_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_health_probe_skipped
+      ~labels:[("provider_name", "custom"); ("profile_name", "big_three")]
+      ()
+  in
+  let before_skip_metric = skip_metric () in
   let shared_model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
   let custom_exec_model =
     Printf.sprintf "custom:custom-exec@%s/v1" dummy_base_url
@@ -364,6 +375,9 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   check int "profile_count" 4 (json_int_field "profile_count" snapshot_json);
   check bool "bootstrap probe status is skipped" true
     (contains_substring (Yojson.Safe.to_string snapshot_json) "\"status\":\"skipped\"");
+  check (float 0.0001) "bootstrap skip metric increments for big_three"
+    1.0
+    (skip_metric () -. before_skip_metric);
   let blank_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
@@ -1000,6 +1014,79 @@ let test_non_strict_resolve_tolerates_nonmatching_filter () =
   check int "non-strict returns all providers despite bad filter" 2
     (List.length providers)
 
+let test_secondary_resolution_disambiguates_duplicate_primary_slots () =
+  with_temp_dir "cascade-secondary-duplicate" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let primary = Printf.sprintf "custom:primary@%s/v1" dummy_base_url in
+  let secondary_a = Printf.sprintf "custom:fallback-a@%s/v1" dummy_base_url in
+  let secondary_b = Printf.sprintf "custom:fallback-b@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "big_three_models": [
+    {"model": "%s", "secondary": "%s"},
+    {"model": "%s", "secondary": "%s"}
+  ]
+}|}
+          primary secondary_a primary secondary_b));
+  let resolution =
+    require_ok
+      (Cascade_catalog_runtime
+       .resolve_named_providers_strict_with_secondary_resolver
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check int "duplicate primaries remain distinct" 2
+    (List.length resolution.providers);
+  let first_primary = List.nth resolution.providers 0 in
+  let second_primary = List.nth resolution.providers 1 in
+  let first_secondary =
+    require_some "first secondary"
+      (resolution.secondary_resolver 0 first_primary)
+  in
+  let second_secondary =
+    require_some "second secondary"
+      (resolution.secondary_resolver 1 second_primary)
+  in
+  check string "first slot secondary" "fallback-a"
+    first_secondary.Llm_provider.Provider_config.model_id;
+  check string "second slot secondary" "fallback-b"
+    second_secondary.Llm_provider.Provider_config.model_id
+
+let test_secondary_resolution_applies_provider_filter_to_secondary () =
+  with_temp_dir "cascade-secondary-filter" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let secondary = Printf.sprintf "custom:fallback@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "big_three_models": [
+    {"model": "anthropic:claude-sonnet-4-20250514", "secondary": "%s"}
+  ]
+}|}
+          secondary));
+  let resolution =
+    require_ok
+      (Cascade_catalog_runtime
+       .resolve_named_providers_strict_with_secondary_resolver
+         ~provider_filter:[ "anthropic" ]
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check int "primary survives provider filter" 1
+    (List.length resolution.providers);
+  let primary = List.nth resolution.providers 0 in
+  check (option string) "secondary violating provider_filter is hidden" None
+    (Option.map
+       (fun (cfg : Llm_provider.Provider_config.t) -> cfg.model_id)
+       (resolution.secondary_resolver 0 primary))
+
 let () =
   run "cascade_catalog_runtime"
     [
@@ -1081,5 +1168,13 @@ let () =
             "non-strict resolve tolerates non-matching filter (#12686)"
             `Quick
             test_non_strict_resolve_tolerates_nonmatching_filter;
+          test_case
+            "secondary resolver disambiguates duplicate primary slots"
+            `Quick
+            test_secondary_resolution_disambiguates_duplicate_primary_slots;
+          test_case
+            "secondary resolver applies provider_filter to secondaries"
+            `Quick
+            test_secondary_resolution_applies_provider_filter_to_secondary;
         ] );
     ]

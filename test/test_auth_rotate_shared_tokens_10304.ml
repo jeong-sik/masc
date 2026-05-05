@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** #10304 — pin the shared-token rotation contract.
 
     #9786 shipped detection only ([Auth.audit_token_uniqueness] +

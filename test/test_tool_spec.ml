@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Tool_spec — unified tool specification and registration. *)
 
 module Tool_spec = Masc_mcp.Tool_spec

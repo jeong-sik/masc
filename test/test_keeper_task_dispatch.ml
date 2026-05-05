@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for keeper_task_claim and keeper_task_done tool dispatch. *)
 
 open Alcotest

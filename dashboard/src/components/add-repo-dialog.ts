@@ -47,7 +47,7 @@ export function openAddRepoDialog(): void {
   void loadCredentials()
 }
 
-export function closeAddRepoDialog(): void {
+function closeAddRepoDialog(): void {
   showAddRepoDialog.value = false
   resetForm()
 }

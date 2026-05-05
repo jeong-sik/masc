@@ -686,8 +686,9 @@ let pending_board_event_of_stimulus ~continuity_summary ~(meta : keeper_meta)
     Posts where the keeper has already commented and no new external
     replies have arrived are excluded. This prevents duplicate reactive
     comments while allowing legitimate follow-ups. *)
-let collect_board_events ~(base_path : string) ~(continuity_summary : string)
-    ~(meta : keeper_meta) : pending_board_event list * int * int =
+let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string)
+    ~(continuity_summary : string) ~(meta : keeper_meta) :
+    pending_board_event list * int * int =
   try
     let broad_scope = scope_message_feed_enabled meta in
     let cursor_ts, cursor_post_id =
@@ -819,28 +820,29 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     let final_events, last_cursor =
       consume_posts event_limit None [] recent
     in
-    (match last_cursor with
-     | Some (ts, post_id)
-       when compare_board_cursor_token
-              (ts, post_id)
-              (fst base_cursor, Option.value ~default:"" (snd base_cursor))
-            > 0 ->
-         Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
-     | Some (ts, post_id) ->
-       Log.Keeper.debug
-         "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
-         meta.name ts post_id (fst base_cursor)
-         (Option.value ~default:"" (snd base_cursor))
-     | None ->
-       if final_events <> [] then begin
-         Prometheus.inc_counter
-           Prometheus.metric_keeper_observation_query_failures
-           ~labels:[("operation", "cursor_stale")]
-           ();
-         Log.Keeper.warn
-           "board cursor not updated for %s despite %d events processed"
-           meta.name (List.length final_events)
-       end);
+    if advance_cursor then (
+      match last_cursor with
+      | Some (ts, post_id)
+        when compare_board_cursor_token
+               (ts, post_id)
+               (fst base_cursor, Option.value ~default:"" (snd base_cursor))
+             > 0 ->
+          Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+      | Some (ts, post_id) ->
+        Log.Keeper.debug
+          "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
+          meta.name ts post_id (fst base_cursor)
+          (Option.value ~default:"" (snd base_cursor))
+      | None ->
+        if final_events <> [] then begin
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_observation_query_failures
+            ~labels:[("operation", "cursor_stale")]
+            ();
+          Log.Keeper.warn
+            "board cursor not updated for %s despite %d events processed"
+            meta.name (List.length final_events)
+        end);
     (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -852,6 +854,17 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     Log.Keeper.warn "board event collection failed: %s"
       (Printexc.to_string exn);
     ([], 0, 0)
+
+let collect_board_events ~(base_path : string) ~(continuity_summary : string)
+    ~(meta : keeper_meta) : pending_board_event list * int * int =
+  collect_board_events_with_cursor_policy ~advance_cursor:true ~base_path
+    ~continuity_summary ~meta
+
+let collect_board_events_without_advancing_cursor ~(base_path : string)
+    ~(continuity_summary : string) ~(meta : keeper_meta) :
+    pending_board_event list * int * int =
+  collect_board_events_with_cursor_policy ~advance_cursor:false ~base_path
+    ~continuity_summary ~meta
 
 let observe ~allowed_tool_names
     ~(pending_board_events : pending_board_event list option)
@@ -928,6 +941,48 @@ let observe ~allowed_tool_names
     last_tools_used = [];
     work_discovery_due;
   }
+
+let durable_signal_present ~allowed_tool_names ~pending_board_events
+    ~(config : Coord.config) ~(meta : keeper_meta) : bool =
+  let pending_mentions, pending_scope_messages, _message_cursor_updates =
+    collect_message_scope ~config ~meta
+  in
+  let ( _unclaimed_task_count,
+        claimable_task_count,
+        failed_task_count,
+        pending_verification_count,
+        _backlog_updated_since_last_scheduled_autonomous ) =
+    read_backlog_counts ~allowed_tool_names ~config ~meta
+  in
+  let pending_board_events =
+    match pending_board_events with
+    | Some events -> events
+    | None ->
+        let events, _board_new_count, _board_mention_count =
+          collect_board_events_without_advancing_cursor
+            ~base_path:config.base_path
+            ~meta
+            ~continuity_summary:meta.continuity_summary
+        in
+        events
+  in
+  let work_discovery_due =
+    match meta.work_discovery_enabled with
+    | Some false -> false
+    | _ ->
+      let interval =
+        Option.value ~default:600 meta.work_discovery_interval_sec
+      in
+      Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
+      >= float_of_int interval
+  in
+  pending_mentions <> []
+  || pending_board_events <> []
+  || pending_scope_messages <> []
+  || claimable_task_count > 0
+  || failed_task_count > 0
+  || pending_verification_count > 0
+  || work_discovery_due
 
 let actionable_signal_present (observation : world_observation) =
   observation.pending_mentions <> []

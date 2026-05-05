@@ -28,7 +28,7 @@ let run_argv_line argv =
       ~actor:"system/notify"
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"notify argv"
-      ~timeout_sec:10.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
       argv
   in
   match String.split_on_char '\n' output with
@@ -47,7 +47,7 @@ let run_argv_ignore argv =
          ~actor:"system/notify"
          ~raw_source:(exec_gate_raw_source argv)
          ~summary:"notify argv"
-         ~timeout_sec:60.0
+         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
          argv
      in
      match status with

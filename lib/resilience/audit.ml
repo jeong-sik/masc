@@ -13,6 +13,7 @@ type category =
   | SpeculativeBranchStarted
   | SpeculativeBranchCompleted
   | SpeculativeWinnerSelected
+  | RecoveryClassified
   | RecoveryAttempted
   | RecoverySucceeded
   | RecoveryFailed
@@ -27,6 +28,7 @@ let category_to_string = function
   | SpeculativeBranchStarted -> "SpeculativeBranchStarted"
   | SpeculativeBranchCompleted -> "SpeculativeBranchCompleted"
   | SpeculativeWinnerSelected -> "SpeculativeWinnerSelected"
+  | RecoveryClassified -> "RecoveryClassified"
   | RecoveryAttempted -> "RecoveryAttempted"
   | RecoverySucceeded -> "RecoverySucceeded"
   | RecoveryFailed -> "RecoveryFailed"
@@ -41,6 +43,7 @@ let category_of_string = function
   | "SpeculativeBranchStarted" -> Some SpeculativeBranchStarted
   | "SpeculativeBranchCompleted" -> Some SpeculativeBranchCompleted
   | "SpeculativeWinnerSelected" -> Some SpeculativeWinnerSelected
+  | "RecoveryClassified" -> Some RecoveryClassified
   | "RecoveryAttempted" -> Some RecoveryAttempted
   | "RecoverySucceeded" -> Some RecoverySucceeded
   | "RecoveryFailed" -> Some RecoveryFailed

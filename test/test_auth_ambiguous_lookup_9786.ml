@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (* test/test_auth_ambiguous_lookup_9786.ml
 
    #9786 runtime complement: when N>=2 credentials share a

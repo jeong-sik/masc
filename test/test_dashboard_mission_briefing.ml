@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 open Alcotest
 
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing

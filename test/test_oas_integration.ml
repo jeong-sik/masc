@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for OAS integration modules: oas_events, message conversion. *)
 
 module Masc_log = Log

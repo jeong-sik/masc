@@ -647,6 +647,13 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       in
       let bare_path = Auth.credential_file dir "sangsu" in
       check bool "bare credential pre-exists" true (Sys.file_exists bare_path);
+      let archive_metric () =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_config_credential_archived_starvation
+          ~labels:[("keeper_name", "sangsu")]
+          ()
+      in
+      let before_archive_metric = archive_metric () in
       (* Now ensure the canonical is created — should self-heal. *)
       (match
          Auth.ensure_keeper_credential dir
@@ -658,6 +665,9 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
         (Sys.file_exists bare_path);
       check bool "bare credential archived" true
         (archive_contains dir "sangsu.json");
+      check (float 0.0001) "starvation archive metric increments"
+        (before_archive_metric +. 1.0)
+        (archive_metric ());
       let canonical_path =
         Auth.credential_file dir "keeper-sangsu-agent"
       in

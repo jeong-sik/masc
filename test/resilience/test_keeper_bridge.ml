@@ -1,6 +1,7 @@
 (* Cycle 23 / Tier A6 — Resilience.Keeper_bridge tests. *)
 
 module KB = Resilience.Keeper_bridge
+module R = Resilience.Recovery
 
 (* ─── masc_resilience_enabled ─────────────────────────────────── *)
 
@@ -69,6 +70,31 @@ let test_upsert_replaces_prior_resilience_meta () =
 
 let witness = KB.running_witness
 
+let make_executor
+    ?(run_retry_attempt = fun ~attempt:_ -> R.Retry_success)
+    ?(sleep = fun _ -> ())
+    ?(on_event = fun _ -> ())
+    ?(apply_fallback = fun ~value:_ ~confidence_delta:_ -> Ok ())
+    ?(request_handoff = fun ~message:_ ~preserve_state:_ -> Ok ())
+    ?(abort = fun ~reason:_ -> Ok ())
+    () =
+  {
+    R.run_retry_attempt = run_retry_attempt;
+    sleep;
+    on_event;
+    apply_fallback;
+    request_handoff;
+    abort;
+  }
+
+let strategy_execution_status = function
+  | Some (`Assoc kv) -> (
+      match List.assoc_opt "strategy_execution" kv with
+      | Some (`Assoc execution_kv) ->
+          List.assoc_opt "status" execution_kv
+      | _ -> None)
+  | _ -> None
+
 let test_pipeline_no_op_when_no_error () =
   let prev_wc = Some (`Assoc [ ("autonomous_meta", `String "x") ]) in
   let outcome =
@@ -77,7 +103,8 @@ let test_pipeline_no_op_when_no_error () =
   in
   assert (outcome.working_context = prev_wc);
   assert (outcome.resilience_meta = None);
-  assert (outcome.audit_envelope_id = None)
+  assert (outcome.audit_envelope_id = None);
+  assert (outcome.strategy_execution = None)
 
 let test_pipeline_classifies_transient () =
   let outcome =
@@ -91,6 +118,69 @@ let test_pipeline_classifies_transient () =
       let strat = List.assoc "default_strategy_class" kv in
       assert (strat = `String "Retry")
   | _ -> assert false
+
+let test_pipeline_marks_execution_not_configured () =
+  let outcome =
+    KB.apply_post_turn_resilience witness ~now:2.5 ~working_context:None
+      ~maybe_error:(Some "Connection timeout while fetching") ()
+  in
+  (match outcome.strategy_execution with
+   | Some KB.Strategy_execution_not_configured -> ()
+   | _ -> assert false);
+  assert
+    (strategy_execution_status outcome.resilience_meta
+     = Some (`String "not_configured"))
+
+let test_pipeline_executes_strategy_when_executor_supplied () =
+  let attempts = ref [] in
+  let sleeps = ref [] in
+  let executor =
+    make_executor
+      ~run_retry_attempt:(fun ~attempt ->
+        attempts := attempt :: !attempts;
+        if attempt < 2 then R.Retryable_failure "not yet"
+        else R.Retry_success)
+      ~sleep:(fun delay -> sleeps := delay :: !sleeps)
+      ()
+  in
+  let outcome =
+    KB.apply_post_turn_resilience witness ~strategy_executor:executor
+      ~now:2.75 ~working_context:None
+      ~maybe_error:(Some "Connection timeout while fetching") ()
+  in
+  (match outcome.strategy_execution with
+   | Some
+       (KB.Strategy_execution_completed
+          (R.RetrySucceeded { attempts = 2 })) ->
+       ()
+   | _ -> assert false);
+  assert (!attempts = [ 2; 1 ]);
+  assert (List.length !sleeps = 1);
+  assert
+    (strategy_execution_status outcome.resilience_meta
+     = Some (`String "completed"))
+
+let test_pipeline_reports_strategy_execution_failure () =
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message:_ ~preserve_state:_ ->
+        Error "operator channel unavailable")
+      ()
+  in
+  let outcome =
+    KB.apply_post_turn_resilience witness ~strategy_executor:executor
+      ~now:2.9 ~working_context:None
+      ~maybe_error:(Some "completely unknown failure mode") ()
+  in
+  (match outcome.strategy_execution with
+   | Some
+       (KB.Strategy_execution_failed
+          "operator channel unavailable") ->
+       ()
+   | _ -> assert false);
+  assert
+    (strategy_execution_status outcome.resilience_meta
+     = Some (`String "failed"))
 
 let test_pipeline_classifies_permanent_handoff () =
   let outcome =
@@ -168,8 +258,89 @@ let test_pipeline_writes_audit_when_store_supplied () =
   assert (List.length recent = 1);
   match recent with
   | [ env ] ->
-      assert (env.Shared_audit.Envelope.category = "RecoveryAttempted");
-      assert (Some env.Shared_audit.Envelope.id = outcome.audit_envelope_id)
+      assert (env.Shared_audit.Envelope.category = "RecoveryClassified");
+      assert (Some env.Shared_audit.Envelope.id = outcome.audit_envelope_id);
+      let audit_status =
+        match env.Shared_audit.Envelope.payload with
+        | `Assoc kv -> (
+            match List.assoc_opt "strategy_execution" kv with
+            | Some (`Assoc execution_kv) ->
+                List.assoc_opt "status" execution_kv
+            | _ -> None)
+        | _ -> None
+      in
+      assert (audit_status = Some (`String "not_configured"))
+  | _ -> assert false
+
+(* PR #13072 review (threads 3 + 4): when an executor is supplied,
+   two audit envelopes must be written:
+   - [RecoveryAttempted] pre-flight, BEFORE the executor's callbacks
+     run, so an I/O failure on the post-flight append still leaves a
+     durable record of the attempt;
+   - the outcome envelope ([RecoverySucceeded] / [RecoveryFailed])
+     after the executor returns, so audit consumers can key off the
+     category enum instead of parsing payloads. *)
+let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
+    () =
+  let tmp_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_bridge_attempted_audit_%d" (Unix.getpid ()))
+  in
+  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message:_ ~preserve_state:_ -> Ok ())
+      ()
+  in
+  let outcome =
+    KB.apply_post_turn_resilience witness ~audit_store:store
+      ~strategy_executor:executor ~now:7.0 ~working_context:None
+      ~maybe_error:(Some "completely unknown failure mode") ()
+  in
+  assert (Option.is_some outcome.audit_envelope_id);
+  let recent = Shared_audit.Store.recent store ~n:2 in
+  assert (List.length recent = 2);
+  (* Most recent is the outcome (HandoffRequested → RecoverySucceeded);
+     older is the pre-flight RecoveryAttempted. *)
+  match recent with
+  | [ outcome_env; attempted_env ] ->
+      assert (
+        attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
+      assert (
+        outcome_env.Shared_audit.Envelope.category = "RecoverySucceeded");
+      assert (
+        Some outcome_env.Shared_audit.Envelope.id
+        = outcome.audit_envelope_id)
+  | _ -> assert false
+
+(* PR #13072 review (thread 3): a callback-failure path
+   ([Strategy_execution_failed]) emits [RecoveryFailed], not
+   [RecoveryAttempted]. *)
+let test_pipeline_writes_recovery_failed_when_callback_fails () =
+  let tmp_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_bridge_recovery_failed_%d" (Unix.getpid ()))
+  in
+  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message:_ ~preserve_state:_ ->
+        Error "synthetic callback failure")
+      ()
+  in
+  let _ =
+    KB.apply_post_turn_resilience witness ~audit_store:store
+      ~strategy_executor:executor ~now:8.0 ~working_context:None
+      ~maybe_error:(Some "completely unknown failure mode") ()
+  in
+  let recent = Shared_audit.Store.recent store ~n:2 in
+  assert (List.length recent = 2);
+  match recent with
+  | [ outcome_env; attempted_env ] ->
+      assert (
+        attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
+      assert (
+        outcome_env.Shared_audit.Envelope.category = "RecoveryFailed")
   | _ -> assert false
 
 let () =
@@ -182,8 +353,13 @@ let () =
   test_upsert_replaces_prior_resilience_meta ();
   test_pipeline_no_op_when_no_error ();
   test_pipeline_classifies_transient ();
+  test_pipeline_marks_execution_not_configured ();
+  test_pipeline_executes_strategy_when_executor_supplied ();
+  test_pipeline_reports_strategy_execution_failure ();
   test_pipeline_classifies_permanent_handoff ();
   test_pipeline_classifies_resource_token ();
   test_pipeline_upserts_into_working_context ();
   test_pipeline_writes_audit_when_store_supplied ();
+  test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied ();
+  test_pipeline_writes_recovery_failed_when_callback_fails ();
   print_endline "test_keeper_bridge: all assertions passed"

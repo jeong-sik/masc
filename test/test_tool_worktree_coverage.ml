@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tool_worktree Module Coverage Tests *)
 
 module Tool_args = Masc_mcp.Tool_args

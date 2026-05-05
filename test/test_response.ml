@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** MASC Response Module Tests
 
     Tests for the standardized API response envelope:

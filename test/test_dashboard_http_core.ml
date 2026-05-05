@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 module Lib = Masc_mcp
 module Auth = Masc_mcp.Auth
 

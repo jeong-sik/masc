@@ -358,6 +358,23 @@ val metric_telemetry_coverage_gap : string
     alertable pair to the durable
     [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
 
+val metric_coord_telemetry_drop : string
+(** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
+    [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
+    pair because dispatch happened outside an Eio scheduler. Labels:
+    [event_family] (one of [agent_lifecycle] / [task_transition] /
+    [accountability]) and [event_kind] (the variant). For
+    [agent_lifecycle], [event_kind] is one of [join] / [rejoin] /
+    [leave] (3 values). For both [task_transition] and
+    [accountability], [event_kind] uses the 8
+    [Masc_domain.task_action_to_string] values: [claim] / [start] /
+    [done] / [cancel] / [release] / [submit_for_verification] /
+    [approve] / [reject]. Cardinality bound: 19 series (3 + 8 + 8).
+    Non-zero rate means a production path is firing the lifecycle
+    outside an Eio fiber and the corresponding audit/telemetry rows
+    are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
+    durable-ledger attrition. *)
+
 val metric_oas_bridge_timeout : string
 (** #10094: labelled [caller, timeout_s] so operators can
     distinguish fantasy 60s budgets from intentional 120/180s
@@ -465,6 +482,11 @@ val metric_cascade_fallback_cycle_detected_total : string
     (the entry point of the detected cycle).  Discovered during the
     2026-05-05 fleet-stuck investigation:
     [big_three → glm_coding_plan_only → big_three]. *)
+
+val metric_provider_health_probe_skipped : string
+(** Total bootstrap/runtime-catalog provider health probes intentionally
+    skipped as advisory. Labels: [provider_name, profile_name]. *)
+
 val metric_keeper_invariant_violations : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
@@ -682,6 +704,10 @@ val metric_auth_credential_token_rotated : string
     boot-time repair rotates out of a shared bearer-token group.
     Labels: [token_hash_prefix, scope]. *)
 
+val metric_config_credential_archived_starvation : string
+(** Bare-form keeper credential files archived because they are dead after
+    PR-3b1 starvation. Labels: [keeper_name]. *)
+
 val metric_auth_credential_ambiguous_lookup : string
 (** #9786 runtime complement: every [find_credential_by_token]
     lookup that hits N>=2 matches fires this counter.
@@ -729,6 +755,17 @@ val metric_coord_join_normalize_outcome : string
     Non-ok outcomes reject [masc_join] at the fail-closed identity gate.
     Cross-reference [metric_silent_auth_token_resolve_error] for auth/name
     drift diagnosis. *)
+
+val metric_config_unknown_keys_ignored : string
+(** Unknown config keys ignored after warning. Labels: [file_path]. *)
+
+val metric_governance_judge_unparseable : string
+(** Governance/operator judge responses that remained unparseable after
+    deterministic JSON recovery. Labels: [judge]. *)
+
+val metric_governance_lenient_json_fallback_hit : string
+(** Lenient_json fallback hits for governance/operator judge output.
+    Labels: [judge]. *)
 
 
 (** {1 Transport metrics} *)

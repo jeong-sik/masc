@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 open Alcotest
 
 module Cases = Test_keeper_tool_matrix_cases

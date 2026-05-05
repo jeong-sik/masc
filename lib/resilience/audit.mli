@@ -73,6 +73,9 @@ type category =
       (** A speculative branch finished (won, lost, or aborted). *)
   | SpeculativeWinnerSelected
       (** A winning branch was committed and losers reaped. *)
+  | RecoveryClassified
+      (** A failure was classified and a default recovery strategy was
+          selected, but no concrete executor was configured. *)
   | RecoveryAttempted
       (** A {!Recovery.strategy} was selected and dispatched. *)
   | RecoverySucceeded

@@ -284,8 +284,9 @@ let node ?agent_id ?color ?sha ?branch ?detail ~repo_id ~kind ~label ~status ~co
 let edge ?label ~kind source target =
   { id = Printf.sprintf "%s:%s->%s" kind source target; source; target; kind; label }
 
-let snapshot_of_outputs ~generated_at outputs =
-  let repo_id = repo_id_of_root outputs.repo_root in
+let snapshot_of_outputs ?repo_id ?repo_label ~generated_at outputs =
+  let repo_id = Option.value repo_id ~default:(repo_id_of_root outputs.repo_root) in
+  let repo_label = Option.value repo_label ~default:(basename outputs.repo_root) in
   let refs = List.filter_map parse_ref_line outputs.refs in
   let commits = List.filter_map parse_commit_line outputs.commits in
   let worktrees = parse_worktrees outputs.worktrees in
@@ -366,7 +367,7 @@ let snapshot_of_outputs ~generated_at outputs =
   let repo =
     { id = repo_id
     ; root = outputs.repo_root
-    ; label = basename outputs.repo_root
+    ; label = repo_label
     ; current_branch
     ; head = outputs.head
     ; dirty
@@ -406,7 +407,7 @@ let run_git ~timeout_sec ~workdir args =
            ~timeout_sec argv)
 
 let run_git_output ~workdir args =
-  match run_git ~timeout_sec:10.0 ~workdir args with
+  match run_git ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ()) ~workdir args with
   | Some (Unix.WEXITED 0, output) -> Some output
   | _ -> None
 
@@ -443,9 +444,18 @@ let default_repo_root ~(config : Coord.config) =
   in
   loop candidates
 
-let capture_outputs ~config ~limit =
-  match default_repo_root ~config with
-  | None -> Error "server cwd and configured base_path are outside a git repository"
+let capture_outputs ?repo_root ~config ~limit () =
+  let resolved_repo_root =
+    match repo_root with
+    | None -> default_repo_root ~config
+    | Some requested -> Coord_git.git_root ~base_path:requested
+  in
+  match resolved_repo_root with
+  | None -> (
+      match repo_root with
+      | None -> Error "server cwd and configured base_path are outside a git repository"
+      | Some requested ->
+        Error (Printf.sprintf "configured repository is outside a git repository: %s" requested))
   | Some repo_root ->
       let head = run_git_output ~workdir:repo_root [ "rev-parse"; "HEAD" ] |> Option.map String.trim in
       let short_head =
@@ -494,25 +504,29 @@ let capture_outputs ~config ~limit =
         ; merge_state = merge_state ~workdir:repo_root
         }
 
-let dashboard_http_json ~config ~limit =
-  match capture_outputs ~config ~limit with
+let empty_json warning =
+  { generated_at = Masc_domain.now_iso ()
+  ; repos = []
+  ; agents = []
+  ; nodes = []
+  ; edges = []
+  ; stats =
+      { repo_count = 0
+      ; agent_count = 0
+      ; branch_count = 0
+      ; commit_count = 0
+      ; conflict_count = 0
+      ; dirty_count = 0
+      }
+  ; warnings = [ warning ]
+  }
+  |> snapshot_to_yojson
+
+let dashboard_http_json ?repo_id ?repo_label ?repo_root ~config ~limit () =
+  match capture_outputs ?repo_root ~config ~limit () with
   | Ok outputs ->
-      snapshot_of_outputs ~generated_at:(Masc_domain.now_iso ()) outputs
+      snapshot_of_outputs ?repo_id ?repo_label
+        ~generated_at:(Masc_domain.now_iso ()) outputs
       |> snapshot_to_yojson
   | Error warning ->
-      { generated_at = Masc_domain.now_iso ()
-      ; repos = []
-      ; agents = []
-      ; nodes = []
-      ; edges = []
-      ; stats =
-          { repo_count = 0
-          ; agent_count = 0
-          ; branch_count = 0
-          ; commit_count = 0
-          ; conflict_count = 0
-          ; dirty_count = 0
-          }
-      ; warnings = [ warning ]
-      }
-      |> snapshot_to_yojson
+      empty_json warning

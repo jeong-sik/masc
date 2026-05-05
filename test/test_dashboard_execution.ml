@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Dashboard Execution read-model regression tests. *)
 
 let () = Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"test"

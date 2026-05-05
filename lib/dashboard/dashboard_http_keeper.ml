@@ -490,7 +490,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   let sandbox_preflight_json =
-    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
     |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
   in
   let series_points = 120 in
@@ -1587,7 +1587,7 @@ let keeper_config_json (config : Coord.config) (name : string)
         else None
       in
       let sandbox_preflight_json =
-        Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+        Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
         |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
       in
       let sandbox_preflight =

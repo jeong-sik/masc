@@ -36,7 +36,7 @@ let trusts_query = {|
 let json ~agent_name () : Yojson.Safe.t =
   let collaborators =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:8.0 ~query:collaborators_query ~variables () with
+    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:collaborators_query ~variables () with
     | Ok data ->
       let open Yojson.Safe.Util in
       data |> member "agentCollaborationNetworkByName" |> to_list
@@ -50,7 +50,7 @@ let json ~agent_name () : Yojson.Safe.t =
   in
   let agent_data =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:8.0 ~query:trusts_query ~variables () with
+    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:trusts_query ~variables () with
     | Ok data ->
       let open Yojson.Safe.Util in
       let agent = data |> member "agent" in

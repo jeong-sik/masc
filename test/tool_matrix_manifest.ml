@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 let sorted_unique values =
   List.sort_uniq String.compare values
 

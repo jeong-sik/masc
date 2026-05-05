@@ -4,6 +4,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
 import { activeIdeFile } from './ide-shell'
 import type { WorkspaceSource } from '../../api/workspace-source'
+import type { Repository } from '../../api/repositories'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -15,12 +16,20 @@ interface IdeExplorerProps {
   // [{ kind: 'project' }] which renders nothing.
   readonly workspaceSource?: () => WorkspaceSource
   readonly subscribeWorkspaceSource?: (listener: () => void) => () => void
+  readonly repositories?: () => ReadonlyArray<Repository>
+  readonly activeRepositoryId?: () => string | null
+  readonly onRepositoryChange?: (repoId: string | null) => void
+  readonly subscribeRepositories?: (listener: () => void) => () => void
 }
 
 export function IdeExplorer({
   fileTreeStore: store,
   workspaceSource,
   subscribeWorkspaceSource,
+  repositories,
+  activeRepositoryId,
+  onRepositoryChange,
+  subscribeRepositories,
 }: IdeExplorerProps) {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
@@ -32,6 +41,20 @@ export function IdeExplorer({
     if (!subscribeWorkspaceSource || !workspaceSource) return
     return subscribeWorkspaceSource(() => setSource(workspaceSource()))
   }, [subscribeWorkspaceSource, workspaceSource])
+
+  const [repoList, setRepoList] = useState<ReadonlyArray<Repository>>(
+    repositories ? repositories() : [],
+  )
+  const [selectedRepoId, setSelectedRepoId] = useState<string | null>(
+    activeRepositoryId ? activeRepositoryId() : null,
+  )
+  useEffect(() => {
+    if (!subscribeRepositories || !repositories) return
+    return subscribeRepositories(() => {
+      setRepoList(repositories())
+      setSelectedRepoId(activeRepositoryId ? activeRepositoryId() : null)
+    })
+  }, [activeRepositoryId, repositories, subscribeRepositories])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -49,7 +72,7 @@ export function IdeExplorer({
     if (needle === '') return visible
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
-  const fileCount = filtered.filter(n => n.diff !== null).length
+  const fileCount = filtered.filter(n => !n.hasChildren).length
 
   return html`
     <div
@@ -79,6 +102,43 @@ export function IdeExplorer({
         <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
         <span>${fileCount} FILES</span>
       </header>
+      ${repoList.length > 0 ? html`
+        <label
+          style=${{
+            display: 'grid',
+            gap: 'var(--sp-1)',
+            color: 'var(--color-fg-muted)',
+            font: 'var(--type-eyebrow)',
+          }}
+        >
+          Repository
+          <select
+            aria-label="IDE repository"
+            value=${selectedRepoId ?? repoList[0]?.id ?? ''}
+            onChange=${(event: Event) => {
+              const next = (event.currentTarget as HTMLSelectElement).value || null
+              setSelectedRepoId(next)
+              onRepositoryChange?.(next)
+            }}
+            style=${{
+              width: '100%',
+              font: 'var(--type-body)',
+              fontSize: 'var(--fs-11)',
+              color: 'var(--color-fg-primary)',
+              background: 'var(--color-bg-elevated)',
+              border: '1px solid var(--color-border-default)',
+              borderRadius: 'var(--r-1)',
+              padding: 'var(--sp-1) var(--sp-2)',
+            }}
+          >
+            ${repoList.map(repository => html`
+              <option key=${repository.id} value=${repository.id}>
+                ${repository.name} · ${repository.local_path}
+              </option>
+            `)}
+          </select>
+        </label>
+      ` : null}
       ${SourceHint(source)}
       <input
         type="search"
@@ -112,8 +172,12 @@ export function IdeExplorer({
 }
 
 function SourceHint(source: WorkspaceSource) {
-  if (source.kind === 'project' || source.kind === 'playground') return null
-  const message = source.kind === 'playground_missing'
+  if (source.kind === 'project' || source.kind === 'playground' || source.kind === 'repository') return null
+  const message = source.kind === 'repository_missing'
+    ? `${source.repoId} repository 디렉토리가 아직 없어 base path tree로 fallback`
+    : source.kind === 'repository_unknown'
+      ? `${source.repoId} repository 설정을 찾지 못해 base path tree로 fallback`
+      : source.kind === 'playground_missing'
     ? `@${source.keeper} 의 playground 디렉토리가 아직 없어 프로젝트 트리로 fallback`
     : `@${source.keeper} 키퍼 메타를 찾지 못해 프로젝트 트리로 fallback`
   return html`

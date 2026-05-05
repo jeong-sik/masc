@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** test_tool_surface_ssot — Shadow parity test for Tool_catalog surface SSOT.
 
     Verifies that [Tool_catalog.tools_for_surface] produces exactly the same

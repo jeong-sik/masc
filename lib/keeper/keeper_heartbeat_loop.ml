@@ -755,16 +755,35 @@ let run_keepalive_unified_turn
             ~channel:turn_decision.channel
             ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
+          let reactive_avail = Eio.Semaphore.get_value Keeper_turn_slot.reactive_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
-          let blocker_text =
+          let holder_summary =
+            Keeper_turn_slot.slot_holders_summary ~now:(Time_compat.now ()) ()
+          in
+          (* #13099 review: [last_blocker] gets capped to 200 chars by
+             [cap_blocker] on meta load (narrative budget for dashboards),
+             so the longer holder snapshot would be ellipsized after a
+             restart and lose the diagnostic value.  Split into two
+             strings:
+             - [persisted_blocker]: short narrative the dashboards see
+               and that survives the cap;
+             - [log_diagnostic]: the full holder snapshot, emitted via
+               Log.Keeper.warn (uncapped) so operators tailing logs can
+               still attribute the starvation to specific peers.  *)
+          let persisted_blocker =
             Printf.sprintf
-              "skipped: semaphore wait > %.0fs, peers holding slot \
-               (cascade=%s, autonomous_available=%d turn_available=%d)"
-              wait_sec meta_after_triage.cascade_name auto_avail turn_avail
+              "skipped: semaphore wait > %.0fs (cascade=%s, \
+               autonomous_available=%d reactive_available=%d \
+               turn_available=%d)"
+              wait_sec meta_after_triage.cascade_name auto_avail reactive_avail
+              turn_avail
+          in
+          let log_diagnostic =
+            Printf.sprintf "%s peers=%s" persisted_blocker holder_summary
           in
           Log.Keeper.warn
             "%s: skipping turn (%s)"
-            meta_after_triage.name blocker_text;
+            meta_after_triage.name log_diagnostic;
           Prometheus.inc_counter
             Prometheus.metric_keeper_semaphore_wait_timeout
             ~labels:[("keeper", meta_after_triage.name); ("channel", (Keeper_world_observation.channel_to_string turn_decision.channel))]
@@ -772,7 +791,7 @@ let run_keepalive_unified_turn
           Keeper_types.map_runtime
             (fun rt ->
               { rt with
-                last_blocker = blocker_text;
+                last_blocker = persisted_blocker;
                 last_blocker_class = Some Keeper_types.Autonomous_slot_wait_timeout;
               })
             meta_after_triage)
@@ -895,7 +914,7 @@ let cycle_continues_after_wake
 ;;
 
 let run_smart_heartbeat_gate
-      ~(base_path : string)
+      ~(config : Coord.config)
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
@@ -927,16 +946,44 @@ let run_smart_heartbeat_gate
     then smart_hb_decision
     else (
       let queue =
-        Keeper_registry.event_queue_snapshot ~base_path meta_current.name
+        Keeper_registry.event_queue_snapshot
+          ~base_path:config.base_path meta_current.name
       in
-      if Keeper_event_queue.is_empty queue
-      then smart_hb_decision
-      else (
+      if not (Keeper_event_queue.is_empty queue) then (
         Prometheus.inc_counter
           Prometheus.metric_keeper_event_queue_override
-          ~labels:[ ("keeper", meta_current.name) ]
+          ~labels:[ ("keeper", meta_current.name); ("reason", "event_queue") ]
           ();
-        Heartbeat_smart.Emit))
+        Heartbeat_smart.Emit)
+      else
+        (* Skip_busy already continues the cycle (no idle sleep), so
+           probing the world-observation signal here would be redundant
+           backlog/board I/O.  The durable-signal probe only matters when
+           the gate would otherwise sleep on Skip_idle. *)
+        match smart_hb_decision with
+        | Heartbeat_smart.Skip_idle _ ->
+          let allowed_tool_names =
+            Keeper_tool_policy.keeper_allowed_tool_names meta_current
+          in
+          if
+            Keeper_world_observation.durable_signal_present
+              ~allowed_tool_names:(Some allowed_tool_names)
+              ~pending_board_events:None
+              ~config
+              ~meta:meta_current
+          then (
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_event_queue_override
+              ~labels:
+                [ ("keeper", meta_current.name)
+                ; ("reason", "durable_state")
+                ]
+              ();
+            Log.Keeper.info
+              "smart heartbeat: durable signal present - cycle resumed before stale watchdog";
+            Heartbeat_smart.Emit)
+          else smart_hb_decision
+        | Heartbeat_smart.Skip_busy | Heartbeat_smart.Emit -> smart_hb_decision)
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
      decision, then delegate the gate answer to [cycle_continues_after_wake]
@@ -1177,7 +1224,7 @@ let run_heartbeat_loop
           ~base_path:ctx.config.base_path meta_current.name meta_current;
       if
         run_smart_heartbeat_gate
-          ~base_path:ctx.config.base_path
+          ~config:ctx.config
           ~clock:ctx.clock
           ~stop
           ~wakeup

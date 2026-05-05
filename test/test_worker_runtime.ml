@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 module Lib = Masc_mcp
 
 open Alcotest

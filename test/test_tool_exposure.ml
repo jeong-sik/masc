@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for tool exposure consistency across MCP profiles.
 
     Validates that:

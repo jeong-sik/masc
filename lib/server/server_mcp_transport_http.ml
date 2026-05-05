@@ -24,6 +24,26 @@ include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
+(** [safe_respond_with_string] is a local guard against the
+    [Failure "invalid state, currently handling error"] race that
+    httpun raises when a client disconnects during a long OAS turn
+    (2026-05-05 cycle9 FATAL incident).  All direct
+    [Httpun.Reqd.respond_with_string] calls in this file use this
+    wrapper instead of the raw httpun call. *)
+let safe_respond_with_string reqd response body =
+  try Httpun.Reqd.respond_with_string reqd response body
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Failure msg ->
+      Log.Server.warn
+        "[mcp-http-post] respond_with_string skipped (reqd invalid state; \
+         2026-05-05 OAS cancel race): %s"
+        msg
+  | exn ->
+      Log.Server.warn
+        "[mcp-http-post] respond_with_string unexpected exception: %s"
+        (Printexc.to_string exn)
+
 let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 
 let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
@@ -240,7 +260,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Conflict in
-          Httpun.Reqd.respond_with_string reqd response body;
+          safe_respond_with_string reqd response body;
           Error ()
     in
     let* () =
@@ -258,7 +278,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body;
+          safe_respond_with_string reqd response body;
           Error ()
     in
     remember_mcp_profile session_id profile;
@@ -289,7 +309,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version
                      origin)
             in
-            Httpun.Reqd.respond_with_string reqd
+            safe_respond_with_string reqd
               (Httpun.Response.create ~headers `Bad_request)
               body;
             Error ()
@@ -322,7 +342,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version origin)
             in
             let response = Httpun.Response.create ~headers `Bad_request in
-            Httpun.Reqd.respond_with_string reqd response body;
+            safe_respond_with_string reqd response body;
             Error ()
         | _ -> Ok accept_mode
       in
@@ -403,7 +423,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response ""
+                                    safe_respond_with_string reqd response ""
                                 | json when is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
@@ -417,7 +437,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Bad_request
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response
+                                    safe_respond_with_string reqd response
                                       body
                                 | json ->
                                     let event =
@@ -436,7 +456,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `OK
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response
+                                    safe_respond_with_string reqd response
                                       body
                               else
                                 match response_json with
@@ -450,7 +470,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response ""
+                                    safe_respond_with_string reqd response ""
                                 | json when is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
@@ -464,7 +484,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Bad_request
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response
+                                    safe_respond_with_string reqd response
                                       body
                                 | json ->
                                     let body = Yojson.Safe.to_string json in
@@ -479,7 +499,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `OK
                                     in
-                                    Httpun.Reqd.respond_with_string reqd response
+                                    safe_respond_with_string reqd response
                                       body
                             with
                             | Eio.Cancel.Cancelled _ as e -> raise e
@@ -535,7 +555,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           :: json_headers ~deps session_id protocol_version origin)
       in
       let response = Httpun.Response.create ~headers `Conflict in
-      Httpun.Reqd.respond_with_string reqd response msg
+      safe_respond_with_string reqd response msg
   | Ok () -> (
       match validate_protocol_version_continuity ~session_id request with
       | Error msg ->
@@ -550,7 +570,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body
+          safe_respond_with_string reqd response body
       | Ok () ->
       (match auth_result with
       | Error msg ->
@@ -702,7 +722,7 @@ let handle_post_messages ~deps request reqd =
           :: (legacy_headers @ deps.cors_headers origin))
       in
       let response = Httpun.Response.create ~headers `Bad_request in
-      Httpun.Reqd.respond_with_string reqd response body
+      safe_respond_with_string reqd response body
   | Some session_id when not (Mcp_session.is_valid session_id) ->
       let body = "invalid session_id" in
       let headers =
@@ -711,7 +731,7 @@ let handle_post_messages ~deps request reqd =
           :: (legacy_headers @ deps.cors_headers origin))
       in
       let response = Httpun.Response.create ~headers `Bad_request in
-      Httpun.Reqd.respond_with_string reqd response body
+      safe_respond_with_string reqd response body
   | Some session_id ->
       let protocol_version = get_protocol_version_for_session ~session_id request in
       let auth_token = deps.auth_token_from_request request in
@@ -750,7 +770,7 @@ let handle_post_messages ~deps request reqd =
                       :: (legacy_headers @ mcp_headers session_id protocol_version))
                   in
                   let response = Httpun.Response.create ~headers `Accepted in
-                  Httpun.Reqd.respond_with_string reqd response "")))
+                  safe_respond_with_string reqd response "")))
 
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   if not (deps.is_ready ()) then
@@ -780,7 +800,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   [ ("content-length", string_of_int (String.length msg)) ]
               in
               let response = Httpun.Response.create ~headers `Conflict in
-              Httpun.Reqd.respond_with_string reqd response msg
+              safe_respond_with_string reqd response msg
           | Ok () -> (
               match validate_protocol_version_continuity ~session_id request with
               | Error msg ->
@@ -801,7 +821,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   let response =
                     Httpun.Response.create ~headers `Bad_request
                   in
-                  Httpun.Reqd.respond_with_string reqd response body
+                  safe_respond_with_string reqd response body
               | Ok () ->
                let protocol_version = get_protocol_version request in
                let sse_active_before_stop = is_active_sse_session session_id in
@@ -830,7 +850,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   (("content-length", "0") :: mcp_headers session_id protocol_version)
               in
               let response = Httpun.Response.create ~headers `No_content in
-              Httpun.Reqd.respond_with_string reqd response ""))
+              safe_respond_with_string reqd response ""))
       | None ->
           let body = "Mcp-Session-Id required" in
           let headers =
@@ -838,4 +858,4 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               [ ("content-length", string_of_int (String.length body)) ]
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          Httpun.Reqd.respond_with_string reqd response body)
+          safe_respond_with_string reqd response body)

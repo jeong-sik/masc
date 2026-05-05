@@ -333,7 +333,7 @@ let populate_neo4j_identity_cache_locked () =
   let body =
     {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
   in
-  match Graphql_client.request ~timeout_sec:10.0 body with
+  match Graphql_client.request ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) body with
   | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
   | Ok output -> (
       try

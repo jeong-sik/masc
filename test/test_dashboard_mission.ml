@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Dashboard Mission read-model regression tests. *)
 
 module Lib = Masc_mcp

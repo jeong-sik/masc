@@ -462,9 +462,30 @@ let test_oas_pin_source_contracts () =
     (file_contains_pattern "scripts/check-oas-pin.sh" "agent_sdk.cmxa");
   check bool "oas pin check validates llm provider native archive" true
     (file_contains_pattern "scripts/check-oas-pin.sh" "llm_provider.cmxa");
+  (* #13095: Metric_contract is consumed by autoresearch_metric.ml; if
+     check-oas-pin.sh stops verifying its cmi, a stale opam switch can
+     pass the artifact gate and produce an incomprehensible build
+     failure later in lib/. *)
+  check bool "oas pin check validates Metric_contract artifact" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "agent_sdk__metric_contract.cmi");
   check bool "oas pin check gives rebuild guidance" true
     (file_contains_pattern "scripts/check-oas-pin.sh"
-       "scripts/opam-pin-external-deps.sh --install")
+       "scripts/opam-pin-external-deps.sh --install");
+  (* #13095: dune-local.sh must run --local-only check-oas-pin.sh
+     before delegating to dune.  Two anchors keep the contract
+     self-documenting: the call line itself, and the env-var bypass
+     that lets operators opt out for clean/fmt/subst when the switch
+     is intentionally drifting (e.g. mid-bump). *)
+  check bool "dune-local.sh asserts oas pin before invoking dune" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "_pin_check}\" --local-only");
+  check bool "dune-local.sh exposes MASC_SKIP_PIN_CHECK bypass" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "MASC_SKIP_PIN_CHECK");
+  check bool "dune-local.sh skips pin check inside GitHub Actions" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "GITHUB_ACTIONS")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
@@ -1010,6 +1031,28 @@ let test_transport_health_contracts () =
           {|Coord.get_messages_raw_in_room|}))
   (* command plane topology reads guard removed (CP purge: Command_plane_v2 deleted) *)
 
+let test_http_cancel_response_contracts () =
+  check bool "main_eio preserves cancellation propagation before 500 fallback" true
+    (file_contains_nearby_line_with_patterns "bin/main_eio.ml"
+       ~anchor:{|else dispatch_route ~routes ~request ~path reqd|}
+       ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
+       ~max_lines:8);
+  check bool "main_eio suppresses stale httpun response writes" true
+    (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
+    && file_contains_pattern "bin/main_eio.ml"
+         {|invalid state, currently handling error|}
+    && file_contains_pattern "bin/main_eio.ml" {|reqd respond skipped|});
+  check bool "main_eio 500 fallback is best-effort" true
+    (file_contains_pattern "bin/main_eio.ml"
+       {|try_internal_error_response|});
+  check bool "standalone ws closed writer is not warning noise" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Http_server_eio.Late_response.classify_write_failure|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|send_pong skipped|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|WS standalone handler closed before write completed|})
+
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/tool_worktree.ml"
@@ -1378,6 +1421,8 @@ let () =
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
+           test_case "http cancel response contracts (#13059)" `Quick
+             test_http_cancel_response_contracts;
            test_case "worktree list contracts" `Quick
              test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick

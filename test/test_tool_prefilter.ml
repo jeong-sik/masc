@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Unit tests for Tool_prefilter — TF-IDF cosine similarity. *)
 
 open Alcotest

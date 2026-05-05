@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Unit tests for [Coord_bootstrap].
 
     Audit P2 follow-up (2026-04-29 §3.1.2) — closes the

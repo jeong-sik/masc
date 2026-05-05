@@ -9,3 +9,7 @@ val format_lenient_fallback : judge_label:string -> string -> string
     the [Lenient_json.parse] [\`Assoc [("raw", _)]] fallback. The
     output is consumed both as the warn log payload and as the [Error]
     returned upstream. *)
+
+val record_lenient_fallback : judge_label:string -> string -> string
+(** Increment the judge fallback metrics and return
+    {!format_lenient_fallback}. *)

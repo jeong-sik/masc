@@ -96,6 +96,46 @@ val resolve_named_providers_strict :
     Provider filter resolution fails closed instead of silently
     broadening to the full provider set. *)
 
+type secondary_resolution = {
+  providers : Llm_provider.Provider_config.t list;
+  secondary_resolver :
+    int -> Llm_provider.Provider_config.t ->
+    Llm_provider.Provider_config.t option;
+}
+(** Providers resolved from a named cascade plus an index-aware secondary
+    lookup derived from the same ordered entries. The resolver is pure
+    over this snapshot and does not re-read or re-rotate catalog state. *)
+
+val resolve_named_providers_strict_with_secondary_resolver :
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?provider_filter:string list ->
+  cascade_name:string ->
+  unit ->
+  (secondary_resolution, string) result
+(** Strict named-provider resolution that also precomputes RFC-0027 PR-9b
+    secondary fallbacks from the same ordered weighted entries. Provider
+    filters are applied to both primaries and secondaries. *)
+
+val resolve_secondary_provider_for_primary :
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  cascade_name:string ->
+  primary:Llm_provider.Provider_config.t ->
+  unit ->
+  Llm_provider.Provider_config.t option
+(** RFC-0027 PR-9b dual-track lookup. For a [primary] provider returned
+    from {!resolve_named_providers} of [cascade_name], find the matching
+    weighted entry and parse its [secondary] field (if any) into a fresh
+    [Provider_config.t]. Returns [None] when the entry has no secondary,
+    when the primary is not present in the cascade (e.g. cross-cascade
+    fallback path), or when secondary parsing fails (unregistered scheme,
+    invalid syntax). The lookup is read-only and does not mutate cascade
+    state — secondary resolution is invoked only after the primary has
+    been rejected by the tool-use gate. *)
+
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

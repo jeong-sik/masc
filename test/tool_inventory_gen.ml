@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (* Generates test_mcp_tool_matrix_names_gen.ml from runtime tool registry.
    Run via dune rule — do not edit the generated file manually. *)
 

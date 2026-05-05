@@ -14,6 +14,7 @@ let all_categories : A.category list =
     SpeculativeBranchStarted;
     SpeculativeBranchCompleted;
     SpeculativeWinnerSelected;
+    RecoveryClassified;
     RecoveryAttempted;
     RecoverySucceeded;
     RecoveryFailed;

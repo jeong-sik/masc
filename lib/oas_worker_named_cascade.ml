@@ -232,30 +232,99 @@ let cascade_empty_should_emit_first ~label ~signature =
   Mutex.unlock cascade_empty_warn_seen_mutex;
   first
 
+(** RFC-0027 PR-9b dual-track swap. When the tool-use gate rejects a
+    primary provider and the caller supplied a [secondary_resolver],
+    invoke it to obtain a candidate fallback provider. The fallback is
+    re-classified through the same gate; on pass it replaces the primary
+    in [kept], on failure (or when no secondary is configured) the
+    primary stays in [rejected].
+
+    Observability:
+    - Successful swap -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"swapped"]
+    - Secondary also rejected -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"<secondary_reason>"]
+    - No secondary configured -> no extra metric (the caller's existing
+      [cascade_empty:<reason>] capability_drop already covers this case).
+    The function is total and never raises; secondary parsing errors are
+    surfaced as [None] by the resolver. *)
+let attempt_secondary_swap
+    ~keeper_name ?runtime_mcp_policy ~tools
+    ~require_tool_choice_support ~require_tool_support
+    ~(secondary_resolver :
+        int ->
+        Llm_provider.Provider_config.t ->
+        Llm_provider.Provider_config.t option)
+    ~(provider_index : int)
+    (primary, primary_reason)
+  : (Llm_provider.Provider_config.t,
+     Llm_provider.Provider_config.t * filter_rejection_reason) Either.t =
+  match secondary_resolver provider_index primary with
+  | None -> Either.Right (primary, primary_reason)
+  | Some secondary -> (
+      match
+        classify_filter_rejection
+          ~keeper_name ?runtime_mcp_policy ~tools
+          ~require_tool_choice_support ~require_tool_support
+          secondary
+      with
+      | None ->
+          Llm_metric_bridge.emit_fallback_triggered
+            ~kind:"dual_track_swap" ~detail:"swapped";
+          Either.Left secondary
+      | Some secondary_reason ->
+          (* Both primary and secondary rejected: keep the primary in
+             rejected so the cascade-empty WARN signature stays anchored
+             on the user-declared model. The secondary's rejection is
+             surfaced as a separate metric so operators can audit which
+             dual-track entries are uselessly configured. *)
+          Llm_metric_bridge.emit_fallback_triggered
+            ~kind:"dual_track_swap"
+            ~detail:(filter_rejection_reason_label secondary_reason);
+          Either.Right (primary, primary_reason))
+
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
     ?runtime_mcp_policy
     ?(tools = [])
     ~require_tool_choice_support
     ~require_tool_support
+    ?secondary_resolver
     ~label
     (provider_cfgs : Llm_provider.Provider_config.t list) =
   if not require_tool_choice_support && not require_tool_support then
     provider_cfgs
   else
-    let kept, rejected =
-      List.partition_map
-        (fun provider_cfg ->
+    let kept_rev, rejected_rev, _ =
+      List.fold_left
+        (fun (kept, rejected, provider_index) provider_cfg ->
            match
              classify_filter_rejection
                ~keeper_name ?runtime_mcp_policy ~tools
                ~require_tool_choice_support ~require_tool_support
                provider_cfg
            with
-           | None -> Either.Left provider_cfg
-           | Some reason -> Either.Right (provider_cfg, reason))
+           | None -> (provider_cfg :: kept, rejected, provider_index + 1)
+           | Some reason ->
+               let swap =
+                 match secondary_resolver with
+                 | None -> Either.Right (provider_cfg, reason)
+                 | Some resolver ->
+                     attempt_secondary_swap
+                       ~keeper_name ?runtime_mcp_policy ~tools
+                       ~require_tool_choice_support ~require_tool_support
+                       ~secondary_resolver:resolver
+                       ~provider_index
+                       (provider_cfg, reason)
+               in
+               (match swap with
+                | Either.Left secondary ->
+                    (secondary :: kept, rejected, provider_index + 1)
+                | Either.Right rejected_provider ->
+                    (kept, rejected_provider :: rejected, provider_index + 1)))
+        ([], [], 0)
         provider_cfgs
     in
+    let kept = List.rev kept_rev in
+    let rejected = List.rev rejected_rev in
     if kept = [] && provider_cfgs <> [] then begin
       let signature = signature_of_rejected_providers rejected in
       (* Forward each rejection to the Prometheus capability_drop counter so
@@ -334,10 +403,16 @@ let resolve_tool_capable_provider_across_cascades
              with
              | Error _ -> None
              | Ok providers ->
+                 let secondary_resolver _provider_index primary =
+                   Cascade_catalog_runtime
+                   .resolve_secondary_provider_for_primary
+                     ~sw ~net ~cascade_name ~primary ()
+                 in
                  let filtered =
                    filter_candidate_providers_for_tool_support
                      ~keeper_name ?runtime_mcp_policy ~tools
                      ~require_tool_choice_support ~require_tool_support
+                     ~secondary_resolver
                      ~label:cascade_name providers
                  in
                  match filtered with

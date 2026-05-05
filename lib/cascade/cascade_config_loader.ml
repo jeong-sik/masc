@@ -126,11 +126,15 @@ let load_json path =
        | End_of_file -> Error "unexpected end of file")
 
 (** A model entry with an optional weight for weighted cascade selection.
-    Weight defaults to 1 when not specified (backward compatible). *)
+    Weight defaults to 1 when not specified (backward compatible).
+    [secondary] is the RFC-0027 PR-9 dual-track fallback (CLI primary +
+    direct-API secondary), [None] for legacy entries. *)
 type weighted_entry = {
   model: string;
   weight: int;
   supports_tool_choice: bool option;
+  secondary: string option;
+  secondary_supports_tool_choice: bool option;
 }
 
 let parse_weight_field = function
@@ -144,9 +148,26 @@ let parse_supports_tool_choice_field = function
   | `Bool b -> Some b
   | _ -> None
 
+(* Trim, then treat empty / whitespace-only secondary as absent (None) —
+   identical to the field being missing.  Returning None rather than an
+   error keeps the JSON loader permissive (typed materializer is the
+   strict source of truth) and avoids producing an invalid provider
+   scheme downstream. *)
+let parse_secondary_field = function
+  | `String s ->
+    let trimmed = String.trim s in
+    if trimmed = "" then None else Some trimmed
+  | _ -> None
+
 let parse_weighted_item = function
   | `String s ->
-    Some { model = String.trim s; weight = 1; supports_tool_choice = None }
+    Some {
+      model = String.trim s;
+      weight = 1;
+      supports_tool_choice = None;
+      secondary = None;
+      secondary_supports_tool_choice = None;
+    }
   | `Assoc fields ->
     let open Yojson.Safe.Util in
     let json = `Assoc fields in
@@ -157,7 +178,21 @@ let parse_weighted_item = function
          parse_supports_tool_choice_field
            (json |> member "supports_tool_choice")
        in
-       Some { model = String.trim s; weight = w; supports_tool_choice = stc }
+       let sec = parse_secondary_field (json |> member "secondary") in
+       let sec_stc =
+         match sec with
+         | None -> None  (* drop override when no secondary declared *)
+         | Some _ ->
+           parse_supports_tool_choice_field
+             (json |> member "secondary_supports_tool_choice")
+       in
+       Some {
+         model = String.trim s;
+         weight = w;
+         supports_tool_choice = stc;
+         secondary = sec;
+         secondary_supports_tool_choice = sec_stc;
+       }
      | _ -> None)
   | _ -> None
 

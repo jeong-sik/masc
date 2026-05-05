@@ -1,6 +1,7 @@
-(** Tests for Types module *)
+module Types = Masc_domain
+open Types
 
-open Masc_domain
+(** Tests for Types module *)
 
 let test_agent_status_roundtrip () =
   let statuses = [Active; Busy; Listening; Inactive] in

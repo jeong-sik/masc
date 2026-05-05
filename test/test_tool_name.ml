@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Test Tool_name: roundtrip, coverage, and invariant checks. *)
 
 open Masc_mcp

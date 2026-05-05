@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Mcp_session Module Coverage Tests
 
     Tests for MCP HTTP Session ID management:

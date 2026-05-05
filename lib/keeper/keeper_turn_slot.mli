@@ -41,6 +41,14 @@ val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list
 
+(** Render a compact holder list such as [[keeper-a/181s, +2 more]].
+    The input is expected to be sorted longest-first, as returned by the
+    holder accessors above. *)
+val format_slot_holders : ?limit:int -> (string * float) list -> string
+
+(** Operator-facing one-line summary of all holder pools. *)
+val slot_holders_summary : ?limit:int -> now:float -> unit -> string
+
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit

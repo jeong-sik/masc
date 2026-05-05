@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Task_sandbox unit tests.
 
     Tests sandbox type construction, path extraction, and error paths.

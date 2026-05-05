@@ -127,6 +127,25 @@ let is_rate_limit_exempt path =
   String.equal path "/health"
   || Masc_mcp.Server_health_paths.is_public path
 
+(** [safe_reqd_respond reqd response body] guards all direct
+    [Httpun.Reqd.respond_with_string] calls in the main request handler
+    against the "invalid state, currently handling error" [Failure] that
+    httpun raises when the reqd has already entered its error-handling path
+    (e.g. client disconnect during a long OAS turn — 2026-05-05 cycle9
+    FATAL race, also see [Http_server_eio.safe_respond_with_string]).
+    [Eio.Cancel.Cancelled] is always re-raised. *)
+let safe_reqd_respond reqd response body =
+  try Httpun.Reqd.respond_with_string reqd response body
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Failure msg ->
+      Log.Server.warn
+        "[http] reqd respond skipped (invalid state; 2026-05-05 OAS cancel race): %s"
+        msg
+  | exn ->
+      Log.Server.warn "[http] reqd respond unexpected exception: %s"
+        (Printexc.to_string exn)
+
 (** Returns true if the request was rate-limited and a 429 response was
     sent on [reqd]. Caller should short-circuit further handling in that
     case. Health-probe paths are always allowed through.
@@ -147,7 +166,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ("content-length", string_of_int (String.length body)) ::
         rl_headers
       ) in
-      Httpun.Reqd.respond_with_string reqd
+      safe_reqd_respond reqd
         (Httpun.Response.create ~headers `Too_many_requests) body;
       true
     end else
@@ -169,7 +188,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                     :: ("content-length", string_of_int (String.length body))
                     :: rl_headers)
                 in
-                Httpun.Reqd.respond_with_string reqd
+                safe_reqd_respond reqd
                   (Httpun.Response.create ~headers `Too_many_requests)
                   body;
                 true
@@ -196,7 +215,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
       :: json_headers "-" protocol_version origin
     ) in
     let response = Httpun.Response.create ~headers `Forbidden in
-    Httpun.Reqd.respond_with_string reqd response body;
+    safe_reqd_respond reqd response body;
     true
   end
   else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
@@ -207,7 +226,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
       :: json_headers "-" protocol_version origin
     ) in
     let response = Httpun.Response.create ~headers `Bad_request in
-    Httpun.Reqd.respond_with_string reqd response body;
+    safe_reqd_respond reqd response body;
     true
   end
   else false
@@ -228,7 +247,7 @@ let dispatch_route ~routes ~request ~path reqd =
       ("content-length", string_of_int (String.length body));
     ] in
     let response = Httpun.Response.create ~headers `OK in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_reqd_respond reqd response body
   | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
       match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
@@ -299,6 +318,22 @@ let dispatch_route ~routes ~request ~path reqd =
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd
 
+let log_late_response_failure ~context msg =
+  Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
+    context msg
+
+let try_internal_error_response reqd msg =
+  try Http.Response.internal_error msg reqd with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> (
+      match Http.Late_response.classify_write_failure exn with
+      | Some failure_msg ->
+          log_late_response_failure ~context:"main_eio internal_error"
+            failure_msg
+      | None ->
+          Log.Http.warn "main_eio internal_error response failed: %s"
+            (Printexc.to_string exn))
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
@@ -317,9 +352,19 @@ let make_extended_handler routes =
       let origin = get_origin request in
       if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
       else dispatch_route ~routes ~request ~path reqd
-    with exn ->
+    with
+    (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
+       Previously the catch-all swallowed Cancelled and tried to write a 500
+       response; that masks shutdown signals and interferes with per-connection
+       switch cleanup. *)
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> (
       let msg = Printexc.to_string exn in
-      Http.Response.internal_error msg reqd
+      match Http.Late_response.classify_write_failure exn with
+      | Some failure_msg ->
+          log_late_response_failure ~context:"main_eio request handler"
+            failure_msg
+      | None -> try_internal_error_response reqd msg)
 
 (** Main server loop *)
 let run_server ~sw:_ ~env ~host ~port ~base_path =

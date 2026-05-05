@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for smart heartbeat integration in keeper_keepalive.
 
     Verifies that the Heartbeat_smart module decisions correctly map

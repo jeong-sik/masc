@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Round-trip + classification tests for [Auth_error_kind].
 
     Guards the closed-enum contract that prometheus dashboards depend on

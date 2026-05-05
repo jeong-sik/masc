@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Keeper Tool Exposure Tests
 
     Verifies that keeper_allowed_tool_names returns the full tool set

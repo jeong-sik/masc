@@ -56,6 +56,51 @@ let merge_detail_fields fields details =
   | `Null -> `Assoc fields
   | other -> `Assoc (fields @ [ ("payload", other) ])
 
+(* #10358 (c1): make non-Eio-context drops observable.
+
+   The three try/with sites below catch [Stdlib.Effect.Unhandled] so the
+   lifecycle hook does not crash when invoked outside an Eio scheduler
+   (test path / bootstrap / non-Eio handler). Before this helper the
+   handler body was [-> ()] which silently dropped the entire Audit_log
+   + Telemetry pair — exactly matching the [#10358] 5-tag → 2-tag
+   attrition pattern observed in the durable ledger. We still swallow
+   the exception (the lifecycle hook must not propagate failures into
+   the caller's control flow), but we now emit a Warn log line and
+   bump [masc_coord_telemetry_drop_total{event_family,event_kind}] so
+   operators can see in Grafana / log aggregation when production
+   paths are dispatching lifecycle outside an Eio fiber. *)
+let warn_telemetry_drop ~event_family ~event_kind exn =
+  let exn_str = Printexc.to_string exn in
+  let details =
+    `Assoc
+      [
+        ("event_family", `String event_family);
+        ("event_kind", `String event_kind);
+        ("exception", `String exn_str);
+      ]
+  in
+  (* Isolated swallows: the call sites that invoke this helper rely on
+     the "[Effect.Unhandled] is fully absorbed" contract — propagating
+     an exception out of the lifecycle hook would crash the caller.
+     Each observability side effect is wrapped separately so a failure
+     in one (e.g. [Log.emit] hitting a sink failure) does not skip the
+     other (the counter still increments and stays observable). The
+     primary contract remains "do not break the caller". (#13096
+     review, copilot P1; supersedes the single-try wrapping noted in
+     codex P2.) *)
+  (try
+    Log.emit Log.Warn ~module_name:"Coord" ~details
+      (Printf.sprintf
+         "telemetry/audit dropped (non-Eio context): %s/%s"
+         event_family event_kind)
+  with _ -> ());
+  (try
+    Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
+      ~labels:
+        [ ("event_family", event_family); ("event_kind", event_kind) ]
+      ()
+  with _ -> ())
+
 (* Exhaustive on [Masc_domain.task_action]: a new variant becomes a compile
    error here so the audit-log mapping cannot silently fall into the
    [Custom "task_<other>"] catch-all that the prior string-typed
@@ -113,7 +158,8 @@ let observe_agent_lifecycle config ~agent_id ~(event : Coord_hooks.agent_lifecyc
     | Lifecycle_join | Lifecycle_rejoin -> Audit_log.Join
   in
   (* Audit and telemetry require Eio context (Eio.Mutex).
-     Silently skip when running in non-Eio test context. *)
+     Skip when running outside an Eio scheduler, but emit a warn log
+     line + Prometheus counter so the drop is observable (#10358 c1). *)
   (try
     Audit_log.log_action config ~agent_id ~action
       ~details:audit_details ~outcome:Audit_log.Success ();
@@ -123,7 +169,9 @@ let observe_agent_lifecycle config ~agent_id ~(event : Coord_hooks.agent_lifecyc
           Telemetry_eio.track_agent_left config ~agent_id ~reason:"leave"
       | Lifecycle_join | Lifecycle_rejoin ->
           Telemetry_eio.track_agent_joined config ~agent_id ()
-  with Stdlib.Effect.Unhandled _ -> ())
+  with Stdlib.Effect.Unhandled _ as exn ->
+    warn_telemetry_drop ~event_family:"agent_lifecycle"
+      ~event_kind:event_kind exn)
 
 (* #8605 family: replaced four parallel string switches on [transition]
    with [Masc_domain.task_action] variant matches. The compiler now forces
@@ -177,11 +225,15 @@ let observe_task_transition_event config ~agent_name ~task_id
             ~success:false
       | (Masc_domain.Release | Masc_domain.Submit_for_verification
         | Masc_domain.Reject_verification) -> ()
-  with Stdlib.Effect.Unhandled _ -> ());
+  with Stdlib.Effect.Unhandled _ as exn ->
+    warn_telemetry_drop ~event_family:"task_transition"
+      ~event_kind:transition_s exn);
   (try
      Keeper_accountability.record_task_transition config ~agent_name ~task_id
        ~transition ~details
-  with Stdlib.Effect.Unhandled _ -> ())
+  with Stdlib.Effect.Unhandled _ as exn ->
+    warn_telemetry_drop ~event_family:"accountability"
+      ~event_kind:transition_s exn)
 
 (* force_release_task — zombie cleanup needs task management logic *)
 let () = Atomic.set Coord_hooks.force_release_task_fn (fun config ~agent_name ~task_id () ->

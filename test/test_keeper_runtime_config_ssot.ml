@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Test ensure_keeper_meta TOML→JSON SSOT reconciliation.
     Verifies that ALL declarative fields from config/keepers/<name>.toml
     overwrite stale runtime JSON on bootstrap, and that unspecified fields

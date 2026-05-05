@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** test_turn_id_propagation — Step 15 partial.
 
     Compile-time sentinel for the Step 0a (PR #11154 + #11156 + #11159)

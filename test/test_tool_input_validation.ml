@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Unit tests for Tool_input_validation — OAS-delegated validation with coercion.
 
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema

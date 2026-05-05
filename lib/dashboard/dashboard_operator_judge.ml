@@ -223,7 +223,9 @@ let compute_judgments
         | `Assoc [("raw", `String raw)] ->
             (* #9774: include a preview so the failure diagnostic doesn't
                require enabling raw provider logging. *)
-            let msg = Judge_diagnostics.format_lenient_fallback ~judge_label:"Operator" raw in
+            let msg =
+              Judge_diagnostics.record_lenient_fallback ~judge_label:"Operator" raw
+            in
             Log.Governance.warn "%s" msg;
             Error msg
         | parsed -> Ok (response.model, parsed)

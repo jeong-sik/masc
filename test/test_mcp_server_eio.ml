@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Test suite for Mcp_server_eio module
 
     Tests the Eio-native MCP server implementation.

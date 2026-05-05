@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Coordination_product — Goal x Task x Board x Reward. *)
 
 open Masc_mcp

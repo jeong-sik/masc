@@ -102,6 +102,33 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 
+  | `GET, "/api/v1/board/karma/ledger" ->
+      (* Karma ledger contract endpoint — attributed karma events.
+         Query params:
+           agent  — filter to a single recipient (case-sensitive)
+           limit  — cap result count (default: 500) *)
+      let agent = query_param httpun_request "agent" in
+      let limit =
+        int_query_param httpun_request "limit" ~default:500
+        |> clamp ~min_v:1 ~max_v:5000
+      in
+      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+      let totals = Board_dispatch.get_all_karma () |> List.sort (fun (_, a) (_, b) -> compare b a) in
+      let json =
+        `Assoc [
+          ("events",
+           `List (List.map Board.karma_event_to_yojson events));
+          ("count", `Int (List.length events));
+          ("scoring_rule", `String "up=+1,down=0");
+          ("totals",
+           `List (List.map (fun (agent_name, k) ->
+               `Assoc [("agent", `String agent_name); ("karma", `Int k)])
+             totals));
+        ]
+      in
+      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      true
+
   | `GET, "/static/css/middleware.css" ->
       (match read_file (playground_asset_path "static/css/middleware.css") with
        | Ok body ->

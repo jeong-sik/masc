@@ -603,6 +603,21 @@ let get_agent_karma ~agent_name =
   match backend () with
   | Jsonl store -> Board.get_agent_karma store ~agent_name
 
+let karma_score_for_direction = Board.karma_score_for_direction
+
+let get_karma_ledger ?agent ?(limit = max_int) () =
+  let events =
+    match backend () with
+    | Jsonl store -> Board.build_karma_ledger store
+  in
+  let filtered =
+    match agent with
+    | None -> events
+    | Some name ->
+        List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
+  in
+  Board.take limit filtered
+
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
 

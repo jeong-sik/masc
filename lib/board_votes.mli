@@ -192,6 +192,38 @@ val flush_dirty : store -> unit
 
 (** {1 Karma} *)
 
+val karma_score_for_direction : vote_direction -> int
+(** Scoring contract: [Up] → [+1], [Down] → [0].
+    This is the single source of truth for karma scoring.
+    Replay and rebuild operations must use this function so that
+    a scoring-rule change takes effect everywhere simultaneously. *)
+
+val build_karma_ledger : store -> karma_event list
+(** Rebuild the full karma ledger from the in-memory vote log and
+    author tables.  One {!karma_event} is emitted per [Up] vote
+    whose target post/comment still exists in the store.
+
+    The function:
+    - Holds the store lock for the duration of the snapshot.
+    - Returns events sorted ascending by [ts] (oldest first) so
+      callers can replay them in chronological order.
+    - Silently drops votes whose target has since been deleted
+      (content gone, vote orphan — not an error).
+
+    Replay contract: [totals_of_karma_ledger (build_karma_ledger s)]
+    must equal the output of [get_all_karma s] when no votes have
+    been quarantined or dropped. *)
+
+val totals_of_karma_ledger : karma_event list -> (string * int) list
+(** Aggregate [(recipient, total_karma)] pairs from a ledger.
+    Sorted descending by total (highest karma first).
+    Complement to {!build_karma_ledger} for the rebuild path. *)
+
+val karma_event_to_yojson : karma_event -> Yojson.Safe.t
+(** JSON serialiser for a single karma event.  Wire format:
+    [{recipient, voter, target_kind, target_id, delta, ts, ts_iso}].
+    [ts_iso] is RFC-3339 UTC (["YYYY-MM-DDTHH:MM:SSZ"]). *)
+
 val get_agent_karma : store -> agent_name:string -> int
 (** Sums [votes_up] across every post + comment authored
     by [agent_name].  Lock-free read of the in-memory

@@ -76,6 +76,7 @@ let transition_task_r
           | Masc_domain.Release
           | Masc_domain.Start
           | Masc_domain.Submit_for_verification
+          | Masc_domain.Submit_pr_evidence
           | Masc_domain.Approve_verification
           | Masc_domain.Reject_verification
           | Masc_domain.Done_action
@@ -197,7 +198,7 @@ let transition_task_r
         let set_current = decision.set_current in
         let* () =
           match action, task.task_status, new_status, prepare_verification_request with
-          | ( Masc_domain.Submit_for_verification,
+          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence),
               _,
               Masc_domain.AwaitingVerification { assignee; verification_id; _ },
               Some prepare ) ->
@@ -217,7 +218,7 @@ let transition_task_r
                        task_id
                        verification_id
                        e))))
-          | Masc_domain.Submit_for_verification, _, _, Some _ ->
+          | (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence), _, _, Some _ ->
             Error
               (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                  (Printf.sprintf
@@ -242,7 +243,8 @@ let transition_task_r
             | Masc_domain.Release
             | Masc_domain.Approve_verification
             | Masc_domain.Reject_verification
-            | Masc_domain.Submit_for_verification ),
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence ),
             _,
             _,
             None ->
@@ -303,7 +305,8 @@ let transition_task_r
             | Masc_domain.Done_action
             | Masc_domain.Cancel
             | Masc_domain.Release
-            | Masc_domain.Submit_for_verification ),
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence ),
             _,
             Some _ ->
             Ok ()
@@ -313,6 +316,7 @@ let transition_task_r
             | Masc_domain.Cancel
             | Masc_domain.Release
             | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification
             | Masc_domain.Reject_verification ),
             _,
@@ -366,7 +370,8 @@ let transition_task_r
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
        | Masc_domain.Claim, _ | Masc_domain.Start, _ | Masc_domain.Done_action, _ | Masc_domain.Cancel, _
-       | Masc_domain.Submit_for_verification, _ | Masc_domain.Approve_verification, _
+       | Masc_domain.Submit_for_verification, _ | Masc_domain.Submit_pr_evidence, _
+       | Masc_domain.Approve_verification, _
        | Masc_domain.Reject_verification, _
        | Masc_domain.Release, Masc_domain.Claimed _ | Masc_domain.Release, Masc_domain.InProgress _
        | Masc_domain.Release, Masc_domain.AwaitingVerification _ | Masc_domain.Release, Masc_domain.Done _
@@ -412,7 +417,8 @@ let transition_task_r
                 level task_id agent_name cc threshold)
          | Masc_domain.Claim | Masc_domain.Start
          | Masc_domain.Done_action | Masc_domain.Cancel
-         | Masc_domain.Submit_for_verification | Masc_domain.Approve_verification
+         | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence
+         | Masc_domain.Approve_verification
          | Masc_domain.Reject_verification -> ());
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.
@@ -436,6 +442,7 @@ let transition_task_r
                      | Masc_domain.Done_action
                      | Masc_domain.Cancel
                      | Masc_domain.Submit_for_verification
+                     | Masc_domain.Submit_pr_evidence
                      | Masc_domain.Approve_verification
                      | Masc_domain.Reject_verification -> t
                    in
@@ -449,6 +456,7 @@ let transition_task_r
                      | Masc_domain.Done_action
                      | Masc_domain.Cancel
                      | Masc_domain.Submit_for_verification
+                     | Masc_domain.Submit_pr_evidence
                      | Masc_domain.Approve_verification
                      | Masc_domain.Reject_verification -> t.cycle_count, t.do_not_reclaim_reason
                    in
@@ -462,6 +470,7 @@ let transition_task_r
                         | Masc_domain.Done_action
                         | Masc_domain.Cancel
                         | Masc_domain.Submit_for_verification
+                        | Masc_domain.Submit_pr_evidence
                         | Masc_domain.Approve_verification
                         | Masc_domain.Reject_verification -> None)
                    ; cycle_count
@@ -554,7 +563,7 @@ let transition_task_r
                           , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
                       | None -> []))
-           | Masc_domain.Submit_for_verification ->
+           | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
              emit_task_activity
                config
                ~agent_name
@@ -587,6 +596,7 @@ let transition_task_r
             | Masc_domain.Start
             | Masc_domain.Release
             | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification
             | Masc_domain.Reject_verification -> None
           in
@@ -713,6 +723,7 @@ let transition_task_r
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification
+           | Masc_domain.Submit_pr_evidence
            | Masc_domain.Approve_verification
            | Masc_domain.Reject_verification -> ());
           Ok

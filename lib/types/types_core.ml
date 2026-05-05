@@ -247,6 +247,7 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Submit_pr_evidence
 [@@deriving show]
 
 let task_action_of_string s =
@@ -259,6 +260,7 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
+  | "submit_pr_evidence" -> Ok Submit_pr_evidence
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 (** Issue #8312: callers (especially small LLM keepers) often pass target-state
@@ -300,11 +302,13 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
+  | Submit_pr_evidence -> "submit_pr_evidence"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+    Submit_for_verification; Approve_verification; Reject_verification;
+    Submit_pr_evidence ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 type task_status =

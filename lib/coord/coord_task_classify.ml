@@ -361,7 +361,7 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     unconditionally so the hint stays accurate when the flag is on; the
     flag-off case still rejects them and produces a more specific error. *)
 let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_action list = function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel ]
+  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel; Masc_domain.Submit_pr_evidence ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
     ; Masc_domain.Done_action

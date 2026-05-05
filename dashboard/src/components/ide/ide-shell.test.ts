@@ -2,6 +2,46 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
+
+vi.mock('../../api/git-graph', () => ({
+  fetchGitGraph: vi.fn(() => Promise.resolve({
+    generated_at: '2026-05-06T00:00:00Z',
+    repos: [{
+      id: 'masc-mcp',
+      root: '/workspace/masc-mcp',
+      label: 'masc-mcp',
+      current_branch: 'main',
+      head: 'abc123',
+      dirty: false,
+      conflict_count: 0,
+      branch_count: 2,
+      commit_count: 8,
+      worktree_count: 1,
+    }],
+    agents: [],
+    nodes: [],
+    edges: [],
+    stats: {
+      repo_count: 1,
+      agent_count: 0,
+      branch_count: 2,
+      commit_count: 8,
+      conflict_count: 0,
+      dirty_count: 0,
+    },
+    warnings: [],
+  })),
+}))
+
+vi.mock('../../api/repositories', () => ({
+  discoverRepositories: vi.fn(() => Promise.resolve([])),
+  fetchRepositoriesList: vi.fn(() => Promise.resolve([{
+    id: 'masc-mcp',
+    name: 'masc-mcp',
+    local_path: '/workspace/masc-mcp',
+  }])),
+}))
+
 import { IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 
@@ -83,6 +123,20 @@ describe('IdeShell', () => {
     fireEvent.click(btn)
     expect(route.value.params.layers).toBeUndefined()
     expect(btn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('renders IDE branch graph context in the review rail', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.textContent).toContain('BRANCH GRAPH')
+    await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
+    expect(container.textContent).toContain('main')
   })
 
   it('hydrates cascade layer button from the ?layers=cascade URL param', () => {

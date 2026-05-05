@@ -54,6 +54,14 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   return button
 }
 
+function ideCommandInput(container: HTMLElement): HTMLInputElement {
+  const input = container.querySelector('[data-testid="ide-command-bar"] input')
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error('missing IDE command bar input')
+  }
+  return input
+}
+
 describe('IdeShell', () => {
   let container: HTMLDivElement
 
@@ -102,6 +110,57 @@ describe('IdeShell', () => {
 
     fireEvent.click(buttonByText(container, 'EXPLODE'))
     expect(route.value.params.layers).toBe('explode')
+  })
+
+  it('runs view commands from the IDE command bar', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    const input = ideCommandInput(container)
+    input.value = 'unified'
+    fireEvent.input(input)
+    await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(route.value.params.view).toBe('unified')
+  })
+
+  it('runs layer commands from the IDE command bar', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    const input = ideCommandInput(container)
+    input.value = 'cascade'
+    fireEvent.input(input)
+    await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(route.value.params.layers).toBe('cascade')
+  })
+
+  it('opens the terminal route from the IDE command bar', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    const input = ideCommandInput(container)
+    input.value = 'terminal'
+    fireEvent.input(input)
+    await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(route.value.params.terminal).toBe('open')
   })
 
   it('renders the Cascade layer button and toggles it via URL', () => {

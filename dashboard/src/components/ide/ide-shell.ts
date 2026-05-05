@@ -90,6 +90,17 @@ export function IdeShell() {
     navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
   }
 
+  const handleTerminalOpen = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      terminal: 'open',
+    }
+    if (terminalKeeper) nextParams.keeper = terminalKeeper
+    navigate('code', nextParams)
+  }
+
   return html`
     <section
       class="ide-plane-shell"
@@ -114,6 +125,7 @@ export function IdeShell() {
         activeLayers=${activeLayers}
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
+        onTerminalOpen=${handleTerminalOpen}
       />
       <div
         class="ide-plane-grid"

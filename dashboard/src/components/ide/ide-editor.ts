@@ -22,7 +22,7 @@ import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 
 // ── Types ─────────────────────────────────────────────────────────
 
-const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'explode'] as const
+const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'cascade', 'explode'] as const
 type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 export type IdeEditorView = 'source' | 'split-diff' | 'unified' | 'blame'
@@ -324,6 +324,7 @@ const LAYER_LABEL: Record<IdeLayerKind, string> = {
   tools: 'Tools',
   approve: 'Approve',
   notes: 'Notes',
+  cascade: 'Cascade',
   explode: 'EXPLODE',
 }
 
@@ -337,6 +338,7 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
   if (kind === 'tools') return '0 anchored'
   if (kind === 'approve') return '0 approval'
   if (kind === 'notes') return '0 note'
+  if (kind === 'cascade') return '0 hits'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
 }

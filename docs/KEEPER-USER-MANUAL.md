@@ -850,6 +850,42 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 
 ---
 
+## 7.7 스케줄러 공정성 — `Eio_guard.yield_meter`
+
+### 개요
+
+하나의 Eio 도메인에서 64개 keeper가 동시에 동작할 때 CPU 집약적인 keeper 루프가 스케줄러를 독점하는 문제가 발생할 수 있다. `Eio_guard.yield_meter`는 이 문제를 해결하기 위한 경량 작업 단위 카운터다.
+
+### 적용 범위
+
+`yield_step`은 아래 hot-path 루프에 계장돼 있다. 각 루프는 기본 임계값인 **1000 작업 단위**마다 `Eio.Fiber.yield`를 호출한다.
+
+| 모듈 | 루프 | 비고 |
+|------|------|------|
+| `keeper_memory_bank` | compaction 행 선택 (`by_priority`, `by_recency`) | 수백 개 메모리 행 순회 |
+| `server_bootstrap_loops` | autoboot 초기 pass 및 retry 루프 | keeper당 1회 |
+| `keeper_keepalive_signal` | board signal 팬아웃 — 실행 중인 keeper 메타 스캔 | 실행 중 keeper 수 |
+| `keeper_supervisor` | sweep Phase 1 (entries 스캔) | in-memory, I/O 없음 |
+| `keeper_supervisor` | sweep Phase 2·3·3.5 (keeper_names 순회) | 메타 파일 읽기 포함 |
+| `keeper_supervisor` | `reconcile_keepalive_keepers` | 메타 파일 읽기 포함 |
+| `keeper_supervisor` | `liveness_recovery_scan` | 레지스트리 스캔 |
+| `keeper_supervisor` | `alive_but_stuck` 스캔 | in-memory |
+
+### 의도적으로 적용하지 않은 범위
+
+아래 경로는 `yield_meter`를 적용하지 않는다. 각 이유는 괄호 안에 명시한다.
+
+- **turn 루프 내부** — `Eio.Time.sleep`, gRPC, 파일 I/O 등 자연적인 Eio 스케줄러 양보점이 이미 존재.
+- **heartbeat cycle** — 헤드에서 `Eio.Time.sleep`이 호출되므로 루프 전체가 이미 양보함.
+- **turn-slot 공정성 대기** — 전용 `Eio.Condition.await`가 사용됨.
+- **단일 keeper 단일 작업** — 루프가 없으므로 계장 불필요.
+
+### 관련 환경 변수
+
+`yield_meter` 자체를 제어하는 환경 변수는 없다. 임계값(기본 1000)은 소스 코드에서만 변경 가능하며, 이는 의도된 설계다. 스케줄러 공정성은 운영 파라미터가 아니라 런타임 불변 속성으로 유지된다.
+
+---
+
 ## 8. 설정과 동기화
 
 ### 8.1 설정 소스

@@ -613,8 +613,9 @@ let reconcile_keepalive_keepers (ctx : _ context) =
   Log.Keeper.debug "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);
   let t0 = Time_compat.now () in
+  let reconcile_ym = Eio_guard.create_yield_meter () in
   List.iter (fun name ->
-         match read_meta ctx.config name with
+         (match read_meta ctx.config name with
          | Ok (Some meta) when not meta.paused ->
              let dominated_by_sweep =
                match Keeper_registry.get ~base_path meta.name with
@@ -651,7 +652,8 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                Prometheus.metric_keeper_observation_query_failures
                ~labels:[("operation", "reconcile_read_meta")]
                ();
-             Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err)
+             Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
+         Eio_guard.yield_step reconcile_ym)
     names;
   Log.Keeper.debug "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))
@@ -1185,8 +1187,11 @@ let sweep_and_recover (ctx : _ context) =
        | None -> ())
     end
   in
+  (* Yield meter: the entry scan is pure in-memory and may cover 64+
+     keepers; yield every ~1000 iterations to stay scheduler-fair. *)
+  let sweep_ym = Eio_guard.create_yield_meter () in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    match entry.phase with
+    (match entry.phase with
     | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
         (match entry.dead_since_ts with
          | Some dead_since when now -. dead_since >= dead_ttl_sec ->
@@ -1209,7 +1214,8 @@ let sweep_and_recover (ctx : _ context) =
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
       | Some (`Crashed msg) ->
-          queue_crashed_entry entry msg)
+          queue_crashed_entry entry msg));
+    Eio_guard.yield_step sweep_ym
   ) entries;
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name;
@@ -1314,9 +1320,10 @@ let sweep_and_recover (ctx : _ context) =
   (* Phase 2: restore paused reconcile gates whose approval queue was lost
      on restart. The queue itself is in-memory, but paused keeper meta is
      durable, so rebuild the human gate from persisted blocker evidence. *)
+  let sweep_names_ym = Eio_guard.create_yield_meter () in
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
-         match read_meta ctx.config name with
+         (match read_meta ctx.config name with
          | Ok (Some meta)
            when paused_meta_requires_reconcile_recovery meta
                 && not
@@ -1324,12 +1331,13 @@ let sweep_and_recover (ctx : _ context) =
                         ~keeper_name:meta.name) ->
              restore_reconcile_continue_gate ctx meta
          | _ -> ());
+         Eio_guard.yield_step sweep_names_ym);
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
   let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
-         if Keeper_registry.is_running ~base_path name then ()
+         (if Keeper_registry.is_running ~base_path name then ()
          else
            match read_meta ctx.config name with
            | Ok (Some meta)
@@ -1356,6 +1364,7 @@ let sweep_and_recover (ctx : _ context) =
                     ~labels:[("keeper", name); ("site", "paused_meta_prune")]
                     ())
            | _ -> ());
+         Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause
      timer has elapsed.  Clearing [paused = false] here lets Phase 4
@@ -1365,7 +1374,7 @@ let sweep_and_recover (ctx : _ context) =
      intentionally skipped so they continue to require human action. *)
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
-         if Keeper_registry.is_running ~base_path name then ()
+         (if Keeper_registry.is_running ~base_path name then ()
          else
            match read_meta ctx.config name with
            | Ok (Some meta) when meta.paused
@@ -1427,6 +1436,7 @@ let sweep_and_recover (ctx : _ context) =
                         name err)
                end
            | _ -> ());
+         Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx
 
@@ -1514,8 +1524,9 @@ let liveness_recovery_scan (ctx : _ context) =
     let base_path = ctx.config.base_path in
     let max_attempts = Env_config.KeeperSupervisor.liveness_recovery_max_attempts in
     let entries = Keeper_registry.all ~base_path () in
+    let liveness_ym = Eio_guard.create_yield_meter () in
     List.iter (fun (entry : Keeper_registry.registry_entry) ->
-      if not (should_attempt_liveness_recovery ~now entry) then ()
+      (if not (should_attempt_liveness_recovery ~now entry) then ()
       else begin
         let rs = get_or_create_recovery_state entry.name in
         if rs.attempt_count >= max_attempts then
@@ -1641,7 +1652,8 @@ let liveness_recovery_scan (ctx : _ context) =
             end
           end
         end
-      end
+      end);
+      Eio_guard.yield_step liveness_ym
     ) entries
   end
 
@@ -1791,13 +1803,17 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
      ([Stale_turn_timeout] / [Stale_termination_storm] /
      [Oas_timeout_budget_loop]), preserve it so we don't churn the
      [stall_seconds] field on every poll. *)
+  let current_failure_reason =
+    match Keeper_registry.get ~base_path entry.name with
+    | Some current -> current.last_failure_reason
+    | None -> entry.last_failure_reason
+  in
   let prior_str =
-    Option.map Keeper_registry.failure_reason_to_string
-      entry.last_failure_reason
+    Option.map Keeper_registry.failure_reason_to_string current_failure_reason
     |> Option.value ~default:"none"
   in
   let reason =
-    match entry.last_failure_reason with
+    match current_failure_reason with
     | Some
         ( Keeper_registry.Stale_turn_timeout _
         | Keeper_registry.Stale_termination_storm _
@@ -1842,8 +1858,9 @@ let alive_but_stuck_scan (ctx : _ context) =
     in
     let base_path = ctx.config.base_path in
     let entries = Keeper_registry.all ~base_path () in
+    let abs_ym = Eio_guard.create_yield_meter () in
     List.iter (fun (entry : Keeper_registry.registry_entry) ->
-      match
+      (match
         detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec entry
       with
       | None -> ()
@@ -1873,6 +1890,7 @@ let alive_but_stuck_scan (ctx : _ context) =
             recovery;
           if String.equal recovery "queued" then
             request_alive_but_stuck_recovery ~base_path ~elapsed entry
-        end
+        end);
+      Eio_guard.yield_step abs_ym
     ) entries
   end

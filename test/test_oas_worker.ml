@@ -843,6 +843,31 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
         "expected Some (Call_err (HttpError 400)) for ordinary InvalidRequest, got %s"
         (Cascade_fsm.provider_outcome_option_to_string outcome)
 
+let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
+  let message = "Invalid request: You do not have permission to access glm-5-code" in
+  let err =
+    Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
+  in
+  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  | Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.ProviderFailure
+            {
+              kind =
+                Llm_provider.Http_client.Capability_mismatch
+                  { capability = Some "model_access" };
+              message = actual_message;
+            } as http_err)) ->
+      Alcotest.(check string) "message preserved" message actual_message;
+      Alcotest.(check bool) "failed model name visible" true
+        (contains_substring ~needle:"glm-5-code" actual_message);
+      Alcotest.(check bool) "model access denial cascades" true
+        (Oas_compat.Http_client.should_cascade http_err)
+  | outcome ->
+      Alcotest.failf
+        "expected model access InvalidRequest to cascade as ProviderFailure Capability_mismatch, got %s"
+        (Cascade_fsm.provider_outcome_option_to_string outcome)
+
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
   let err =
@@ -4173,6 +4198,8 @@ let () =
         test_sdk_error_to_cascade_outcome_maps_not_found_to_404;
       Alcotest.test_case "sdk_error_to_cascade_outcome keeps ordinary InvalidRequest at 400" `Quick
         test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400;
+      Alcotest.test_case "sdk_error_to_cascade_outcome cascades model access denial" `Quick
+        test_sdk_error_to_cascade_outcome_cascades_model_access_denied;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades runtime MCP auth config" `Quick
         test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades resumable CLI session" `Quick

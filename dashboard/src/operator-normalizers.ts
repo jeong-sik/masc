@@ -7,6 +7,7 @@ import {
 } from './pending-confirm'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
 import type {
+  AdmissionQueueSnapshot,
   Message,
   OperatorActionDescriptor,
   OperatorAttentionItem,
@@ -105,6 +106,18 @@ function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | nul
     model_used: asString(raw.model_used) ?? null,
     keeper_name: asString(raw.keeper_name) ?? null,
     last_error: asString(raw.last_error) ?? null,
+  }
+}
+
+function normalizeAdmissionQueue(raw: unknown): AdmissionQueueSnapshot | null {
+  if (!isRecord(raw)) return null
+  return {
+    mode: asString(raw.mode) ?? 'unknown',
+    throttle_owner: asString(raw.throttle_owner) ?? 'unknown',
+    max_concurrent: asNumber(raw.max_concurrent) ?? 0,
+    active: asNumber(raw.active) ?? 0,
+    available: asNumber(raw.available) ?? 0,
+    queue_depth: asNumber(raw.queue_depth) ?? 0,
   }
 }
 
@@ -306,6 +319,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
+    admission_queue: normalizeAdmissionQueue(root.admission_queue),
     operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
     persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
       .map(normalizeKeeper)

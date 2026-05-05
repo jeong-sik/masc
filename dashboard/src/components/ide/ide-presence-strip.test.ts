@@ -57,8 +57,8 @@ describe('parseWorktreeSSE', () => {
 
     const result = parseWorktreeSSE(body)
     expect(result).toHaveLength(2)
-    expect(result[0].branch).toBe('nick0cave/wt-run-47')
-    expect(result[1].branch).toBe('improver/p0a-worktree-status-sse')
+    expect(result[0]?.branch).toBe('nick0cave/wt-run-47')
+    expect(result[1]?.branch).toBe('improver/p0a-worktree-status-sse')
   })
 
   it('skips empty data payload and non-data lines', () => {
@@ -76,7 +76,7 @@ describe('parseWorktreeSSE', () => {
     const body = 'data: {not valid json}\ndata: ' + JSON.stringify(sampleWorktrees[0])
     const result = parseWorktreeSSE(body)
     expect(result).toHaveLength(1)
-    expect(result[0].branch).toBe('nick0cave/wt-run-47')
+    expect(result[0]?.branch).toBe('nick0cave/wt-run-47')
   })
 
   it('workspace_label is populated from workspaceLabelForAgent using parsed SSE', () => {

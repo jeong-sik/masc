@@ -5,6 +5,7 @@ import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { CountBadge } from '../common/badge'
 import { shellAuthSummary } from '../../store'
+import { operatorSnapshot } from '../../operator-store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import {
   flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom,
@@ -33,12 +34,24 @@ export function FlowControlPanel() {
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const admission = operatorSnapshot.value?.admission_queue ?? null
+  const admissionMode = admission?.mode ?? 'unknown'
+  const admissionOwner = admission?.throttle_owner === 'oas_cascade'
+    ? 'OAS cascade'
+    : admission?.throttle_owner ?? 'unknown'
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
       <div class="flex items-center gap-3 mb-3">
         <h3 class="text-sm text-[var(--color-fg-secondary)] font-medium">Flow Control</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
+      ${admission ? html`
+        <div class="mb-3 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="flow-admission-mode">
+          <${CountBadge} tone=${admissionMode === 'passthrough' ? 'default' : 'warn'}>${admissionMode}<//>
+          <span>Throttle: ${admissionOwner}</span>
+          <span>${admission.active}/${admission.max_concurrent} observed inflight</span>
+        </div>
+      ` : null}
       ${mutationAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)]">
           Control blocked: ${mutationAccess.reason ?? 'worker role is required.'}

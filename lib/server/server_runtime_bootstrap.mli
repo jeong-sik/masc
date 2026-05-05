@@ -46,6 +46,11 @@ val runtime_path_diagnostics :
   Mcp_server.server_state ->
   Server_base_path_diagnostics.t
 
+val record_tool_policy_init_failure : base_path:string -> string -> unit
+(** Record and log a fatal startup failure while loading
+    [config/tool_policy.toml]. Exposed for focused regression tests and
+    used before the startup path exits. *)
+
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit

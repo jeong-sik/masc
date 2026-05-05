@@ -280,6 +280,20 @@ let test_tool_policy_unloaded_accessors_emit_metric () =
     (clone_depth_after >= clone_depth_before +. 1.0);
   init_registry ()
 
+let tool_policy_init_failed_metric base_path =
+  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_init_failed
+    ~labels:[("base_path", base_path)]
+    ()
+
+let test_tool_policy_init_failure_emits_metric () =
+  let base_path = "/tmp/masc-test-tool-policy-init-failed" in
+  let before = tool_policy_init_failed_metric base_path in
+  Server_runtime_bootstrap.record_tool_policy_init_failure ~base_path
+    "synthetic test failure";
+  let after = tool_policy_init_failed_metric base_path in
+  check bool "tool policy init failure increments metric" true
+    (after >= before +. 1.0)
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -311,5 +325,7 @@ let () =
             test_oas_mainline_warns_are_promoted_in_bridge;
           test_case "tool policy pre-init accessors emit metric" `Quick
             test_tool_policy_unloaded_accessors_emit_metric;
+          test_case "tool policy init failure emits metric" `Quick
+            test_tool_policy_init_failure_emits_metric;
         ] );
     ]

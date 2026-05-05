@@ -268,6 +268,15 @@ let init_runtime_context env =
   let fs = Eio.Stdenv.fs env in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
+let record_tool_policy_init_failure ~base_path msg =
+  Prometheus.inc_counter Prometheus.metric_tool_policy_init_failed
+    ~labels:[("base_path", base_path)]
+    ();
+  Prometheus.inc_counter Prometheus.metric_error_events
+    ~labels:[("type", "missing_config")]
+    ();
+  Log.Server.error "Fatal tool policy config load failure: %s" msg
+
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     : Mcp_server.server_state =
   let input_base_path =
@@ -313,8 +322,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   (match Keeper_exec_tools.init_policy_config ~base_path with
    | Ok () -> ()
    | Error msg ->
-       Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
-      Log.Server.error "Fatal tool policy config load failure: %s" msg;
+       record_tool_policy_init_failure ~base_path msg;
        exit 1);
   (* Validate Tool_spec <-> TOML coverage *)
   let validation = Tool_registration_check.validate () in

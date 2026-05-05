@@ -66,26 +66,31 @@ let get_float_nonneg ~default name =
 
 (** Variant for [\[0.0, 1.0\]]-bounded floats — probabilities,
     score thresholds, context-ratio caps, anything where the
-    operator's mental model is "this is a fraction".  Out-of-range
-    parses ([< 0.0], [> 1.0], or non-finite) fall back to
-    [default].  The default itself is also clamped to
-    [\[0.0, 1.0\]] as defense-in-depth so a future caller cannot
-    accidentally introduce an out-of-range default.
+    operator's mental model is "this is a fraction".  Implemented
+    by delegating to {!get_float_nonneg} (which already handles
+    NaN/-∞ rejection and the negative-floor semantics) and then
+    adding the [> 1.0] upper bound.
+
+    The [default] itself is sanitised first: non-finite inputs
+    ([NaN], [+∞], [-∞]) are coerced to [0.0]; finite values
+    out of range are clamped via [Float.max 0.0 (Float.min 1.0 .)].
+    This is defense in depth so a caller passing a stale
+    out-of-range default still gets a valid ratio back.
 
     NaN-safety note: [Float.min nan 1.0] / [Float.max nan 0.0]
-    propagate NaN, so a naive [Float.max 0.0 (Float.min 1.0 v)]
-    would still return NaN when [v] is NaN.  We sanitise non-
-    finite [default] inputs to [0.0] before clamping. *)
+    propagate NaN per OCaml's IEEE 754 semantics, so a naive
+    [Float.max 0.0 (Float.min 1.0 v)] without the explicit
+    {!Float.is_finite} guard would still leak NaN. *)
 let get_ratio ~default name =
   let sanitise v =
     if not (Float.is_finite v) then 0.0
     else Float.max 0.0 (Float.min 1.0 v)
   in
   let safe_default = sanitise default in
-  let parsed = get_float ~default:safe_default name in
-  if (not (Float.is_finite parsed)) || parsed < 0.0 || parsed > 1.0
-  then safe_default
-  else parsed
+  (* Delegate to get_float_nonneg for the < 0.0 / non-finite
+     rejection, then layer the > 1.0 upper bound. *)
+  let parsed = get_float_nonneg ~default:safe_default name in
+  if parsed > 1.0 then safe_default else parsed
 
 let get_bool ~default name =
   match raw_value_opt name with

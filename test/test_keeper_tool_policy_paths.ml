@@ -1,10 +1,21 @@
 (** Path-policy unit tests for [Keeper_tool_policy.is_masc_write_allowed].
 
     The internal [normalize_path] is exercised indirectly through
-    the public [is_masc_write_allowed].  Audit P3 (2026-04-29)
-    flagged that no unit tests existed for traversal cases like
-    [.masc/playground/../reputation/], leaving the lexical
-    normaliser unverified.
+    the public [is_masc_write_allowed].  Audit P3 (2026-04-29 §1.1)
+    flagged the unit-test gap on traversal cases.
+
+    Note: [test/test_decision_pipeline.ml:113-133] already
+    covers 6 baseline cases (3 allowed prefixes + 3 disallowed,
+    including one [..] escape `.masc/playground/../reputation/evil.json`).
+    This suite is a {b dedicated, exhaustive} pin for the lexical
+    normaliser — 19 cases including prefix-name boundaries
+    ([.masc/decision_audit_sneaky/], plural [playgrounds],
+    [.worktrees-stale/]), root-overshoot semantics
+    ([../../etc/passwd]), and the non-escape "round-trip into
+    writable" case ([playground/../playground/x] → still allowed).
+    Cases overlap with [test_decision_pipeline] are intentional
+    redundancy at a different abstraction level (pure isolated
+    test vs the integrated decision pipeline).
 
     Properties pinned:
 

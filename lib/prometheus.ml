@@ -867,6 +867,12 @@ let metric_anti_rationalization_excuse_pattern =
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
+
+(* RFC-0022 §9 attempt-liveness gate.  Counts would-be (Observe) and
+   actual (Enforce) liveness kills broken down by failure class.
+   Labels: [kind, mode, provider]. *)
+let metric_cascade_attempt_liveness_kill =
+  "masc_cascade_attempt_liveness_kill_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"

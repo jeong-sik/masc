@@ -63,6 +63,13 @@ let on_broadcast_mention : (string option -> unit) ref =
 
 let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
   ensure_initialized config;
+  let content =
+    Coord_task_cache_invariant.rewrite_broadcast_content
+      ~config
+      ~from_agent
+      ~module_name:"coord_broadcast"
+      ~content
+  in
   let seq = Coord_state.next_seq config in
   let mention = Mention.extract content in
   let safe_content = sanitize_message content in

@@ -50,6 +50,13 @@ let handle_broadcast (ctx : context) : tool_result option =
   if not allowed then
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
+    let message =
+      Coord_task_cache_invariant.rewrite_broadcast_content
+        ~config
+        ~from_agent:agent_name
+        ~module_name:"tool_inline_dispatch_comm"
+        ~content:message
+    in
     let trace_context = Otel_trace_context.from_ambient () in
     let broadcast_result = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
         let mention = Mention.extract message in

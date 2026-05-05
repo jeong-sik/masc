@@ -241,6 +241,14 @@ let task_auto_release_observed_fn
   : (agent_name:string -> from_status:string -> unit) Atomic.t
   = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
 
+(** #13460: stale task-state cache emission observability.
+    Coord sub-modules fire this when they replace a stale active-task
+    broadcast/mention with a cache invalidation message. [lib/coord.ml]
+    wires it to Prometheus to avoid a [masc_coord -> Prometheus] dependency. *)
+let cache_desync_cleared_fn
+  : (module_name:string -> task_id:string -> status:string -> unit) Atomic.t
+  = Atomic.make (fun ~module_name:_ ~task_id:_ ~status:_ -> ())
+
 (** task-103: Auto-provision a sandbox worktree on successful task claim.
 
     [Coord_task.claim_task_r] flips a task to [Claimed] but does not create

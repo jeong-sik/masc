@@ -316,6 +316,24 @@ let () =
   Atomic.set Coord_hooks.task_auto_release_observed_fn
     record_task_auto_release
 
+(* #13460: cache desync invalidation counter. Coord_broadcast emits this when
+   it replaces an active-claim/release message for a terminal backlog task with
+   a cache_invalidated broadcast. *)
+let record_cache_desync_cleared ~module_name ~task_id ~status =
+  Prometheus.inc_counter
+    Prometheus.metric_cache_desync_cleared
+    ~labels:
+      [
+        ("module", module_name);
+        ("task_id", task_id);
+        ("status", status);
+      ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.cache_desync_cleared_fn
+    record_cache_desync_cleared
+
 (* #9632: Process_eio timeout observability.
    Fleet-wide rate of subprocess timeouts, broken down by program
    (argv[0] basename) and configured budget.  Lets operators answer

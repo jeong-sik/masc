@@ -152,6 +152,66 @@ let test_broadcast_message () =
   let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
+let test_broadcast_replaces_terminal_task_cache_desync () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_test_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+
+  let config = room_config tmp_dir in
+  let _ = Coord.init config ~agent_name:(Some "taskmaster") in
+  let _ = Coord.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
+  let _ = Coord.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
+  (match
+     Coord.force_done_task_r
+       config
+       ~agent_name:"operator"
+       ~task_id:"task-001"
+       ~notes:"terminal in backlog"
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+
+  let stale_message =
+    "@nick0cave task-001 stale claim detected: current_task_id=null but \
+     MASC still lists task-001 as claimed by you. Please release it."
+  in
+  let since_seq =
+    Coord.get_all_messages_raw config ~since_seq:0
+    |> List.fold_left (fun acc msg -> max acc msg.Masc_domain.seq) 0
+  in
+  let result =
+    Coord.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
+  in
+  Alcotest.(check bool)
+    "broadcast reports invalidation"
+    true
+    (str_contains result "[cache_invalidated]");
+  let messages = Coord.get_all_messages_raw config ~since_seq in
+  (match messages with
+   | [ msg ] ->
+     Alcotest.(check bool)
+       "original stale text omitted"
+       false
+       (str_contains msg.content "Please release");
+     Alcotest.(check bool)
+       "replacement cites terminal task"
+       true
+       (str_contains msg.content "task-001=done")
+   | msgs ->
+     Alcotest.failf "expected one replacement message, got %d" (List.length msgs));
+
+  let _ = Coord.reset config in
+  Unix.rmdir tmp_dir
+
 let test_worktree_list_no_git () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1599,6 +1659,8 @@ let () =
       Alcotest.test_case "broadcast" `Quick test_broadcast_message;
       Alcotest.test_case "lifecycle messages are typed" `Quick
         test_lifecycle_messages_are_typed;
+      Alcotest.test_case "broadcast replaces terminal task cache desync" `Quick
+        test_broadcast_replaces_terminal_task_cache_desync;
     ];
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;

@@ -1,6 +1,21 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api')>()
+  return {
+    ...actual,
+    fetchBoardHearths: vi.fn(),
+  }
+})
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
+}))
 
 import {
+  boardHearths,
+  boardHearthsError,
+  boardHearthsLoading,
   isUpdated,
   boardPostKind,
   contentCategory,
@@ -10,10 +25,13 @@ import {
   visibilityLabel,
   filterHint,
   splitVisiblePosts,
+  refreshBoardHearths,
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
 import type { BoardPost } from '../../types'
+import { fetchBoardHearths, type BoardHearth } from '../../api'
+import { showToast } from '../common/toast'
 
 // Reset module-scope signals between tests
 import { boardHiddenCategories, boardExcludeAutomation } from '../../store'
@@ -45,6 +63,11 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
 beforeEach(() => {
   boardHiddenCategories.value = new Set()
   boardExcludeAutomation.value = false
+  boardHearths.value = []
+  boardHearthsError.value = false
+  boardHearthsLoading.value = false
+  vi.mocked(fetchBoardHearths).mockReset()
+  vi.mocked(showToast).mockReset()
 })
 
 describe('isUpdated', () => {
@@ -220,5 +243,34 @@ describe('filterHint', () => {
     const hint = filterHint(grouped)
     expect(hint).toContain('숨겨져')
     expect(hint).toContain('3건')
+  })
+})
+
+describe('refreshBoardHearths', () => {
+  it('keeps a newer successful hearth refresh authoritative over stale failures', async () => {
+    let rejectFirst: ((error: Error) => void) | undefined
+    let resolveSecond: ((hearths: BoardHearth[]) => void) | undefined
+
+    vi.mocked(fetchBoardHearths)
+      .mockImplementationOnce(() => new Promise<BoardHearth[]>((_, reject) => { rejectFirst = reject }))
+      .mockImplementationOnce(() => new Promise<BoardHearth[]>((resolve) => { resolveSecond = resolve }))
+
+    const first = refreshBoardHearths()
+    const second = refreshBoardHearths()
+
+    resolveSecond!([{ name: 'ops', count: 2 }])
+    await second
+
+    expect(boardHearths.value).toEqual([{ name: 'ops', count: 2 }])
+    expect(boardHearthsError.value).toBe(false)
+    expect(boardHearthsLoading.value).toBe(false)
+
+    rejectFirst!(new Error('stale failure'))
+    await first
+
+    expect(boardHearths.value).toEqual([{ name: 'ops', count: 2 }])
+    expect(boardHearthsError.value).toBe(false)
+    expect(boardHearthsLoading.value).toBe(false)
+    expect(showToast).not.toHaveBeenCalled()
   })
 })

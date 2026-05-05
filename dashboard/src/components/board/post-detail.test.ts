@@ -172,7 +172,15 @@ describe('CommentThread', () => {
     })
 
     expect(screen.getByText('needle child reply')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '답글 1개 접기' })).not.toBeInTheDocument()
     expect(screen.queryByText('답글 1개 접힘')).not.toBeInTheDocument()
+
+    fireEvent.input(screen.getByPlaceholderText('댓글 내용 검색'), {
+      target: { value: '' },
+    })
+
+    expect(screen.queryByText('needle child reply')).not.toBeInTheDocument()
+    expect(screen.getByText('답글 1개 접힘')).toBeInTheDocument()
   })
 
   it('sends comment votes through the board comment vote tool', async () => {

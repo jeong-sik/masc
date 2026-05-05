@@ -271,37 +271,44 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
   in
+  (* Yield meter: scanning all running keepers' meta files is CPU-bound
+     when many keepers share a domain.  Yield every ~1000 iterations. *)
+  let board_ym = Eio_guard.create_yield_meter () in
   let candidates =
     running_names
     |> List.filter_map (fun name ->
-      match read_meta config name with
-      | Ok (Some meta) ->
-        let wake_reason =
-          Keeper_world_observation.board_signal_wake_reason
-            ~continuity_summary:meta.continuity_summary
-            ~meta
-            ~signal
-        in
-        (* Visibility for the REPO_WAKE_UP audit finding: a [None]
-           wake_reason means the running keeper had no explicit_mention
-           match, scope feed disabled, and (for comments) no external
-           reply after a self-comment. Without this counter, operators
-           cannot distinguish between a board post that legitimately
-           had no addressee and one that was silently dropped by a
-           keeper whose [room_signal_prompt_enabled] / mention_targets
-           configuration is too narrow. *)
-        (match wake_reason with
-         | None ->
-           Prometheus.inc_counter
-             Prometheus.metric_keeper_board_signal_no_wake_total
-             ~labels:[
-               ("keeper", meta.name);
-               ("kind", signal_kind_label);
-             ]
-             ()
-         | Some _ -> ());
-        Some (meta, wake_reason)
-      | _ -> None)
+      let result =
+        match read_meta config name with
+        | Ok (Some meta) ->
+          let wake_reason =
+            Keeper_world_observation.board_signal_wake_reason
+              ~continuity_summary:meta.continuity_summary
+              ~meta
+              ~signal
+          in
+          (* Visibility for the REPO_WAKE_UP audit finding: a [None]
+             wake_reason means the running keeper had no explicit_mention
+             match, scope feed disabled, and (for comments) no external
+             reply after a self-comment. Without this counter, operators
+             cannot distinguish between a board post that legitimately
+             had no addressee and one that was silently dropped by a
+             keeper whose [room_signal_prompt_enabled] / mention_targets
+             configuration is too narrow. *)
+          (match wake_reason with
+           | None ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_board_signal_no_wake_total
+               ~labels:[
+                 ("keeper", meta.name);
+                 ("kind", signal_kind_label);
+               ]
+               ()
+           | Some _ -> ());
+          Some (meta, wake_reason)
+        | _ -> None
+      in
+      Eio_guard.yield_step board_ym;
+      result)
   in
   let wake_meta (meta : keeper_meta) reason =
     if

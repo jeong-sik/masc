@@ -268,6 +268,8 @@ describe('setupSSEReaction reconnect hydration', () => {
 
   it('keeps optimistic post_created hydration inside the active hearth filter', async () => {
     const { sseStore } = await loadSseStore()
+    const refreshHearths = vi.fn()
+    sseStore.registerBoardHearthsRefresh(refreshHearths)
     route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
     boardHearthFilter.value = 'ops'
 
@@ -284,6 +286,7 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(boardPosts.value).toEqual([])
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+    expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
   it('refreshes hearth chips when an optimistic board post carries a hearth', async () => {
@@ -299,6 +302,7 @@ describe('setupSSEReaction reconnect hydration', () => {
       title: 'Ops note',
       content: 'body',
       author: 'agent-a',
+      post_kind: 'automation',
       hearth: 'ops',
     })
     vi.advanceTimersByTime(1_000)
@@ -306,8 +310,27 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(boardPosts.value[0]?.id).toBe('post-1')
     expect(boardPosts.value[0]?.hearth).toBe('ops')
+    expect(boardPosts.value[0]?.post_kind).toBe('automation')
     expect(refreshBoard).not.toHaveBeenCalled()
     expect(refreshHearths).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh hearth chips for comment-only board events', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshHearths = vi.fn()
+    sseStore.registerBoardHearthsRefresh(refreshHearths)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'comment_added',
+      post_id: 'post-1',
+      comment_id: 'comment-1',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+    expect(refreshHearths).not.toHaveBeenCalled()
   })
 
   it('keeps websocket raw push refreshes hidden when the route does not need that surface', async () => {

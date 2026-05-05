@@ -243,7 +243,8 @@ function NewPostForm() {
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)]"
+          class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled=${newPostSubmitting.value}
           onClick=${() => {
             showNewPostForm.value = false
             newPostTitle.value = ''

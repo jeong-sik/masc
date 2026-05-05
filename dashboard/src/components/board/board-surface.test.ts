@@ -1,10 +1,10 @@
 import { h } from 'preact'
-import { fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
 import { route } from '../../router'
-import { boardHearths, contentCategory, newPostHearth } from './board-state'
+import { boardHearths, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -128,7 +128,10 @@ describe('BoardSurface Component', () => {
   // PR #13152 review: vi.stubGlobal('fetch') in beforeEach without a matching
   // unstub leaks the mocked fetch into later tests in the same worker.  Add
   // an explicit afterEach that restores all stubbed globals.
-  afterEach(() => {
+  afterEach(async () => {
+    cleanup()
+    await vi.dynamicImportSettled()
+    await Promise.resolve()
     vi.unstubAllGlobals()
   })
 
@@ -149,7 +152,9 @@ describe('BoardSurface Component', () => {
     boardAuthorFilter.value = ''
     boardHearthFilter.value = ''
     boardHearths.value = [{ name: 'ops', count: 0 }]
+    showNewPostForm.value = false
     newPostHearth.value = ''
+    newPostSubmitting.value = false
     route.value = { params: {} } as any
   })
 
@@ -233,5 +238,14 @@ describe('BoardSurface Component', () => {
 
     expect(screen.getByLabelText('새 글 hearth')).toHaveValue('ops')
     expect(newPostHearth.value).toBe('ops')
+  })
+
+  it('disables compose cancel while a post is submitting', () => {
+    showNewPostForm.value = true
+    newPostSubmitting.value = true
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('button', { name: '취소' })).toBeDisabled()
   })
 })

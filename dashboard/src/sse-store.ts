@@ -154,6 +154,12 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 
+const BOARD_HEARTH_REFRESH_EVENTS = new Set([
+  'masc/board_post',
+  'masc/board_delete',
+  'post_created',
+])
+
 // Prefix patterns for events that use startsWith matching
 const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
   { prefix: 'task_',      target: 'execution' },
@@ -163,10 +169,7 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   execution: () => { void refreshExecution() },
-  board:     () => {
-    void refreshBoard()
-    _refreshBoardHearthsFn?.()
-  },
+  board:     refreshBoard,
   operator:  () => _refreshOperatorFn?.(),
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()
@@ -386,8 +389,8 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
   if (!postId || !content) return false
   if (boardPosts.value.some(p => p.id === postId)) return false
   const eventHearth = event.hearth?.trim() ?? ''
-  if (eventHearth) scheduleBoardHearthsRefresh()
   if (!eventMatchesActiveBoardFilters(event)) return false
+  if (eventHearth) scheduleBoardHearthsRefresh()
 
   const now = new Date().toISOString()
   const post: BoardPost = {
@@ -403,11 +406,17 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
     votes: 0,
     vote_balance: 0,
     comment_count: 0,
+    post_kind: boardPostKindFromEvent(event),
     hearth: eventHearth || undefined,
   }
   boardPosts.value = [post, ...boardPosts.value]
   boardOffset.value = boardPosts.value.length
   return true
+}
+
+function boardPostKindFromEvent(event: SSEEvent): BoardPost['post_kind'] {
+  const rawKind = (event.post_kind ?? 'direct').toLowerCase()
+  return rawKind === 'system' || rawKind === 'automation' ? rawKind : 'direct'
 }
 
 function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
@@ -418,8 +427,7 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
   // reconciled through the board endpoint instead of guessing client-side.
   if (boardAuthorFilter.value.trim() !== '') return false
 
-  const rawKind = (event.post_kind ?? 'direct').toLowerCase()
-  const postKind = rawKind === 'system' || rawKind === 'automation' ? rawKind : 'direct'
+  const postKind = boardPostKindFromEvent(event)
   if (postKind === 'system' && boardExcludeSystem.value) return false
   if (postKind === 'automation' && boardExcludeAutomation.value) return false
   return true
@@ -437,6 +445,9 @@ export function routeServerPushEvent(event: SSEEvent): void {
       REFRESH_FNS[simpleRoute.target],
       simpleRoute.debounceMs,
     )
+    if (BOARD_HEARTH_REFRESH_EVENTS.has(event.type)) {
+      scheduleBoardHearthsRefresh(simpleRoute.debounceMs)
+    }
   }
 
   for (const { prefix, target } of PREFIX_ROUTES) {

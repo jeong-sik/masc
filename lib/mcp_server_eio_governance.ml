@@ -79,7 +79,11 @@ let mcp_sessions_path (config : Coord.config) =
 let mcp_session_to_json = mcp_session_record_to_yojson
 
 let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
-  mcp_session_record_of_yojson json |> Result.to_option
+  match mcp_session_record_of_yojson json with
+  | Ok v -> Some v
+  | Error detail ->
+    Log.Misc.warn "MCP session JSON decode error discarded: %s" detail;
+    None
 
 let load_mcp_sessions (config : Coord.config) : mcp_session_record list =
   let path = mcp_sessions_path config in

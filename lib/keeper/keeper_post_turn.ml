@@ -694,7 +694,13 @@ let recover_latest_checkpoint_for_overflow_retry
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
    | Ok _ -> ());
   let oas_checkpoint =
-    Result.to_option oas_result
+    (match oas_result with
+     | Ok v -> Some v
+     | Error Not_found -> None
+     | Error _ ->
+       Log.Keeper.warn "keeper:%s overflow-retry OAS checkpoint error discarded at to_option"
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+       None)
     |> Option.map (fun checkpoint ->
       let sanitized, stats =
         sanitize_oas_checkpoint ~repair_orphans:false checkpoint

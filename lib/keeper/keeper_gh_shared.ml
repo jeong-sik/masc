@@ -572,7 +572,12 @@ let inject_repo_flag_cmd ~repo_slug cmd =
 
 let repo_slug_of_remote_url url =
   match Tool_code_write.extract_github_org_repo url with
-  | Some slug -> validate_repo_slug slug |> Result.to_option
+  | Some slug ->
+    (match validate_repo_slug slug with
+     | Ok v -> Some v
+     | Error detail ->
+       Log.Misc.warn "repo slug validation error discarded: %s" detail;
+       None)
   | None -> None
 
 (** Read an origin slug from a concrete git config path without invoking git.

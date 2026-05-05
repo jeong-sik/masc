@@ -223,7 +223,11 @@ let load_worker_checkpoint ~base_path ~worker_name =
   if Sys.file_exists path then
     try
       let raw = In_channel.with_open_text path In_channel.input_all in
-      Agent_sdk.Checkpoint.of_string raw |> Result.to_option
+      (match Agent_sdk.Checkpoint.of_string raw with
+       | Ok v -> Some v
+       | Error detail ->
+         Log.LocalWorker.warn "checkpoint parse error discarded for %s: %s" worker_name (Agent_sdk.Error.to_string detail);
+         None)
     with Sys_error _ -> None
   else
     None

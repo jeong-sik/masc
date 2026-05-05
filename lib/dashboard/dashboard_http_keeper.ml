@@ -1365,8 +1365,7 @@ let sort_by_latest_ts jsons =
     jsons
 
 let string_member_nonempty key json =
-  Safe_ops.json_string_opt key json
-  |> Option.bind nonempty_string_opt
+  Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 
 let int_member_fallback key json =
   let usage = Yojson.Safe.Util.member "usage" json in
@@ -1451,7 +1450,7 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
                || Option.is_some (string_member_nonempty "need" json))
       in
       let metric_field key =
-        latest_social |> Option.bind (string_member_nonempty key)
+        Option.bind latest_social (string_member_nonempty key)
       in
       let belief =
         match metric_field "belief_summary" with

@@ -119,6 +119,14 @@
   --require-consistency-resolved` checked at 2026-05-06T06:10:00+09:00,
   confidence High: exits non-zero while the 206-vs-214 aggregate-count
   consistency finding remains open.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-status-audit.json --require-complete --format text` checked at
+  2026-05-06T06:50:00+09:00, confidence High: exits non-zero with explicit
+  blockers `strict_row_level_catalog_complete`,
+  `aggregate_consistency_resolved`, `broader_structured_ids_cataloged`, and
+  `post_act_verify_complete`, while preserving PASS evidence for source
+  manifest coverage, source artifact validation, source identity, aggregate
+  claim source verification, and strict source/catalog ID sync.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   19 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -253,7 +261,9 @@ in the strict audit catalog across 12 uncataloged ID families, 187 missing
 206-itemized rows, one open
 consistency finding for the 206-vs-214 count mismatch that fails
 `--require-consistency-resolved`, and 9 itemized rows that are not evaluable
-from the startup log patterns.
+from the startup log patterns. `goal_loop_completion_audit.py --require-complete`
+turns those facts into a closeout gate so the objective cannot be marked
+complete while those blockers remain.
 
 ### 4. DECIDE
 

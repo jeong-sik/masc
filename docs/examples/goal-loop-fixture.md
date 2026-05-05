@@ -160,3 +160,19 @@ Expected key fact: `phases.orient.summary.audit_catalog` preserves the
 source-document coverage, missing row count, source/catalog itemized-ID counts,
 and open consistency finding; the Verify phase still exposes
 `post_act_verify_pending` in `violation_kinds`.
+
+Use the status JSON as input to the closeout gate before marking the Goal
+complete:
+
+```bash
+python3 scripts/goal_loop_completion_audit.py \
+  /tmp/goal-loop-status-audit.json \
+  --require-complete \
+  --format text
+```
+
+Expected key fact: this exits non-zero until every completion criterion passes.
+With the current fixture and external source manifest it reports `BLOCKED`
+because the strict row-level catalog is incomplete, the aggregate mismatch is
+open, broader structured IDs remain uncataloged, and post-ACT Verify is still
+pending.

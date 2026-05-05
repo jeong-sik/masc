@@ -72,6 +72,11 @@ let utf8_repair_path_samples = ref []
 let utf8_repair_path_sample_limit = 8
 let utf8_repair_log_restate_sec = 60.0
 let utf8_repair_log_entry_limit = 1024
+(* Reviewer #13206: idle entries that have not been seen for this long
+   are dropped on the next insert.  Bounds memory growth even when the
+   distinct-(surface,path) count never reaches [entry_limit] but the
+   workload churns through new keys faster than restate emissions. *)
+let utf8_repair_log_idle_eviction_sec = 3600.0
 
 type utf8_repair_log_entry =
   { last_emit : float
@@ -84,7 +89,23 @@ let utf8_repair_log_seen : (string, utf8_repair_log_entry) Hashtbl.t =
 
 let utf8_repair_log_key ~surface ~path = surface ^ "\x00" ^ path
 
-let prune_utf8_repair_log_seen_if_needed () =
+let prune_utf8_repair_log_seen_if_needed ~now =
+  (* Sweep first: drop any entry whose [last_seen] is older than
+     [idle_eviction_sec], or whose [last_seen] is in the future
+     relative to [now] (a wall clock that jumped backwards via NTP /
+     VM suspend would otherwise leave entries that look "young"
+     forever and never restate).  Then, if still at or above the
+     hard cap, evict the single oldest entry. *)
+  let to_drop =
+    Hashtbl.fold
+      (fun key entry acc ->
+        let elapsed = now -. entry.last_seen in
+        if elapsed >= utf8_repair_log_idle_eviction_sec || elapsed < 0.0
+        then key :: acc
+        else acc)
+      utf8_repair_log_seen []
+  in
+  List.iter (fun k -> Hashtbl.remove utf8_repair_log_seen k) to_drop;
   if Hashtbl.length utf8_repair_log_seen >= utf8_repair_log_entry_limit then
     let oldest =
       Hashtbl.fold
@@ -115,12 +136,20 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
       let now = Time_compat.now () in
       match Hashtbl.find_opt utf8_repair_log_seen key with
       | None ->
-          prune_utf8_repair_log_seen_if_needed ();
+          prune_utf8_repair_log_seen_if_needed ~now;
           Hashtbl.replace utf8_repair_log_seen key
             { last_emit = now; last_seen = now; suppressed = 0 };
           Some 0
       | Some entry
-        when now -. entry.last_emit >= utf8_repair_log_restate_sec ->
+        when (let elapsed = now -. entry.last_emit in
+              elapsed >= utf8_repair_log_restate_sec || elapsed < 0.0) ->
+          (* Reviewer #13206: Time_compat.now resolves to Eio.Time.now
+             or Unix.gettimeofday — both wall clocks that can step
+             backwards (NTP / VM suspend) or forward by a large jump.
+             A negative [elapsed] would otherwise suppress the next
+             warning until the clock catches back up to the recorded
+             [last_emit].  Treat backwards motion as a forced restate
+             so the rate limiter recovers within one record call. *)
           Hashtbl.replace utf8_repair_log_seen key
             { last_emit = now; last_seen = now; suppressed = 0 };
           Some entry.suppressed

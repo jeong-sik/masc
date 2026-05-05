@@ -263,27 +263,51 @@ type keeper_turn_slot_state = {
   autonomous_ticket : int option ref;
 }
 
+(* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
+   Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
+   keeper fiber is being cancelled.  If a mutex acquisition raises
+   [Eio.Cancel.Cancelled] (the fiber's cancellation context is already
+   triggered), we MUST still execute the [Eio.Semaphore.release] calls
+   below — otherwise the slot is leaked and the fleet deadlocks at
+   [turn_available=0] (see 2026-05-05 fleet-stuck cycle, 14 keepers
+   idle 20+min behind a 3-slot semaphore that was never released). *)
+let safe_bookkeeping ~op f =
+  try f () with
+  | Eio.Cancel.Cancelled _ ->
+    (* Bookkeeping (holder table / waiter queue / completion stamp) is
+       advisory and self-healing; skipping under fiber cancellation is
+       acceptable.  The semaphore release that follows must still run. *)
+    Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
+  | exn ->
+    Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
+      op (Printexc.to_string exn)
+
 let release_keeper_turn_slot ~keeper_name state =
-  Option.iter
-    (fun ticket -> drop_autonomous_waiter ~ticket)
-    !(state.autonomous_ticket);
+  safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
+    Option.iter
+      (fun ticket -> drop_autonomous_waiter ~ticket)
+      !(state.autonomous_ticket));
   (* Release exactly what we acquired. The turn, autonomous, and reactive
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
-    drop_holder ~label:"turn" ~keeper_name;
+    safe_bookkeeping ~op:"drop_holder turn" (fun () ->
+      drop_holder ~label:"turn" ~keeper_name);
     Eio.Semaphore.release turn_semaphore
   end;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
        [maybe_yield_for_fairness] can measure the correct interval
        when this keeper's heartbeat loops back immediately. *)
-    record_autonomous_completion ~keeper_name;
-    drop_holder ~label:"autonomous" ~keeper_name;
+    safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+      record_autonomous_completion ~keeper_name);
+    safe_bookkeeping ~op:"drop_holder autonomous" (fun () ->
+      drop_holder ~label:"autonomous" ~keeper_name);
     Eio.Semaphore.release autonomous_turn_semaphore
   end;
   if !(state.acquired_reactive) then begin
-    drop_holder ~label:"reactive" ~keeper_name;
+    safe_bookkeeping ~op:"drop_holder reactive" (fun () ->
+      drop_holder ~label:"reactive" ~keeper_name);
     Eio.Semaphore.release reactive_turn_semaphore
   end
 

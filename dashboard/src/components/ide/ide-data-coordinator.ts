@@ -2,6 +2,10 @@ import { signal, effect } from '@preact/signals'
 import { activeIdeFile } from './ide-shell'
 import { activeKeeperName } from '../../keeper-state'
 import {
+  fetchRepositoriesList,
+  type Repository,
+} from '../../api/repositories'
+import {
   fetchWorkspaceFile,
   fetchGitBlame,
   fetchGitDiff,
@@ -31,7 +35,16 @@ export interface IdeDataCoordinator {
   readonly subscribeDiffRows: (listener: () => void) => () => void
   readonly workspaceSource: () => WorkspaceSource
   readonly subscribeWorkspaceSource: (listener: () => void) => () => void
+  readonly repositories: () => ReadonlyArray<Repository>
+  readonly activeRepositoryId: () => string | null
+  readonly setActiveRepositoryId: (repoId: string | null) => void
+  readonly subscribeRepositories: (listener: () => void) => () => void
   readonly dispose: () => void
+}
+
+function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
+  const firstFile = nodes.find(node => !node.hasChildren)
+  return firstFile?.path ?? null
 }
 
 export function createIdeDataCoordinator(): IdeDataCoordinator {
@@ -45,13 +58,25 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
+  const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
+  const activeRepositoryIdSignal = signal<string | null>(null)
 
   let abortController = new AbortController()
+
+  fetchRepositoriesList()
+    .then(repositories => {
+      activeRepositoryIdSignal.value = repositories[0]?.id ?? null
+      repositoriesSignal.value = repositories
+    })
+    .catch(() => {
+      repositoriesSignal.value = []
+    })
 
   // React to file / keeper changes
   const disposeEffect = effect(() => {
     const filePath = activeIdeFile.value
     const keeper = activeKeeperName.value
+    const repoId = activeRepositoryIdSignal.value
 
     // Cancel in-flight requests for previous file
     abortController.abort()
@@ -61,13 +86,18 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     ownershipStore.reset(filePath)
 
     const keeperParam = keeper || undefined
-    const opts = { keeper: keeperParam, signal }
+    const opts = { keeper: keeperParam, repoId, signal }
 
     // Load file tree
     fetchWorkspaceTree(2, opts).then(({ nodes, source }) => {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
       workspaceSourceSignal.value = source
+      const hasCurrentFile = nodes.some(node => node.path === filePath && !node.hasChildren)
+      const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
+      if (nextFile && nextFile !== activeIdeFile.value) {
+        activeIdeFile.value = nextFile
+      }
     }).catch(() => {})
 
     // Load file content
@@ -118,6 +148,13 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     // signal core's internal tracking).
     subscribeWorkspaceSource: (listener: () => void) =>
       workspaceSourceSignal.subscribe(listener),
+    repositories: () => repositoriesSignal.value,
+    activeRepositoryId: () => activeRepositoryIdSignal.value,
+    setActiveRepositoryId: (repoId: string | null) => {
+      activeRepositoryIdSignal.value = repoId
+    },
+    subscribeRepositories: (listener: () => void) =>
+      repositoriesSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
       disposeEffect()

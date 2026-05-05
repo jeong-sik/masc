@@ -12,9 +12,11 @@ Local Dune wrapper for multi-agent development:
   - serializes local Dune invocations with a machine-wide lock
   - defaults local concurrency to DUNE_LOCAL_JOBS, or 2
   - injects --root <repo-root> unless --root is already present
+  - asserts agent_sdk opam pin matches the repo SSOT before each build
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
+Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 USAGE
 }
 
@@ -57,6 +59,38 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   export DUNE_JOBS="${DUNE_JOBS:-${DUNE_LOCAL_JOBS:-2}}"
   export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$repo_root/_build}"
 fi
+
+# --- agent_sdk pin guard -----------------------------------------------
+# Assert the local opam switch is pinned to the SSOT SHA before each local
+# build.  Multiple concurrent sessions that share one opam switch can
+# silently repin agent_sdk to a different SHA, producing non-deterministic
+# CMI mismatches (e.g. "inconsistent assumptions over interface Types").
+# This guard catches drift before Dune starts and prints actionable repair
+# guidance.
+#
+# Skipped when:
+#   GITHUB_ACTIONS=true     – CI pins via workflow; no local switch to check
+#   MASC_SKIP_PIN_CHECK=1   – operator opt-out for known-good environments
+#   MASC_DUNE_DRY_RUN=1     – dry-run never mutates or validates state
+#   subcommand == clean     – clean does not compile; pin irrelevant
+#   opam absent from PATH   – switch not managed here; nothing to assert
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_SKIP_PIN_CHECK:-0}" != "1" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${args[0]:-build}" != "clean" ]]; then
+  _pin_check="${repo_root}/scripts/check-oas-pin.sh"
+  if [[ -x "${_pin_check}" ]] && command -v opam >/dev/null 2>&1; then
+    printf '[dune-local] checking agent_sdk pin...\n' >&2
+    if ! "${_pin_check}" --local-only >/dev/null; then
+      printf '[dune-local] agent_sdk pin drift detected — aborting build\n' >&2
+      printf '[dune-local] repair: bash scripts/opam-pin-external-deps.sh --install\n' >&2
+      printf '[dune-local] set MASC_SKIP_PIN_CHECK=1 to bypass this guard\n' >&2
+      exit 1
+    fi
+    printf '[dune-local] agent_sdk pin OK\n' >&2
+  fi
+fi
+# -----------------------------------------------------------------------
 
 printf '[dune-local] DUNE_JOBS=%s DUNE_BUILD_DIR=%s\n' \
   "${DUNE_JOBS:-auto}" "${DUNE_BUILD_DIR:-_build}" >&2

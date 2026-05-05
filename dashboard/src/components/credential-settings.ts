@@ -123,7 +123,7 @@ export function sanitizeOptionalString(value: string | null | undefined): string
   return trimmed === '' ? null : trimmed
 }
 
-export function shellQuote(value: string): string {
+function shellQuote(value: string): string {
   return `'${value.split("'").join("'\\''")}'`
 }
 

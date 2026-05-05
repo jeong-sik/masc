@@ -44,6 +44,14 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'cognition', view: 'decisions' },
     })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ki-bdi' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'keeper', focus: 'bdi' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-tool-access' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'keeper', focus: 'tool-access' },
+    })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'sa-dash' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'safety' },

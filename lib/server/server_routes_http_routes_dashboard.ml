@@ -757,6 +757,32 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
 
+  (* ── Worktree status SSE channel (RFC-0033) ── *)
+  |> Http.Router.get "/api/dashboard/worktree-status" (fun request reqd ->
+       with_public_read (fun state _req inner_reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             ([
+                ("content-type", "text/event-stream");
+                ("cache-control", "no-cache");
+                ("connection", "keep-alive");
+                ("x-accel-buffering", "no");
+              ]
+             @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let events = Dashboard_worktree_status.sse_events ~base_path in
+         List.iter
+           (fun event ->
+             try Httpun.Body.Writer.write_string writer event
+             with _ -> ())
+           events;
+         (try Httpun.Body.Writer.close writer with _ -> ())
+       ) request reqd)
+
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
   |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
        with_public_read (fun state req reqd ->

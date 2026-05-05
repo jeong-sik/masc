@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
-import { IdeEditorMock, type IdeEditorView } from './ide-editor-mock'
+import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
@@ -159,7 +159,7 @@ export function IdeShell() {
             minHeight: 0,
           }}
         >
-          <${IdeEditorMock}
+          <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
             documentStore=${coordinator.documentStore}

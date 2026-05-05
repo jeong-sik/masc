@@ -206,6 +206,22 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
+  let candidate_cfgs =
+    List.filter
+      (fun (provider_cfg : Llm_provider.Provider_config.t) ->
+         match
+           Cascade_health_tracker.check_circuit_breaker
+             Cascade_health_tracker.global
+             ~provider_key:provider_cfg.model_id
+         with
+         | Ok () -> true
+         | Error msg ->
+             Log.Misc.debug
+               "cascade %s: prefilter skipped %s (provider cooldown: %s)"
+               cascade_name provider_cfg.model_id msg;
+             false)
+      candidate_cfgs
+  in
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
      a healthy tool-capable provider. Depth 1 only (no recursive search). *)

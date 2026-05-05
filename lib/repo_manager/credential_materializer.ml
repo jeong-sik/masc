@@ -444,7 +444,6 @@ let provision_via_with_token ?credential_id ?identity_label
                | Sys_error _ ->
                    close_out_noerr oc);
               let status = snd (waitpid_no_intr [] pid) in
-              let status = snd (waitpid_no_intr [] pid) in
               (match status with
                | Unix.WEXITED 0 ->
                    (* RFC-0008 F-2: relabel hosts.yml:user back to the

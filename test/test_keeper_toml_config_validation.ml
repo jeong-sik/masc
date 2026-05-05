@@ -1,6 +1,9 @@
 open Alcotest
 
 module KTP = Masc_mcp.Keeper_types_profile
+module KT = Masc_mcp.Keeper_types
+module KPolicy = Masc_mcp.Keeper_tool_policy
+module KPR = Masc_mcp.Keeper_tool_pr_review
 
 (** Validate that every .toml file in config/keepers/ parses successfully
     with the OCaml TOML parser.  This catches syntax that is valid standard
@@ -62,12 +65,16 @@ let test_named_keeper_docker_defaults () =
   expect_keeper ~name:"sangsu" ~persona:"sangsu"
 
 let test_committed_keepers_are_pr_work_capable () =
+  let project_root = Masc_test_deps.find_project_root () in
+  Masc_test_deps.init_keeper_tool_registry ();
+  (match KPolicy.init_policy_config ~base_path:project_root with
+   | Ok () -> ()
+   | Error e -> fail (Printf.sprintf "init_policy_config: %s" e));
   let config_dir =
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
     | Some repo_root -> Filename.concat repo_root "config/keepers"
-    | None -> "config/keepers"
+    | None -> Filename.concat project_root "config/keepers"
   in
-  let pr_work_presets = [ "coding"; "research"; "delivery"; "full" ] in
   let files =
     Sys.readdir config_dir
     |> Array.to_list
@@ -83,11 +90,58 @@ let test_committed_keepers_are_pr_work_capable () =
        match KTP.load_keeper_toml path with
        | Error e -> fail (Printf.sprintf "%s: %s" file e)
        | Ok (_loaded_name, defaults) ->
-           let preset = defaults.tool_preset in
-           check bool (name ^ " preset can do PR work") true
-             (match preset with
-              | Some p -> List.mem p pr_work_presets
-              | None -> true))
+           check (option string) (name ^ " sandbox_profile") (Some "docker")
+             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+           check (option string) (name ^ " network_mode") (Some "inherit")
+             (Option.map KTP.network_mode_to_string defaults.network_mode);
+           check (option string) (name ^ " github_identity")
+             (Some "anyang-keepers") defaults.github_identity;
+           check (option string) (name ^ " git_identity_mode")
+             (Some "github_identity") defaults.git_identity_mode;
+           let preset =
+             match defaults.tool_preset with
+             | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)
+             | Some raw ->
+                 (match KT.tool_preset_of_string raw with
+                  | Some preset -> preset
+                  | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
+           in
+           check bool (name ^ " preset can mutate PR reviews") true
+             (KPR.pr_review_mutation_preset_ok (Some preset));
+           let meta =
+             match
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc [
+                    ("name", `String name);
+                    ("agent_name", `String name);
+                    ("trace_id", `String (name ^ "-capability-test"));
+                    ( "tool_access",
+                      `Assoc [
+                        ("kind", `String "preset");
+                        ("preset", `String (KT.tool_preset_to_string preset));
+                        ("also_allow", `List []);
+                      ] );
+                    ("tool_denylist", `List []);
+                  ])
+             with
+             | Ok meta -> meta
+             | Error e -> fail (Printf.sprintf "%s: meta fixture: %s" file e)
+           in
+           let lookup = KPolicy.tool_access_lookup_of_meta meta in
+           List.iter
+             (fun tool_name ->
+                check bool (name ^ " can execute " ^ tool_name) true
+                  (KPolicy.can_execute ~lookup tool_name))
+             [
+               "keeper_shell";
+               "masc_code_git";
+               "keeper_preflight_check";
+               "keeper_pr_review_read";
+               "keeper_pr_review_comment";
+               "keeper_pr_review_reply";
+             ];
+           check string (name ^ " approve event maps to gh") "--approve"
+             (KPR.pr_review_event_to_gh_flag KPR.Approve))
     files
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)

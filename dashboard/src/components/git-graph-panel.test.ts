@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { h, type ComponentChildren } from 'preact'
 import { render } from 'preact'
+import { act } from 'preact/test-utils'
 
 vi.mock('./git-graph-store', () => {
   const mockState = { value: { data: null, loading: false, error: null } }
@@ -13,6 +14,37 @@ vi.mock('./git-graph-store', () => {
 
 vi.mock('./git-graph-view', () => ({
   GitGraphView: () => h('div', { 'data-testid': 'git-graph-view' }, 'GitGraphView'),
+}))
+
+vi.mock('../api/repositories', () => ({
+  fetchRepositoriesList: vi.fn(() => Promise.resolve([
+    {
+      id: 'masc',
+      name: 'masc',
+      url: '',
+      local_path: '.masc/repos/masc',
+      default_branch: 'main',
+      status: 'active',
+      auto_sync: false,
+      sync_interval: 300,
+      credential_id: null,
+      created_at: null,
+      updated_at: null,
+    },
+    {
+      id: 'oas',
+      name: 'oas',
+      url: '',
+      local_path: '.masc/repos/oas',
+      default_branch: 'main',
+      status: 'active',
+      auto_sync: false,
+      sync_interval: 300,
+      credential_id: null,
+      created_at: null,
+      updated_at: null,
+    },
+  ])),
 }))
 
 vi.mock('./common/feedback-state', () => ({
@@ -135,6 +167,30 @@ describe('GitGraphPanel', () => {
     expect(container.textContent).toContain('2')
     expect(container.textContent).toContain('Commits')
     expect(container.textContent).toContain('4')
+  })
+
+  it('renders repository selector from configured repositories', async () => {
+    gitGraphResource.state.value = {
+      data: makeGraph({
+        repos: [makeRepo()],
+        stats: { repo_count: 1, agent_count: 0, branch_count: 0, commit_count: 0, dirty_count: 0, conflict_count: 0 },
+        warnings: [],
+        generated_at: '',
+      }),
+      loading: false,
+      error: null,
+    }
+    await act(() => {
+      render(h(GitGraphPanel, null), container)
+      return new Promise<void>(resolve => {
+        window.setTimeout(resolve, 10)
+      })
+    })
+
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Git graph repository"]')
+    expect(select).not.toBeNull()
+    expect(select!.value).toBe('masc')
+    expect(select!.textContent).toContain('.masc/repos/masc')
   })
 
   it('renders warning banner when warnings present', () => {

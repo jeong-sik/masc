@@ -43,19 +43,23 @@ export interface WorkspaceFileResponse {
 
 export interface WorkspaceApiOptions extends GetOptions {
   readonly keeper?: string
+  readonly repoId?: string | null
 }
 
-function keeperParam(keeper: string | undefined): string {
-  return keeper ? `&keeper=${encodeURIComponent(keeper)}` : ''
+function appendWorkspaceParams(params: URLSearchParams, opts: WorkspaceApiOptions): void {
+  if (opts.repoId) params.set('repo_id', opts.repoId)
+  if (opts.keeper) params.set('keeper', opts.keeper)
 }
 
 export async function fetchWorkspaceTree(
   depth: number,
   opts: WorkspaceApiOptions = {},
 ): Promise<WorkspaceTreeResult> {
-  const keeper = keeperParam(opts.keeper)
+  const params = new URLSearchParams()
+  params.set('depth', String(depth))
+  appendWorkspaceParams(params, opts)
   const { data, headers } = await getWithResponse<ReadonlyArray<FileTreeNode>>(
-    `/api/v1/workspace/tree?depth=${depth}${keeper}`,
+    `/api/v1/workspace/tree?${params.toString()}`,
     opts,
   )
   return {
@@ -68,9 +72,11 @@ export function fetchWorkspaceFile(
   path: string,
   opts: WorkspaceApiOptions = {},
 ): Promise<WorkspaceFileResponse | null> {
-  const keeper = keeperParam(opts.keeper)
+  const params = new URLSearchParams()
+  params.set('path', path)
+  appendWorkspaceParams(params, opts)
   return get<WorkspaceFileResponse | null>(
-    `/api/v1/workspace/file?path=${encodeURIComponent(path)}${keeper}`,
+    `/api/v1/workspace/file?${params.toString()}`,
     opts,
   )
 }
@@ -79,9 +85,11 @@ export function fetchGitBlame(
   path: string,
   opts: WorkspaceApiOptions = {},
 ): Promise<ReadonlyArray<BlameBlock>> {
-  const keeper = keeperParam(opts.keeper)
+  const params = new URLSearchParams()
+  params.set('path', path)
+  appendWorkspaceParams(params, opts)
   return get<ReadonlyArray<BlameBlock>>(
-    `/api/v1/git/blame?path=${encodeURIComponent(path)}${keeper}`,
+    `/api/v1/git/blame?${params.toString()}`,
     opts,
   )
 }
@@ -95,9 +103,12 @@ export function fetchGitDiff(
   opts: WorkspaceApiOptions & { baseRef?: string } = {},
 ): Promise<ReadonlyArray<UnifiedDiffRow>> {
   const baseRef = opts.baseRef ?? 'HEAD'
-  const keeper = keeperParam(opts.keeper)
+  const params = new URLSearchParams()
+  params.set('path', path)
+  params.set('base_ref', baseRef)
+  appendWorkspaceParams(params, opts)
   return get<GitDiffResponse>(
-    `/api/v1/git/diff?path=${encodeURIComponent(path)}&base_ref=${encodeURIComponent(baseRef)}${keeper}`,
+    `/api/v1/git/diff?${params.toString()}`,
     opts,
   ).then(data => Array.isArray(data.unified) ? data.unified : [])
 }

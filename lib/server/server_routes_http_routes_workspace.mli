@@ -14,12 +14,33 @@ val classify_keeper_query :
            | `PlaygroundMissing of string
            | `KeeperUnknown of string ]
 
+(** Pure dispatch logic for repository-aware workspace queries.
+    [repo_param] takes precedence over [keeper_param], matching the
+    dashboard IDE repository picker. *)
+val classify_workspace_query :
+  project_base:string ->
+  lookup_repository:(string -> string option) ->
+  lookup_playground:(string -> string option) ->
+  exists_dir:(string -> bool) ->
+  repo_param:string option ->
+  keeper_param:string option ->
+  string * [ `Project
+           | `Repository of string
+           | `RepositoryMissing of string
+           | `RepositoryUnknown of string
+           | `Playground of string
+           | `PlaygroundMissing of string
+           | `KeeperUnknown of string ]
+
 (** Encode the workspace source tag as the [X-Workspace-Source] header
     so the frontend can render hints (e.g. "Playground 없음 — 프로젝트로
     fallback") without parsing the JSON body. Exposed for unit
     testing. *)
 val source_header :
   [ `Project
+  | `Repository of string
+  | `RepositoryMissing of string
+  | `RepositoryUnknown of string
   | `Playground of string
   | `PlaygroundMissing of string
   | `KeeperUnknown of string ] ->

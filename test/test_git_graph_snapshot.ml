@@ -81,11 +81,40 @@ let test_conflict_status_encoding () =
       check bool "conflict" true node.conflict
   | None -> fail "current branch node missing"
 
+let test_repository_identity_override () =
+  let snap =
+    G.snapshot_of_outputs
+      ~repo_id:"masc"
+      ~repo_label:"MASC"
+      ~generated_at:"2026-04-30T00:00:00Z"
+      (sample_outputs ())
+  in
+  match snap.repos with
+  | [ repo ] ->
+    check string "repo id" "masc" repo.id;
+    check string "repo label" "MASC" repo.label;
+    List.iter
+      (fun (node : G.graph_node) ->
+        check string ("node repo id " ^ node.id) "masc" node.repo_id)
+      snap.nodes
+  | _ -> fail "expected one repo"
+
+let test_empty_json_warning () =
+  match G.empty_json "repository unknown: ghost" with
+  | `Assoc fields -> (
+      match List.assoc_opt "warnings" fields, List.assoc_opt "repos" fields with
+      | Some (`List [`String warning]), Some (`List []) ->
+        check string "warning" "repository unknown: ghost" warning
+      | _ -> fail "expected empty repos and warning")
+  | _ -> fail "expected object"
+
 let () =
   run "git_graph_snapshot"
     [ ( "snapshot"
       , [ test_case "json shape round trips" `Quick test_json_shape_round_trips
         ; test_case "commit/ref edges" `Quick test_commit_parent_and_ref_edges
         ; test_case "conflict status encoding" `Quick test_conflict_status_encoding
+        ; test_case "repository identity override" `Quick test_repository_identity_override
+        ; test_case "empty json warning" `Quick test_empty_json_warning
         ] )
     ]

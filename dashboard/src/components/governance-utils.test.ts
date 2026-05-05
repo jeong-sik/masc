@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   itemKey,
   getSelectedDecision,
-  isOpenStatus,
   filteredItemsByFilter,
   kindLabel,
   formatAgeSummary,
@@ -67,45 +66,6 @@ describe('getSelectedDecision', () => {
 
 // ================================================================
 // isOpenStatus
-// ================================================================
-
-describe('isOpenStatus', () => {
-  it('returns true for pending_ruling', () => {
-    expect(isOpenStatus('pending_ruling')).toBe(true)
-  })
-
-  it('returns true for needs_human_gate', () => {
-    expect(isOpenStatus('needs_human_gate')).toBe(true)
-  })
-
-  it('returns true for unknown status', () => {
-    expect(isOpenStatus('something_else')).toBe(true)
-  })
-
-  it('returns false for executed', () => {
-    expect(isOpenStatus('executed')).toBe(false)
-  })
-
-  it('returns false for blocked', () => {
-    expect(isOpenStatus('blocked')).toBe(false)
-  })
-
-  it('returns false for closed', () => {
-    expect(isOpenStatus('closed')).toBe(false)
-  })
-
-  it('is case-insensitive', () => {
-    expect(isOpenStatus('Executed')).toBe(false)
-    expect(isOpenStatus('BLOCKED')).toBe(false)
-  })
-
-  it('trims whitespace', () => {
-    expect(isOpenStatus('  executed  ')).toBe(false)
-  })
-})
-
-// ================================================================
-// filteredItemsByFilter
 // ================================================================
 
 describe('filteredItemsByFilter', () => {

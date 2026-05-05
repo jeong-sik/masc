@@ -1,7 +1,13 @@
 (* Recovery — Cycle 23 / Tier B6.
    Classification plus callback-driven strategy execution. Keeper-turn
    lifecycle integration remains outside this module; see recovery.mli for
-   the design rationale. *)
+   the design rationale.
+
+   Audit response 2026-05-05 §4: classification + audit log entry only;
+   strategy execution is deferred until the keeper-turn wire-in lands
+   (see resilience_runtime.mli §Deferred). External audits should read the
+   matrix at docs/audit-responses/2026-05-05-dashboard-heuristic.md before
+   filing claims against this module. *)
 
 type error_mode =
   | TransientError of {

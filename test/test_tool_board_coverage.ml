@@ -44,7 +44,7 @@ let parse_create_response_json body =
   | Some idx ->
       Yojson.Safe.from_string
         (String.sub body (idx + 1) (String.length body - idx - 1))
-  | None -> Alcotest.fail "expected JSON payload in create response"
+  | None -> Yojson.Safe.from_string body
 
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
   match
@@ -377,13 +377,7 @@ let test_post_create_structured_payload () =
        ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json =
-    match String.index_opt body '\n' with
-    | Some idx ->
-        Yojson.Safe.from_string
-          (String.sub body (idx + 1) (String.length body - idx - 1))
-    | None -> Alcotest.fail "expected JSON payload in create response"
-  in
+  let json = parse_create_response_json body in
   Alcotest.(check string) "title kept" "Why"
     Yojson.Safe.Util.(json |> member "title" |> to_string);
   Alcotest.(check string) "body stripped" "Visible answer"
@@ -682,14 +676,11 @@ let test_dispatch_delete_success () =
   let _ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "to be deleted"); ("author", `String "tester")]) in
   let post_id =
-    match String.index_opt body '\n' with
-    | Some idx ->
-      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
-      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
-    | None -> Alcotest.fail ("No newline in create response: " ^ body)
+    try
+      parse_create_response_json body
+      |> Yojson.Safe.Util.member "id"
+      |> Yojson.Safe.Util.to_string
+    with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ body)
   in
   let ok_del, msg_del = dispatch "masc_board_delete"
     (make_args [("post_id", `String post_id)]) in
@@ -726,14 +717,11 @@ let test_post_get_success () =
   Alcotest.(check bool) "create ok" true ok;
   (* Response is "✅ Post created:\n{json}" — extract JSON after first newline *)
   let post_id =
-    match String.index_opt body '\n' with
-    | Some idx ->
-      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
-      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
-    | None -> Alcotest.fail ("No newline in create response: " ^ body)
+    try
+      parse_create_response_json body
+      |> Yojson.Safe.Util.member "id"
+      |> Yojson.Safe.Util.to_string
+    with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ body)
   in
   Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
   let ok2, body2 = dispatch "masc_board_get"
@@ -1008,8 +996,9 @@ let () =
               ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "classified as direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1020,8 +1009,9 @@ let () =
               ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as automation" true
-              (contains_substring msg {|"post_kind": "automation"|}));
+            Alcotest.(check string) "classified as automation" "automation"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1032,8 +1022,9 @@ let () =
               ("author", `String "sangsu")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "classified as direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "legacy human override normalizes to direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1045,8 +1036,9 @@ let () =
               ("post_kind", `String "human")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "legacy override normalized to direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "legacy override normalized to direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
         ] );
       ( "board_list_cache",
         [

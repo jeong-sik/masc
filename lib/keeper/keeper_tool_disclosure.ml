@@ -335,6 +335,7 @@ let actionable_tool_contract_violation_reason
     | [] ->
       Some
         "actionable keeper signal was present, but the model called no keeper tools"
+    | names when List.exists is_owned_task_progress_tool_name names -> None
     | names
       when (not claim_context_allowed)
            && not (List.exists is_owned_task_progress_tool_name names) ->

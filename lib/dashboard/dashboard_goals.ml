@@ -33,6 +33,11 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
+type attainment_unit =
+  | Percent
+  | Count
+  | Unknown
+
 let task_is_linked_to_goal (task : Masc_domain.task) goal_id =
   Convergence.task_matches_goal ~goal_id task
 
@@ -248,6 +253,201 @@ let compute_convergence (goal : Goal_store.goal) linked_tasks children =
     child_avg
   else
     task_ratio
+
+let clamp_float lower upper value =
+  if value < lower then lower else if value > upper then upper else value
+
+let pct_of_float value =
+  int_of_float (floor (clamp_float 0.0 100.0 value +. 0.5))
+
+let json_float_opt = function
+  | Some value -> `Float value
+  | None -> `Null
+
+let json_int_opt = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let attainment_unit_to_string = function
+  | Percent -> "percent"
+  | Count -> "count"
+  | Unknown -> "unknown"
+
+let contains_ci haystack needle =
+  String_util.contains_substring_ci haystack needle
+
+let metric_implies_percent metric =
+  match metric with
+  | None -> false
+  | Some raw ->
+      contains_ci raw "percent"
+      || contains_ci raw "pct"
+      || contains_ci raw "ratio"
+      || contains_ci raw "rate"
+      || contains_ci raw "completion"
+
+let metric_supports_count_target metric =
+  match metric with
+  | None -> true
+  | Some raw ->
+      contains_ci raw "task"
+      || contains_ci raw "todo"
+      || contains_ci raw "issue"
+      || contains_ci raw "ticket"
+      || contains_ci raw "pr"
+      || contains_ci raw "done"
+
+let target_value_implies_percent raw =
+  contains_ci raw "%"
+  || contains_ci raw "percent"
+  || contains_ci raw "pct"
+
+let parse_first_float raw =
+  let len = String.length raw in
+  let is_start = function
+    | '0' .. '9' | '+' | '-' | '.' -> true
+    | _ -> false
+  in
+  let is_part = function
+    | '0' .. '9' | '+' | '-' | '.' -> true
+    | _ -> false
+  in
+  let rec token_end index =
+    if index >= len || not (is_part raw.[index]) then index
+    else token_end (index + 1)
+  in
+  let rec search index =
+    if index >= len then None
+    else if is_start raw.[index] then
+      let stop = token_end index in
+      let token = String.sub raw index (stop - index) in
+      match float_of_string_opt token with
+      | Some value -> Some value
+      | None -> search (index + 1)
+    else
+      search (index + 1)
+  in
+  search 0
+
+let parsed_target_unit metric raw =
+  if target_value_implies_percent raw || metric_implies_percent metric then
+    Percent
+  else
+    Count
+
+let build_attainment_json ~state ~basis ~task_done_count ~task_count
+    ~target_parse_status ~unit ~observed_value ~target_numeric ~attainment_pct
+    ~note (goal : Goal_store.goal) =
+  `Assoc
+    [
+      ("state", `String state);
+      ("basis", `String basis);
+      ("metric", Json_util.string_opt_to_json goal.metric);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
+      ("target_parse_status", `String target_parse_status);
+      ("unit", `String (attainment_unit_to_string unit));
+      ("observed_value", json_float_opt observed_value);
+      ("target_numeric", json_float_opt target_numeric);
+      ("attainment_pct", json_int_opt attainment_pct);
+      ("task_done_count", `Int task_done_count);
+      ("task_count", `Int task_count);
+      ("note", `String note);
+    ]
+
+let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
+  let task_count = List.length node.tasks in
+  let task_done_count =
+    List.length
+      (List.filter
+         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+         node.tasks)
+  in
+  let task_completion_pct =
+    if task_count = 0 then None
+    else Some (float_of_int task_done_count /. float_of_int task_count *. 100.0)
+  in
+  let measured ~basis ~unit ~observed_value ~target_numeric ~target_parse_status =
+    let attainment_pct =
+      if target_numeric <= 0.0 then
+        None
+      else
+        Some (pct_of_float (observed_value /. target_numeric *. 100.0))
+    in
+    let state =
+      match attainment_pct with
+      | Some pct when pct >= 100 -> "attained"
+      | Some 0 -> "not_started"
+      | Some _ -> "in_progress"
+      | None -> "unmeasured"
+    in
+    build_attainment_json ~state ~basis ~task_done_count ~task_count
+      ~target_parse_status ~unit ~observed_value:(Some observed_value)
+      ~target_numeric:(Some target_numeric) ~attainment_pct
+      ~note:
+        (match unit with
+        | Percent -> "Derived from linked task completion against a percent target."
+        | Count -> "Derived from completed linked tasks against a count target."
+        | Unknown -> "Derived from linked goal evidence.")
+      goal
+  in
+  let unmeasured ?(unit = Unknown) ?target_numeric target_parse_status note =
+    build_attainment_json ~state:"unmeasured" ~basis:"unmeasured"
+      ~task_done_count ~task_count ~target_parse_status ~unit
+      ~observed_value:None ~target_numeric ~attainment_pct:None ~note goal
+  in
+  match goal.phase with
+  | Goal_phase.Completed ->
+      build_attainment_json ~state:"attained" ~basis:"goal_phase"
+        ~task_done_count ~task_count
+        ~target_parse_status:
+          (match goal.target_value with
+          | Some raw when parse_first_float raw <> None -> "parseable"
+          | Some _ -> "unparseable"
+          | None -> "absent")
+        ~unit:Percent ~observed_value:(Some 100.0) ~target_numeric:(Some 100.0)
+        ~attainment_pct:(Some 100)
+        ~note:"Goal lifecycle phase is completed." goal
+  | _ -> (
+      match goal.target_value with
+      | Some raw -> (
+          match parse_first_float raw with
+          | None ->
+              unmeasured "unparseable"
+                "Target value is not numeric enough for dashboard attainment."
+          | Some target_numeric when target_numeric <= 0.0 ->
+              unmeasured "invalid_target"
+                "Target value must be greater than zero."
+          | Some target_numeric -> (
+              let unit = parsed_target_unit goal.metric raw in
+              match unit with
+              | Percent -> (
+                  match task_completion_pct with
+                  | Some observed_value ->
+                      measured ~basis:"metric_target_percent" ~unit
+                        ~observed_value ~target_numeric
+                        ~target_parse_status:"parseable"
+                  | None ->
+                      unmeasured ~unit ~target_numeric "no_linked_tasks"
+                        "Percent target needs linked task evidence." )
+              | Count ->
+                  if metric_supports_count_target goal.metric then
+                    measured ~basis:"metric_target_count" ~unit
+                      ~observed_value:(float_of_int task_done_count)
+                      ~target_numeric ~target_parse_status:"parseable"
+                  else
+                    unmeasured ~unit ~target_numeric "unsupported_metric"
+                      "Numeric target is not mapped to a known count metric."
+              | Unknown ->
+                  unmeasured "unsupported_metric"
+                    "Target unit is unknown." ))
+      | None -> (
+          match task_completion_pct with
+          | Some observed_value ->
+              measured ~basis:"linked_tasks" ~unit:Percent ~observed_value
+                ~target_numeric:100.0 ~target_parse_status:"absent"
+          | None ->
+              unmeasured "absent"
+                "No target value or linked task evidence is available." ))
 
 let approval_matches_goal goal_id approval_json =
   let goal_ids =
@@ -1172,6 +1372,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
        | None -> `Null);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
+      ("attainment", goal_attainment_to_json goal node);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",

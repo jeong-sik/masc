@@ -539,6 +539,38 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   `
 }
 
+function attainmentTone(attainment: GoalTreeNode['attainment']): 'default' | 'ok' | 'warn' | 'bad' {
+  if (attainment.state === 'attained') return 'ok'
+  if (attainment.state === 'unmeasured') return 'warn'
+  if (attainment.state === 'not_started') return 'bad'
+  return 'default'
+}
+
+function attainmentClass(attainment: GoalTreeNode['attainment']): string {
+  switch (attainmentTone(attainment)) {
+    case 'ok': return 'border-ok/30 bg-ok/10 text-ok'
+    case 'warn': return 'border-warn/30 bg-warn/10 text-warn'
+    case 'bad': return 'border-bad/30 bg-bad/10 text-bad'
+    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
+  }
+}
+
+function attainmentLabel(attainment: GoalTreeNode['attainment']): string {
+  if (attainment.attainment_pct == null) return '달성 미측정'
+  return `달성 ${attainment.attainment_pct}%`
+}
+
+function GoalAttainmentChip({ attainment }: { attainment: GoalTreeNode['attainment'] }) {
+  return html`
+    <span
+      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${attainmentClass(attainment)}"
+      title=${`${attainment.basis}; target=${attainment.target_value ?? '-'}; observed=${attainment.observed_value ?? '-'}; ${attainment.note}`}
+    >
+      ${attainmentLabel(attainment)}
+    </span>
+  `
+}
+
 function TreeSummary({
   summary,
   awaitingVerificationCount,
@@ -690,6 +722,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
               </span>
             ` : null}
+            <${GoalAttainmentChip} attainment=${node.attainment} />
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
@@ -1092,6 +1125,7 @@ function GoalDetailPanel({
         ` : null}
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
+          <${DetailMetric} label="목표 달성" value=${selectedNode.attainment.attainment_pct == null ? '미측정' : `${selectedNode.attainment.attainment_pct}%`} tone=${attainmentTone(selectedNode.attainment)} />
           <${DetailMetric} label="작업" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="승인 대기" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />

@@ -468,6 +468,90 @@ describe('dashboard goals decoding', () => {
     expect(result.summary.on_track_goals).toBe(1)
   })
 
+  it('decodes goal attainment projections on tree payloads', async () => {
+    const rawResponse = {
+      tree: [
+        makeRawGoalNode({
+          metric: 'completion_pct',
+          target_value: '75%',
+          attainment: {
+            state: 'attained',
+            basis: 'metric_target_percent',
+            metric: 'completion_pct',
+            target_value: '75%',
+            target_parse_status: 'parseable',
+            unit: 'percent',
+            observed_value: 75,
+            target_numeric: 75,
+            attainment_pct: 100,
+            task_done_count: 3,
+            task_count: 4,
+            note: 'Derived from linked task completion against a percent target.',
+          },
+        }),
+      ],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]?.attainment).toMatchObject({
+      state: 'attained',
+      basis: 'metric_target_percent',
+      metric: 'completion_pct',
+      target_value: '75%',
+      target_parse_status: 'parseable',
+      unit: 'percent',
+      observed_value: 75,
+      target_numeric: 75,
+      attainment_pct: 100,
+      task_done_count: 3,
+      task_count: 4,
+    })
+  })
+
+  it('falls back to unmeasured goal attainment when payloads are old', async () => {
+    const rawResponse = {
+      tree: [
+        makeRawGoalNode({
+          metric: 'latency',
+          target_value: 'fast enough',
+          task_done_count: 1,
+          task_count: 2,
+        }),
+      ],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]?.attainment).toMatchObject({
+      state: 'unmeasured',
+      basis: 'unmeasured',
+      metric: 'latency',
+      target_value: 'fast enough',
+      target_parse_status: 'unparseable',
+      task_done_count: 1,
+      task_count: 2,
+    })
+  })
+
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
     const rawResponse = {
       goal: makeRawGoalNode(),

@@ -41,6 +41,7 @@ import type {
   GoalKeeperTrustLatestEvent,
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
+  GoalAttainmentProjection,
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
@@ -1371,6 +1372,47 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
   }
 }
 
+function decodeGoalAttainmentProjection(
+  raw: unknown,
+  fallback: {
+    metric: string | null
+    targetValue: string | null
+    taskDoneCount: number
+    taskCount: number
+  },
+): GoalAttainmentProjection {
+  if (!isRecord(raw)) {
+    return {
+      state: 'unmeasured',
+      basis: 'unmeasured',
+      metric: fallback.metric,
+      target_value: fallback.targetValue,
+      target_parse_status: fallback.targetValue ? 'unparseable' : 'absent',
+      unit: 'unknown',
+      observed_value: null,
+      target_numeric: null,
+      attainment_pct: null,
+      task_done_count: fallback.taskDoneCount,
+      task_count: fallback.taskCount,
+      note: 'Attainment projection missing from payload.',
+    }
+  }
+  return {
+    state: asString(raw.state, 'unmeasured'),
+    basis: asString(raw.basis, 'unmeasured'),
+    metric: asNullableString(raw.metric) ?? fallback.metric,
+    target_value: asNullableString(raw.target_value) ?? fallback.targetValue,
+    target_parse_status: asString(raw.target_parse_status, 'absent'),
+    unit: asString(raw.unit, 'unknown'),
+    observed_value: asNumber(raw.observed_value) ?? null,
+    target_numeric: asNumber(raw.target_numeric) ?? null,
+    attainment_pct: asInt(raw.attainment_pct) ?? null,
+    task_done_count: asInt(raw.task_done_count) ?? fallback.taskDoneCount,
+    task_count: asInt(raw.task_count) ?? fallback.taskCount,
+    note: asString(raw.note, ''),
+  }
+}
+
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -1382,6 +1424,10 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   const children = asRecordArray(raw.children)
     .map(decodeGoalTreeNode)
     .filter((node): node is GoalTreeNode => node !== null)
+  const metric = asNullableString(raw.metric)
+  const targetValue = asNullableString(raw.target_value)
+  const taskCount = asInt(raw.task_count) ?? tasks.length
+  const taskDoneCount = asInt(raw.task_done_count) ?? 0
   return {
     id,
     title,
@@ -1396,15 +1442,21 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     badges: asStringArray(raw.badges),
     status_reason: asString(raw.status_reason, ''),
     priority: asInt(raw.priority) ?? 0,
-    metric: asNullableString(raw.metric),
-    target_value: asNullableString(raw.target_value),
+    metric,
+    target_value: targetValue,
     due_date: asNullableString(raw.due_date),
     parent_goal_id: asNullableString(raw.parent_goal_id),
     convergence: asNumber(raw.convergence, 0),
     convergence_pct: asInt(raw.convergence_pct) ?? 0,
+    attainment: decodeGoalAttainmentProjection(raw.attainment, {
+      metric,
+      targetValue,
+      taskDoneCount,
+      taskCount,
+    }),
     tasks,
-    task_count: asInt(raw.task_count) ?? tasks.length,
-    task_done_count: asInt(raw.task_done_count) ?? 0,
+    task_count: taskCount,
+    task_done_count: taskDoneCount,
     verification_summary: decodeGoalVerificationSummary(raw.verification_summary),
     effective_verifier_policy: decodeGoalVerificationPolicySnapshot(raw.effective_verifier_policy),
     active_verification_request: decodeGoalVerificationRequest(raw.active_verification_request),

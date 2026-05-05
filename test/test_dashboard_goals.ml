@@ -367,6 +367,70 @@ let test_title_marker_links_legacy_task () =
   check string "node linkage source" "title_tag"
     (node |> member "linkage_source" |> to_string)
 
+let test_goal_attainment_projects_percent_target () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Percent target goal"
+        ~metric:"completion_pct" ~target_value:"75%" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Done task 1";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 2";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 3";
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Open task"
+       ~priority:3 ~description:"remaining work");
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "attainment state" "attained"
+    (attainment |> member "state" |> to_string);
+  check string "attainment basis" "metric_target_percent"
+    (attainment |> member "basis" |> to_string);
+  check string "target parse status" "parseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check int "target-relative pct" 100
+    (attainment |> member "attainment_pct" |> to_int);
+  check (float 0.001) "observed percent" 75.0
+    (attainment |> member "observed_value" |> to_float);
+  check (float 0.001) "target percent" 75.0
+    (attainment |> member "target_numeric" |> to_float);
+  check int "task count" 4 (attainment |> member "task_count" |> to_int);
+  check int "done task count" 3
+    (attainment |> member "task_done_count" |> to_int)
+
+let test_goal_attainment_does_not_fake_unparseable_target () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Unparseable target goal"
+        ~metric:"latency" ~target_value:"fast enough" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Evidence task";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "unmeasured state" "unmeasured"
+    (attainment |> member "state" |> to_string);
+  check string "unmeasured basis" "unmeasured"
+    (attainment |> member "basis" |> to_string);
+  check string "unparseable target" "unparseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check bool "attainment pct omitted" true
+    (attainment |> member "attainment_pct" = `Null);
+  check int "evidence task retained" 1
+    (attainment |> member "task_done_count" |> to_int)
+
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
   let _goal, _kind =
@@ -621,6 +685,10 @@ let () =
             test_cancelled_only_goal_is_at_risk;
           test_case "title marker links legacy task" `Quick
             test_title_marker_links_legacy_task;
+          test_case "goal attainment projects percent targets" `Quick
+            test_goal_attainment_projects_percent_target;
+          test_case "goal attainment does not fake unparseable targets" `Quick
+            test_goal_attainment_does_not_fake_unparseable_target;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
           test_case

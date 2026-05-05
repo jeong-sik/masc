@@ -663,6 +663,7 @@ export interface GoalTreeNode {
   parent_goal_id: string | null
   convergence: number
   convergence_pct: number
+  attainment: GoalAttainmentProjection
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
@@ -689,6 +690,21 @@ export interface GoalTreeNode {
   stalled_since?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface GoalAttainmentProjection {
+  state: 'attained' | 'in_progress' | 'not_started' | 'unmeasured' | string
+  basis: 'goal_phase' | 'linked_tasks' | 'metric_target_percent' | 'metric_target_count' | 'unmeasured' | string
+  metric: string | null
+  target_value: string | null
+  target_parse_status: 'absent' | 'parseable' | 'unparseable' | 'invalid_target' | 'unsupported_metric' | 'no_linked_tasks' | string
+  unit: 'percent' | 'count' | 'unknown' | string
+  observed_value: number | null
+  target_numeric: number | null
+  attainment_pct: number | null
+  task_done_count: number
+  task_count: number
+  note: string
 }
 
 export interface GoalTreeSummary {

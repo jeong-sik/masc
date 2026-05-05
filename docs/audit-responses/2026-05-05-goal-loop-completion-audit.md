@@ -89,9 +89,10 @@
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root /Users/dancer/Downloads --audit-source-strip-prefix
   prompt_corpus/GOAL_LOOP --require-source-artifacts` checked at
-  2026-05-06T05:59:00+09:00, confidence High: validates the current local
+  2026-05-06T06:03:00+09:00, confidence High: validates the current local
   external source artifacts without committing those documents to the public
-  repository.
+  repository, with 12 resolved source artifacts, 18 source-itemized audit IDs,
+  18 catalog-itemized audit IDs, and zero ID mismatch or line-ref errors.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   18 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -218,9 +219,10 @@ claims are now machine-visible. The full set is still not encoded: current
 catalog replay reports 12/12 source documents named by the manifest, no checked
 source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
 external source artifacts resolvable from `/Users/dancer/Downloads` via
-`--audit-source-strip-prefix`, 18 itemized findings, 188 missing 206-itemized
-rows, one open consistency finding for the 206-vs-214 count mismatch, and 8
-itemized rows that are not evaluable from the startup log patterns.
+`--audit-source-strip-prefix`, 18 source-itemized IDs matching the 18
+catalog-itemized findings, 188 missing 206-itemized rows, one open consistency
+finding for the 206-vs-214 count mismatch, and 8 itemized rows that are not
+evaluable from the startup log patterns.
 
 ### 4. DECIDE
 

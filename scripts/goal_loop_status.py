@@ -180,6 +180,22 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             audit_catalog_summary["source_line_ref_errors"] = source_artifacts.get(
                 "line_ref_errors"
             )
+            audit_catalog_summary["source_itemized_id_status"] = source_artifacts.get(
+                "source_itemized_id_status",
+                "unknown",
+            )
+            audit_catalog_summary["source_itemized_finding_ids_total"] = (
+                source_artifacts.get("source_itemized_finding_ids_total")
+            )
+            audit_catalog_summary["catalog_itemized_finding_ids_total"] = (
+                source_artifacts.get("catalog_itemized_finding_ids_total")
+            )
+            audit_catalog_summary["source_ids_missing_from_catalog"] = (
+                source_artifacts.get("source_ids_missing_from_catalog")
+            )
+            audit_catalog_summary["catalog_ids_missing_from_source"] = (
+                source_artifacts.get("catalog_ids_missing_from_source")
+            )
         audit_catalog_warning = (
             audit_catalog_summary["status"] != "COMPLETE"
             or audit_catalog_summary["source_documents_status"] != "COMPLETE"

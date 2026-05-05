@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TextIO
+
+
+AUDIT_FINDING_ID_RE = re.compile(r"\b(?:R-FATAL|CD|CE|CF|NF)-[0-9]+\b")
 
 
 @dataclass(frozen=True)
@@ -288,6 +292,8 @@ def source_artifact_summary(
     missing_paths: list[str] = []
     line_ref_errors: list[dict[str, Any]] = []
     resolved = 0
+    source_finding_ids: set[str] = set()
+    catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
 
     def resolve_candidate(path_text: str) -> Path:
         path = Path(path_text)
@@ -308,10 +314,11 @@ def source_artifact_summary(
             missing_paths.append(path_text)
             continue
         resolved += 1
+        content = candidate.read_text(encoding="utf-8")
+        source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
         if not line_refs:
             continue
-        with candidate.open("r", encoding="utf-8") as handle:
-            line_count = sum(1 for _ in handle)
+        line_count = len(content.splitlines())
         bad_refs = sorted({line_ref for line_ref in line_refs if line_ref > line_count})
         if bad_refs:
             line_ref_errors.append(
@@ -322,7 +329,20 @@ def source_artifact_summary(
                 }
             )
 
-    status = "COMPLETE" if not missing_paths and not line_ref_errors else "INCOMPLETE"
+    source_ids_missing_from_catalog = sorted(source_finding_ids - catalog_finding_ids)
+    catalog_ids_missing_from_source = sorted(catalog_finding_ids - source_finding_ids)
+    source_itemized_id_status = (
+        "COMPLETE"
+        if not source_ids_missing_from_catalog and not catalog_ids_missing_from_source
+        else "INCOMPLETE"
+    )
+    status = (
+        "COMPLETE"
+        if not missing_paths
+        and not line_ref_errors
+        and source_itemized_id_status == "COMPLETE"
+        else "INCOMPLETE"
+    )
     return {
         "status": status,
         "source_root": str(source_root),
@@ -331,8 +351,15 @@ def source_artifact_summary(
         "source_artifacts_resolved": resolved,
         "source_artifacts_missing": len(missing_paths),
         "line_ref_errors": len(line_ref_errors),
+        "source_itemized_id_status": source_itemized_id_status,
+        "source_itemized_finding_ids_total": len(source_finding_ids),
+        "catalog_itemized_finding_ids_total": len(catalog_finding_ids),
+        "source_ids_missing_from_catalog": len(source_ids_missing_from_catalog),
+        "catalog_ids_missing_from_source": len(catalog_ids_missing_from_source),
         "missing_paths": missing_paths[:10],
         "line_ref_error_samples": line_ref_errors[:10],
+        "source_ids_missing_from_catalog_samples": source_ids_missing_from_catalog[:10],
+        "catalog_ids_missing_from_source_samples": catalog_ids_missing_from_source[:10],
     }
 
 
@@ -499,7 +526,8 @@ def report_to_text(report: OrientReport) -> str:
                 f"{source_artifacts['status']} "
                 f"resolved={source_artifacts['source_artifacts_resolved']} "
                 f"missing={source_artifacts['source_artifacts_missing']} "
-                f"line_ref_errors={source_artifacts['line_ref_errors']}"
+                f"line_ref_errors={source_artifacts['line_ref_errors']} "
+                f"source_ids={source_artifacts['source_itemized_finding_ids_total']}"
             )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:

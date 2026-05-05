@@ -58,6 +58,25 @@ def json_from_fixture(name: str) -> dict[str, object]:
     return data
 
 
+def catalog_finding_ids(catalog: dict[str, object]) -> list[str]:
+    findings = catalog["findings"]
+    assert isinstance(findings, list)
+    ids: list[str] = []
+    for finding in findings:
+        assert isinstance(finding, dict)
+        finding_id = finding["finding_id"]
+        assert isinstance(finding_id, str)
+        ids.append(finding_id)
+    return ids
+
+
+def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
+    body = "source line\n" * 2000
+    if Path(source_path).name == "GOAL_LOOP_INTEGRATION.md":
+        body += "\n".join(ids) + "\n"
+    return body
+
+
 class ObserveGoalLoopLogsTest(unittest.TestCase):
     def test_scan_counts_prompt_signatures(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -216,6 +235,10 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_total"], 12)
         self.assertEqual(source_artifacts["source_artifacts_resolved"], 0)
         self.assertEqual(source_artifacts["source_artifacts_missing"], 12)
+        self.assertEqual(source_artifacts["source_itemized_id_status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 0)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 18)
         self.assertIn(
             "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
             source_artifacts["missing_paths"],
@@ -229,6 +252,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         assert catalog is not None
         external_sources = catalog["external_sources"]
         assert isinstance(external_sources, list)
+        ids = catalog_finding_ids(catalog)
 
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)
@@ -237,7 +261,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                 source_path = source["path"]
                 assert isinstance(source_path, str)
                 (root / Path(source_path).name).write_text(
-                    "source line\n" * 2000,
+                    source_text_with_optional_ids(source_path, ids),
                     encoding="utf-8",
                 )
 
@@ -256,6 +280,11 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_resolved"], 12)
         self.assertEqual(source_artifacts["source_artifacts_missing"], 0)
         self.assertEqual(source_artifacts["line_ref_errors"], 0)
+        self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 18)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(source_artifacts["source_ids_missing_from_catalog"], 0)
+        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
 
     def test_orient_cli_can_fail_on_incomplete_catalog(self) -> None:
         result = subprocess.run(
@@ -305,6 +334,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         assert catalog is not None
         external_sources = catalog["external_sources"]
         assert isinstance(external_sources, list)
+        ids = catalog_finding_ids(catalog)
 
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)
@@ -313,7 +343,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                 source_path = source["path"]
                 assert isinstance(source_path, str)
                 (root / Path(source_path).name).write_text(
-                    "source line\n" * 2000,
+                    source_text_with_optional_ids(source_path, ids),
                     encoding="utf-8",
                 )
 
@@ -338,6 +368,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"source_artifacts_resolved": 12', result.stdout)
+        self.assertIn('"source_itemized_finding_ids_total": 18', result.stdout)
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

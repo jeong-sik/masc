@@ -113,8 +113,11 @@ python3 scripts/orient_goal_loop_logs.py \
 ```
 
 Expected key fact: this can pass locally when the 12 prompt-supplied source
-files exist in Downloads, while `--require-complete-catalog` can still fail
-because the row-level 206 corpus is incomplete.
+files exist in Downloads. The source-artifact summary should show
+`source_artifacts_resolved=12`, `source_itemized_finding_ids_total=18`,
+`catalog_itemized_finding_ids_total=18`, and zero source/catalog ID mismatch.
+`--require-complete-catalog` can still fail because the row-level 206 corpus is
+incomplete.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:
@@ -129,6 +132,6 @@ python3 scripts/goal_loop_status.py \
 ```
 
 Expected key fact: `phases.orient.summary.audit_catalog` preserves the
-source-document coverage, missing row count, missing source-artifact count, and
-open consistency finding; the Verify phase still exposes
+source-document coverage, missing row count, source/catalog itemized-ID counts,
+and open consistency finding; the Verify phase still exposes
 `post_act_verify_pending` in `violation_kinds`.

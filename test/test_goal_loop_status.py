@@ -148,6 +148,11 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "source_artifacts_resolved": 0,
                         "source_artifacts_missing": 12,
                         "line_ref_errors": 0,
+                        "source_itemized_id_status": "INCOMPLETE",
+                        "source_itemized_finding_ids_total": 0,
+                        "catalog_itemized_finding_ids_total": 18,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 18,
                     },
                 },
             },
@@ -164,6 +169,10 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
         self.assertEqual(audit_catalog["source_artifacts_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_artifacts_missing"], 12)
+        self.assertEqual(audit_catalog["source_itemized_id_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
+        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 18)
 
     def test_next_action_prefers_missing_act_over_linked_decision(self) -> None:
         report = goal_loop_status.build_status_report(

@@ -9,6 +9,15 @@
 
 open Masc_mcp
 
+let wait_until ~timeout_s f =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    if f () then true
+    else if Unix.gettimeofday () >= deadline then false
+    else (ignore (Unix.select [] [] [] 0.02); loop ())
+  in
+  loop ()
+
 let test_empty_keeper_shape () =
   (* Quiet / unknown keeper legitimately returns count=0 and tasks=[].
      The endpoint does not gate on keeper existence — mirrors the
@@ -87,6 +96,54 @@ let test_task_details_shape_on_empty () =
      | None -> Alcotest.fail "task_details field missing")
   | _ -> Alcotest.fail "response is not a JSON object"
 
+let test_keeper_shell_no_task_snapshot_shape () =
+  let snap =
+    Server_routes_http_routes_legendary_bash.keeper_shell_snapshot_response
+      ~keeper:"quiet-keeper" ~since_stdout:0 ~since_stderr:0 ()
+  in
+  let s = Yojson.Safe.to_string snap.json in
+  Alcotest.(check bool)
+    "no task type" true
+    (Astring.String.is_infix ~affix:"\"type\":\"no_task\"" s);
+  Alcotest.(check bool)
+    "keeper echoed" true
+    (Astring.String.is_infix ~affix:"\"keeper\":\"quiet-keeper\"" s);
+  Alcotest.(check bool)
+    "closed no-task stream" true snap.closed
+
+let test_keeper_shell_snapshot_reads_stdout () =
+  let keeper = "shell-route-kp" in
+  let tid =
+    match
+      Bg_task.spawn ~keeper
+        ~argv:[ "/bin/sh"; "-c"; "printf 'hello\\n'" ]
+        ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
+    with
+    | Ok tid -> tid
+    | Error _ -> Alcotest.fail "spawn failed"
+  in
+  let closed =
+    wait_until ~timeout_s:3.0 (fun () ->
+        let snap =
+          Server_routes_http_routes_legendary_bash.keeper_shell_snapshot_response
+            ~keeper ~task_id:(Bg_task.task_id_to_string tid)
+            ~since_stdout:0 ~since_stderr:0 ()
+        in
+        snap.closed)
+  in
+  Alcotest.(check bool) "task closed" true closed;
+  let snap =
+    Server_routes_http_routes_legendary_bash.keeper_shell_snapshot_response
+      ~keeper ~task_id:(Bg_task.task_id_to_string tid)
+      ~since_stdout:0 ~since_stderr:0 ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "stdout surfaced" "hello\n"
+    (snap.json |> member "stdout_since" |> to_string);
+  Alcotest.(check int)
+    "next stdout advances" 6 snap.next_stdout
+
 let () =
   Alcotest.run "legendary_bash_bg_tasks_route"
     [
@@ -99,5 +156,9 @@ let () =
             test_field_ordering_stable;
           Alcotest.test_case "task_details empty shape" `Quick
             test_task_details_shape_on_empty;
+          Alcotest.test_case "keeper shell no-task snapshot" `Quick
+            test_keeper_shell_no_task_snapshot_shape;
+          Alcotest.test_case "keeper shell stdout snapshot" `Quick
+            test_keeper_shell_snapshot_reads_stdout;
         ] );
     ]

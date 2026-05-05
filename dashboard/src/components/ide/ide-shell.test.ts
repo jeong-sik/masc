@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { fireEvent } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { IdeShell } from './ide-shell'
-import { route } from '../../router'
+import { navigate, route } from '../../router'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -23,6 +23,7 @@ describe('IdeShell', () => {
 
   afterEach(() => {
     render(null, container)
+    vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
   })
@@ -95,5 +96,35 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Cascade')
+  })
+
+  it('opens the keeper shell drawer from the terminal route param', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        'event: shell\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"bgt-1","stdout_since":"hello\\\\n","stderr_since":"","closed":true}\n\n',
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    navigate('code', {
+      section: 'ide-shell',
+      view: 'source',
+      terminal: 'open',
+      keeper: 'sangsu',
+    })
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(container.textContent).toContain('hello'))
+    expect(container.querySelector('[data-testid="keeper-shell-drawer"]')).not.toBeNull()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/dashboard/keeper-shell/sangsu',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Accept: 'text/event-stream' }),
+      }),
+    )
   })
 })

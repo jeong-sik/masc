@@ -8,11 +8,14 @@ import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
+import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { WorldVisualizer } from '../world-visualizer'
 import { navigate, route } from '../../router'
+import { activeKeeperName } from '../../keeper-state'
+import { keepers } from '../../store'
 import {
   parseActive,
   serializeActive,
@@ -34,6 +37,14 @@ function viewFromRoute(raw: string | null | undefined): ViewTab {
 
 function layersFromRoute(raw: string | null | undefined): ReadonlySet<string> {
   return parseActive(raw ?? '', IDE_LAYER_KINDS)
+}
+
+function keeperFromRoute(): string {
+  const routeKeeper = route.value.params.keeper?.trim()
+  if (routeKeeper) return routeKeeper
+  const active = activeKeeperName.value.trim()
+  if (active) return active
+  return keepers.value[0]?.name?.trim() ?? ''
 }
 
 function paramsWithLayers(
@@ -58,6 +69,10 @@ export function IdeShell() {
 
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const activeLayers = layersFromRoute(route.value.params.layers)
+  const terminalOpen =
+    route.value.params.terminal === 'open'
+    || Boolean(route.value.params.keeper?.trim())
+  const terminalKeeper = keeperFromRoute()
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)
@@ -80,7 +95,9 @@ export function IdeShell() {
       aria-label="Code IDE shell"
       style=${{
         display: 'grid',
-        gridTemplateRows: 'auto auto auto 1fr auto',
+        gridTemplateRows: terminalOpen
+          ? 'auto auto auto minmax(0, 1fr) auto auto'
+          : 'auto auto auto minmax(0, 1fr) auto',
         background: 'var(--color-bg-page)',
         color: 'var(--color-fg-primary)',
         minHeight: 'calc(100vh - var(--h-topbar) - var(--h-kpi))',
@@ -163,6 +180,9 @@ export function IdeShell() {
           <${IdeActivityMock} />
         </div>
       </div>
+      ${terminalOpen
+        ? html`<${KeeperShellDrawer} keeperName=${terminalKeeper} />`
+        : null}
       <${IdeInterjectMock} />
     </section>
   `

@@ -17,6 +17,16 @@ let wait_until ~timeout_s f =
 
 let env_of_current () = Unix.environment ()
 
+let with_ring_line_limit raw f =
+  let previous = Sys.getenv_opt "MASC_KEEPER_SHELL_RING_LINES" in
+  Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" raw;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" value
+      | None -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "")
+    f
+
 let sp
     ?(keeper = "test-keeper")
     ?(cwd = "")
@@ -70,6 +80,92 @@ let test_since_offset_skips_prefix () =
   match Bg_task.read tid ~since_stdout:3 ~since_stderr:0 with
   | Error _ -> fail "read failed"
   | Ok s -> check string "suffix only" "def\n" s.stdout_since
+
+let test_line_ring_drops_old_stdout_lines () =
+  with_ring_line_limit "2" (fun () ->
+      let tid =
+        sp ~keeper:"kp-ring"
+          [ "/bin/sh"; "-c"; "printf 'one\\ntwo\\nthree\\n'" ]
+      in
+      let _ = poll_for_closed tid in
+      match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+      | Error _ -> fail "read failed"
+      | Ok s ->
+          check string "retains last two lines" "two\nthree\n" s.stdout_since;
+          check bool "reports dropped bytes" true (s.bytes_dropped_stdout > 0))
+
+let line_count s =
+  let n = ref 0 in
+  String.iter (fun ch -> if ch = '\n' then incr n) s;
+  if String.length s > 0 && s.[String.length s - 1] <> '\n' then incr n;
+  !n
+
+let test_sixteen_keepers_keep_bounded_shell_rings () =
+  with_ring_line_limit "3" (fun () ->
+      let tasks =
+        List.init 16 (fun i ->
+          let keeper = Printf.sprintf "kp-sustained-%02d" i in
+          let script =
+            Printf.sprintf
+              "i=0; while [ $i -lt 20 ]; do printf '%s-line-%%02d\\n' $i; i=$((i+1)); done"
+              keeper
+          in
+          (keeper, sp ~keeper [ "/bin/sh"; "-c"; script ]))
+      in
+      List.iter
+        (fun (_keeper, tid) ->
+          check bool "sustained keeper task closed" true (poll_for_closed tid))
+        tasks;
+      List.iter
+        (fun (keeper, tid) ->
+          match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+          | Error _ -> failf "read failed for %s" keeper
+          | Ok s ->
+              check bool
+                (keeper ^ " retained at most 3 stdout lines")
+                true (line_count s.stdout_since <= 3);
+              check bool
+                (keeper ^ " reports dropped bytes")
+                true (s.bytes_dropped_stdout > 0))
+        tasks)
+
+let spawn_and_read_stdout_with_limit ~limit ~keeper =
+  with_ring_line_limit limit (fun () ->
+      let tid =
+        sp ~keeper
+          [ "/bin/sh"; "-c"; "printf 'one\\ntwo\\nthree\\n'" ]
+      in
+      check bool (keeper ^ " task closed") true (poll_for_closed tid);
+      match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+      | Error _ -> failf "read failed for %s" keeper
+      | Ok s -> s)
+
+let test_ring_line_limit_boundaries () =
+  let zero =
+    spawn_and_read_stdout_with_limit ~limit:"0" ~keeper:"kp-ring-zero"
+  in
+  check string "limit=0 retains no stdout" "" zero.stdout_since;
+  check bool "limit=0 reports dropped bytes" true
+    (zero.bytes_dropped_stdout > 0);
+  let one =
+    spawn_and_read_stdout_with_limit ~limit:"1" ~keeper:"kp-ring-one"
+  in
+  check string "limit=1 retains final line" "three\n" one.stdout_since;
+  check bool "limit=1 reports dropped bytes" true
+    (one.bytes_dropped_stdout > 0);
+  let invalid =
+    spawn_and_read_stdout_with_limit ~limit:"not-an-int"
+      ~keeper:"kp-ring-invalid"
+  in
+  check string "invalid limit falls back to default" "one\ntwo\nthree\n"
+    invalid.stdout_since;
+  check int "invalid limit drops nothing" 0 invalid.bytes_dropped_stdout;
+  let high =
+    spawn_and_read_stdout_with_limit ~limit:"5001" ~keeper:"kp-ring-high"
+  in
+  check string "large limit keeps small output" "one\ntwo\nthree\n"
+    high.stdout_since;
+  check int "large limit drops nothing" 0 high.bytes_dropped_stdout
 
 let test_kill_closes_task () =
   let tid = sp ~keeper:"kp3" [ "/bin/sleep"; "30" ] in
@@ -210,6 +306,12 @@ let () =
             test_unknown_task_errors;
           test_case "reap_orphans on missing base returns 0" `Quick
             test_reap_orphans_returns_zero;
+          test_case "line ring drops old stdout lines" `Quick
+            test_line_ring_drops_old_stdout_lines;
+          test_case "16 keepers keep bounded shell rings" `Quick
+            test_sixteen_keepers_keep_bounded_shell_rings;
+          test_case "ring line limit boundaries" `Quick
+            test_ring_line_limit_boundaries;
         ] );
       ( "persistence",
         [

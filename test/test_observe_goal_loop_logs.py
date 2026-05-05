@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "observe_goal_loop_logs.py"
 ORIENT_SCRIPT_PATH = REPO_ROOT / "scripts" / "orient_goal_loop_logs.py"
 DECIDE_SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
+VERIFY_SCRIPT_PATH = REPO_ROOT / "scripts" / "verify_goal_loop_logs.py"
 
 spec = importlib.util.spec_from_file_location("observe_goal_loop_logs", SCRIPT_PATH)
 assert spec is not None
@@ -38,6 +39,15 @@ decide_goal_loop_findings = importlib.util.module_from_spec(decide_spec)
 assert decide_spec.loader is not None
 sys.modules[decide_spec.name] = decide_goal_loop_findings
 decide_spec.loader.exec_module(decide_goal_loop_findings)
+
+verify_spec = importlib.util.spec_from_file_location(
+    "verify_goal_loop_logs", VERIFY_SCRIPT_PATH
+)
+assert verify_spec is not None
+verify_goal_loop_logs = importlib.util.module_from_spec(verify_spec)
+assert verify_spec.loader is not None
+sys.modules[verify_spec.name] = verify_goal_loop_logs
+verify_spec.loader.exec_module(verify_goal_loop_logs)
 
 
 class ObserveGoalLoopLogsTest(unittest.TestCase):
@@ -164,6 +174,51 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.decisions_total, 3)
         self.assertEqual(decision_ids[:2], ["D-EMERGENCY-2", "D-EMERGENCY-1"])
         self.assertIn("D-P2-1", decision_ids)
+
+    def test_verify_fails_on_critical_evidence(self) -> None:
+        report = verify_goal_loop_logs.verify_orient(
+            {
+                "findings": [
+                    {
+                        "finding_id": "NF-1",
+                        "title": "provider_health_skipped_all_models",
+                        "severity": "critical",
+                        "status": "EVIDENCE_PRESENT",
+                        "count": 1,
+                    },
+                    {
+                        "finding_id": "NF-6",
+                        "title": "config_unknown_keys_ignored",
+                        "severity": "warning",
+                        "status": "EVIDENCE_PRESENT",
+                        "count": 1,
+                    },
+                ]
+            },
+            policy="critical",
+        )
+
+        self.assertEqual(report.status, "FAIL")
+        self.assertEqual(len(report.failing_findings), 1)
+        self.assertEqual(report.failing_findings[0].finding_id, "NF-1")
+
+    def test_verify_passes_when_only_warning_and_policy_is_critical(self) -> None:
+        report = verify_goal_loop_logs.verify_orient(
+            {
+                "findings": [
+                    {
+                        "finding_id": "NF-6",
+                        "title": "config_unknown_keys_ignored",
+                        "severity": "warning",
+                        "status": "EVIDENCE_PRESENT",
+                        "count": 1,
+                    }
+                ]
+            },
+            policy="critical",
+        )
+
+        self.assertEqual(report.status, "PASS")
 
 
 if __name__ == "__main__":

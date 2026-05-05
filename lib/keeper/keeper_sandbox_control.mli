@@ -45,6 +45,11 @@ val cleanup_stale :
   unit ->
   Keeper_sandbox_runtime.cleanup_result
 
+val playground_repos_json :
+  config:Coord.config ->
+  meta:keeper_meta ->
+  Yojson.Safe.t
+
 val live_status_json :
   ?include_preflight:bool ->
   ?preflight_override:Yojson.Safe.t option ->

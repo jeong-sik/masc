@@ -280,6 +280,12 @@ let test_keeper_sandbox_status_exposes_local_summary () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
+      let meta = read_keeper_meta_exn config keeper_name in
+      let repo_path =
+        Keeper_sandbox.host_root_abs_of_meta ~config meta
+        |> fun root -> Filename.concat root "repos/sandbox-repo"
+      in
+      ensure_dir (Filename.concat repo_path ".git");
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
           ~args:
@@ -306,16 +312,36 @@ let test_keeper_sandbox_status_exposes_local_summary () =
       Alcotest.(check bool) "identity matches canonical agent" true
         (sandbox_json |> member "identity" |> member "agent_name_matches"
        |> to_bool);
-      let ok, status_body =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
-          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      let sandbox_repos =
+        sandbox_json |> member "playground_repos" |> to_list
       in
-      Alcotest.(check bool) "keeper status ok" true ok;
-      let status_json = parse_json_exn status_body in
-      Alcotest.(check string) "status surfaces sandbox_live local" "local"
-        Yojson.Safe.Util.(
-          status_json |> member "sandbox_live" |> member "effective_mode"
-          |> to_string))
+      Alcotest.(check bool) "sandbox status scans filesystem repo" true
+        (List.exists
+           (fun repo ->
+             String.equal
+               (repo |> member "name" |> to_string)
+               "sandbox-repo"
+             && String.equal
+                  (repo |> member "source" |> to_string)
+                  "filesystem")
+           sandbox_repos);
+      (* keepalive is not part of this status-surface assertion. *)
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let status_repos =
+        Keeper_sandbox_control.playground_repos_json ~config ~meta
+        |> to_list
+      in
+      Alcotest.(check bool) "keeper status repo helper scans filesystem repo"
+        true
+        (List.exists
+           (fun repo ->
+             String.equal
+               (repo |> member "name" |> to_string)
+               "sandbox-repo"
+             && String.equal
+                  (repo |> member "path" |> to_string)
+                  "repos/sandbox-repo")
+           status_repos))
 
 let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
   Eio_main.run @@ fun env ->

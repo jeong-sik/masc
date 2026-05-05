@@ -102,8 +102,15 @@ let runtime_mcp_policy_requires_http_headers
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
 
 let codex_cli_identity_runtime_mcp_header key =
+  (* OAS Codex transport turns [Authorization: Bearer ...] into
+     bearer_token_env_var, so the token is carried through the subprocess
+     environment rather than argv. Other auth-bearing headers remain
+     unsupported. *)
   match normalize_header_key key with
-  | "x-masc-agent-name" | "x-masc-keeper-name" -> true
+  | "authorization"
+  | "x-masc-agent-name"
+  | "x-masc-keeper-name" ->
+      true
   | _ -> false
 
 let provider_supports_runtime_mcp_http_header

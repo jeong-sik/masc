@@ -6,7 +6,21 @@
     instead of a smoke test (richer regression coverage). *)
 
 module H = Masc_mcp.Dashboard_feature_health
-module R = Masc_mcp.Feature_flag_registry
+module R = Feature_flag_registry
+
+(** Force-unset an env var around [f] so {!R.runtime_value}'s
+    [Sys.getenv_opt] read does not pick up an inherited value
+    from the developer's shell or another test in the same
+    process (Copilot review feedback). *)
+let with_env_unset name f =
+  let prev = Sys.getenv_opt name in
+  Unix.putenv name "";
+  let finally () =
+    match prev with
+    | Some v -> Unix.putenv name v
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect ~finally f
 
 (* ─── (1) status_to_string exhaustiveness ──────────────────────── *)
 
@@ -62,48 +76,48 @@ let dummy_flag ~env_name ~lifecycle ~default =
   }
 
 let test_active_enabled_is_healthy () =
-  (* Active + runtime_value=true → Healthy.  Because we cannot
-     mutate env vars within the test framework reliably, use a
-     flag whose default is true and assume no env var override
-     in the test process. *)
-  let f =
-    dummy_flag ~env_name:"MASC_TEST_HEALTH_ACTIVE_ENABLED_XYZ123"
-      ~lifecycle:R.Active ~default:true
-  in
+  (* Active + runtime_value=true → Healthy.  Force the env var
+     unset so an inherited shell value cannot flip the flag and
+     break the test. *)
+  let env = "MASC_TEST_HEALTH_ACTIVE_ENABLED_XYZ123" in
+  with_env_unset env @@ fun () ->
+  let f = dummy_flag ~env_name:env ~lifecycle:R.Active ~default:true in
   let item = H.feature_to_health_item f in
   assert (item.is_enabled = true);
   assert (item.status = H.Healthy)
 
 let test_active_disabled_is_inactive () =
-  (* Active + runtime_value=false → Inactive *)
-  let f =
-    dummy_flag ~env_name:"MASC_TEST_HEALTH_ACTIVE_DISABLED_XYZ123"
-      ~lifecycle:R.Active ~default:false
-  in
+  let env = "MASC_TEST_HEALTH_ACTIVE_DISABLED_XYZ123" in
+  with_env_unset env @@ fun () ->
+  let f = dummy_flag ~env_name:env ~lifecycle:R.Active ~default:false in
   let item = H.feature_to_health_item f in
   assert (item.is_enabled = false);
   assert (item.status = H.Inactive)
 
 let test_experimental_is_warning_regardless_of_enabled () =
-  (* Experimental → Warning even when the flag is enabled. *)
+  let env = "MASC_TEST_HEALTH_EXPERIMENTAL_XYZ123" in
+  with_env_unset env @@ fun () ->
   let f =
-    dummy_flag ~env_name:"MASC_TEST_HEALTH_EXPERIMENTAL_XYZ123"
-      ~lifecycle:R.Experimental ~default:true
+    dummy_flag ~env_name:env ~lifecycle:R.Experimental ~default:true
   in
   let item = H.feature_to_health_item f in
   assert (item.status = H.Warning)
 
 let test_deprecated_is_deprecated_regardless_of_enabled () =
+  let env = "MASC_TEST_HEALTH_DEPRECATED_XYZ123" in
+  with_env_unset env @@ fun () ->
   let f =
-    dummy_flag ~env_name:"MASC_TEST_HEALTH_DEPRECATED_XYZ123"
+    dummy_flag ~env_name:env
       ~lifecycle:(R.Deprecated "use MASC_X instead") ~default:true
   in
   let item = H.feature_to_health_item f in
   assert (item.status = H.Deprecated)
 
 let test_lifecycle_field_serialised () =
+  let env = "MASC_TEST_HEALTH_LIFECYCLE_FIELD_XYZ123" in
+  with_env_unset env @@ fun () ->
   let f =
-    dummy_flag ~env_name:"MASC_TEST_HEALTH_LIFECYCLE_FIELD_XYZ123"
+    dummy_flag ~env_name:env
       ~lifecycle:(R.Deprecated "old API") ~default:false
   in
   let item = H.feature_to_health_item f in

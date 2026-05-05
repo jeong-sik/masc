@@ -62,11 +62,7 @@ let classify (s : stimulus) : stimulus_class =
   else
     (* Board signals carry JSON with "source":"board_signal". Lightweight
        prefix check avoids a full Yojson parse in the data layer. *)
-    let len = String.length s.payload in
-    if len > 2
-       && String.equal
-            (String.sub s.payload 0 (min 30 len))
-            "{\"source\":\"board_signal\""
+    if String.starts_with ~prefix:"{\"source\":\"board_signal\"" s.payload
     then Board_signal
     else
       Unsupported

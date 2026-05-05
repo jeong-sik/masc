@@ -917,6 +917,25 @@ let test_sub_board_members_only_post_policy () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ())
 
+let test_sub_board_owner_only_post_policy () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"owner-space" ~name:"Owner"
+       ~description:"" ~owner:"agent-owner" ~members:["agent-member"]
+       ~access:Board.Owner_only ());
+  (match
+     Board_dispatch.create_post ~author:"agent-member" ~content:"member denied"
+       ~post_kind:Board.Human_post ~hearth:"owner-space" ()
+   with
+   | Error (Board.Validation_error _) -> ()
+   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Ok _ -> Alcotest.fail "expected owner-only sub-board to reject member");
+  (match
+     Board_dispatch.create_post ~author:"agent-owner" ~content:"owner allowed"
+       ~post_kind:Board.Human_post ~hearth:"owner-space" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ())
+
 let test_sub_board_post_count_projection () =
   ignore
     (Board_dispatch.create_sub_board ~slug:"counted" ~name:"Counted"
@@ -1027,6 +1046,7 @@ let () =
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
+      Alcotest.test_case "owner-only post policy" `Quick (with_eio test_sub_board_owner_only_post_policy);
       Alcotest.test_case "derived post count" `Quick (with_eio test_sub_board_post_count_projection);
     ];
   ]

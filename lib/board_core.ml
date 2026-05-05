@@ -439,16 +439,38 @@ let append_comment (c : comment) =
     rotate_if_needed path
   with Sys_error msg -> record_persist_error ~where:"append_comment" msg
 
-let sub_board_post_count_unlocked store slug =
-  Hashtbl.fold
-    (fun _ (p : post) acc ->
+let sub_board_access_to_string = function
+  | Open -> "open"
+  | Members_only -> "members_only"
+  | Owner_only -> "owner_only"
+
+let sub_board_access_of_string_opt = function
+  | "open" -> Some Open
+  | "members_only" -> Some Members_only
+  | "owner_only" -> Some Owner_only
+  | _ -> None
+
+let sub_board_post_counts_unlocked store =
+  let counts = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun _ (p : post) ->
        match p.hearth with
-       | Some hearth when String.equal hearth slug -> acc + 1
-       | _ -> acc)
-    store.posts 0
+       | None -> ()
+       | Some slug ->
+           let count = Hashtbl.find_opt counts slug |> Option.value ~default:0 in
+           Hashtbl.replace counts slug (count + 1))
+    store.posts;
+  counts
+
+let sub_board_post_count_from_counts counts slug =
+  Hashtbl.find_opt counts slug |> Option.value ~default:0
 
 let sub_board_with_post_count_unlocked store (sb : sub_board) =
-  { sb with post_count = sub_board_post_count_unlocked store sb.slug }
+  let counts = sub_board_post_counts_unlocked store in
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+
+let sub_board_with_post_count counts (sb : sub_board) =
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
 
 let sub_board_author_allowed (sb : sub_board) ~author_id =
   let author = Agent_id.to_string author_id in
@@ -474,12 +496,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
             | Some sb when sub_board_author_allowed sb ~author_id -> Ok ()
             | Some sb ->
                 let author = Agent_id.to_string author_id in
-                let access =
-                  match sb.access with
-                  | Open -> "open"
-                  | Members_only -> "members_only"
-                  | Owner_only -> "owner_only"
-                in
+                let access = sub_board_access_to_string sb.access in
                 Error
                   (Validation_error
                      (Printf.sprintf
@@ -1031,17 +1048,6 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
 
 (** {1 SubBoard Operations} *)
 
-let sub_board_access_to_string = function
-  | Open -> "open"
-  | Members_only -> "members_only"
-  | Owner_only -> "owner_only"
-
-let sub_board_access_of_string_opt = function
-  | "open" -> Some Open
-  | "members_only" -> Some Members_only
-  | "owner_only" -> Some Owner_only
-  | _ -> None
-
 let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
   `Assoc [
     ("id", `String (Sub_board_id.to_string sb.id));
@@ -1190,8 +1196,9 @@ let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
 
 let list_sub_boards store : sub_board list =
   with_lock store (fun () ->
+    let counts = sub_board_post_counts_unlocked store in
     Hashtbl.fold
-      (fun _ sb acc -> sub_board_with_post_count_unlocked store sb :: acc)
+      (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
       store.sub_boards []
     |> List.sort (fun (a : sub_board) (b : sub_board) ->
         compare a.created_at b.created_at))

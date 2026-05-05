@@ -282,7 +282,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
 | `github_identity` | string | 없음 | keeper에 바인딩된 GitHub CLI identity 이름. `.masc/github-identities/<identity>/gh` bundle을 사용한다. | `keeper.toml` 선언 |
 | `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, GitHub identity 기반 author로 결합할지 결정 | `keeper.toml` 선언 |
-| `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 해당 goal에 링크된 task만 claim | `keeper.toml` 선언 |
+| `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 goal-linked task를 우선 claim. scoped pool에 현재 capability로 claim 가능한 task가 없으면 전체 claimable task로 fallback | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
 

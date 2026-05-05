@@ -3,6 +3,20 @@ val primary_goal_id_opt : Keeper_types.keeper_meta -> string option
 val backend_of_meta : Keeper_types.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   string list -> Masc_domain.task -> bool
+
+type claim_goal_scope = {
+  task_filter : Masc_domain.task -> bool;
+  mode : string;
+  effective_goal_ids : string list;
+  fallback_reason : string option;
+}
+
+val resolve_claim_goal_scope :
+  ?agent_tool_names:string list ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  claim_goal_scope
+
 val runtime_contract_json :
   ?config:Coord.config -> Keeper_types.keeper_meta -> Yojson.Safe.t
 

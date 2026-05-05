@@ -18,6 +18,95 @@ let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
     (fun goal_id -> Convergence.task_matches_goal ~goal_id task)
     goal_ids
 
+type claim_goal_scope = {
+  task_filter : Masc_domain.task -> bool;
+  mode : string;
+  effective_goal_ids : string list;
+  fallback_reason : string option;
+}
+
+let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
+  String.equal goal.Goal_store.title
+    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
+
+let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
+  goal_ids <> []
+  && List.for_all
+       (fun goal_id ->
+         match Goal_store.get_goal config ~goal_id with
+         | Some goal -> goal_title_matches_keeper_purpose ~meta goal
+         | None -> false)
+       goal_ids
+
+let task_is_eligible_for_claim ?agent_tool_names latest_verification_status task =
+  Coord_task_schedule.task_is_claim_pool_candidate task
+  && not
+       (Coord_task_schedule.verification_blocks_claim
+          latest_verification_status
+          task)
+  && Coord_task_schedule.required_tools_allowed
+       ?agent_tool_names
+       (Coord_task_schedule.task_required_tools task)
+
+let active_goal_ids_have_eligible_claim_task
+    ?agent_tool_names
+    config
+    goal_ids
+  =
+  let latest_verification_status =
+    Coord_task_schedule.latest_verification_status_by_task config
+  in
+  Coord.get_tasks_safe config
+  |> List.exists (fun task ->
+       task_is_linked_to_keeper_goals goal_ids task
+       && task_is_eligible_for_claim
+            ?agent_tool_names
+            latest_verification_status
+            task)
+
+let resolve_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+    ~(meta : keeper_meta) =
+  match meta.active_goal_ids with
+  | [] ->
+      {
+        task_filter = (fun (_task : Masc_domain.task) -> true);
+        mode = "all_tasks";
+        effective_goal_ids = [];
+        fallback_reason = None;
+      }
+  | goal_ids ->
+      let scoped_filter task = task_is_linked_to_keeper_goals goal_ids task in
+      if
+        not
+          (active_goal_ids_have_eligible_claim_task
+             ?agent_tool_names
+             config
+             goal_ids)
+      then
+        let is_auto_goal =
+          active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+        in
+        {
+          task_filter = (fun (_task : Masc_domain.task) -> true);
+          mode =
+            (if is_auto_goal then "auto_goal_fallback_all_tasks"
+             else "empty_goal_scope_fallback_all_tasks");
+          effective_goal_ids = [];
+          fallback_reason =
+            Some
+              (if is_auto_goal then
+                 "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks"
+               else
+                 "active goal scope has no claimable linked tasks; falling back to all claimable tasks");
+        }
+      else
+        {
+          task_filter = scoped_filter;
+          mode = "active_goal_ids";
+          effective_goal_ids = goal_ids;
+          fallback_reason = None;
+        }
+
 let task_is_blocked (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.AwaitingVerification _ -> true

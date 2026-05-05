@@ -220,6 +220,85 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(report.status, "PASS")
 
+    def test_log_contract_fails_on_forbidden_pattern(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "server.log"
+            path.write_text(
+                "\n".join(
+                    [
+                        "[INFO] provider_health_probe_completed provider=ollama",
+                        "[WARN] [Keeper] alive-but-stuck detected",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = verify_goal_loop_logs.verify_log_contract(
+                [str(path)],
+                must_contain=["provider_health_probe_completed"],
+                must_not_contain=["alive-but-stuck detected"],
+                max_samples=2,
+            )
+
+        self.assertEqual(report.status, "FAIL")
+        self.assertEqual(len(report.violations), 1)
+        self.assertEqual(report.violations[0].kind, "forbidden_present")
+        self.assertEqual(report.violations[0].count, 1)
+        self.assertIn("alive-but-stuck", report.violations[0].samples[0].text)
+
+    def test_log_contract_fails_when_required_pattern_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "server.log"
+            path.write_text(
+                "[INFO] fallback_ladder_activated keeper=executor\n",
+                encoding="utf-8",
+            )
+
+            report = verify_goal_loop_logs.verify_log_contract(
+                [str(path)],
+                must_contain=[
+                    "fallback_ladder_activated",
+                    "provider_health_probe_completed",
+                ],
+                must_not_contain=["pricing_catalog_miss"],
+                max_samples=2,
+            )
+
+        self.assertEqual(report.status, "FAIL")
+        self.assertEqual(len(report.violations), 1)
+        self.assertEqual(report.violations[0].kind, "required_missing")
+        self.assertEqual(
+            report.violations[0].pattern, "provider_health_probe_completed"
+        )
+
+    def test_log_contract_cli_returns_json_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "server.log"
+            path.write_text(
+                "[WARN] archived credential x (reason: starvation)\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFY_SCRIPT_PATH),
+                    "--mode",
+                    "log-contract",
+                    "--log",
+                    str(path),
+                    "--must-not-contain",
+                    "archived credential.*starvation",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"kind": "forbidden_present"', result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

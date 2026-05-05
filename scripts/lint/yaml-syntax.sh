@@ -10,9 +10,18 @@
 # files were not parsed at PR-time — invalid syntax silently fails the
 # workflow run as "workflow-file-issue" rather than failing the PR.
 #
-# This script parses every workflow file with PyYAML and exits non-zero
-# on the first ScannerError or ParserError. Run as a PR check so the
-# same partial-fix shape cannot reach main again.
+# This script parses every workflow file with PyYAML, aggregates parse
+# failures across all files, prints one ::error annotation per failing
+# file, and exits non-zero if any file failed (i.e. it does not
+# fail-fast — operators get the full list of broken files in a single
+# CI run). Run as a PR check so the same partial-fix shape cannot
+# reach main again.
+#
+# Dependency: PyYAML. The .github/workflows/fundamental-check.yml
+# job that invokes this script installs it explicitly via
+# `python -m pip install pyyaml` so the gate does not silently rely
+# on whatever happens to be preinstalled on ubuntu-latest at the
+# moment.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -30,6 +39,18 @@ python3 - "${files[@]}" <<'PY'
 import sys
 import yaml
 
+
+def gha_escape(s: str) -> str:
+    """Escape a string for a GitHub Actions workflow command line.
+
+    Workflow commands (`::error ...::message`) interpret newlines and
+    `%` specially.  The official sequences are %25, %0A, %0D — applied
+    in that order so the literal `%` in the input does not get
+    re-escaped after being emitted as `%25`.
+    """
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 failed = 0
 for path in sys.argv[1:]:
     try:
@@ -37,7 +58,8 @@ for path in sys.argv[1:]:
             yaml.safe_load(fh)
     except yaml.YAMLError as exc:
         failed += 1
-        print(f"::error file={path}::YAML parse error: {exc}", file=sys.stderr)
+        msg = gha_escape(f"YAML parse error: {exc}")
+        print(f"::error file={path}::{msg}", file=sys.stderr)
 
 if failed:
     print(f"yaml-syntax: {failed} workflow file(s) failed to parse", file=sys.stderr)

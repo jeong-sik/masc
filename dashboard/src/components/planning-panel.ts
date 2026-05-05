@@ -138,7 +138,6 @@ function CoordinationHealthPanel() {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">협력 상태</div>
-          <div class="text-2xs text-text-dim">Goal x Task x Board x Reward · ${snapshot.mode ?? 'advisory'}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">
           <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
@@ -164,7 +163,7 @@ function CoordinationHealthPanel() {
         </div>
       ` : null}
       ${violations.length === 0 ? html`
-        <div class="mt-2 text-xs text-text-muted">정합</div>
+        <div class="mt-2 text-xs text-text-muted">위반 없음</div>
       ` : html`
         <ul class="mt-2 grid gap-2">
           ${topViolations.map((violation, index) => html`
@@ -172,7 +171,7 @@ function CoordinationHealthPanel() {
           `)}
         </ul>
       `}
-      ${topEvidence.length > 0 ? html`
+      ${violations.length > 0 && topEvidence.length > 0 ? html`
         <div class="mt-3">
           <div class="mb-1 text-3xs font-semibold uppercase text-text-muted">근거</div>
           <ul class="grid gap-1 md:grid-cols-2">

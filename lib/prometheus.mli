@@ -154,11 +154,6 @@ val metric_keeper_turn_queue_depth : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-val metric_keeper_slot_yield_total : string
-(** RFC #12885: incremented each time the autonomous turn slot is
-    successfully yielded and reacquired during a cascade rotation retry.
-    Labels: [keeper]. *)
-
 val metric_timeout_policy_overshoot : string
 (** #9662: cooperative-cancel timeout overshoot counter emitted by
     [Timeout_policy].  Labels: [layer, origin]. *)

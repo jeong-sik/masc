@@ -47,10 +47,13 @@ type text_cache = {
   key : string option;
   value : string option;
   expires_at : float;
+  generation : int;
 }
 
-let empty_text_cache = { key = None; value = None; expires_at = 0.0 }
-let _keeper_list_cache = Atomic.make empty_text_cache
+let empty_text_cache ~generation =
+  { key = None; value = None; expires_at = 0.0; generation }
+
+let _keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
@@ -63,9 +66,17 @@ let cache_ttl_seconds env_var ~default =
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
 
-let invalidate_keeper_list_cache () = Atomic.set _keeper_list_cache empty_text_cache
+let invalidate_text_cache cache_ref =
+  let rec loop () =
+    let current = Atomic.get cache_ref in
+    let next = empty_text_cache ~generation:(current.generation + 1) in
+    if not (Atomic.compare_and_set cache_ref current next) then loop ()
+  in
+  loop ()
 
-let cached_text_by_key cache_ref ~key ~ttl_s compute =
+let invalidate_keeper_list_cache () = invalidate_text_cache _keeper_list_cache
+
+let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
   let cache = Atomic.get cache_ref in
   match cache.key, cache.value with
@@ -74,8 +85,26 @@ let cached_text_by_key cache_ref ~key ~ttl_s compute =
       value
   | _ ->
       let value = compute () in
-      Atomic.set cache_ref { key = Some key; value = Some value; expires_at = now +. ttl_s };
-      value
+      let next =
+        {
+          key = Some key;
+          value = Some value;
+          expires_at = Time_compat.now () +. ttl_s;
+          generation = cache.generation;
+        }
+      in
+      if Atomic.compare_and_set cache_ref cache next then value
+      else cached_text_by_key cache_ref ~key ~ttl_s compute
+
+module For_testing = struct
+  let reset_keeper_list_cache () =
+    Atomic.set _keeper_list_cache (empty_text_cache ~generation:0)
+
+  let invalidate_keeper_list_cache = invalidate_keeper_list_cache
+
+  let cached_keeper_list_text ~key ~ttl_s compute =
+    cached_text_by_key _keeper_list_cache ~key ~ttl_s compute
+end
 
 let annotate_keeper_json ~runtime_class json =
   match json with

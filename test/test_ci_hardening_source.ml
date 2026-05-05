@@ -699,12 +699,15 @@ let test_keeper_direct_reply_contracts () =
        "Keeper_prompt.append_direct_reply_mode_prompt")
 
 let test_keeper_list_cache_atomic_contracts () =
-  check bool "keeper list cache uses atomic snapshot storage" true
+  check bool "keeper list cache uses versioned atomic snapshot storage" true
     (file_contains_pattern "lib/tool_keeper.ml"
-       "let _keeper_list_cache = Atomic.make empty_text_cache");
-  check bool "keeper list cache invalidation publishes whole snapshot" true
+       "generation : int");
+  check bool "keeper list cache invalidation bumps generation" true
     (file_contains_pattern "lib/tool_keeper.ml"
-       "let invalidate_keeper_list_cache () = Atomic.set _keeper_list_cache empty_text_cache");
+       "generation:(current.generation + 1)");
+  check bool "keeper list cache publish uses CAS" true
+    (file_contains_pattern "lib/tool_keeper.ml"
+       "Atomic.compare_and_set cache_ref cache next");
   check bool "keeper list cache no longer mutates key field in place" true
     (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.key <-");
   check bool "keeper list cache no longer mutates value field in place" true

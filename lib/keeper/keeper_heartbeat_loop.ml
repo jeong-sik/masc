@@ -755,12 +755,18 @@ let run_keepalive_unified_turn
             ~channel:turn_decision.channel
             ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
+          let reactive_avail = Eio.Semaphore.get_value Keeper_turn_slot.reactive_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
+          let holder_summary =
+            Keeper_turn_slot.slot_holders_summary ~now:(Time_compat.now ()) ()
+          in
           let blocker_text =
             Printf.sprintf
               "skipped: semaphore wait > %.0fs, peers holding slot \
-               (cascade=%s, autonomous_available=%d turn_available=%d)"
-              wait_sec meta_after_triage.cascade_name auto_avail turn_avail
+               (cascade=%s, autonomous_available=%d reactive_available=%d \
+               turn_available=%d, %s)"
+              wait_sec meta_after_triage.cascade_name auto_avail reactive_avail
+              turn_avail holder_summary
           in
           Log.Keeper.warn
             "%s: skipping turn (%s)"

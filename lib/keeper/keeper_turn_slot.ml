@@ -128,6 +128,40 @@ let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
 let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
 
+let format_slot_holders ?(limit = 5) holders =
+  let limit = max 1 limit in
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  match holders with
+  | [] -> "[]"
+  | _ ->
+    let shown = take limit holders in
+    let rendered =
+      List.map
+        (fun (name, held_for_sec) ->
+           Printf.sprintf "%s/%.0fs" name (max 0.0 held_for_sec))
+        shown
+    in
+    let extra = List.length holders - List.length shown in
+    let items =
+      if extra > 0
+      then rendered @ [Printf.sprintf "+%d more" extra]
+      else rendered
+    in
+    "[" ^ String.concat ", " items ^ "]"
+;;
+
+let slot_holders_summary ?(limit = 5) ~now () =
+  Printf.sprintf
+    "turn_holders=%s autonomous_holders=%s reactive_holders=%s"
+    (format_slot_holders ~limit (turn_slot_holders ~now))
+    (format_slot_holders ~limit (autonomous_slot_holders ~now))
+    (format_slot_holders ~limit (reactive_slot_holders ~now))
+;;
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -519,17 +553,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         let holders =
           snapshot_holders ~label ~now:(Time_compat.now ())
         in
-        let holder_summary =
-          match holders with
-          | [] -> "(none — race or empty)"
-          | _ ->
-            holders
-            |> List.map (fun (n, age) -> Printf.sprintf "%s/%.0fs" n age)
-            |> String.concat ", "
-        in
+        let holder_summary = format_slot_holders holders in
         Log.Keeper.routine
           "semaphore_wait: %s semaphore wait exceeded %.0fs \
-           (channel=%s, holders=[%s]), skipping turn"
+           (channel=%s, holders=%s), skipping turn"
           label semaphore_wait_timeout_sec
           channel_label holder_summary;
         (* #9771: per-keeper × per-acquire-channel counter so

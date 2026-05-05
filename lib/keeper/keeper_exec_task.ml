@@ -126,15 +126,21 @@ let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
     let scoped_filter task =
       Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
     in
-    if active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-       && not (active_goal_ids_have_claim_pool_task config goal_ids)
-    then
+    if not (active_goal_ids_have_claim_pool_task config goal_ids) then
+      let is_auto_goal =
+        active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+      in
       { task_filter = (fun (_task : Masc_domain.task) -> true);
-        mode = "auto_goal_fallback_all_tasks";
+        mode =
+          (if is_auto_goal then "auto_goal_fallback_all_tasks"
+           else "empty_goal_scope_fallback_all_tasks");
         effective_goal_ids = [];
         fallback_reason =
           Some
-            "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks";
+            (if is_auto_goal then
+               "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks"
+             else
+               "active goal scope has no claimable linked tasks; falling back to all claimable tasks");
       }
     else
       { task_filter = scoped_filter;

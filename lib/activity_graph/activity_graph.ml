@@ -185,8 +185,9 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           }
           |> sanitize_event
         in
+        let path = day_path config in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
-        append_line (day_path config) (json_line ^ "\n");
+        append_line path (json_line ^ "\n");
         (value, json_line))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in

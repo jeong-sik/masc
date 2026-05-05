@@ -48,7 +48,10 @@ let test_default_constraints_max_time () =
   | None -> fail "expected Some"
 
 let test_default_constraints_buffer () =
-  check int "token_buffer" 5000 Bounded.default_constraints.token_buffer
+  (* RFC-0028: token_buffer is deprecated.  Default is now 0 — the
+     predictor uses Usage_history.predict_p95 instead. *)
+  check int "token_buffer (RFC-0028 deprecated)" 0
+    Bounded.default_constraints.token_buffer
 
 let test_default_constraints_hard_max () =
   check int "hard_max_iterations" 100 Bounded.default_constraints.hard_max_iterations

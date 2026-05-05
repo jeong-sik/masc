@@ -52,7 +52,11 @@ type constraints = {
   max_tokens: int option;
   max_cost_usd: float option;
   max_time_seconds: float option;
-  token_buffer: int;           (** Buffer for predictive checking *)
+  token_buffer: int;
+  (* Deprecated since RFC-0028.  Kept on the record so that JSON
+     inputs that still set it parse without raising; no longer
+     consulted by the predictive token check, which now reads
+     {!Usage_history.predict_p95}. *)
   hard_max_iterations: int;    (** Absolute failsafe limit *)
   retry: retry_config;         (** Retry configuration *)
 }
@@ -63,10 +67,83 @@ let default_constraints = {
   max_tokens = Some 100000;
   max_cost_usd = Some 1.0;
   max_time_seconds = Some 300.0;
-  token_buffer = 5000;
+  (* Was 5000 pre-RFC-0028.  Now 0 — the predictor consults
+     [Usage_history.predict_p95] instead of this magic constant. *)
+  token_buffer = 0;
   hard_max_iterations = 100;
   retry = default_retry_config;
 }
+
+module Usage_history = struct
+  (* RFC-0028 — per-agent ring buffer of recent output-token counts.
+     The predictive constraint check estimates the next turn's cost
+     from the high quantile of these samples instead of the linear
+     running average that the prior implementation used. *)
+
+  let max_samples_per_agent = 64
+  let min_samples_for_p95 = 10
+  let unknown_agent_fallback = 1024
+  (* RFC-0028 §4.2.  Conservative upper bound for one cascade turn's
+     output tokens against current defaults (gpt-4o-mini / qwen3-9B /
+     qwen3-35B-A3B).  No formal heuristic_metrics evidence is
+     attached today — this gap is acknowledged in the RFC.  Re-measure
+     once distribution data lands. *)
+
+  let store : (string, int Queue.t) Hashtbl.t = Hashtbl.create 8
+  let mutex = Mutex.create ()
+
+  let with_lock f =
+    Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
+  let record ~agent ~tokens_out =
+    if tokens_out <= 0 then ()
+    else
+      with_lock (fun () ->
+        let q =
+          match Hashtbl.find_opt store agent with
+          | Some existing -> existing
+          | None ->
+              let fresh = Queue.create () in
+              Hashtbl.add store agent fresh;
+              fresh
+        in
+        Queue.add tokens_out q;
+        while Queue.length q > max_samples_per_agent do
+          ignore (Queue.pop q)
+        done)
+
+  let snapshot agent =
+    with_lock (fun () ->
+      match Hashtbl.find_opt store agent with
+      | None -> []
+      | Some q -> List.of_seq (Queue.to_seq q))
+
+  let predict_p95 ?agent () =
+    match agent with
+    | None -> unknown_agent_fallback
+    | Some a ->
+        let samples = snapshot a in
+        let n = List.length samples in
+        if n < min_samples_for_p95 then unknown_agent_fallback
+        else
+          let sorted = List.sort compare samples in
+          let raw_idx = int_of_float (ceil (0.95 *. float_of_int n)) - 1 in
+          let idx = max 0 (min (n - 1) raw_idx) in
+          List.nth sorted idx
+
+  let sample_count ?agent () =
+    match agent with
+    | None -> 0
+    | Some a ->
+        with_lock (fun () ->
+          match Hashtbl.find_opt store a with
+          | None -> 0
+          | Some q -> Queue.length q)
+
+  let reset () =
+    with_lock (fun () -> Hashtbl.reset store)
+end
 
 (** Bounded execution state *)
 type bounded_state = {
@@ -157,21 +234,24 @@ let check_constraints state =
   ] in
   List.find_map Fun.id checks
 
-(** Check constraints with buffer (predictive) *)
-let check_constraints_with_buffer state =
-  let avg_tokens_per_turn =
-    if state.turns > 0 then
-      (state.tokens_in + state.tokens_out) / state.turns
-    else
-      state.constraints.token_buffer
+(** Check constraints with buffer (predictive).
+
+    RFC-0028: the prediction now comes from the per-agent empirical
+    distribution of recent output-token samples (p95) instead of the
+    linear average.  Without [next_agent] or before the agent has
+    accumulated [Usage_history.min_samples_for_p95] samples, falls
+    back to [Usage_history.unknown_agent_fallback]. *)
+let check_constraints_with_buffer ?next_agent state =
+  let predicted_per_turn =
+    Usage_history.predict_p95 ?agent:next_agent ()
   in
   let predicted_total =
-    state.tokens_in + state.tokens_out + avg_tokens_per_turn
+    state.tokens_in + state.tokens_out + predicted_per_turn
   in
   match state.constraints.max_tokens with
   | Some max when predicted_total > max ->
       Some (Printf.sprintf "Approaching token limit: %d + ~%d > %d"
-        (state.tokens_in + state.tokens_out) avg_tokens_per_turn max)
+        (state.tokens_in + state.tokens_out) predicted_per_turn max)
   | _ -> check_constraints state
 
 (** Simple path resolution - supports "$.field" and "$.field.subfield" *)
@@ -306,27 +386,27 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
             warning = None;
           }
         else
-        (* 2. Predictive constraint check *)
-        match check_constraints_with_buffer state with
-        | Some reason ->
-            {
-              status = `Constraint_exceeded;
-              reason;
-              final_output = None;
-              stats = state;
-              history = List.rev !history;
-              warning = None;
-            }
-        | None ->
-            (* 3. Select next agent (round-robin) *)
-            let agent_idx = state.turns mod (List.length agents) in
-            let agent =
-              match List.nth_opt agents agent_idx with
-              | Some a -> a
-              | None -> fallback_agent
-            in
-
-            (* 4. Execute agent with retry logic *)
+          (* 3. Select next agent (round-robin) ahead of the predictive
+             check — RFC-0028 needs the agent key for the per-agent
+             distribution lookup. *)
+          let agent_idx = state.turns mod (List.length agents) in
+          let agent =
+            Option.value ~default:fallback_agent
+              (List.nth_opt agents agent_idx)
+          in
+          (* 2. Predictive constraint check *)
+          match check_constraints_with_buffer ~next_agent:agent state with
+          | Some reason ->
+              {
+                status = `Constraint_exceeded;
+                reason;
+                final_output = None;
+                stats = state;
+                history = List.rev !history;
+                warning = None;
+              }
+          | None ->
+              (* 4. Execute agent with retry logic *)
             let rec try_spawn attempt =
               let result =
                 try Ok (spawn_fn agent prompt)
@@ -384,6 +464,13 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
             | Ok (spawn_result, retries_used) ->
                 (* 5. Update state AFTER execution *)
                 update_state state spawn_result;
+                (* RFC-0028: feed the per-agent distribution so future
+                   predictive checks can read this agent's tail.  The
+                   recorder drops zero/negative samples internally. *)
+                (match spawn_result.output_tokens with
+                 | Some tokens ->
+                     Usage_history.record ~agent ~tokens_out:tokens
+                 | None -> ());
 
                 (* 6. Parse output as JSON for goal check *)
                 let output_json =

@@ -12,7 +12,10 @@ let test_default_constraints () =
   check (option int) "default max_turns" (Some 10) c.max_turns;
   check (option int) "default max_tokens" (Some 100000) c.max_tokens;
   check int "default hard_max_iterations" 100 c.hard_max_iterations;
-  check int "default token_buffer" 5000 c.token_buffer
+  (* RFC-0028: token_buffer is deprecated; default is now 0.  The
+     predictor consults Usage_history.predict_p95 instead of this
+     magic constant.  Field is retained for JSON-input compatibility. *)
+  check int "default token_buffer (RFC-0028 deprecated)" 0 c.token_buffer
 
 let test_constraints_of_json () =
   let json = Yojson.Safe.from_string {|
@@ -345,6 +348,122 @@ let test_backoff_calculation () =
   check int "backoff capped at max" 10000 (Bounded.calc_backoff_delay retry_cfg 5)
 
 (* ============================================ *)
+(* Usage history (RFC-0028) tests               *)
+(* ============================================ *)
+
+let test_usage_history_p95_with_known_distribution () =
+  Bounded.Usage_history.reset ();
+  (* Record 20 samples ascending: 100..2000 step 100. *)
+  let samples = List.init 20 (fun i -> (i + 1) * 100) in
+  List.iter
+    (fun t -> Bounded.Usage_history.record ~agent:"alpha" ~tokens_out:t)
+    samples;
+  check int "20 samples accepted" 20
+    (Bounded.Usage_history.sample_count ~agent:"alpha" ());
+  (* p95 of 20 ascending samples = ceil(0.95 * 20) - 1 = index 18 → 1900. *)
+  let p95 = Bounded.Usage_history.predict_p95 ~agent:"alpha" () in
+  check int "p95 from 20 ascending samples" 1900 p95
+
+let test_usage_history_fallback_under_min_samples () =
+  Bounded.Usage_history.reset ();
+  (* Five samples — below min_samples_for_p95 (10). *)
+  List.iter
+    (fun t -> Bounded.Usage_history.record ~agent:"beta" ~tokens_out:t)
+    [100; 200; 300; 400; 500];
+  let p = Bounded.Usage_history.predict_p95 ~agent:"beta" () in
+  check int "fallback returned when n < min_samples"
+    Bounded.Usage_history.unknown_agent_fallback p
+
+let test_usage_history_per_agent_isolation () =
+  Bounded.Usage_history.reset ();
+  List.iter
+    (fun t -> Bounded.Usage_history.record ~agent:"low" ~tokens_out:t)
+    [100; 110; 120; 130; 140; 150; 160; 170; 180; 190; 200; 210];
+  List.iter
+    (fun t -> Bounded.Usage_history.record ~agent:"high" ~tokens_out:t)
+    [1000; 1100; 1200; 1300; 1400; 1500; 1600; 1700; 1800; 1900; 2000; 2100];
+  let p_low = Bounded.Usage_history.predict_p95 ~agent:"low" () in
+  let p_high = Bounded.Usage_history.predict_p95 ~agent:"high" () in
+  check bool "low agent p95 < high agent p95" true (p_low < p_high);
+  check bool "low agent p95 in expected range" true
+    (p_low >= 200 && p_low <= 210);
+  check bool "high agent p95 in expected range" true
+    (p_high >= 2000 && p_high <= 2100)
+
+let test_usage_history_no_agent_returns_fallback () =
+  Bounded.Usage_history.reset ();
+  let p = Bounded.Usage_history.predict_p95 () in
+  check int "no agent → fallback"
+    Bounded.Usage_history.unknown_agent_fallback p
+
+let test_usage_history_unknown_agent_returns_fallback () =
+  Bounded.Usage_history.reset ();
+  let p = Bounded.Usage_history.predict_p95 ~agent:"never-seen" () in
+  check int "unknown agent → fallback"
+    Bounded.Usage_history.unknown_agent_fallback p
+
+let test_usage_history_drops_zero_and_negative () =
+  Bounded.Usage_history.reset ();
+  Bounded.Usage_history.record ~agent:"gamma" ~tokens_out:0;
+  Bounded.Usage_history.record ~agent:"gamma" ~tokens_out:(-10);
+  check int "zero/negative samples dropped" 0
+    (Bounded.Usage_history.sample_count ~agent:"gamma" ())
+
+let test_usage_history_ring_buffer_eviction () =
+  Bounded.Usage_history.reset ();
+  (* Push 80 samples; ring capacity is 64, oldest must evict first. *)
+  for i = 1 to 80 do
+    Bounded.Usage_history.record ~agent:"delta" ~tokens_out:i
+  done;
+  check int "ring buffer caps at 64" 64
+    (Bounded.Usage_history.sample_count ~agent:"delta" ());
+  (* Surviving samples are 17..80; p95 falls in that window. *)
+  let p = Bounded.Usage_history.predict_p95 ~agent:"delta" () in
+  check bool "p95 reflects newest samples (>= 70)" true (p >= 70);
+  check bool "p95 not above max sample" true (p <= 80)
+
+let test_bounded_run_predictor_uses_distribution () =
+  Bounded.Usage_history.reset ();
+  (* Pre-seed the agent's distribution with high token output so the
+     RFC-0028 predictor pre-empts the very first turn. *)
+  for _ = 1 to 12 do
+    Bounded.Usage_history.record ~agent:"high-cost" ~tokens_out:5000
+  done;
+  let constraints = { Bounded.default_constraints with
+    max_turns = Some 100;
+    max_tokens = Some 4000;
+    max_cost_usd = None;
+    max_time_seconds = None;
+    hard_max_iterations = 100;
+  } in
+  let goal = { Bounded.path = "$.never"; condition = Bounded.Eq (`Bool true) } in
+  let spawn_fn _ _ = mock_spawn_result ~output:{|{}|} () in
+  let result =
+    Bounded.bounded_run
+      ~constraints ~goal ~agents:["high-cost"] ~prompt:"test" ~spawn_fn
+  in
+  check bool "predictor pre-empts via distribution" true
+    (result.status = `Constraint_exceeded);
+  check int "no turn executed before pre-emption" 0 result.stats.turns;
+  check bool "reason mentions approaching limit" true
+    (try
+       let _ = Str.search_forward
+         (Str.regexp_string "Approaching token limit") result.reason 0 in
+       true
+     with Not_found -> false)
+
+let test_bounded_run_records_distribution_after_turn () =
+  Bounded.Usage_history.reset ();
+  let constraints = { Bounded.default_constraints with max_turns = Some 1 } in
+  let goal = { Bounded.path = "$.done"; condition = Bounded.Eq (`Bool true) } in
+  let spawn_fn _ _ = mock_spawn_result ~output:{|{"done": true}|} () in
+  let _ = Bounded.bounded_run
+    ~constraints ~goal ~agents:["recorder"] ~prompt:"test" ~spawn_fn in
+  (* mock_spawn_result reports output_tokens = 30; one sample expected. *)
+  check int "agent gained one sample" 1
+    (Bounded.Usage_history.sample_count ~agent:"recorder" ())
+
+(* ============================================ *)
 (* Result serialization tests                   *)
 (* ============================================ *)
 
@@ -394,6 +513,27 @@ let bounded_run_tests = [
   "spawn exception", `Quick, test_bounded_run_spawn_exception;
   "failure reason names agent and turn", `Quick,
     test_bounded_run_failure_reason_names_agent_and_turn;
+  "predictor consults distribution (RFC-0028)", `Quick,
+    test_bounded_run_predictor_uses_distribution;
+  "records sample after turn (RFC-0028)", `Quick,
+    test_bounded_run_records_distribution_after_turn;
+]
+
+let usage_history_tests = [
+  "p95 from known distribution", `Quick,
+    test_usage_history_p95_with_known_distribution;
+  "fallback under min samples", `Quick,
+    test_usage_history_fallback_under_min_samples;
+  "per-agent isolation", `Quick,
+    test_usage_history_per_agent_isolation;
+  "no agent returns fallback", `Quick,
+    test_usage_history_no_agent_returns_fallback;
+  "unknown agent returns fallback", `Quick,
+    test_usage_history_unknown_agent_returns_fallback;
+  "drops zero and negative samples", `Quick,
+    test_usage_history_drops_zero_and_negative;
+  "ring buffer eviction at 64", `Quick,
+    test_usage_history_ring_buffer_eviction;
 ]
 
 let retry_tests = [
@@ -417,5 +557,6 @@ let () =
     "goal_checking", goal_checking_tests;
     "bounded_run", bounded_run_tests;
     "retry", retry_tests;
+    "usage_history", usage_history_tests;
     "serialization", serialization_tests;
   ]

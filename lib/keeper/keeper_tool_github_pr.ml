@@ -1,0 +1,230 @@
+(** Dedicated GitHub PR keeper tools. *)
+
+open Keeper_types
+open Keeper_exec_shared
+
+let pr_json_fields =
+  "number,title,state,isDraft,headRefName,baseRefName,mergeable,reviewDecision,url,updatedAt"
+
+let credential_state_json = function
+  | Repo_manager_types.Unmaterialized ->
+      `Assoc [ "state", `String "unmaterialized" ]
+  | Repo_manager_types.Materialized { last_verified_at } ->
+      `Assoc
+        [
+          "state", `String "materialized";
+          "last_verified_at", `Intlit (Int64.to_string last_verified_at);
+        ]
+  | Repo_manager_types.Stale { reason } ->
+      `Assoc [ "state", `String "stale"; "reason", `String reason ]
+
+let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
+  `Assoc
+    [
+      "effective_github_identity", `String binding.effective_github_identity;
+      ( "credential_scope",
+        `String
+          (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
+      "git_identity_mode", `String binding.git_identity_mode;
+      "credential_state", credential_state_json state;
+    ]
+
+let with_repo_arg repo argv =
+  let repo = String.trim repo in
+  if repo = "" then argv else argv @ [ "-R"; repo ]
+
+let opt_flag flag = function
+  | None -> []
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then [] else [ flag; value ]
+
+let clamp_limit n =
+  Int.max 1 (Int.min 100 n)
+
+let normalize_state raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "open" -> Ok "open"
+  | "closed" -> Ok "closed"
+  | "merged" -> Ok "merged"
+  | "all" -> Ok "all"
+  | other ->
+      Error
+        (Printf.sprintf
+           "state must be one of open, closed, merged, all; got %S" other)
+
+let build_pr_list_argv ~repo ~state ~limit =
+  [ "gh"; "pr"; "list" ]
+  |> with_repo_arg repo
+  |> fun argv ->
+  argv
+  @ [
+      "--state";
+      state;
+      "--limit";
+      string_of_int (clamp_limit limit);
+      "--json";
+      pr_json_fields;
+    ]
+
+let build_pr_status_argv ~repo ~pr_number =
+  [ "gh"; "pr"; "view"; string_of_int pr_number ]
+  |> with_repo_arg repo
+  |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body,files,reviews,comments" ]
+
+let build_pr_create_argv ~repo ~title ~body ~base ~head =
+  [ "gh"; "pr"; "create" ]
+  |> with_repo_arg repo
+  |> fun argv ->
+  argv
+  @ [ "--draft"; "--title"; title; "--body"; body ]
+  @ opt_flag "--base" base
+  @ opt_flag "--head" head
+
+let draft_request_allowed args =
+  match Safe_ops.json_bool_opt "draft" args with
+  | Some false -> false
+  | Some true | None -> (
+      match Safe_ops.json_bool_opt "ready" args with
+      | Some true -> false
+      | Some false | None -> true)
+
+let mutation_preset_ok = function
+  | Some (Delivery | Coding | Full) -> true
+  | _ -> false
+
+let scoped_credential_or_error ~config ~meta =
+  match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
+  | Error reason ->
+      Error
+        (`Assoc
+          [
+            "ok", `Bool false;
+            "error", `String "credential_binding_failed";
+            "reason", `String reason;
+            "keeper", `String meta.name;
+          ])
+  | Ok binding -> (
+      let state =
+        Credential_materializer.verify_state
+          ~gh_config_dir:binding.gh_config_dir
+      in
+      match state with
+      | Repo_manager_types.Materialized _ ->
+          let env =
+            Keeper_gh_env.compose_base_with_gh_config
+              ~dir:binding.gh_config_dir
+          in
+          Ok (binding, state, env)
+      | Repo_manager_types.Unmaterialized | Repo_manager_types.Stale _ ->
+          Error
+            (`Assoc
+              [
+                "ok", `Bool false;
+                "error", `String "credential_preflight_failed";
+                "keeper", `String meta.name;
+                "credential", binding_json binding ~state;
+              ]))
+
+let status_ok = function
+  | Unix.WEXITED 0 -> true
+  | _ -> false
+
+let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~output =
+  Yojson.Safe.to_string
+    (`Assoc
+      [
+        "ok", `Bool ok;
+        "tool", `String tool;
+        "operation", `String operation;
+        "keeper", `String meta.name;
+        "credential", binding_json binding ~state;
+        "cwd", `String cwd;
+        "output", `String output;
+      ])
+
+let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
+  match scoped_credential_or_error ~config ~meta with
+  | Error json -> Yojson.Safe.to_string json
+  | Ok (binding, state, env) -> (
+      let cwd_result =
+        if write then
+          Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args
+        else
+          Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args
+      in
+      match cwd_result with
+      | Error reason ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                "ok", `Bool false;
+                "tool", `String tool;
+                "error", `String "cwd_resolution_failed";
+                "reason", `String reason;
+                "keeper", `String meta.name;
+              ])
+      | Ok cwd ->
+          let timeout_sec =
+            Env_config_exec_timeout.timeout_sec
+              ~caller:(if write then Pr_review_post else Pr_review)
+              ()
+          in
+          let st, output =
+            Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+          in
+          output_json ~ok:(status_ok st) ~tool ~operation ~meta ~binding
+            ~state ~cwd ~output)
+
+let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
+    ~(args : Yojson.Safe.t) =
+  let repo = Safe_ops.json_string ~default:"" "repo" args in
+  let limit = Safe_ops.json_int ~default:20 "limit" args |> clamp_limit in
+  match Safe_ops.json_string ~default:"open" "state" args |> normalize_state with
+  | Error reason -> error_json reason
+  | Ok state ->
+      run_gh ~tool:"keeper_pr_list" ~operation:"pr_list" ~config ~meta
+        ~args ~write:false (build_pr_list_argv ~repo ~state ~limit)
+
+let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
+    ~(args : Yojson.Safe.t) =
+  let repo = Safe_ops.json_string ~default:"" "repo" args in
+  let pr_number = Keeper_tool_pr_review.pr_number_of_args args in
+  if pr_number = 0 then
+    error_json "pr_number is required. Good: pr_number=123."
+  else
+    run_gh ~tool:"keeper_pr_status" ~operation:"pr_status" ~config ~meta
+      ~args ~write:false (build_pr_status_argv ~repo ~pr_number)
+
+let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
+    ~(args : Yojson.Safe.t) =
+  let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
+  let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
+  let repo = Safe_ops.json_string ~default:"" "repo" args in
+  let base = Safe_ops.json_string_opt "base" args in
+  let head = Safe_ops.json_string_opt "head" args in
+  if not (draft_request_allowed args) then
+    error_json "keeper_pr_create is draft-only; omit draft or set draft=true."
+  else if title = "" then
+    error_json "title is required."
+  else if body = "" then
+    error_json "body is required."
+  else if not (mutation_preset_ok (Keeper_types.tool_access_preset meta.tool_access)) then
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          "ok", `Bool false;
+          "error", `String "preset_insufficient";
+          "reason", `String "keeper_pr_create requires delivery, coding, or full preset";
+        ])
+  else
+    run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config ~meta
+      ~args ~write:true
+      (build_pr_create_argv ~repo ~title ~body ~base ~head)
+
+module For_testing = struct
+  let build_pr_list_argv = build_pr_list_argv
+  let build_pr_status_argv = build_pr_status_argv
+  let build_pr_create_argv = build_pr_create_argv
+  let draft_request_allowed = draft_request_allowed
+end

@@ -49,10 +49,9 @@ tools = ["keeper_fs_edit"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-# PR submit helpers are no longer exposed. The canonical path is
-# masc_worktree_create → masc_code_edit/masc_code_write → masc_code_git
-# → keeper_shell op=gh for `gh pr create`.
-tools = ["keeper_preflight_check"]
+# Dedicated PR helpers run keeper-scoped credential preflight before gh.
+# keeper_pr_create is draft-only; ready/merge flows remain gated elsewhere.
+tools = ["keeper_preflight_check", "keeper_pr_list", "keeper_pr_status", "keeper_pr_create"]
 
 [groups.github_review]
 tools = ["keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply"]

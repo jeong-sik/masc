@@ -859,6 +859,28 @@ let test_tool_failure_classification_contracts () =
     (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
        "let failure_class = classify_tool_failure_class error_detail")
 
+let test_keeper_github_pr_tool_contracts () =
+  check bool "dedicated keeper PR list tool exists" true
+    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_list"|});
+  check bool "dedicated keeper PR status tool exists" true
+    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_status"|});
+  check bool "dedicated keeper PR create tool exists" true
+    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_create"|});
+  check bool "PR create is draft-only" true
+    (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
+       {|[ "gh"; "pr"; "create" ]|}
+     && file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
+          {|@ [ "--draft"; "--title"; title; "--body"; body ]|});
+  check bool "keeper PR tools use scoped GH env" true
+    (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
+       "Keeper_gh_env.compose_base_with_gh_config");
+  check bool "keeper PR tools verify credential materialization" true
+    (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
+       "Credential_materializer.verify_state");
+  check bool "keeper PR create is exposed by github group" true
+    (file_contains_pattern "config/tool_policy.toml"
+       {|keeper_pr_create|})
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1573,10 +1595,12 @@ let () =
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick
              test_docker_config_storage_contracts;
-           test_case "tool failure classification contracts" `Quick
-             test_tool_failure_classification_contracts;
-           test_case "dashboard warm hydration contracts" `Quick
-             test_dashboard_warm_hydration_contracts;
+          test_case "tool failure classification contracts" `Quick
+            test_tool_failure_classification_contracts;
+          test_case "keeper github PR tool contracts" `Quick
+            test_keeper_github_pr_tool_contracts;
+          test_case "dashboard warm hydration contracts" `Quick
+            test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;
            test_case "operator surface route contracts" `Quick
              test_operator_surface_route_contracts;

@@ -119,6 +119,33 @@ let test_of_json_blob_ref_missing_ref () =
   | Error _ -> ()
   | Ok _ -> assert false
 
+let test_of_json_streaming_missing_bytes () =
+  (* Symmetric to blob_ref_missing_ref — Copilot review caught
+     this branch was untested. *)
+  let j = `Assoc [ ("kind", `String "streaming") ] in
+  match P.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_streaming_wrong_type_bytes () =
+  (* "bytes" present but not `Int — must reject. *)
+  let j =
+    `Assoc
+      [ ("kind", `String "streaming"); ("bytes", `String "4096") ]
+  in
+  match P.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_blob_ref_wrong_type_ref () =
+  (* "ref" present but not `String. *)
+  let j =
+    `Assoc [ ("kind", `String "blob_ref"); ("ref", `Int 42) ]
+  in
+  match P.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
 let test_of_json_not_object () =
   let j = `String "scalar" in
   match P.of_json j with
@@ -139,5 +166,8 @@ let () =
   test_of_json_unknown_kind ();
   test_of_json_missing_kind ();
   test_of_json_blob_ref_missing_ref ();
+  test_of_json_streaming_missing_bytes ();
+  test_of_json_streaming_wrong_type_bytes ();
+  test_of_json_blob_ref_wrong_type_ref ();
   test_of_json_not_object ();
   print_endline "test_payload: all assertions passed"

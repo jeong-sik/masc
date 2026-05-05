@@ -73,10 +73,94 @@ let test_of_json_missing_created_by () =
   | Error _ -> ()
   | Ok _ -> assert false
 
+let test_of_json_missing_created_at () =
+  (* Symmetric to missing_created_by — Copilot review caught
+     the [created_at] branch was untested. *)
+  let j = `Assoc [ ("created_by", `String "k") ] in
+  match Pr.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_origin_artifact_ids_not_list () =
+  (* "origin_artifact_ids" present but not a JSON list. *)
+  let j =
+    `Assoc
+      [
+        ("origin_artifact_ids", `String "wrong-type");
+        ("created_by", `String "k");
+        ("created_at", `Float 1.0);
+      ]
+  in
+  match Pr.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_origin_artifact_ids_invalid_member () =
+  (* "origin_artifact_ids" is a list, but a member is not a
+     valid Artifact_id JSON shape. *)
+  let j =
+    `Assoc
+      [
+        ( "origin_artifact_ids",
+          `List [ `Int 42 (* not a string-shaped Aid *) ] );
+        ("created_by", `String "k");
+        ("created_at", `Float 1.0);
+      ]
+  in
+  match Pr.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_created_by_wrong_type () =
+  let j =
+    `Assoc
+      [
+        ("created_by", `Int 42);
+        ("created_at", `Float 1.0);
+      ]
+  in
+  match Pr.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_created_at_wrong_type () =
+  let j =
+    `Assoc
+      [
+        ("created_by", `String "k");
+        ("created_at", `String "not-a-number");
+      ]
+  in
+  match Pr.of_json j with
+  | Error _ -> ()
+  | Ok _ -> assert false
+
+let test_of_json_created_at_int_accepted () =
+  (* Implementation accepts both `Float and `Int for created_at
+     (line 46: float_of_int i).  Pin that behavior. *)
+  let j =
+    `Assoc
+      [
+        ("created_by", `String "k");
+        ("created_at", `Int 1700000000);
+      ]
+  in
+  match Pr.of_json j with
+  | Ok r -> assert (r.created_at = 1700000000.0)
+  | Error e ->
+      Printf.eprintf "unexpected error: %s\n" e;
+      assert false
+
 let () =
   test_empty_no_origins ();
   test_round_trip_empty ();
   test_round_trip_with_origins ();
   test_of_json_garbage ();
   test_of_json_missing_created_by ();
+  test_of_json_missing_created_at ();
+  test_of_json_origin_artifact_ids_not_list ();
+  test_of_json_origin_artifact_ids_invalid_member ();
+  test_of_json_created_by_wrong_type ();
+  test_of_json_created_at_wrong_type ();
+  test_of_json_created_at_int_accepted ();
   print_endline "test_provenance_stub: all assertions passed"

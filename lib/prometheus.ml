@@ -470,6 +470,16 @@ let metric_keeper_tool_emission_pushes =
 let metric_keeper_path_rejection =
   "masc_keeper_path_rejection_total"
 
+(* RFC-0026 PR-E-1.6 admission router shadow observation
+   (keeper_admission_runtime.ml). Labels:
+     - keeper:  keeper_id
+     - outcome: legacy | dispatch | wait | surface
+
+   "legacy" dominates until PR-E-1.7 wires the registry + bucket
+   lookups via [Keeper_admission_runtime.set_*_lookup]. *)
+let metric_keeper_admission_shadow_outcome =
+  "masc_keeper_admission_shadow_outcome_total"
+
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
@@ -857,6 +867,18 @@ let metric_anti_rationalization_excuse_pattern =
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
+
+(* RFC-0022 §9 attempt-liveness gate.  Counts would-be (Observe) and
+   actual (Enforce) liveness kills broken down by failure class.
+   Labels: [kind, mode, provider].
+
+   [observed_total] is the per-attempt finalizer counter regardless of
+   outcome (success | kill | wire_error). Useful for the kill-rate
+   ratio kill / observed. *)
+let metric_cascade_attempt_liveness_kill =
+  "masc_cascade_attempt_liveness_kill_total"
+let metric_cascade_attempt_liveness_observed =
+  "masc_cascade_attempt_liveness_observed_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
@@ -1296,6 +1318,14 @@ let init () =
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
   add metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
+  (* RFC-0026 PR-E-1.6 admission router shadow observation.
+     Emitted by keeper_admission_runtime.observe before the existing
+     [Keeper_turn_slot.with_keeper_turn_slot] call. *)
+  add metric_keeper_admission_shadow_outcome
+    "RFC-0026 PR-E-1.6 admission router shadow observation \
+     (labels: keeper, outcome=legacy|dispatch|wait|surface). \
+     [legacy] dominates until PR-E-1.7 wires registry+bucket lookups."
+    Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
   add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;

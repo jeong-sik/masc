@@ -197,6 +197,10 @@ val metric_keeper_operator_clear : string
     [kind="out_of_roots"|"not_found_relative"]. *)
 val metric_keeper_path_rejection : string
 
+val metric_keeper_admission_shadow_outcome : string
+(** RFC-0026 PR-E-1.6 shadow observation. Counter; labels
+    [keeper] and [outcome \in {legacy, dispatch, wait, surface}]. *)
+
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string
@@ -405,6 +409,28 @@ val metric_anti_rationalization_excuse_pattern : string
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
+
+val metric_cascade_attempt_liveness_kill : string
+(** RFC-0022 §9 — would-be ([mode=observe]) and actual ([mode=enforce])
+    in-attempt liveness kills, broken down by failure class.
+
+    Labels: [kind, mode, provider] where:
+    - [kind] ∈ [no_first_token | inter_chunk_idle | wall_exceeded | provider_error]
+    - [mode] ∈ [observe | enforce]
+    - [provider] is the cascade label that produced the attempt
+
+    Use the {b observe}-mode counter to calibrate the per-profile
+    budgets (cloud_fast / cloud_thinking / local_27b / local_70b_plus)
+    against [scripts/diag-keeper-cycle.sh] before flipping any profile
+    to {b enforce}. *)
+
+val metric_cascade_attempt_liveness_observed : string
+(** RFC-0022 PR-2 §3 — per-attempt finalizer counter regardless of
+    outcome. Labels: [cascade], [provider], [outcome] ∈ {success |
+    kill | wire_error}. The kill-rate is
+    [kill_total / observed_total]. *)
+
+
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)

@@ -103,6 +103,27 @@ val schedule :
     inside the bucket; [policy] is immutable; [buckets] is a function
     the caller is responsible for making safe. *)
 
+val schedule_peek :
+  policy:Keeper_admission_policy.t ->
+  buckets:bucket_lookup ->
+  decision
+(** Non-mutating variant of [schedule] for shadow-mode observation
+    (RFC-0026 PR-E-1.6).  Returns the decision [schedule] would have
+    produced without consuming a token.
+
+    Differs from [schedule] in exactly one place: instead of
+    [Keeper_provider_token_bucket.try_acquire] it queries
+    [Keeper_provider_token_bucket.tokens_available] and treats
+    [>= 1.0] as "would dispatch".
+
+    Side effect: [tokens_available] performs a lazy refill (updates
+    the bucket's [last_refill_at] timestamp) but does not consume a
+    token.  This matches what a live call would observe.
+
+    Use case: shadow-mode counter emission while
+    [MASC_ADMISSION_USE_NEW] is off, so we can read the would-be
+    decision distribution without affecting live admission. *)
+
 (** {1 Drift classification helpers} *)
 
 val classify_reason :

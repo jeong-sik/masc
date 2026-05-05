@@ -19,7 +19,7 @@
     6. [deprecated_flags] / [overridden_flags] partition
        behaviour. *)
 
-module R = Masc_mcp.Feature_flag_registry
+module R = Feature_flag_registry
 
 (* ─── (1) lifecycle_to_string exhaustiveness ──────────────────── *)
 

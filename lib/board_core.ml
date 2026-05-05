@@ -79,9 +79,28 @@ let mark_dirty_comment store comment_id =
 let with_lock store f =
   Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
 
-(** Serialize JSONL writes without holding the state mutex. *)
+(** Serialize JSONL writes without holding the state mutex.
+
+    #10569 diagnostic: split the timing into [acquire_sec] (wait
+    for mutex) and [held_sec] (disk I/O inside the lock).  The two
+    histograms together let operators decide whether the
+    keeper_board_* 60s timeout cluster is driven by writer-side
+    queueing or by individual-syscall stall — without this
+    decomposition the issue's root cause hypothesis ("mutex SPOF")
+    cannot be confirmed against the field evidence. *)
 let with_persist_lock store f =
-  Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () -> f ())
+  let started = Time_compat.now () in
+  Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
+    let acquired = Time_compat.now () in
+    Prometheus.observe_histogram
+      Prometheus.metric_board_persist_lock_acquire_sec
+      (acquired -. started);
+    let result = f () in
+    let released = Time_compat.now () in
+    Prometheus.observe_histogram
+      Prometheus.metric_board_persist_lock_held_sec
+      (released -. acquired);
+    result)
 
 (** {1 Sweeper - Aggressive Cleanup} *)
 

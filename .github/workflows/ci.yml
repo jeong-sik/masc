@@ -539,10 +539,7 @@ jobs:
           opam exec -- dune exec ./bin/env_knob_catalog.exe -- \
             docs/runtime-tunables.md
           if ! git diff --exit-code docs/runtime-tunables.md; then
-            echo "::error::docs/runtime-tunables.md is stale relative \
-to lib/config/env_config_*.ml. Run 'dune exec \
-./bin/env_knob_catalog.exe -- docs/runtime-tunables.md' locally and \
-commit the result."
+            echo "::error::docs/runtime-tunables.md is stale relative to lib/config/env_config_*.ml. Run 'dune exec ./bin/env_knob_catalog.exe -- docs/runtime-tunables.md' locally and commit the result."
             exit 1
           fi
 

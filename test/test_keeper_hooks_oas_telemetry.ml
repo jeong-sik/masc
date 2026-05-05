@@ -697,6 +697,35 @@ let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
   check bool "failure propagated to every action" true
     (List.for_all (fun e -> not e.Hooks.success) events)
 
+let test_pr_work_action_metric_ignores_quoted_command_words () =
+  let bash_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                "git commit -m \"revert git push\" && gh issue comment 1 --body \"please pr create later\""
+            );
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "quoted command words do not add actions"
+    [ "GIT_COMMIT" ] (work_actions bash_events);
+  let gh_events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "issue comment 1 --body \"please pr create later\"");
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -762,5 +791,7 @@ let () =
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case "extracts bash git sequence and failure" `Quick
             test_pr_work_action_metric_extracts_bash_git_sequence_failure
+        ; test_case "ignores quoted command words" `Quick
+            test_pr_work_action_metric_ignores_quoted_command_words
         ] )
     ]

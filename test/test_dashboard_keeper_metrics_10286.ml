@@ -254,6 +254,32 @@ let test_context_snapshot_classifier_rejects_sparse_tool_events () =
   check bool "work action row is sparse" false
     (Metrics.metrics_row_has_context_snapshot (pr_work_action "GIT_PUSH"))
 
+let test_metrics_series_ignores_sparse_tool_events () =
+  let items, summary, _, _ =
+    Detail.compute_metrics_window
+      ~parsed_metrics:
+        [
+          context_snapshot ~context_ratio:0.55 ();
+          pr_review_action "COMMENT";
+          pr_work_action "GIT_PUSH";
+        ]
+      ~generation:0
+      ~compact:false
+      ~series_points:80
+      ~metrics_window_max_bytes:200_000
+      ~primary_model_norm:""
+      ~primary_model:""
+  in
+  check int "series skips sparse rows" 1 (List.length items);
+  check int "actions still count" 2
+    (summary_int "pr_work_signal_count" summary);
+  match items with
+  | [ row ] ->
+      check (float 0.0001) "context sample preserved" 0.55
+        (summary_float "context_ratio" row)
+  | other ->
+      failf "expected one metrics series row, got %d" (List.length other)
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -279,5 +305,7 @@ let () =
             test_24h_context_ignores_sparse_tool_events;
           test_case "classifies sparse tool events" `Quick
             test_context_snapshot_classifier_rejects_sparse_tool_events;
+          test_case "series ignores sparse tool events" `Quick
+            test_metrics_series_ignores_sparse_tool_events;
         ] );
     ]

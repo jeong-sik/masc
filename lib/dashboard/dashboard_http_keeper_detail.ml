@@ -513,7 +513,7 @@ let compute_metrics_window
         let acc = if is_heartbeat then { acc with ma_heartbeat_points = acc.ma_heartbeat_points + 1 } else acc in
 
         let output_item =
-          if compact then None
+          if compact || not (metrics_row_has_context_snapshot j) then None
           else
             Some (`Assoc [
               ("ts_unix", `Float ts_unix);

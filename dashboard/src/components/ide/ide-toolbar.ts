@@ -58,19 +58,11 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
 
   return html`
     <div
+      class="ide-toolbar"
       role="toolbar"
       aria-label="IDE editor toolbar"
-      style=${{
-        display: 'grid',
-        gridTemplateColumns: 'auto 1fr auto',
-        alignItems: 'center',
-        gap: 'var(--sp-3)',
-        padding: 'var(--sp-2) var(--sp-3)',
-        borderBottom: '1px solid var(--color-border-divider)',
-        background: 'var(--color-bg-surface)',
-      }}
     >
-      <div role="tablist" aria-label="View mode" style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+      <div class="ide-view-tabs" role="tablist" aria-label="View mode">
         ${VIEW_TABS.map(tab => html`
           <button
             type="button"
@@ -92,14 +84,8 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
       </div>
       <span aria-hidden="true" />
       <div
+        class="ide-layer-picker"
         aria-label="Layers (multi-select)"
-        style=${{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--sp-2)',
-          color: 'var(--color-fg-muted)',
-          font: 'var(--type-eyebrow)',
-        }}
       >
         <span>LAYERS</span>
         ${IDE_LAYERS.map(layer => html`

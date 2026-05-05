@@ -14,8 +14,8 @@ describe('IdeConversationRailMock', () => {
     render(h(IdeConversationRailMock, {}), container)
 
     const region = container.querySelector('[role="region"]')
-    expect(region?.getAttribute('aria-label')).toBe('CONVERSATION')
-    expect(container.textContent).toContain('CONVERSATION')
+    expect(region?.getAttribute('aria-label')).toBe('REACTION THREAD')
+    expect(container.textContent).toContain('REACTION THREAD')
     expect(container.textContent).toContain('0')
   })
 

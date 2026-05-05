@@ -98,8 +98,12 @@ export function IdeShell() {
           color: 'var(--color-fg-muted)',
         }}
       >
-        <span style=${{ color: 'var(--color-fg-secondary)' }}>코드 IDE</span>
+        <span style=${{ color: 'var(--color-fg-secondary)' }}>MASC IDE</span>
         <span>·</span>
+        <span
+          class="chip sm is-brass"
+          style=${{ flexShrink: 0 }}
+        >LIVE WORKSPACE</span>
         <${IdePresenceStrip} />
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok)' }}>● mcp · connected</span>
       </header>

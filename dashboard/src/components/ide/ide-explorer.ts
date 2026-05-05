@@ -7,6 +7,7 @@ import { activeIdeFile } from './ide-shell'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
+import { KeeperBadge } from '../keeper-badge'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -272,9 +273,6 @@ function SourceHint(source: WorkspaceSource) {
 
 function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
   const indent = node.depth * 12
-  const dotColor = node.hueIndex !== null
-    ? `var(--color-keeper-${node.hueIndex}-glow, var(--k-${node.hueIndex}))`
-    : 'transparent'
   const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -303,16 +301,9 @@ function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
       }}
     >
       <span aria-hidden="true" style=${{ color: 'var(--color-fg-muted)', width: '12px', textAlign: 'center' }}>${chevron}</span>
-      <span
-        aria-hidden="true"
-        style=${{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          background: dotColor,
-          opacity: node.hueIndex !== null ? 0.85 : 0,
-        }}
-      />
+      ${node.keeperId
+        ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
+        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px' }} />`}
       <span>${node.label}</span>
       ${node.diff !== null
         ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`

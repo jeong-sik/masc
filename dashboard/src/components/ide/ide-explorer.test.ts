@@ -39,4 +39,17 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(leafItem).toBeDefined()
     expect(leafItem?.getAttribute('tabindex')).toBe('0')
   })
+
+  it('renders keeper sigils in file rows instead of color-only markers', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const keeperOwnedRow = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    ).find(el => el.textContent?.includes('router.ts'))
+
+    expect(keeperOwnedRow?.textContent).toContain('NK')
+    expect(keeperOwnedRow?.textContent).toContain('router.ts')
+  })
 })

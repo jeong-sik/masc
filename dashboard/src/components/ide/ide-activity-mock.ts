@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import { KeeperBadge } from '../keeper-badge'
 import {
   createRunActivityStore,
   type RunActivityEvent,
@@ -129,7 +129,7 @@ export function IdeActivityMock() {
   return html`
     <div
       role="region"
-      aria-label="ACTIVITY"
+      aria-label="EVENT TIMELINE"
       style=${{
         display: 'flex',
         flexDirection: 'column',
@@ -149,7 +149,7 @@ export function IdeActivityMock() {
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>ACTIVITY</span>
+        <span>EVENT TIMELINE</span>
         <span>${events.length} events · ${keepers.length} keepers</span>
       </div>
       <ol
@@ -170,13 +170,11 @@ export function IdeActivityMock() {
 }
 
 function ActivityRow(item: RunActivityEvent) {
-  const hue = keeperHueIndex(item.keeper_id)
-  const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   return html`
     <li
       style=${{
         display: 'grid',
-        gridTemplateColumns: '52px 8px 1fr',
+        gridTemplateColumns: '52px minmax(0, 1fr)',
         gap: 'var(--sp-2)',
         alignItems: 'baseline',
         padding: '4px 6px',
@@ -185,10 +183,10 @@ function ActivityRow(item: RunActivityEvent) {
       }}
     >
       <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatActivityTime(item.timestamp_ms)}</span>
-      <span aria-hidden="true" style=${{ width: '6px', height: '6px', borderRadius: '50%', background: dot, alignSelf: 'center' }} />
       <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
         <span style=${{ fontSize: 'var(--fs-11)' }}>
-          <strong style=${{ color: dot }}>${item.keeper_id}</strong> ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
+          <${KeeperBadge} id=${item.keeper_id} variant="full" size="sm" />
+          ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
         </span>
         ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
       </div>

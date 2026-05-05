@@ -19,7 +19,6 @@ let run_cmd base_path =
   Mirage_crypto_rng_unix.use_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Masc_mcp.Cancellation.TokenStore.init ();
   Eio.Switch.run @@ fun sw ->
   let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env

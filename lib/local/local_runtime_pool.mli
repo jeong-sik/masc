@@ -5,10 +5,22 @@
     ([http://127.0.0.1:<port>] etc) as a {!runtime} entry
     with EMA-smoothed latency, an active-slot counter, a
     failure streak, and a cooldown window after repeated
-    failures.  {!acquire} hands a caller an {!assignment}
-    (runtime selection + lease handle); {!release} returns
-    the lease and folds the success / latency / error
-    outcome into the runtime's stats.
+    failures.
+
+    {1 Status — 2026-05-05}
+
+    The leasing API ([acquire] / [release] / [lease] /
+    [assignment]) had zero production callers as of
+    2026-05-05 and was removed surgically per audit response;
+    if leasing semantics are needed in the future, the design
+    should land at the OAS cascade layer per RFC-0026 (the
+    same architectural rollback as [admission_queue]).
+    Selection ([select_runtime_from]) and the read-only
+    accessors below remain in active use by
+    [tool_local_runtime_status] / [tool_local_runtime_verify]
+    / [tool_local_runtime_bench]. See
+    [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
+    §7.1 for the verification matrix.
 
     Ref-cell architecture: {!pool} is a global [pool_state ref]
     guarded by an [Eio.Mutex].  The ref is exposed because
@@ -59,26 +71,6 @@ type runtime_snapshot = {
 }
 (** External-facing read-only view.  Mirrors {!runtime} plus
     a derived [port] field parsed from [base_url]. *)
-
-type lease = {
-  runtime_id : string;
-}
-(** Opaque-ish handle returned to callers via
-    {!assignment.lease}.  Carries only the runtime id back
-    to {!release}; mutation goes through the locked pool. *)
-
-type assignment = {
-  runtime_id : string;
-  base_url : string;
-  model_name : string;
-  max_concurrency : int;
-  lease : lease;
-}
-(** Result of {!acquire}.  [model_name] is the resolved
-    label (caller-requested model when applicable, otherwise
-    the runtime's advertised model).  [max_concurrency] is
-    the runtime cap so the caller can size its own
-    concurrency primitives. *)
 
 type pool_state = {
   runtimes : runtime list;
@@ -189,31 +181,7 @@ val select_runtime_from :
 
     Errors when no candidate satisfies the filters. *)
 
-val acquire :
-  ?preferred_pool:string ->
-  model_name:string option ->
-  unit ->
-  (assignment, string) result
-(** Picks a runtime via {!select_runtime_from}, increments
-    its [active_slots], and returns the {!assignment}.
-    Holds the pool lock for the slot bump so concurrent
-    acquires serialize cleanly.  Errors when selection
-    fails (no eligible runtime). *)
-
-val release :
-  lease ->
-  success:bool ->
-  ?error:string ->
-  ?latency_ms:int ->
-  unit ->
-  unit
-(** Returns a previously-acquired lease.  Decrements
-    [active_slots], folds the latency into [latency_ema_ms]
-    when given, and updates the success / failure counters.
-    On three consecutive failures opens a cooldown window
-    via {!cooldown_seconds}.  Idempotent on unknown leases
-    (missing runtime id is silently dropped — useful when
-    the pool was reset between acquire and release). *)
+(* [acquire] / [release] removed 2026-05-05 — see header §Status. *)
 
 (** {1 Snapshot serialization} *)
 

@@ -1171,6 +1171,7 @@
 (include stanzas/test_process_eio_default_timeout.inc)
 (include stanzas/test_provider_kind_resolution.inc)
 (include stanzas/test_release_train_guard_script.inc)
+(include stanzas/test_reqd_invalid_state_swallow.inc)
 (include stanzas/test_require_tool_use_violation_counter_10091.inc)
 (include stanzas/test_sandbox_clone_conflict.inc)
 (include stanzas/test_server_state_product.inc)

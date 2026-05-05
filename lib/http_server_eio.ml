@@ -84,6 +84,32 @@ module Compression = struct
       with Zstd.Error _ -> (data, false)
 end
 
+(** [safe_respond_with_string reqd response body] wraps
+    [Httpun.Reqd.respond_with_string] to silently discard the
+    [Failure "...invalid state..."] that httpun raises when the
+    request descriptor has already transitioned into its error-
+    handling path (e.g. client disconnected during a long OAS
+    turn and httpun's own error_handler fired first — the
+    2026-05-05 cycle9 FATAL race).
+
+    [Eio.Cancel.Cancelled] is always re-raised so structured
+    concurrency cancellation is never swallowed.  Any other
+    unexpected exception is logged at WARN level so the incident
+    remains observable without crashing the server. *)
+let safe_respond_with_string reqd response body =
+  try Httpun.Reqd.respond_with_string reqd response body
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Failure msg ->
+      Log.Http.warn
+        "[http-eio] respond_with_string skipped (reqd already in \
+         error-handling state; 2026-05-05 OAS cancellation race): %s"
+        msg
+  | exn ->
+      Log.Http.warn
+        "[http-eio] respond_with_string unexpected exception: %s"
+        (Printexc.to_string exn)
+
 (** Simple response helpers *)
 module Response = struct
   let html_cache_control = "no-store, max-age=0, must-revalidate"
@@ -94,7 +120,7 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
     ]) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_respond_with_string reqd response body
 
   let html ?(status = `OK) ?(headers = []) body reqd =
     let base_headers = [
@@ -105,7 +131,7 @@ module Response = struct
       ~headers:(Httpun.Headers.of_list (base_headers @ headers))
       status
     in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_respond_with_string reqd response body
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
     let base_headers = [
@@ -116,7 +142,7 @@ module Response = struct
       ~headers:(Httpun.Headers.of_list (base_headers @ headers))
       status
     in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_respond_with_string reqd response body
 
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
@@ -150,7 +176,7 @@ module Response = struct
     in
     let headers = extra_headers @ headers in
     let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-    Httpun.Reqd.respond_with_string reqd response final_body
+    safe_respond_with_string reqd response final_body
 
   (** Sunset headers for deprecated endpoints per RFC 8594.
       [date] must be an HTTP-date (RFC 7231 S7.1.1.1), e.g. ["Sat, 01 Jun 2026 00:00:00 GMT"].
@@ -171,7 +197,7 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
     ]) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_respond_with_string reqd response body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
@@ -189,7 +215,7 @@ module Response = struct
           ("cache-control", html_cache_control);
         ] in
         let response = Httpun.Response.create ~headers `Not_modified in
-        Httpun.Reqd.respond_with_string reqd response ""
+        safe_respond_with_string reqd response ""
     | _ ->
         (* Serve full response, with compression if possible *)
         let accepts_zstd = Compression.accepts_zstd request in
@@ -211,7 +237,7 @@ module Response = struct
           | None -> base_headers
         in
         let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
-        Httpun.Reqd.respond_with_string reqd response final_body
+        safe_respond_with_string reqd response final_body
 
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
@@ -253,7 +279,7 @@ module Request = struct
       ("connection", "close");
     ] in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    safe_respond_with_string reqd response body
 
   let respond_too_large reqd max_bytes =
     let body = Printf.sprintf
@@ -474,7 +500,7 @@ let metrics_handler _request reqd =
     ("content-length", string_of_int (String.length body));
   ] in
   let response = Httpun.Response.create ~headers `OK in
-  Httpun.Reqd.respond_with_string reqd response body
+  safe_respond_with_string reqd response body
 
 let mcp_post_handler
     ?request_handler
@@ -505,7 +531,7 @@ let mcp_post_handler
             ("content-length", string_of_int (String.length json_str));
           ] @ extra_headers) in
           let response = Httpun.Response.create ~headers `OK in
-          Httpun.Reqd.respond_with_string reqd response json_str
+          safe_respond_with_string reqd response json_str
 
       | Streamable_http.Json_batch jsons ->
           let json_str = Yojson.Safe.to_string (`List jsons) in
@@ -518,7 +544,7 @@ let mcp_post_handler
             ("content-length", string_of_int (String.length json_str));
           ] @ extra_headers) in
           let response = Httpun.Response.create ~headers `OK in
-          Httpun.Reqd.respond_with_string reqd response json_str
+          safe_respond_with_string reqd response json_str
 
       | Streamable_http.Sse_upgrade ->
           Response.text ~status:`Not_implemented

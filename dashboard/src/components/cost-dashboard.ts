@@ -128,6 +128,10 @@ function updateCostFocusParam(focus: CostFocus): void {
 }
 
 function setCostViewMode(mode: ViewMode): void {
+  const currentFocus = activeCostFocus.value
+  const currentMode = currentFocus ? viewModeForCostFocus(currentFocus) : viewMode.value
+  if (currentMode === mode) return
+
   viewMode.value = mode
   replaceRoute('monitoring', mode === 'keeper'
     ? { section: 'runtime', view: 'cost', focus: 'agent' }
@@ -825,7 +829,7 @@ function CostFocusRail({
   keeperCount: number | null
   bucketCount: number | null
 }) {
-  const active = focus ?? (mode === 'keeper' ? 'agent' : 'matrix')
+  const active = focus ?? (mode === 'keeper' ? 'agent' : undefined)
   return html`
     <div class="flex flex-col gap-2" aria-label="비용 포커스" data-testid="cost-focus-rail">
       <${FilterChips}
@@ -878,9 +882,18 @@ function CostDashboardContent({ view }: { view: CostView }) {
     const loadedModelCount = modelState.value.status === 'loaded' ? modelState.value.data.length : null
     const loadedKeeperCount = keeperState.value.status === 'loaded' ? keeperState.value.data.length : null
     const loadedBucketCount = modelState.value.status === 'loaded' ? modelState.value.latencyBuckets.length : null
-    const showMatrix = mode === 'model' && activeState.status === 'loaded' && (focus == null || focus === 'matrix')
-    const showLatency = mode === 'model' && activeState.status === 'loaded' && (focus == null || focus === 'latency')
+    const modelLoadedState = mode === 'model'
+      ? activeState as Extract<ModelLoadState, { status: 'loaded' }>
+      : null
+    const latencyBuckets = modelLoadedState?.latencyBuckets ?? []
+    const showMatrix = modelLoadedState != null && data.length > 0 && (focus == null || focus === 'matrix')
+    const showLatency = modelLoadedState != null && latencyBuckets.length > 0 && (focus == null || focus === 'latency')
     const showTable = focus !== 'matrix' && focus !== 'latency'
+    const focusedEmptyMessage = focus === 'matrix' && data.length === 0
+      ? '이 시간 창에서 기록된 모델 비용 매트릭스가 없습니다.'
+      : focus === 'latency' && latencyBuckets.length === 0
+        ? '이 시간 창에서 기록된 모델 지연 분포가 없습니다.'
+        : null
 
     return html`
       <section class="flex flex-col gap-4" aria-label="비용 / 지연 대시보드">
@@ -971,10 +984,16 @@ function CostDashboardContent({ view }: { view: CostView }) {
         ${showMatrix ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />` : null}
         ${showLatency ? html`
           <${CostLatency}
-            buckets=${(activeState as Extract<ModelLoadState, { status: 'loaded' }>).latencyBuckets}
+            buckets=${latencyBuckets}
             p50=${t?.p50Avg ?? null}
             p95=${t?.p95Max ?? null}
           />
+        ` : null}
+
+        ${focusedEmptyMessage ? html`
+          <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
+            ${focusedEmptyMessage}
+          </div>
         ` : null}
 
         ${!showTable ? null : data.length === 0 ? html`

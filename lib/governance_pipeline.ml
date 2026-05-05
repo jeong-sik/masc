@@ -420,6 +420,7 @@ let to_oas_approval_callback
                   ~keeper_name
                   ~tool_name
                   ~input
+                  ?base_path
                   ?turn_id
                   ?task_id
                   ?goal_id

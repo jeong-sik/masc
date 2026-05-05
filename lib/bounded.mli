@@ -18,7 +18,16 @@
     \[resolve_path] / \[json_to_float], \[update_state],
     \[format_agent_failure] / \[format_agent_execution_failure],
     \[retry_config_of_json].  All consumed only inside
-    {!bounded_run} or the {!constraints_of_json} parser. *)
+    {!bounded_run} or the {!constraints_of_json} parser.
+
+    The predictive token-budget check used to read
+    \[constraints.token_buffer] as a magic constant (5000 by default).
+    Since RFC-0028 it instead consults {!Usage_history.predict_p95}
+    over per-agent empirical distributions, falling back to a
+    documented constant only when fewer than ten samples have
+    accumulated for an agent.  The \[token_buffer] field is retained
+    for JSON-input compatibility and is no longer read; see
+    {!constraints} for the deprecation note. *)
 
 (** {1 Goal conditions} *)
 
@@ -60,7 +69,14 @@ type constraints = {
   max_tokens : int option;
   max_cost_usd : float option;
   max_time_seconds : float option;
-  token_buffer : int;          (** Buffer for predictive token check. *)
+  token_buffer : int;
+  (** {b Deprecated since RFC-0028.}  Retained for JSON-input
+      compatibility ({!constraints_of_json} still parses it without
+      raising), but no longer consulted by the predictive token check.
+      The next-turn estimate now comes from
+      {!Usage_history.predict_p95}.  Set to [0] in
+      {!default_constraints}.  Plan: removed once external producers
+      stop emitting it. *)
   hard_max_iterations : int;   (** Absolute failsafe — termination guarantee. *)
   retry : retry_config;
 }
@@ -68,7 +84,7 @@ type constraints = {
 val default_constraints : constraints
 (** Safe defaults: [max_turns = Some 10], [max_tokens = Some 100000],
     [max_cost_usd = Some 1.0], [max_time_seconds = Some 300.0],
-    [token_buffer = 5000], [hard_max_iterations = 100],
+    [token_buffer = 0] (deprecated; see field doc), [hard_max_iterations = 100],
     [retry = default_retry_config]. *)
 
 (** {1 Execution state} *)
@@ -84,6 +100,57 @@ type bounded_state = {
 }
 (** Mutable execution accumulator.  Carried through the loop and
     snapshotted into {!bounded_result.stats} at termination. *)
+
+(** {1 Per-agent token-usage history (RFC-0028)} *)
+
+module Usage_history : sig
+  (** Empirical distribution of per-turn output-token counts, keyed
+      by agent name.  Populated by {!bounded_run} after each successful
+      spawn (see RFC-0028 §4.4).  Used by the predictive token-budget
+      check to estimate the next turn's cost from the high quantile
+      of the recent samples instead of the linear average that
+      {!check_constraints_with_buffer} historically used.
+
+      Storage is a module-level hashtable (one bounded ring buffer per
+      agent) protected by an internal mutex.  All operations are
+      O(samples) with samples capped at 64 per agent. *)
+
+  val record : agent:string -> tokens_out:int -> unit
+  (** [record ~agent ~tokens_out] appends a sample to [agent]'s ring
+      buffer.  When the buffer is full the oldest sample is evicted
+      first.  Negative or zero [tokens_out] are dropped silently —
+      mock spawns and degenerate turns must not pollute the
+      distribution. *)
+
+  val predict_p95 : ?agent:string -> unit -> int
+  (** [predict_p95 ?agent ()] returns the 95th-percentile output-token
+      count for [agent]'s recent samples.  When [agent] is omitted or
+      fewer than [min_samples_for_p95] samples are recorded for that
+      agent, returns {!unknown_agent_fallback}.  The agent's queue is
+      copied and sorted; the source ring buffer is not mutated. *)
+
+  val sample_count : ?agent:string -> unit -> int
+  (** [sample_count ?agent ()] returns the current number of samples
+      recorded for [agent], or [0] when no agent is supplied or the
+      agent has no samples.  Test inspection helper — not consumed in
+      production paths. *)
+
+  val reset : unit -> unit
+  (** [reset ()] clears every agent's ring buffer.  Used by the test
+      suite to isolate cases that depend on a fresh distribution. *)
+
+  val min_samples_for_p95 : int
+  (** Minimum samples required before {!predict_p95} returns a
+      distribution-derived value.  Below this threshold the predictor
+      returns {!unknown_agent_fallback} instead of a noisy estimate.
+      Currently [10] (RFC-0028 §4.2). *)
+
+  val unknown_agent_fallback : int
+  (** Conservative per-turn output-token estimate used when the
+      empirical distribution for an agent is missing or too small.
+      Currently [1024] (RFC-0028 §4.2 — the value lacks measurement
+      evidence today and is intentionally documented as such). *)
+end
 
 (** {1 Helpers (test-visible)} *)
 

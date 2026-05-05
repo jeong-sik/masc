@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -8,8 +8,13 @@ vi.mock('../../api/board', () => ({
   toggleReaction: vi.fn(),
 }))
 
-import { fetchBoardReactions } from '../../api/board'
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
+}))
+
+import { fetchBoardReactions, toggleReaction } from '../../api/board'
 import { lastEvent } from '../../sse'
+import { showToast } from '../common/toast'
 import { ReactionBar } from './reaction-bar'
 
 afterEach(() => {
@@ -86,5 +91,21 @@ describe('ReactionBar', () => {
       expect(fetchBoardReactions).toHaveBeenCalledTimes(2)
       expect(screen.getByRole('button', { name: '🔥 리액션 3개' })).toBeInTheDocument()
     })
+  })
+
+  it('announces and toasts failed reaction toggles', async () => {
+    vi.mocked(toggleReaction).mockRejectedValueOnce(new Error('network down'))
+
+    render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
+
+    const reaction = screen.getByRole('button', { name: '👍 리액션 0개' })
+    fireEvent.click(reaction)
+
+    await waitFor(() => {
+      expect(toggleReaction).toHaveBeenCalledWith('post', 'post-1', '👍')
+      expect(showToast).toHaveBeenCalledWith('리액션 반영에 실패했습니다', 'error')
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('리액션 반영에 실패했습니다')
+    expect(reaction).not.toBeDisabled()
   })
 })

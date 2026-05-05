@@ -19,8 +19,8 @@ import { KpiStripIsland } from '../kpi-strip-island'
 import { LifelineBar } from '../lifeline-bar'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
-import { agents, tasks, keepers } from '../../store'
-import type { Agent, Task, Keeper } from '../../types/core'
+import { agents, tasks, keepers, messages, boardPosts } from '../../store'
+import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
@@ -90,6 +90,185 @@ export function severityToneClass(severity?: string | null): string {
     default:
       return 'text-[var(--color-fg-muted)]'
   }
+}
+
+// ─── Fleet ticker ───────────────────────────────────────────────────────────
+
+export type FleetTickerKind = 'task' | 'message' | 'board' | 'keeper'
+
+export interface FleetTickerEvent {
+  id: string
+  timestamp: string
+  timestampMs: number
+  actor: string
+  label: string
+  text: string
+  kind: FleetTickerKind
+  tone: 'ok' | 'warn' | 'err' | 'info' | 'idle'
+}
+
+function trimTickerText(text: string, max = 96): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= max) return normalized
+  return `${normalized.slice(0, max - 3)}...`
+}
+
+function taskTickerTone(status?: Task['status']): FleetTickerEvent['tone'] {
+  switch (status) {
+    case 'done':
+      return 'ok'
+    case 'awaiting_verification':
+      return 'warn'
+    case 'cancelled':
+      return 'err'
+    case 'claimed':
+    case 'in_progress':
+      return 'info'
+    default:
+      return 'idle'
+  }
+}
+
+function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
+  switch ((status ?? '').toLowerCase()) {
+    case 'active':
+    case 'live':
+      return 'ok'
+    case 'busy':
+    case 'executing':
+      return 'info'
+    case 'offline':
+    case 'dead':
+      return 'err'
+    case 'paused':
+    case 'inactive':
+      return 'warn'
+    default:
+      return 'idle'
+  }
+}
+
+function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 'timestampMs'>) {
+  const timestampMs = parseIsoMs(event.timestamp)
+  if (timestampMs === null) return
+  const text = trimTickerText(event.text)
+  if (text === '') return
+  out.push({ ...event, timestampMs, text })
+}
+
+export function deriveFleetTickerEvents({
+  taskList,
+  messageList,
+  boardPostList,
+  keeperList,
+  max = 6,
+}: {
+  taskList: readonly Task[]
+  messageList: readonly Message[]
+  boardPostList: readonly BoardPost[]
+  keeperList: readonly Keeper[]
+  max?: number
+}): FleetTickerEvent[] {
+  const events: FleetTickerEvent[] = []
+  for (const task of taskList) {
+    const timestamp = task.updated_at ?? task.completed_at ?? task.created_at
+    if (!timestamp) continue
+    pushTickerEvent(events, {
+      id: `task:${task.id}`,
+      timestamp,
+      actor: task.assignee ?? 'unassigned',
+      label: task.status ?? 'task',
+      text: task.title,
+      kind: 'task',
+      tone: taskTickerTone(task.status),
+    })
+  }
+  for (const message of messageList) {
+    if (!message.timestamp) continue
+    pushTickerEvent(events, {
+      id: `message:${message.id ?? message.seq ?? message.timestamp}`,
+      timestamp: message.timestamp,
+      actor: message.from ?? 'system',
+      label: message.type ?? 'message',
+      text: message.content,
+      kind: 'message',
+      tone: 'info',
+    })
+  }
+  for (const post of boardPostList) {
+    pushTickerEvent(events, {
+      id: `board:${post.id}`,
+      timestamp: post.updated_at || post.created_at,
+      actor: post.author,
+      label: post.post_kind ?? 'board',
+      text: post.title || post.content || post.body,
+      kind: 'board',
+      tone: post.post_kind === 'system' ? 'warn' : 'info',
+    })
+  }
+  for (const keeper of keeperList) {
+    if (!keeper.last_heartbeat) continue
+    pushTickerEvent(events, {
+      id: `keeper:${keeper.name}`,
+      timestamp: keeper.last_heartbeat,
+      actor: keeper.koreanName && keeper.koreanName !== '' ? keeper.koreanName : keeper.name,
+      label: 'heartbeat',
+      text: keeperStatusLabel(keeper.status),
+      kind: 'keeper',
+      tone: keeperTickerTone(keeper.status),
+    })
+  }
+  return events
+    .sort((a, b) => b.timestampMs - a.timestampMs)
+    .slice(0, Math.max(0, max))
+}
+
+function tickerToneClass(tone: FleetTickerEvent['tone']): string {
+  switch (tone) {
+    case 'ok':
+      return 'text-[var(--color-status-ok)]'
+    case 'warn':
+      return 'text-[var(--color-status-warn)]'
+    case 'err':
+      return 'text-[var(--color-status-err)]'
+    case 'info':
+      return 'text-[var(--color-accent-fg)]'
+    default:
+      return 'text-[var(--color-fg-muted)]'
+  }
+}
+
+function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
+  if (events.length === 0) return null
+  return html`
+    <${SectionCard}
+      title="Fleet Ticker"
+      right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">latest ${events.length}</span>`}
+      data-testid="overview-fleet-ticker"
+    >
+      <div
+        role="list"
+        aria-label="Recent fleet events"
+        class="flex min-w-0 gap-2 overflow-x-auto pb-1"
+      >
+        ${events.map(event => html`
+          <div
+            key=${event.id}
+            role="listitem"
+            class="grid min-w-[15rem] max-w-[22rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
+          >
+            <div class="flex min-w-0 items-center gap-2 font-mono text-3xs uppercase tracking-wider">
+              <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
+              <span class="truncate text-[var(--color-fg-muted)]">${event.actor}</span>
+              <${TimeAgo} timestamp=${event.timestamp} class="ml-auto shrink-0 text-[var(--color-fg-disabled)]" />
+            </div>
+            <div class="truncate text-xs font-semibold text-[var(--color-fg-primary)]">${event.text}</div>
+            <div class="truncate font-mono text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">${event.label}</div>
+          </div>
+        `)}
+      </div>
+    <//>
+  `
 }
 
 function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; taskAlerts: TaskAlert[] }) {
@@ -385,14 +564,21 @@ export function Overview() {
   const taskList = tasks.value
   const keeperList = keepers.value
   const agentList = agents.value
+  const messageList = messages.value
+  const boardPostList = boardPosts.value
   const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
   const counts = useMemo(() => computeFunnelCounts(taskList, active, nowMs), [taskList, active, nowMs])
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
   const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
+  const tickerEvents = useMemo(
+    () => deriveFleetTickerEvents({ taskList, messageList, boardPostList, keeperList }),
+    [taskList, messageList, boardPostList, keeperList],
+  )
   return html`
     <div class="flex flex-col gap-8">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
+      <${FleetTicker} events=${tickerEvents} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />
       <${KeeperStrip} keeperList=${keeperList} />

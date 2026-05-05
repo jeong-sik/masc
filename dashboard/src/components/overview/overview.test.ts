@@ -8,6 +8,7 @@ import {
   severityToneClass,
   deriveAgentAlerts,
   deriveTaskAlerts,
+  deriveFleetTickerEvents,
   type FunnelCounts,
 } from './overview'
 
@@ -16,7 +17,7 @@ function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting'
   const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
   return total > 0 ? (counts[key] / total) * 100 : 0
 }
-import type { Agent, Task, Keeper } from '../../types/core'
+import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
@@ -55,6 +56,26 @@ function makeTask(partial: Partial<Task>): Task {
 
 function makeKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'k', status: 'active', ...partial }
+}
+
+function makeMessage(partial: Partial<Message>): Message {
+  return { id: 'm-1', content: 'message', ...partial }
+}
+
+function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
+  return {
+    id: 'p-1',
+    author: 'keeper',
+    title: 'post',
+    body: 'body',
+    content: 'content',
+    tags: [],
+    votes: 0,
+    comment_count: 0,
+    created_at: localIsoAt(1),
+    updated_at: localIsoAt(1),
+    ...partial,
+  }
 }
 
 describe('computeFunnelCounts', () => {
@@ -246,6 +267,53 @@ describe('pickActiveKeepers', () => {
       makeKeeper({ name: `k${i}`, last_heartbeat: `2026-04-18T0${i}:00:00+09:00` }),
     )
     expect(pickActiveKeepers(keepers, 2)).toHaveLength(2)
+  })
+})
+
+describe('deriveFleetTickerEvents', () => {
+  it('combines recent task, message, board, and keeper events in newest-first order', () => {
+    const events = deriveFleetTickerEvents({
+      taskList: [makeTask({ id: 'task-old', title: 'Old task', updated_at: localIsoAt(1), status: 'in_progress' })],
+      messageList: [makeMessage({ id: 'msg-new', from: 'sangsu', content: 'new message', timestamp: localIsoAt(4) })],
+      boardPostList: [makeBoardPost({ id: 'post-mid', title: 'Board post', updated_at: localIsoAt(3), created_at: localIsoAt(2) })],
+      keeperList: [makeKeeper({ name: 'keeper-mid', last_heartbeat: localIsoAt(2), status: 'active' })],
+    })
+
+    expect(events.map(event => event.id)).toEqual([
+      'message:msg-new',
+      'board:post-mid',
+      'keeper:keeper-mid',
+      'task:task-old',
+    ])
+  })
+
+  it('drops events without valid timestamps or readable text', () => {
+    const events = deriveFleetTickerEvents({
+      taskList: [makeTask({ id: 'bad-task', title: 'Bad', updated_at: 'not-a-date' })],
+      messageList: [makeMessage({ id: 'blank-message', content: '   ', timestamp: localIsoAt(4) })],
+      boardPostList: [makeBoardPost({ id: 'blank-post', title: '', body: '', content: '', updated_at: localIsoAt(3) })],
+      keeperList: [makeKeeper({ name: 'no-heartbeat' })],
+    })
+
+    expect(events).toEqual([])
+  })
+
+  it('limits output and maps operational tones', () => {
+    const events = deriveFleetTickerEvents({
+      max: 2,
+      taskList: [
+        makeTask({ id: 'done', title: 'Done task', updated_at: localIsoAt(4), status: 'done' }),
+        makeTask({ id: 'verify', title: 'Verify task', updated_at: localIsoAt(3), status: 'awaiting_verification' }),
+        makeTask({ id: 'cancelled', title: 'Cancelled task', updated_at: localIsoAt(2), status: 'cancelled' }),
+      ],
+      messageList: [],
+      boardPostList: [],
+      keeperList: [],
+    })
+
+    expect(events).toHaveLength(2)
+    expect(events.map(event => event.id)).toEqual(['task:done', 'task:verify'])
+    expect(events.map(event => event.tone)).toEqual(['ok', 'warn'])
   })
 })
 

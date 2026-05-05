@@ -240,6 +240,7 @@ val run_keeper_cycle :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
+  ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
@@ -251,6 +252,7 @@ val run_unified_turn :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
+  ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

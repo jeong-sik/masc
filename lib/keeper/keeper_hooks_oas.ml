@@ -64,18 +64,39 @@ let current_keeper_model meta =
   let m = meta.Keeper_types.runtime.usage.last_model_used in
   if m = "" then meta.Keeper_types.cascade_name else m
 
+let render_pre_tool_gate_source_hint
+    (event : Keeper_guards.gate_decision_event) =
+  match event.source_path, event.source_line with
+  | None, None -> ""
+  | Some path, None ->
+    Printf.sprintf " source_path=%s" (Keeper_guards.escape_field path)
+  | None, Some line -> Printf.sprintf " source_line=%d" line
+  | Some path, Some line ->
+    Printf.sprintf " source_path=%s source_line=%d"
+      (Keeper_guards.escape_field path) line
+
 let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
   if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
-      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s"
+      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s%s"
       (Keeper_guards.escape_field event.tool_name)
       (Keeper_guards.escape_field event.reason_code)
       (Keeper_guards.escape_field event.reason_text)
+      (render_pre_tool_gate_source_hint event)
   else
-    Keeper_guards.render_inline_skip_reason
-      ~tool_name:event.tool_name
-      ~reason_code:event.reason_code
-      ~reason_text:event.reason_text
+    match event.source_path, event.source_line with
+    | Some source_path, Some source_line ->
+      Keeper_guards.render_inline_skip_reason_with_source
+        ~source_path
+        ~source_line
+        ~tool_name:event.tool_name
+        ~reason_code:event.reason_code
+        ~reason_text:event.reason_text
+    | _ ->
+      Keeper_guards.render_inline_skip_reason
+        ~tool_name:event.tool_name
+        ~reason_code:event.reason_code
+        ~reason_text:event.reason_text
 
 let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
   let decision = Keeper_guards.gate_decision_to_string event.decision in

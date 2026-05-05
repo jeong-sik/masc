@@ -9,6 +9,7 @@
 
 open Alcotest
 module KG = Masc_mcp.Keeper_guards
+module HK = Masc_mcp.Keeper_hooks_oas
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
@@ -113,7 +114,47 @@ let test_render_inline_skip_reason () =
   check bool "contains code=streak_gate" true
     (contains_substring s "code=streak_gate");
   check bool "contains source=keeper_hook" true
-    (contains_substring s "source=keeper_hook")
+    (contains_substring s "source=keeper_hook");
+  let with_source = KG.render_inline_skip_reason_with_source
+    ~source_path:"lib/keeper/keeper_guards.ml"
+    ~source_line:123
+    ~tool_name:"keeper_fs_read"
+    ~reason_code:"streak_gate"
+    ~reason_text:"called 5 times"
+  in
+  check bool "contains source_path" true
+    (contains_substring with_source "source_path=lib/keeper/keeper_guards.ml");
+  check bool "contains source_line" true
+    (contains_substring with_source "source_line=123")
+
+let make_gate_event ?(decision = KG.Gate_override) () =
+  { KG.stage = "keeper_deny";
+    decision;
+    reason_code = "keeper_deny";
+    reason_text = "tool is on the keeper deny list";
+    tool_name = "dangerous_tool";
+    input = `Assoc [];
+    turn = 4;
+    accumulated_cost_usd = 0.0;
+    stage_latency_ms = 1.0;
+    source_path = Some "lib/keeper/keeper_guards.ml";
+    source_line = Some 123;
+  }
+
+let test_render_pre_tool_gate_output_preserves_source () =
+  let blocked = HK.render_pre_tool_gate_output (make_gate_event ()) in
+  check bool "override output carries source path" true
+    (contains_substring blocked "source_path=lib/keeper/keeper_guards.ml");
+  check bool "override output carries source line" true
+    (contains_substring blocked "source_line=123");
+  let approval =
+    HK.render_pre_tool_gate_output
+      (make_gate_event ~decision:KG.Gate_approval_required ())
+  in
+  check bool "approval output carries source path" true
+    (contains_substring approval "source_path=lib/keeper/keeper_guards.ml");
+  check bool "approval output carries source line" true
+    (contains_substring approval "source_line=123")
 
 let test_gate_decision_vocabulary () =
   check string "override" "override"
@@ -143,7 +184,11 @@ let test_deny_guard_blocks () =
   check string "denied tool -> Override" "Override" (decision_kind d);
   let text = override_text d in
   check bool "override mentions deny list" true
-    (contains_substring text "code=keeper_deny")
+    (contains_substring text "code=keeper_deny");
+  check bool "override carries source path" true
+    (contains_substring text "source_path=lib/keeper/keeper_guards.ml");
+  check bool "override carries source line" true
+    (contains_substring text "source_line=")
 
 let test_deny_guard_notifies_gate_observer () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -167,6 +212,13 @@ let test_deny_guard_notifies_gate_observer () =
     check string "reason_code" "keeper_deny" event.KG.reason_code;
     check string "tool_name" "dangerous_tool" event.KG.tool_name;
     check int "turn" 4 event.KG.turn;
+    check (option string) "source_path"
+      (Some "lib/keeper/keeper_guards.ml")
+      event.KG.source_path;
+    check bool "source_line present" true
+      (match event.KG.source_line with
+       | Some line -> line > 0
+       | None -> false);
     check bool "input preserved" true
       (match event.KG.input with
        | `Assoc [ ("path", `String "/tmp/secret") ] -> true
@@ -318,7 +370,14 @@ let test_governance_approval_notifies_gate_observer () =
       check string "decision" "approval_required"
         (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "governance_approval" event.KG.reason_code;
-      check string "tool_name" "keeper_fs_edit" event.KG.tool_name
+      check string "tool_name" "keeper_fs_edit" event.KG.tool_name;
+      check (option string) "source_path"
+        (Some "lib/keeper/keeper_guards.ml")
+        event.KG.source_path;
+      check bool "source_line present" true
+        (match event.KG.source_line with
+         | Some line -> line > 0
+         | None -> false)
     | events ->
       failf "expected one observer event, got %d" (List.length events))
 
@@ -412,6 +471,8 @@ let () = run "Keeper_guards" [
   "utilities", [
     test_case "extract_command_from_input" `Quick test_extract_command_from_input;
     test_case "render_inline_skip_reason" `Quick test_render_inline_skip_reason;
+    test_case "pre-tool gate output preserves source" `Quick
+      test_render_pre_tool_gate_output_preserves_source;
     test_case "gate decision vocabulary" `Quick test_gate_decision_vocabulary;
   ];
   "deny_guard", [

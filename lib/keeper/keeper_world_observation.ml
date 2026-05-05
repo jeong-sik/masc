@@ -43,9 +43,6 @@ type world_observation = {
   backlog_updated_since_last_scheduled_autonomous : bool;
   active_agent_count : int;
   last_turn_budget : (int * int) option;
-  last_tools_used : string list;
-    (** Tools used in the previous cycle. Empty on first cycle.
-        Used by the unified prompt to generate data-driven anti-repetition hints. *)
   work_discovery_due : bool;
 }
 
@@ -971,7 +968,6 @@ let observe ~allowed_tool_names
     backlog_updated_since_last_scheduled_autonomous;
     active_agent_count;
     last_turn_budget = None;
-    last_tools_used = [];
     work_discovery_due;
   }
 

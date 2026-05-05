@@ -112,7 +112,9 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
-    [keeper_fibers] / [lazy_task_boot_guard_fires_total].
+    [keeper_fibers] / [keeper_config_parse_error_count] /
+    [keeper_config_parse_errors] / [keeper_config_unknown_key_count] /
+    [keeper_config_unknown_keys] / [lazy_task_boot_guard_fires_total].
 
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}

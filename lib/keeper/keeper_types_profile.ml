@@ -1046,6 +1046,8 @@ let canonical_keeper_toml_key_names =
   ; "cascade_name"
   ]
 
+let loader_level_keeper_toml_key_names = [ "base" ]
+
 let () =
   assert (
     List.sort String.compare canonical_keeper_toml_key_names
@@ -1056,7 +1058,7 @@ let () =
     assert on the key list without mocking the Log subsystem. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
-    canonical_keeper_toml_key_names
+    (canonical_keeper_toml_key_names @ loader_level_keeper_toml_key_names)
     |> List.map (fun k -> "keeper." ^ k)
   in
   let oas_env_prefix = oas_env_key_prefix in
@@ -1611,6 +1613,12 @@ type keeper_toml_config_error = {
   reason : string;
 }
 
+type keeper_toml_unknown_keys = {
+  keeper_name : string;
+  path : string;
+  unknown_keys : string list;
+}
+
 let keeper_toml_config_error_to_json
     ({ keeper_name; path; error; reason } : keeper_toml_config_error)
     : Yojson.Safe.t =
@@ -1623,8 +1631,37 @@ let keeper_toml_config_error_to_json
       ("terminal_reason", `String "config_parse_failed");
     ]
 
+let keeper_toml_unknown_keys_to_json
+    ({ keeper_name; path; unknown_keys } : keeper_toml_unknown_keys)
+    : Yojson.Safe.t =
+  `Assoc
+    [
+      ("keeper", `String keeper_name);
+      ("path", `String path);
+      ("unknown_key_count", `Int (List.length unknown_keys));
+      ("unknown_keys", `List (List.map (fun key -> `String key) unknown_keys));
+      ("terminal_reason", `String "config_unknown_keys");
+    ]
+
 let keeper_name_of_toml_path path =
   Filename.basename path |> Filename.remove_extension
+
+let keeper_toml_unknown_keys_of_path path =
+  match Safe_ops.read_file_safe path with
+  | Error _ -> None
+  | Ok content -> (
+      match Keeper_toml_loader.parse_toml content with
+      | Error _ -> None
+      | Ok doc -> (
+          match detect_unknown_keeper_toml_keys doc with
+          | [] -> None
+          | unknown_keys ->
+              Some
+                {
+                  keeper_name = keeper_name_of_toml_path path;
+                  path;
+                  unknown_keys = normalize_unknown_keeper_toml_keys unknown_keys;
+                }))
 
 let keeper_toml_config_error_of_path path =
   match load_keeper_toml path with
@@ -1649,8 +1686,22 @@ let keeper_toml_config_errors_in_dir dir =
     |> List.filter_map (fun f ->
          keeper_toml_config_error_of_path (Filename.concat dir f))
 
+let keeper_toml_unknown_keys_in_dir dir =
+  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
+  else
+    dir
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".toml")
+    |> List.sort String.compare
+    |> List.filter_map (fun f ->
+         keeper_toml_unknown_keys_of_path (Filename.concat dir f))
+
 let keeper_toml_config_errors () =
   keeper_toml_config_errors_in_dir (Config_dir_resolver.keepers_dir ())
+
+let keeper_toml_unknown_keys () =
+  keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
 
 let keeper_toml_config_errors_json () =
   `List (List.map keeper_toml_config_error_to_json (keeper_toml_config_errors ()))

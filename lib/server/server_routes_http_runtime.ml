@@ -118,6 +118,25 @@ let make_health_json ?(listener = "http/1.1") request =
           };
         ]
   in
+  let keeper_config_unknown_keys =
+    try Keeper_types_profile.keeper_toml_unknown_keys () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+        [
+          {
+            Keeper_types_profile.keeper_name = "unknown";
+            path = "";
+            unknown_keys = [ "health_probe_failed: " ^ Printexc.to_string exn ];
+          };
+        ]
+  in
+  let keeper_config_unknown_key_count =
+    List.fold_left
+      (fun acc (entry : Keeper_types_profile.keeper_toml_unknown_keys) ->
+        acc + List.length entry.unknown_keys)
+      0
+      keeper_config_unknown_keys
+  in
   `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -155,6 +174,12 @@ let make_health_json ?(listener = "http/1.1") request =
       `List
         (List.map Keeper_types_profile.keeper_toml_config_error_to_json
            keeper_config_parse_errors) );
+    ( "keeper_config_unknown_key_count",
+      `Int keeper_config_unknown_key_count );
+    ( "keeper_config_unknown_keys",
+      `List
+        (List.map Keeper_types_profile.keeper_toml_unknown_keys_to_json
+           keeper_config_unknown_keys) );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
        The Prometheus counter `masc_lazy_task_boot_guard_fired_total`

@@ -4,6 +4,7 @@ module TL = Masc_mcp.Keeper_toml_loader
 module KTP = Masc_mcp.Keeper_types_profile
 module KPA = Masc_mcp.Keeper_persona_authoring
 module KEP = Masc_mcp.Keeper_exec_persona
+module Runtime = Masc_mcp.Server_routes_http_runtime
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -1527,6 +1528,20 @@ preset = "coding"
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
     check (list string) "tool_access TOML table is canonical" [] unknown
 
+let test_detect_unknown_keys_accepts_loader_base () =
+  let input = {|
+[keeper]
+goal = "g"
+base = "base.toml"
+legacy_scope = "removed"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "base include is a loader key"
+      ["keeper.legacy_scope"] unknown
+
 let test_shared_memory_scope_is_canonical_toml () =
   let input = {|
 [keeper]
@@ -1722,6 +1737,83 @@ typo_field = 42
       2.0
       (unknown_metric () -. before_unknown_metric)
 
+let test_keeper_toml_unknown_keys_in_dir_reports_files () =
+  with_temp_dir "keeper-unknown-dir" @@ fun dir ->
+  write_file (Filename.concat dir "alpha.toml")
+    {|
+[keeper]
+name = "alpha"
+goal = "g"
+base = "base.toml"
+legacy_scope = "removed"
+|};
+  write_file (Filename.concat dir "beta.toml")
+    {|
+[keeper]
+name = "beta"
+goal = "g"
+base = "base.toml"
+|};
+  write_file (Filename.concat dir "bad.toml")
+    {|
+[keeper
+name = "bad"
+|};
+  let rows = KTP.keeper_toml_unknown_keys_in_dir dir in
+  match rows with
+  | [ row ] ->
+    check string "keeper name" "alpha" row.KTP.keeper_name;
+    check string "path"
+      (Filename.concat dir "alpha.toml")
+      row.KTP.path;
+    check (list string) "unknown keys"
+      [ "keeper.legacy_scope" ]
+      row.KTP.unknown_keys
+  | _ ->
+    fail
+      (Printf.sprintf "expected one unknown-key row, got %d"
+         (List.length rows))
+
+let test_health_json_surfaces_keeper_toml_unknown_keys () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir "alpha.toml")
+    {|
+[keeper]
+name = "alpha"
+goal = "g"
+base = "base.toml"
+legacy_scope = "removed"
+|};
+  let unknown_metric () =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+      ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
+      ()
+  in
+  let before_unknown_metric = unknown_metric () in
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Runtime.make_health_json request in
+  let open Yojson.Safe.Util in
+  check int "unknown key count" 1
+    (json |> member "keeper_config_unknown_key_count" |> to_int);
+  let rows = json |> member "keeper_config_unknown_keys" |> to_list in
+  (match rows with
+   | [ row ] ->
+     check string "keeper" "alpha" (row |> member "keeper" |> to_string);
+     check string "terminal reason" "config_unknown_keys"
+       (row |> member "terminal_reason" |> to_string);
+     check (list string) "unknown keys"
+       [ "keeper.legacy_scope" ]
+       (row |> member "unknown_keys" |> to_list |> List.map to_string)
+   | _ ->
+     fail
+       (Printf.sprintf "expected one health unknown-key row, got %d"
+          (List.length rows)));
+  check (float 0.0001) "health scan does not increment warning metric"
+    before_unknown_metric (unknown_metric ())
+
 let test_unknown_toml_warning_key_normalizes_unknown_order () =
   let path =
     Printf.sprintf "/tmp/keeper-warning-order-%06x.toml" (Random.bits ())
@@ -1868,6 +1960,8 @@ let () =
             test_detect_unknown_keys_flags_legacy_dead_config;
           test_case "accepts tool_access table" `Quick
             test_detect_unknown_keys_accepts_tool_access_table;
+          test_case "accepts loader base include" `Quick
+            test_detect_unknown_keys_accepts_loader_base;
           test_case "accepts shared_memory_scope" `Quick
             test_shared_memory_scope_is_canonical_toml;
           test_case "rejects invalid shared_memory_scope" `Quick
@@ -1878,6 +1972,10 @@ let () =
             test_oas_env_not_flagged_as_unknown;
           test_case "load_keeper_toml captures unknown keys on profile" `Quick
             test_load_keeper_toml_captures_unknown_keys_on_profile;
+          test_case "unknown-key scanner reports files" `Quick
+            test_keeper_toml_unknown_keys_in_dir_reports_files;
+          test_case "health JSON surfaces unknown keys" `Quick
+            test_health_json_surfaces_keeper_toml_unknown_keys;
           test_case "unknown TOML warning key normalizes order" `Quick
             test_unknown_toml_warning_key_normalizes_unknown_order;
           test_case "unknown TOML warning key uses full path not basename" `Quick

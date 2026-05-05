@@ -89,10 +89,13 @@ let event_to_chunk_kind (evt : Agent_sdk.Types.sse_event)
   | Agent_sdk.Types.MessageDelta _ -> None
   | Agent_sdk.Types.Ping -> None
   | Agent_sdk.Types.SSEError _ -> None
+  | Agent_sdk.Types.SSEParseFailed _ -> None
+  | Agent_sdk.Types.SSEUnknownEventType _ -> None
 
 let wire_error_of_event (evt : Agent_sdk.Types.sse_event) : string option =
   match evt with
   | Agent_sdk.Types.SSEError msg -> Some msg
+  | Agent_sdk.Types.SSEParseFailed { reason; _ } -> Some reason
   | _ -> None
 
 (* -- React to FSM output ------------------------------------------ *)

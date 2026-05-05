@@ -177,12 +177,12 @@ let _tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
 
 let tool_required_permission = function
   | "masc_plan_get" | "masc_plan_get_task" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

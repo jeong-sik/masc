@@ -109,7 +109,7 @@ let resource_contents_of_response response =
       | Some message -> Error message
       | None -> Error "Missing resources/read result")
 
-let sdk_tool_of_schema profile (schema : Types.tool_schema) =
+let sdk_tool_of_schema profile (schema : Masc_domain.tool_schema) =
   let annotations =
     match TP.tool_annotations_for_profile profile schema.name with
     | None -> None
@@ -132,9 +132,9 @@ let public_tool_help_schemas () =
 
 let tool_help_resources () =
   public_tool_help_schemas ()
-  |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+  |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
          String.compare a.name b.name)
-  |> List.map (fun (schema : Types.tool_schema) ->
+  |> List.map (fun (schema : Masc_domain.tool_schema) ->
          let entry = Tool_help_registry.entry_of_schema schema in
          Mcp_server.make_resource ~uri:("masc://tool-help/" ^ schema.name)
            ~name:(schema.name ^ " Help") ~description:entry.short_description
@@ -193,10 +193,10 @@ let create_handler
   in
   let handler =
     TP.tool_schemas_for_profile state profile
-    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
            String.compare a.name b.name)
     |> List.fold_left
-         (fun acc (schema : Types.tool_schema) ->
+         (fun acc (schema : Masc_domain.tool_schema) ->
            let tool = sdk_tool_of_schema profile schema in
            Handler.add_tool tool
              (fun _ctx _name arguments ->

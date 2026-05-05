@@ -112,14 +112,14 @@ let build_task_lookup config =
     []
   else
     Coord.get_tasks_raw config
-    |> List.filter_map (fun (task : Types.task) ->
+    |> List.filter_map (fun (task : Masc_domain.task) ->
            if String.trim task.id = "" then None
            else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
 
 let latest_message_from agent_name messages =
   let lowered = String.lowercase_ascii (String.trim agent_name) in
   List.fold_left
-    (fun best (message : Types.message) ->
+    (fun best (message : Masc_domain.message) ->
       if not (String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered) then
         best
       else
@@ -132,7 +132,7 @@ let latest_message_from agent_name messages =
 let latest_message_to agent_name messages =
   let lowered = String.lowercase_ascii (String.trim agent_name) in
   List.fold_left
-    (fun best (message : Types.message) ->
+    (fun best (message : Masc_domain.message) ->
       let content = String.lowercase_ascii message.content in
       let from_self = String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered in
       let mentioned =
@@ -288,11 +288,11 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
   in
   let room_agent_by_name =
     room_agents
-    |> List.map (fun (agent : Types.agent) -> (agent.name, agent))
+    |> List.map (fun (agent : Masc_domain.agent) -> (agent.name, agent))
   in
   let agent_names =
     dedup_strings
-      (List.map (fun (agent : Types.agent) -> agent.name) room_agents
+      (List.map (fun (agent : Masc_domain.agent) -> agent.name) room_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
   let archived_meta_by_name = archived_agent_meta_map config agent_names in
@@ -327,14 +327,14 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
            Hashtbl.find_opt keeper_aliases agent_name |> Option.value ~default:agent_name
          in
          let recent_output_preview =
-           latest_out |> Option.map (fun (message : Types.message) -> compact_text message.content)
+           latest_out |> Option.map (fun (message : Masc_domain.message) -> compact_text message.content)
          in
          let recent_input_preview =
-           latest_in |> Option.map (fun (message : Types.message) -> compact_text message.content)
+           latest_in |> Option.map (fun (message : Masc_domain.message) -> compact_text message.content)
          in
          let status =
            match agent with
-           | Some value -> Types.agent_status_to_string value.status
+           | Some value -> Masc_domain.agent_status_to_string value.status
            | None -> status_of_archived_session related_session
          in
          let last_activity_at =

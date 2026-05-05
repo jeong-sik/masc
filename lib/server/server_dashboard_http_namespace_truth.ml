@@ -35,7 +35,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
     `Assoc
       [
         ("status", `String "initializing");
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ( "message",
           `String
             "Execution snapshot is still warming up. The dashboard will retry automatically."

@@ -1,6 +1,6 @@
 (** ISO-8601 timestamp helpers kept small and local to [masc_gate] so the
     library does not depend on [lib/server/server_utils.ml] (HTTP routing
-    types) nor on [lib/types/] (Types.parse_iso8601_opt drags the whole
+    types) nor on [lib/types/] (Masc_domain.parse_iso8601_opt drags the whole
     masc_types surface in for a 17-line helper).
 
     When Gate moves out of the MASC monolith (Track B4), the remaining
@@ -14,7 +14,7 @@ let iso8601_of_unix ts =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 (** Parse ISO8601 "YYYY-MM-DDTHH:MM:SSZ" to Unix float (UTC). Duplicated
-    locally from [Types.parse_iso8601_opt] to sever the dependency on
+    locally from [Masc_domain.parse_iso8601_opt] to sever the dependency on
     [masc_types]. Behavior byte-identical to the original. *)
 let parse_iso8601_opt s =
   try

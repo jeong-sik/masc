@@ -99,16 +99,16 @@ let set_tempo (config : Coord_utils.config) ~interval_s ~reason : tempo_state =
 let get_tempo (config : Coord_utils.config) : tempo_state =
   load_state config
 
-let is_pending_task (task : Types.task) : bool =
-  not (Types.task_status_is_terminal task.task_status)
+let is_pending_task (task : Masc_domain.task) : bool =
+  not (Masc_domain.task_status_is_terminal task.task_status)
 
 (** Calculate adaptive tempo based on task urgency *)
-let calculate_adaptive_tempo (tasks : Types.task list) : float * string =
+let calculate_adaptive_tempo (tasks : Masc_domain.task list) : float * string =
   if tasks = [] then
     (default_config.max_interval_s, "idle - no pending tasks")
   else
-    let urgent_count = List.filter (fun t -> t.Types.priority <= 2) tasks |> List.length in
-    let high_count = List.filter (fun t -> t.Types.priority = 3) tasks |> List.length in
+    let urgent_count = List.filter (fun t -> t.Masc_domain.priority <= 2) tasks |> List.length in
+    let high_count = List.filter (fun t -> t.Masc_domain.priority = 3) tasks |> List.length in
     if urgent_count > 0 then
       (default_config.min_interval_s,
        Printf.sprintf "fast - %d urgent task(s)" urgent_count)

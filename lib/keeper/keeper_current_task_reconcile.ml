@@ -22,7 +22,7 @@ let resolved_agent_names ~(config : Coord.config) ~(agent_name : string) =
   in
   [ agent_name; actual_name ] |> List.sort_uniq String.compare
 
-let task_id_of_owned_active_task ~(keeper_name : string) (task : Types.task) =
+let task_id_of_owned_active_task ~(keeper_name : string) (task : Masc_domain.task) =
   match Keeper_id.Task_id.of_string task.id with
   | Ok task_id -> Some task_id
   | Error msg ->
@@ -41,18 +41,18 @@ let owned_active_task_ids_for_meta ~(config : Coord.config)
   let matches assignee = List.mem assignee names in
   try
     Coord.get_tasks_raw config
-    |> List.filter_map (fun (task : Types.task) ->
+    |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
-         | Types.Claimed { assignee; _ }
-         | Types.InProgress { assignee; _ }
+         | Masc_domain.Claimed { assignee; _ }
+         | Masc_domain.InProgress { assignee; _ }
            when matches assignee ->
              task_id_of_owned_active_task ~keeper_name:meta.name task
-         | Types.Claimed _
-         | Types.InProgress _
-         | Types.AwaitingVerification _
-         | Types.Todo
-         | Types.Done _
-         | Types.Cancelled _ -> None)
+         | Masc_domain.Claimed _
+         | Masc_domain.InProgress _
+         | Masc_domain.AwaitingVerification _
+         | Masc_domain.Todo
+         | Masc_domain.Done _
+         | Masc_domain.Cancelled _ -> None)
     |> List.sort_uniq (fun a b ->
          String.compare
            (Keeper_id.Task_id.to_string a)
@@ -100,7 +100,7 @@ let sync_current_task_id_from_backlog ~(config : Coord.config)
   if equal then meta
   else
     let updated_meta =
-      { meta with current_task_id = desired; updated_at = Types.now_iso () }
+      { meta with current_task_id = desired; updated_at = Masc_domain.now_iso () }
     in
     Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
     (match

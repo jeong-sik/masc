@@ -41,7 +41,7 @@ let prepare_run_context
       ~(generation : int)
       ()
   =
-  let receipt_started_at = Types.now_iso () in
+  let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =

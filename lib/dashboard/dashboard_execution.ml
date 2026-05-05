@@ -330,30 +330,30 @@ let model_map_of_keeper_rows keepers =
   model_map
 
 
-let task_updated_at (task : Types.task) =
+let task_updated_at (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Done { completed_at; _ } -> completed_at
-  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Types.InProgress { started_at; _ } -> started_at
-  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Types.Claimed { claimed_at; _ } -> claimed_at
-  | Types.Todo -> task.created_at
+  | Masc_domain.Done { completed_at; _ } -> completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.InProgress { started_at; _ } -> started_at
+  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Todo -> task.created_at
 
-let task_completed_at (task : Types.task) =
+let task_completed_at (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Done { completed_at; _ } -> Some completed_at
-  | Types.Cancelled { cancelled_at; _ } -> Some cancelled_at
-  | Types.Todo | Types.Claimed _ | Types.InProgress _
-  | Types.AwaitingVerification _ -> None
+  | Masc_domain.Done { completed_at; _ } -> Some completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> Some cancelled_at
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> None
 
-let task_execution_links_json (task : Types.task) =
+let task_execution_links_json (task : Masc_domain.task) =
   match task.contract with
-  | Some contract -> Types.task_execution_links_to_yojson contract.links
+  | Some contract -> Masc_domain.task_execution_links_to_yojson contract.links
   | None -> `Null
 
-let task_json (task : Types.task) =
+let task_json (task : Masc_domain.task) =
   let fields =
-    match Types.task_to_yojson task with
+    match Masc_domain.task_to_yojson task with
     | `Assoc assoc -> assoc
     | _ -> []
   in
@@ -374,7 +374,7 @@ let task_json (task : Types.task) =
   in
   `Assoc fields
 
-let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Types.agent) =
+let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.agent) =
   let (emoji, korean_name) = get_agent_identity agent.name in
   let model_value =
     match Hashtbl.find_opt model_map agent.name with
@@ -385,7 +385,7 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Types.agent) =
     [
       ("name", `String agent.name);
       ("agent_type", `String agent.agent_type);
-      ("status", `String (Types.string_of_agent_status agent.status));
+      ("status", `String (Masc_domain.string_of_agent_status agent.status));
       ( "current_task",
         match agent.current_task with
         | Some task -> `String task
@@ -398,7 +398,7 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Types.agent) =
       ("model", model_value);
     ]
 
-let message_json (message : Types.message) =
+let message_json (message : Masc_domain.message) =
   `Assoc
     [
       ("from", `String message.from_agent);
@@ -519,7 +519,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let base_fields =
         let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
         [
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
           ("status", room_status_json config);
           ( "projection_diagnostics",
             `Assoc
@@ -552,18 +552,18 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       in
       let now = Time_compat.now () in
       let recent_cutoff = now -. Masc_time_constants.day in (* 24 hours *)
-      let active_tasks = List.filter (fun (t : Types.task) ->
-        not (Types.task_status_is_terminal t.task_status)
+      let active_tasks = List.filter (fun (t : Masc_domain.task) ->
+        not (Masc_domain.task_status_is_terminal t.task_status)
       ) tasks in
       let recent_done = tasks
-        |> List.filter (fun (t : Types.task) ->
+        |> List.filter (fun (t : Masc_domain.task) ->
           match t.task_status with
-          | Types.Done { completed_at; _ } ->
-            (match Types.parse_iso8601_opt completed_at with
+          | Masc_domain.Done { completed_at; _ } ->
+            (match Masc_domain.parse_iso8601_opt completed_at with
              | Some ts -> ts >= recent_cutoff
              | None -> false)
-          | Types.Cancelled { cancelled_at; _ } ->
-            (match Types.parse_iso8601_opt cancelled_at with
+          | Masc_domain.Cancelled { cancelled_at; _ } ->
+            (match Masc_domain.parse_iso8601_opt cancelled_at with
              | Some ts -> ts >= recent_cutoff
              | None -> false)
           | _ -> false)
@@ -634,7 +634,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
     | Error `Timeout ->
       Log.Dashboard.error "[dashboard_execution] render timed out after %.0fs" render_timeout_s;
       `Assoc [
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ("error", `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s));
         ("status", room_status_json config);
       ]

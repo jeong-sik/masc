@@ -5,7 +5,7 @@
     @since 0.7.0
 *)
 
-open Types
+open Masc_domain
 
 (** Backend variant *)
 type task_backend =

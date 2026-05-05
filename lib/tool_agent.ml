@@ -27,7 +27,7 @@ type context = {
 (** Helper: result to response *)
 let result_to_response = function
   | Ok msg -> (true, msg)
-  | Error e -> (false, Types.masc_error_to_string e)
+  | Error e -> (false, Masc_domain.masc_error_to_string e)
 
 (* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
    new constructor forces compilation in [agent_card_action_to_string]
@@ -203,7 +203,7 @@ let handle_agent_fitness ctx args =
       let room_agents =
         try
           Coord.get_agents_raw ctx.config
-          |> List.map (fun (a : Types.agent) -> a.name)
+          |> List.map (fun (a : Masc_domain.agent) -> a.name)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -276,14 +276,14 @@ let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 let tool_required_permission = function
   | "masc_agents" | "masc_agent_fitness"
   | "masc_get_metrics" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_register_capabilities" | "masc_agent_update" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

@@ -17,13 +17,13 @@ val goal_title_marker : string -> string
 
 (** True when the task is structurally linked to the goal or carries the
     legacy [[goal:<id>]] title marker. *)
-val task_matches_goal : goal_id:string -> Types.task -> bool
+val task_matches_goal : goal_id:string -> Masc_domain.task -> bool
 
 (** True only when the task's structured [goal_id] field matches.
 
     New read models should prefer this over {!task_matches_goal}; the latter is
     retained for legacy convergence compatibility with old title-marker tasks. *)
-val task_has_goal_id : goal_id:string -> Types.task -> bool
+val task_has_goal_id : goal_id:string -> Masc_domain.task -> bool
 
 (** Check whether a goal's tasks have converged.
 
@@ -41,7 +41,7 @@ val task_has_goal_id : goal_id:string -> Types.task -> bool
                                         tracking this across invocations. *)
 val check_convergence :
   goal_id:string ->
-  tasks:Types.task list ->
+  tasks:Masc_domain.task list ->
   ?stagnation_threshold:int ->
   iterations_without_progress:int ->
   unit ->

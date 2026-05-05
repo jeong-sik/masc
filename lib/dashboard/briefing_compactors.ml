@@ -154,7 +154,7 @@ let compact_keeper_json keeper_json =
       ("skill_primary", string_json ~default:"unknown" ~max_len:120 (member_assoc "skill_primary" keeper_json));
     ]
 
-let compact_agent_json (agent : Types.agent) =
+let compact_agent_json (agent : Masc_domain.agent) =
   let current_focus =
     match agent.current_task with
     | Some task when String.trim task <> "" -> compact_text ~max_len:120 task
@@ -164,7 +164,7 @@ let compact_agent_json (agent : Types.agent) =
     [
       ("name", `String agent.name);
       ("agent_type", `String agent.agent_type);
-      ("status", `String (Types.string_of_agent_status agent.status));
+      ("status", `String (Masc_domain.string_of_agent_status agent.status));
       ("assignment_status", `String (if current_focus = "unassigned" then "unassigned" else "assigned"));
       ("current_focus", `String current_focus);
       ("goal_hint", `String current_focus);

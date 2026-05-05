@@ -30,7 +30,7 @@ val dispatch :
   args:Yojson.Safe.t ->
   tool_result option
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 
 val completion_notes_example : string
 (** Concrete example of accepted completion notes. Referenced in the

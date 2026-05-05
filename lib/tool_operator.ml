@@ -15,7 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-open Types
+open Masc_domain
 open Tool_args
 
 type 'a context = {
@@ -340,10 +340,10 @@ let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
 let tool_required_permission = function
   | "masc_operator_snapshot" | "masc_operator_digest" | "masc_surface_audit" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_operator_action" | "masc_operator_confirm"
   | "masc_operator_judgment_write" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =

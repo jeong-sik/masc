@@ -13,9 +13,9 @@
 type room_snapshot = {
   room_id : string;
   is_current : bool;
-  agents : Types.agent list;
-  tasks : Types.task list;
-  messages : Types.message list;
+  agents : Masc_domain.agent list;
+  tasks : Masc_domain.task list;
+  messages : Masc_domain.message list;
   locks : int;
 }
 
@@ -41,7 +41,7 @@ val format_elapsed : float -> string -> string -> string
 (** Translate agent status + [last_seen_iso] into operator-readable text
     like ["working"], ["quiet (Nm)"], ["STUCK (Nm, needs check)"], etc. *)
 val translate_agent_status :
-  now:float -> Types.agent_status -> string -> string
+  now:float -> Masc_domain.agent_status -> string -> string
 
 (** Agent grouping for capacity / operator views.
 
@@ -54,4 +54,4 @@ type agent_group = Working | Stuck | Idle | Offline
 (** Classify an agent using wall-clock [now] and the stuck threshold.
     [Active]/[Busy] past the threshold → [Stuck]; otherwise → [Working].
     [Listening] → [Idle]. [Inactive] → [Offline]. *)
-val classify_agent : now:float -> Types.agent -> agent_group
+val classify_agent : now:float -> Masc_domain.agent -> agent_group

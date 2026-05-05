@@ -16,7 +16,7 @@ val do_not_reclaim_reason_blocks_claim : string option -> string option
     should still block claiming. Legacy automatic cycle reasons such as
     ["auto: 3 releases"] are treated as soft and return [None]. *)
 
-val clear_soft_do_not_reclaim_reason : Types.task -> Types.task
+val clear_soft_do_not_reclaim_reason : Masc_domain.task -> Masc_domain.task
 (** Clears legacy automatic cycle block reasons before a task is claimed. *)
 
 (** {1 Task claiming} *)
@@ -26,15 +26,15 @@ val claim_task :
 
 val claim_task_r :
   config -> agent_name:string -> task_id:string ->
-  ?agent_tool_names:string list -> unit -> string Types.masc_result
+  ?agent_tool_names:string list -> unit -> string Masc_domain.masc_result
 
 (** {1 Release/reclaim helpers} *)
 
-val release_handoff_texts : Types.task_handoff_context option -> string list
+val release_handoff_texts : Masc_domain.task_handoff_context option -> string list
 
 val release_hard_stop_markers : string list
 
-val release_should_block_reclaim : Types.task_handoff_context option -> bool
+val release_should_block_reclaim : Masc_domain.task_handoff_context option -> bool
 
 val derive_release_do_not_reclaim_reason :
-  Types.task -> Types.task_handoff_context option -> string option
+  Masc_domain.task -> Masc_domain.task_handoff_context option -> string option

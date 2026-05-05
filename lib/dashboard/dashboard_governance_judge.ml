@@ -108,7 +108,7 @@ let ensure_dir path =
 let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
-let now_iso () = Types.now_iso ()
+let now_iso () = Masc_domain.now_iso ()
 let option_to_yojson = Json_util.option_to_yojson
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
@@ -482,7 +482,7 @@ let prompt_for_facts facts_json =
   | Error _ -> Prompt_registry.get_prompt "dashboard.governance_judge"
 
 let compute_judgments
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts =
   let cascade_name =
@@ -624,7 +624,7 @@ let should_backoff ~sw ~net =
     false
 
 let refresh_once ~sw ~net
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~base_path ~build_facts =
   let st = get_state base_path in
@@ -682,9 +682,9 @@ let refresh_once ~sw ~net
             st.runtime_status <- status_online;
             st.degraded_reason <- None;
             st.generated_at <- Some generated_at;
-            st.generated_at_unix <- Some (Types.parse_iso8601 generated_at);
+            st.generated_at_unix <- Some (Masc_domain.parse_iso8601 generated_at);
             st.expires_at <- Some expires_at;
-            st.expires_at_unix <- Some (Types.parse_iso8601 expires_at);
+            st.expires_at_unix <- Some (Masc_domain.parse_iso8601 expires_at);
             st.model_used <- Some model_used;
             st.last_error <- None;
             st.last_disk_load_unix <- Some (Unix.gettimeofday ());
@@ -700,7 +700,7 @@ let refresh_once ~sw ~net
   end
 
 let start ~sw ~clock ~net ~base_path
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
   (* Ensure governance directories exist before first read/write *)

@@ -17,18 +17,18 @@ val tasks :
   ?include_done:bool ->
   ?include_cancelled:bool ->
   Coord.config ->
-  Types.task list
+  Masc_domain.task list
 
-val task_assignee : Types.task -> string option
+val task_assignee : Masc_domain.task -> string option
 
 val agents :
   ?status_filter:string ->
   Coord.config ->
-  Types.agent list
+  Masc_domain.agent list
 
 val messages :
   ?agent_filter:string ->
   since_seq:int ->
   limit:int ->
   Coord.config ->
-  Types.message list
+  Masc_domain.message list

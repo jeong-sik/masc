@@ -149,6 +149,13 @@ module Metrics : sig
     ?on_error:(model_id:string -> error:string -> unit) ->
     ?on_http_status:(provider:string -> model_id:string -> status:int -> unit) ->
     ?on_capability_drop:(model_id:string -> field:string -> unit) ->
+    ?on_retry:(provider:string -> model_id:string -> attempt:int -> unit) ->
+    ?on_token_usage:
+      (provider:string ->
+       model_id:string ->
+       input_tokens:int ->
+       output_tokens:int ->
+       unit) ->
     unit ->
     Llm_provider.Metrics.t
   (** Construct a [Llm_provider.Metrics.t] value.

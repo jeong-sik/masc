@@ -178,7 +178,7 @@ let handle_initialize_eio ?(profile = Full) id params =
                  | Operator_remote -> TP.operator_remote_instructions) );
              ( "_meta",
                `Assoc [
-                 ("serverStartedAt", `String (Types.now_iso ()));
+                 ("serverStartedAt", `String (Masc_domain.now_iso ()));
                  ("serverVersion", `String Version.version);
                  ("profile", `String
                    (match profile with
@@ -208,14 +208,14 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
     |> (match names with
        | None -> Fun.id
        | Some wanted ->
-           List.filter (fun (schema : Types.tool_schema) ->
+           List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name wanted))
-    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
            String.compare a.name b.name)
   in
   (match agent_id with
    | Some aid ->
-       let tool_names = List.map (fun (s : Types.tool_schema) -> s.name) tools in
+       let tool_names = List.map (fun (s : Masc_domain.tool_schema) -> s.name) tools in
        let profile_str =
          match profile with
          | Full -> "full"
@@ -268,9 +268,9 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
 let handle_list_resources_eio id cursor =
   let tool_help_resources =
     public_tool_help_schemas ()
-    |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
+    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
            String.compare a.name b.name)
-    |> List.map (fun (schema : Types.tool_schema) ->
+    |> List.map (fun (schema : Masc_domain.tool_schema) ->
            let entry = Tool_help_registry.entry_of_schema schema in
            Mcp_server.make_resource ~uri:("masc://tool-help/" ^ schema.name)
              ~name:(schema.name ^ " Help") ~description:entry.short_description
@@ -680,7 +680,7 @@ let handle_request
                  with
                  | Invalid_argument msg
                    when contains_casefold msg "masc not initialized" ->
-                     make_error ~id (-32603) (Types.masc_error_to_string (Types.System Types.System_error.NotInitialized))
+                     make_error ~id (-32603) (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->
                        let err = Printexc.to_string exn in

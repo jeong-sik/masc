@@ -57,14 +57,14 @@ let strip_mcp_prefix name =
 
 let unique_preserve_order = Json_util.dedupe_keep_order
 
-let has_agent_name_field (schema : Types.tool_schema) =
+let has_agent_name_field (schema : Masc_domain.tool_schema) =
   let open Yojson.Safe.Util in
   match schema.input_schema |> member "properties" |> member "agent_name" with
   | `Null -> false
   | _ -> true
 
 let inject_default_agent_name ~(worker_name : string)
-    ~(schema : Types.tool_schema option) (args : Yojson.Safe.t) =
+    ~(schema : Masc_domain.tool_schema option) (args : Yojson.Safe.t) =
   match (schema, args) with
   | Some schema, `Assoc fields
     when has_agent_name_field schema && not (List.mem_assoc "agent_name" fields) ->
@@ -289,14 +289,14 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
 
 let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
-    (Types.tool_schema list, string) result =
+    (Masc_domain.tool_schema list, string) result =
   ignore (_sw, auth_token, session_id);
   Agent_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let tool_schema_of_name schemas tool_name =
-  List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas
+  List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name) schemas
 
-let tool_defs_of_schemas (schemas : Types.tool_schema list) : Types.tool_schema list =
+let tool_defs_of_schemas (schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
   schemas
 
 let safe_text_for_followup text =
@@ -602,8 +602,8 @@ let worker_session_id worker_name =
 let worker_auth_token ~base_path ~worker_name =
   let auth_cfg = Auth.load_auth_config base_path in
   if auth_cfg.enabled && auth_cfg.require_token then
-    match Auth.create_token base_path ~agent_name:worker_name ~role:Types.Worker with
+    match Auth.create_token base_path ~agent_name:worker_name ~role:Masc_domain.Worker with
     | Ok (token, _cred) -> Ok (Some token)
-    | Error err -> Error (Types.masc_error_to_string err)
+    | Error err -> Error (Masc_domain.masc_error_to_string err)
   else
     Ok None

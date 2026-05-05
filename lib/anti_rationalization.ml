@@ -314,7 +314,7 @@ REJECT: <reason> - if the notes are vague, avoidant, or do not address the task|
 (** JSON schema for the report_review_verdict tool.
     Forces the LLM to call a tool with typed parameters.
     verdict is constrained to APPROVE/REJECT by enum. *)
-let report_review_verdict_schema : Types.tool_schema =
+let report_review_verdict_schema : Masc_domain.tool_schema =
   { name = "report_review_verdict";
     description =
       "Report your review verdict. You MUST call this tool with your assessment. \

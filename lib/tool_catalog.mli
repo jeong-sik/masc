@@ -48,7 +48,7 @@ type metadata = {
   readonly : bool option;
   destructive : bool option;
   idempotent : bool option;
-  required_permission : Types.permission option;
+  required_permission : Masc_domain.permission option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
 }

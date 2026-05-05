@@ -5,4 +5,4 @@
     {!Agent_tool_surfaces} to expose [masc_goal_*] on coordinating
     surfaces. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

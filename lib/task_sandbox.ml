@@ -86,7 +86,7 @@ let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
           ~agent_name ~task_id ~base_branch with
   | Error e ->
     Error (Printf.sprintf "worktree creation failed: %s"
-             (Types.masc_error_to_string e))
+             (Masc_domain.masc_error_to_string e))
   | Ok msg ->
     let base_path = config.base_path in
     match extract_worktree_path ~base_path msg with
@@ -145,7 +145,7 @@ let cleanup ~config ~agent_name sandbox =
   | Error e ->
     (* If removal fails, still return the files we found *)
     Log.Misc.warn "[task_sandbox] cleanup failed for %s: %s"
-      sandbox.task_id (Types.masc_error_to_string e);
+      sandbox.task_id (Masc_domain.masc_error_to_string e);
     (* Attempt force removal as fallback *)
     let rec find_git_owner dir =
       if Sys.file_exists (Filename.concat dir ".git") then Some dir
@@ -174,7 +174,7 @@ let cleanup ~config ~agent_name sandbox =
       Ok all_files
     end else
       Error (Printf.sprintf "cleanup failed for %s: %s"
-               sandbox.task_id (Types.masc_error_to_string e))
+               sandbox.task_id (Masc_domain.masc_error_to_string e))
 
 let with_sandbox ~config ~task_id ?base_branch ?repo_name ~agent_name f =
   match create ~config ~task_id ?base_branch ?repo_name ~agent_name () with

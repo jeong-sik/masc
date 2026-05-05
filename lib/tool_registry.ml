@@ -78,7 +78,7 @@ module StringSet = Set.Make (String)
 let known_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     List.fold_left
-      (fun set (schema : Types.tool_schema) -> StringSet.add schema.name set)
+      (fun set (schema : Masc_domain.tool_schema) -> StringSet.add schema.name set)
       StringSet.empty Config.raw_all_tool_schemas)
 
 let is_known_tool tool_name =

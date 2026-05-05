@@ -54,7 +54,7 @@ val strict_http_auth_error : string -> string
     deployment is missing strict token auth. *)
 
 val ensure_strict_http_token_auth :
-  endpoint:string -> Types.auth_config -> (Types.auth_config, string) result
+  endpoint:string -> Masc_domain.auth_config -> (Masc_domain.auth_config, string) result
 (** Validate [auth_config] for [endpoint]: when the endpoint is
     non-loopback it must carry a strict token configuration. *)
 
@@ -83,7 +83,7 @@ val internal_keeper_agent_from_request : Httpun.Request.t -> string option
 val resolve_agent_name_for_auth_raw :
   base_path:string ->
   Httpun.Request.t ->
-  token:string option -> (string option, Types.masc_error) result
+  token:string option -> (string option, Masc_domain.masc_error) result
 (** Resolve the agent name to use for permission checks given the
     request and bearer [token].  [Ok None] means "no agent context". *)
 
@@ -157,14 +157,14 @@ val is_allowlisted_loopback_dev_origin : string -> bool
 (** [true] when [origin] matches the loopback dev allowlist. *)
 
 val ensure_same_origin_browser_request :
-  Httpun.Request.t -> (unit, Types.masc_error) result
+  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Reject mutations from off-origin browsers; allows the loopback dev
     allowlist. *)
 
 (** {1 Auth-error wire format} *)
 
 val http_status_of_auth_error :
-  Types.masc_error ->
+  Masc_domain.masc_error ->
   [> `Forbidden | `Internal_server_error | `Unauthorized ]
 (** HTTP status to return for a given auth-domain error. *)
 
@@ -203,11 +203,11 @@ val respond_public_read_json :
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Public-read JSON responder. *)
 
-val auth_error_json : Types.masc_error -> string
+val auth_error_json : Masc_domain.masc_error -> string
 (** Render an auth error as the standard JSON envelope. *)
 
 val respond_auth_error :
-  Httpun.Request.t -> Httpun.Reqd.t -> Types.masc_error -> unit
+  Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + CORS. *)
 
 val respond_agent_rate_limited :
@@ -246,29 +246,29 @@ val is_public_read_path : String.t -> bool
 val resolve_agent_name_for_auth :
   base_path:string ->
   Httpun.Request.t ->
-  token:string option -> (string option, Types.masc_error) result
+  token:string option -> (string option, Masc_domain.masc_error) result
 (** Public wrapper of [resolve_agent_name_for_auth_raw]; the raw form
     is exposed for tests that exercise the underlying decision. *)
 
 val authorize_permission_request :
   base_path:string ->
-  permission:Types.permission ->
-  Httpun.Request.t -> (unit, Types.masc_error) result
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check that the request carries [permission]. *)
 
 val authorize_read_request :
-  base_path:string -> Httpun.Request.t -> (unit, Types.masc_error) result
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check read-tier auth. *)
 
 val authorize_tool_request :
   base_path:string ->
-  tool_name:string -> Httpun.Request.t -> (unit, Types.masc_error) result
+  tool_name:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check that the request is allowed to call [tool_name]. *)
 
 val authorize_token_bound_permission_request :
   base_path:string ->
-  permission:Types.permission ->
-  Httpun.Request.t -> (string, Types.masc_error) result
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
 (** Like [authorize_permission_request] but returns the token id used
     for auditing the call. *)
 
@@ -293,7 +293,7 @@ val with_read_auth :
 (** Read-tier auth combinator. *)
 
 val with_permission_auth :
-  permission:Types.permission ->
+  permission:Masc_domain.permission ->
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
@@ -307,7 +307,7 @@ val with_tool_auth :
 (** Tool-call auth combinator. *)
 
 val with_token_permission_auth :
-  permission:Types.permission ->
+  permission:Masc_domain.permission ->
   (Mcp_server.server_state ->
    string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit

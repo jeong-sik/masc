@@ -12,4 +12,4 @@
     [masc_autoresearch_inject], [masc_autoresearch_cycle],
     [masc_autoresearch_record_finding], and
     [masc_autoresearch_search_findings]. *)
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

@@ -2,11 +2,11 @@
     and permission enforcement for MASC agents.
 
     Types ([auth_config], [agent_credential], [masc_error], [agent_role],
-    [permission]) are re-exported from the [Types] module via [open Types].
+    [permission]) are re-exported from the [Types] module via [open Masc_domain].
 
     @since 0.4.0 *)
 
-open Types
+open Masc_domain
 
 (** {1 Token Generation} *)
 
@@ -109,7 +109,7 @@ val ensure_credential_alias :
   string ->
   canonical_name:string ->
   alias_name:string ->
-  (unit, Types.masc_error) result
+  (unit, Masc_domain.masc_error) result
 (** #10440: write a short-form alias [<alias_name>.json] as a
     redirect stub pointing at the same UUID file as the existing
     [<canonical_name>.json] credential.  Idempotent — a stub

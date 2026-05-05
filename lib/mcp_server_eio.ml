@@ -85,7 +85,7 @@ let requires_join_tools_inline =
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 let () =
   (* [Keeper_exec_tools.keeper_read_only_tools] is the keeper SSOT.
@@ -118,7 +118,7 @@ let () =
   (* Report tool schema budget to Prometheus (#7483 Step 1). *)
   (let schemas = Config.visible_tool_schemas () in
    let count = List.length schemas in
-   let chars = List.fold_left (fun acc (s : Types.tool_schema) ->
+   let chars = List.fold_left (fun acc (s : Masc_domain.tool_schema) ->
      acc + String.length s.name + String.length s.description
      + String.length (Yojson.Safe.to_string s.input_schema)
    ) 0 schemas in

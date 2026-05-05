@@ -180,7 +180,7 @@ let source_metadata_fields () =
 let empty_summary ~window_hours ~n ~sampling_mode =
   `Assoc
     (source_metadata_fields ()
-    @ [ ("generated_at", `String (Types.now_iso ()))
+    @ [ ("generated_at", `String (Masc_domain.now_iso ()))
     ; ("sampling_mode", `String sampling_mode)
     ; ( "sample_limit",
         match sampling_mode with
@@ -431,7 +431,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   `Assoc (
     source_metadata_fields ()
     @ [
-    ("generated_at", `String (Types.now_iso ()));
+    ("generated_at", `String (Masc_domain.now_iso ()));
     ("sampling_mode", `String sampling_mode);
     ( "sample_limit",
       match sampling_mode with

@@ -4,7 +4,7 @@
     Other schemas have been moved to their owning modules:
       Tool_inline_dispatch (via Tool_schemas_inline) *)
 
-open Types
+open Masc_domain
 
 (** Issue #8636: hand-mirrored from
     [Tool_coord.valid_assertion_strings]. Cycle constraint —

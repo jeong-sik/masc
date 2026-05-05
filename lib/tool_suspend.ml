@@ -71,7 +71,7 @@ let remove_from_blacklist ~agent_id =
 (** Check if agent is in the current room *)
 let is_agent_in_room config ~agent_id =
   let state = Coord.read_state config in
-  List.mem agent_id state.Types.active_agents
+  List.mem agent_id state.Masc_domain.active_agents
 ;;
 
 (** Force an agent to leave the room (uses Coord.update_state for consistency) *)
@@ -79,7 +79,7 @@ let force_leave config ~agent_id ~reason =
   (* Use update_state for atomic read-modify-write (same pattern as Coord.leave) *)
   let _ =
     Coord.update_state config (fun s ->
-      { s with Types.active_agents = List.filter (fun a -> not (String.equal a agent_id)) s.active_agents })
+      { s with Masc_domain.active_agents = List.filter (fun a -> not (String.equal a agent_id)) s.active_agents })
   in
   (* Broadcast the forced leave *)
   let message =
@@ -94,7 +94,7 @@ let force_leave config ~agent_id ~reason =
 
 (** masc_suspend removed: pruned from surfaces. *)
 
-let schemas : Types.tool_schema list = []
+let schemas : Masc_domain.tool_schema list = []
 
 (** {1 Dispatch} *)
 
@@ -127,7 +127,7 @@ let _tool_spec_requires_join = [ "masc_suspend" ]
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
        Tool_spec.register
          (Tool_spec.create
             ~name:s.name

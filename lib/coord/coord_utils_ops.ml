@@ -1,4 +1,4 @@
-open Types
+open Masc_domain
 open Coord_utils_backend_setup
 open Coord_utils_paths_backend
 
@@ -401,13 +401,13 @@ let agent_json_needs_repair = function
 
 let read_agent_with_repair config path =
   let json = read_json config path in
-  match Types.agent_of_yojson json with
+  match Masc_domain.agent_of_yojson json with
   | Ok agent as ok ->
       if agent_json_needs_repair json then (
         Log.Coord.warn
           "agent state repair: repaired agent JSON and rewrote canonical state for %s"
           path;
-        write_json config path (Types.agent_to_yojson agent));
+        write_json config path (Masc_domain.agent_to_yojson agent));
       ok
   | Error _ as error -> error
 

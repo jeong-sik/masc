@@ -106,7 +106,7 @@ let json_created_at_or_fallback ~kind ~path json =
   | None ->
       (match Safe_ops.json_string_opt "created_at" json with
        | Some raw -> (
-           match Types.parse_iso8601_opt (String.trim raw) with
+           match Masc_domain.parse_iso8601_opt (String.trim raw) with
            | Some ts -> ts
            | None ->
                Log.Feed.warn "%s missing/invalid created_at for %s" kind path;

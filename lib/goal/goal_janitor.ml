@@ -53,7 +53,7 @@ let days_since_update (goal : Goal_store.goal) ~now =
 let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
   : Goal_store.goal list * sweep_result =
   let now = Unix.gettimeofday () in
-  let iso_now = Types.now_iso () in
+  let iso_now = Masc_domain.now_iso () in
   let purged = ref 0 in
   let stagnated = ref 0 in
   let result =
@@ -103,7 +103,7 @@ let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
     Goal_store.write_state room_config
       { goals = goals';
         version = st.version + 1;
-        updated_at = Types.now_iso () }
+        updated_at = Masc_domain.now_iso () }
   end;
   (* Prune active_goal_ids from all keeper metas *)
   let total_orphans = ref 0 in

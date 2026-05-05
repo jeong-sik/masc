@@ -6,8 +6,8 @@
     @since 0.1.0 *)
 
 val retired_front_door_schema_names : string list
-val filter_retired_front_door_schemas : Types.tool_schema list -> Types.tool_schema list
-val raw_schemas : Types.tool_schema list
-val all_schemas : Types.tool_schema list
-val all_schemas_extended : Types.tool_schema list
-val find_tool : string -> Types.tool_schema option
+val filter_retired_front_door_schemas : Masc_domain.tool_schema list -> Masc_domain.tool_schema list
+val raw_schemas : Masc_domain.tool_schema list
+val all_schemas : Masc_domain.tool_schema list
+val all_schemas_extended : Masc_domain.tool_schema list
+val find_tool : string -> Masc_domain.tool_schema option

@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Tool_permission_map — Shared tool→permission resolution. *)
 
-open Types
+open Masc_domain
 
 let declared_permission_for_tool tool_name =
   match Tool_catalog.registered_metadata tool_name with

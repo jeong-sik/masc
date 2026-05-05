@@ -28,7 +28,7 @@ module Float = Stdlib.Float
 
     @since 2.128.0 *)
 
-open Types
+open Masc_domain
 open Tool_args
 
 type context = {
@@ -437,7 +437,7 @@ let handle_code_write ctx args =
     (false, "Binary file extension not allowed for write")
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       try
         if create_dirs then begin
@@ -468,7 +468,7 @@ let handle_code_edit ctx args =
   else if String.equal old_string new_string then (false, "old_string and new_string are identical")
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
         (false, Printf.sprintf "File not found: %s" path)
@@ -585,7 +585,7 @@ let handle_code_delete ctx args =
   if String.equal path "" then (false, "path parameter required")
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
         (false, Printf.sprintf "File not found: %s" path)
@@ -625,7 +625,7 @@ let handle_code_shell ctx args =
             | Error e -> Error e
         in
         (match cwd_result with
-         | Error e -> (false, Types.masc_error_to_string e)
+         | Error e -> (false, Masc_domain.masc_error_to_string e)
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
              let cmd_parts = ["sh"; "-c"; command] in
@@ -682,7 +682,7 @@ let handle_code_git ctx args =
       | Error msg -> (false, msg)
       | Ok () ->
         match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
-        | Error e -> (false, Types.masc_error_to_string e)
+        | Error e -> (false, Masc_domain.masc_error_to_string e)
         | Ok abs_cwd ->
           let clone_url = normalize_github_clone_url url in
           (* Only pass the validated URL — no extra args allowed.
@@ -740,7 +740,7 @@ let handle_code_git ctx args =
           | Error e -> Error e
       in
       match cwd_result with
-      | Error e -> (false, Types.masc_error_to_string e)
+      | Error e -> (false, Masc_domain.masc_error_to_string e)
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
         let cmd = ["sh"; "-c";
@@ -780,7 +780,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | _ -> None
 
 (* Tool schemas *)
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   {
     name = "masc_code_write";
     description = "Create or overwrite a file in an allowed coding sandbox \
@@ -923,7 +923,7 @@ Returns git command output.";
 
 (** Tool names for keeper gating *)
 let tool_names : string list =
-  schemas |> List.map (fun (t : Types.tool_schema) -> t.name)
+  schemas |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

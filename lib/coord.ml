@@ -56,20 +56,20 @@ let merge_detail_fields fields details =
   | `Null -> `Assoc fields
   | other -> `Assoc (fields @ [ ("payload", other) ])
 
-(* Exhaustive on [Types.task_action]: a new variant becomes a compile
+(* Exhaustive on [Masc_domain.task_action]: a new variant becomes a compile
    error here so the audit-log mapping cannot silently fall into the
    [Custom "task_<other>"] catch-all that the prior string-typed
    classifier produced. (#8605 family -- exhaustive-match template) *)
-let task_action_of_transition : Types.task_action -> Audit_log.action = function
-  | Types.Claim -> Audit_log.ClaimTask
-  | Types.Start -> Audit_log.StartTask
-  | Types.Done_action -> Audit_log.DoneTask
-  | Types.Cancel -> Audit_log.CancelTask
-  | Types.Release -> Audit_log.ReleaseTask
-  | (Types.Submit_for_verification
-    | Types.Approve_verification
-    | Types.Reject_verification) as action ->
-      Audit_log.Custom ("task_" ^ Types.task_action_to_string action)
+let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = function
+  | Masc_domain.Claim -> Audit_log.ClaimTask
+  | Masc_domain.Start -> Audit_log.StartTask
+  | Masc_domain.Done_action -> Audit_log.DoneTask
+  | Masc_domain.Cancel -> Audit_log.CancelTask
+  | Masc_domain.Release -> Audit_log.ReleaseTask
+  | (Masc_domain.Submit_for_verification
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification) as action ->
+      Audit_log.Custom ("task_" ^ Masc_domain.task_action_to_string action)
 
 (* #8605 family: replaced four parallel string switches on [event_kind]
    with a single [agent_lifecycle_event] variant. The compiler now
@@ -126,14 +126,14 @@ let observe_agent_lifecycle config ~agent_id ~(event : Coord_hooks.agent_lifecyc
   with Stdlib.Effect.Unhandled _ -> ())
 
 (* #8605 family: replaced four parallel string switches on [transition]
-   with [Types.task_action] variant matches. The compiler now forces
+   with [Masc_domain.task_action] variant matches. The compiler now forces
    every dispatch to cover all 8 task_action constructors, so a future
    action variant cannot silently coalesce into the catch-all "no-op"
    branch. JSON wire format ("claim" / "start" / "done" / ...) is
-   preserved via [Types.task_action_to_string]. *)
+   preserved via [Masc_domain.task_action_to_string]. *)
 let observe_task_transition_event config ~agent_name ~task_id
-    ~(transition : Types.task_action) ~details =
-  let transition_s = Types.task_action_to_string transition in
+    ~(transition : Masc_domain.task_action) ~details =
+  let transition_s = Masc_domain.task_action_to_string transition in
   let details =
     merge_detail_fields
       [
@@ -146,10 +146,10 @@ let observe_task_transition_event config ~agent_name ~task_id
   in
   let level =
     match transition with
-    | Types.Cancel -> Log.Warn
-    | (Types.Claim | Types.Start | Types.Done_action | Types.Release
-      | Types.Submit_for_verification | Types.Approve_verification
-      | Types.Reject_verification) -> Log.Info
+    | Masc_domain.Cancel -> Log.Warn
+    | (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Release
+      | Masc_domain.Submit_for_verification | Masc_domain.Approve_verification
+      | Masc_domain.Reject_verification) -> Log.Info
   in
   let message =
     Printf.sprintf "task %s %s by %s" task_id transition_s agent_name
@@ -161,22 +161,22 @@ let observe_task_transition_event config ~agent_name ~task_id
       ~details ~outcome:Audit_log.Success ();
     if telemetry_enabled () then
       match transition with
-      | Types.Claim | Types.Start ->
+      | Masc_domain.Claim | Masc_domain.Start ->
           Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
-      | Types.Done_action | Types.Approve_verification ->
+      | Masc_domain.Done_action | Masc_domain.Approve_verification ->
           let duration_ms =
             Safe_ops.json_int ~default:0 "duration_ms" details
           in
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
             ~success:true
-      | Types.Cancel ->
+      | Masc_domain.Cancel ->
           let duration_ms =
             Safe_ops.json_int ~default:0 "duration_ms" details
           in
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
             ~success:false
-      | (Types.Release | Types.Submit_for_verification
-        | Types.Reject_verification) -> ()
+      | (Masc_domain.Release | Masc_domain.Submit_for_verification
+        | Masc_domain.Reject_verification) -> ()
   with Stdlib.Effect.Unhandled _ -> ());
   (try
      Keeper_accountability.record_task_transition config ~agent_name ~task_id

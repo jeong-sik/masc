@@ -147,7 +147,7 @@ let record_pre_tool_gate_attempt
       let entry : Trajectory.tool_call_entry =
         {
           ts = now;
-          ts_iso = Types.iso8601_of_unix_seconds now;
+          ts_iso = Masc_domain.iso8601_of_unix_seconds now;
           turn;
           round;
           tool_name = event.tool_name;
@@ -747,7 +747,7 @@ let assemble_cost_event_payload
     (* #10318: self-describing reason for [cost_usd]'s value. *)
     ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
-    ("timestamp", `String (Types.now_iso ()));
+    ("timestamp", `String (Masc_domain.now_iso ()));
     ("source", `String "auto_trajectory");
   ]
   @ Keeper_usage_trust.json_fields usage_trust
@@ -1351,7 +1351,7 @@ let make_hooks
            let entry : Trajectory.tool_call_entry =
              {
                ts = now;
-               ts_iso = Types.iso8601_of_unix_seconds now;
+               ts_iso = Masc_domain.iso8601_of_unix_seconds now;
                turn = acc.Trajectory.turn;
                round = Trajectory.calls_in_current_turn acc + 1;
                tool_name;

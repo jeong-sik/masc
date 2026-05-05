@@ -75,7 +75,7 @@ let handle_cleanup_zombies ctx _args =
 let handle_tool_stats _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
   let all_tool_names =
-    List.map (fun (s : Types.tool_schema) -> s.name)
+    List.map (fun (s : Masc_domain.tool_schema) -> s.name)
       Config.all_tool_schemas
   in
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
@@ -152,16 +152,16 @@ let _tool_spec_read_only =
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard"
   | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
-      Some Types.CanAdmin
+      Some Masc_domain.CanAdmin
   | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
-      Some Types.CanBroadcast
+      Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

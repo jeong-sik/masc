@@ -8,7 +8,7 @@ type severity_counts =
 
 type observed_state =
   { goals : Goal_store.goal list
-  ; tasks : Types.task list
+  ; tasks : Masc_domain.task list
   ; posts : Board.post list
   ; transactions : Agent_economy.transaction list
   ; telemetry_events : Telemetry_eio.event_record list
@@ -71,7 +71,7 @@ let compare_goal_id (left : Goal_store.goal) (right : Goal_store.goal) =
   String.compare left.id right.id
 ;;
 
-let compare_task_id (left : Types.task) (right : Types.task) =
+let compare_task_id (left : Masc_domain.task) (right : Masc_domain.task) =
   String.compare left.id right.id
 ;;
 
@@ -160,15 +160,15 @@ let single_unique = function
   | [] | _ :: _ :: _ -> None
 ;;
 
-let task_actor_name (task : Types.task) =
+let task_actor_name (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Todo -> task.created_by
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ }
-  | Types.Done { assignee; _ } ->
+  | Masc_domain.Todo -> task.created_by
+  | Masc_domain.Claimed { assignee; _ }
+  | Masc_domain.InProgress { assignee; _ }
+  | Masc_domain.AwaitingVerification { assignee; _ }
+  | Masc_domain.Done { assignee; _ } ->
     Some assignee
-  | Types.Cancelled { cancelled_by; _ } -> Some cancelled_by
+  | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by
 ;;
 
 let earning_kind = function
@@ -266,7 +266,7 @@ let reward_facts ~(ids : Coordination_product.ids) transactions =
   has_reward_earning, has_spend, has_penalty
 ;;
 
-let task_evidence (ids : Coordination_product.ids) (task : Types.task)
+let task_evidence (ids : Coordination_product.ids) (task : Masc_domain.task)
   : Coordination_product.evidence
   =
   { source = Coordination_product.Source_task_store
@@ -276,10 +276,10 @@ let task_evidence (ids : Coordination_product.ids) (task : Types.task)
   ; detail =
       Printf.sprintf
         "status=%s; priority=%d; created_by=%s"
-        (Types.task_status_to_string task.task_status)
+        (Masc_domain.task_status_to_string task.task_status)
         task.priority
         (Option.value task.created_by ~default:"-")
-  ; timestamp = Types.parse_iso8601_opt task.created_at
+  ; timestamp = Masc_domain.parse_iso8601_opt task.created_at
   ; refs = { ids with task_ids = unique_strings (task.id :: ids.task_ids) }
   }
 ;;
@@ -297,7 +297,7 @@ let goal_evidence (ids : Coordination_product.ids) (goal : Goal_store.goal)
         (Goal_phase.to_string goal.phase)
         goal.priority
         (Option.value goal.active_verification_request_id ~default:"-")
-  ; timestamp = Types.parse_iso8601_opt goal.updated_at
+  ; timestamp = Masc_domain.parse_iso8601_opt goal.updated_at
   ; refs = { ids with goal_id = Some goal.id }
   }
 ;;
@@ -472,10 +472,10 @@ let product_for
       ~persist_errors
       ~economy_enabled
   =
-  let task_statuses = List.map (fun (task : Types.task) -> task.task_status) tasks in
+  let task_statuses = List.map (fun (task : Masc_domain.task) -> task.task_status) tasks in
   let task_counts = Coordination_product.task_counts_of_statuses task_statuses in
   let task = Coordination_product.task_phase_of_counts task_statuses in
-  let task_ids = List.map (fun (task : Types.task) -> task.id) tasks in
+  let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) tasks in
   let agent_name =
     tasks |> List.filter_map task_actor_name |> unique_strings |> single_unique
   in
@@ -593,7 +593,7 @@ let project state =
   in
   let unlinked_task_products =
     all_tasks
-    |> List.filter (fun (task : Types.task) -> not (List.mem task.id linked_task_ids))
+    |> List.filter (fun (task : Masc_domain.task) -> not (List.mem task.id linked_task_ids))
     |> List.map (fun task ->
       product_for
         ~goal_phase:None

@@ -3,7 +3,7 @@
     Extracted from Coord module. Handles agent entry, re-entry, and departure
     including nickname resolution, dedup, metadata, and relation materialization. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 open Coord_broadcast

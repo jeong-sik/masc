@@ -56,8 +56,8 @@ val core_remote_operation_names : string list
     (masc_join / decision_create / etc.). Used by the dashboard
     capability inventory and the discovery wiring. *)
 
-val sdk_tool_schemas : Types.tool_schema list
-(** SDK-facing [Types.tool_schema] entries (excluding bindings
+val sdk_tool_schemas : Masc_domain.tool_schema list
+(** SDK-facing [Masc_domain.tool_schema] entries (excluding bindings
     flagged [discovery_hidden]). Consumed by the public MCP
     discovery endpoint. *)
 

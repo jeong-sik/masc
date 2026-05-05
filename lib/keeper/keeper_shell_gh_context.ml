@@ -89,7 +89,7 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
       let task_id = Keeper_id.Task_id.to_string task_id in
       match
         Coord_query.get_tasks_safe config
-        |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+        |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
       with
       | None ->
           Error

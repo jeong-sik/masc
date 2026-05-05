@@ -341,7 +341,7 @@ let execute_keeper_tool_call_with_outcome
          let masc_schemas = !Keeper_tool_registry.masc_schemas_ref in
          let enrich_suggestion name =
            let schema_opt =
-             List.find_opt (fun (s : Types.tool_schema) -> s.name = name) masc_schemas
+             List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) masc_schemas
            in
            match schema_opt with
            | Some s ->

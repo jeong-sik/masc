@@ -4,7 +4,7 @@
     manages notification queues, and provides MCP session-id
     lifecycle (create, get, cleanup). *)
 
-open Types
+open Masc_domain
 
 module AgentMap : Map.S with type key = String.t
 

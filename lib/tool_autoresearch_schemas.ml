@@ -21,7 +21,7 @@ module Float = Stdlib.Float
 
     @since 2.80.0 *)
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   {
     name = "masc_autoresearch_start";
     description = "Start a solo experiment loop: iteratively modify a target file to optimize \

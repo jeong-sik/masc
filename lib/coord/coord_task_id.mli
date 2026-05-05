@@ -4,7 +4,7 @@
     archive read/merge/write sequence so callers cannot bypass it.
     See issue #10751 for the broader [coord/] [.mli] coverage push. *)
 
-open Types
+open Masc_domain
 
 (** Parse a [task-N] identifier into its integer suffix.
     Returns [None] when the string does not match the [task-N] form

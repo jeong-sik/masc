@@ -22,12 +22,12 @@ let task_phase_to_string = function
 ;;
 
 let task_phase_of_status = function
-  | Types.Todo -> Todo
-  | Types.Claimed _ -> Claimed
-  | Types.InProgress _ -> In_progress
-  | Types.AwaitingVerification _ -> Awaiting_verification
-  | Types.Done _ -> Done
-  | Types.Cancelled _ -> Cancelled
+  | Masc_domain.Todo -> Todo
+  | Masc_domain.Claimed _ -> Claimed
+  | Masc_domain.InProgress _ -> In_progress
+  | Masc_domain.AwaitingVerification _ -> Awaiting_verification
+  | Masc_domain.Done _ -> Done
+  | Masc_domain.Cancelled _ -> Cancelled
 ;;
 
 type board_phase =
@@ -141,15 +141,15 @@ let empty_task_counts =
 let task_counts_of_statuses statuses =
   let count pred = statuses |> List.filter pred |> List.length in
   { total = List.length statuses
-  ; open_count = count (fun status -> not (Types.task_status_is_terminal status))
-  ; done_count = count Types.task_status_is_done
+  ; open_count = count (fun status -> not (Masc_domain.task_status_is_terminal status))
+  ; done_count = count Masc_domain.task_status_is_done
   ; cancelled_count =
       count (function
-        | Types.Cancelled _ -> true
+        | Masc_domain.Cancelled _ -> true
         | _ -> false)
   ; awaiting_verification_count =
       count (function
-        | Types.AwaitingVerification _ -> true
+        | Masc_domain.AwaitingVerification _ -> true
         | _ -> false)
   }
 ;;
@@ -183,13 +183,13 @@ type turn_queue_entry =
   }
 
 let active_owner_of_status = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ } -> Some assignee
-  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+  | Masc_domain.Claimed { assignee; _ }
+  | Masc_domain.InProgress { assignee; _ }
+  | Masc_domain.AwaitingVerification { assignee; _ } -> Some assignee
+  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 ;;
 
-let active_claim_observation (task : Types.task) =
+let active_claim_observation (task : Masc_domain.task) =
   active_owner_of_status task.task_status
   |> Option.map (fun owner ->
     { task_id = task.id; owner; phase = task_phase_of_status task.task_status })
@@ -237,16 +237,16 @@ let compare_turn_queue_entry left right =
 
 let visible_claim_queue tasks =
   tasks
-  |> List.filter_map (fun (task : Types.task) ->
+  |> List.filter_map (fun (task : Masc_domain.task) ->
     match task.task_status, task.do_not_reclaim_reason with
-    | Types.Todo, None ->
+    | Masc_domain.Todo, None ->
       Some { task_id = task.id; priority = task.priority; created_at = task.created_at }
-    | Types.Todo, Some _
-    | Types.Claimed _, _
-    | Types.InProgress _, _
-    | Types.AwaitingVerification _, _
-    | Types.Done _, _
-    | Types.Cancelled _, _ -> None)
+    | Masc_domain.Todo, Some _
+    | Masc_domain.Claimed _, _
+    | Masc_domain.InProgress _, _
+    | Masc_domain.AwaitingVerification _, _
+    | Masc_domain.Done _, _
+    | Masc_domain.Cancelled _, _ -> None)
   |> List.sort compare_turn_queue_entry
 ;;
 

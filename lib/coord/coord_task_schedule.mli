@@ -1,7 +1,7 @@
 (** Coord task scheduling — claim pool gating, verification block
     state, and the [claim_next] / [release_stale_claims] entries. *)
 
-open Types
+open Masc_domain
 include module type of Coord_utils
 include module type of Coord_state
 
@@ -10,10 +10,10 @@ include module type of Coord_state
 type verification_claim_state =
   [ `Pending | `Assigned | `Passed | `Rejected ]
 
-val task_status_label : Types.task_status -> string
-val task_is_claim_pool_candidate : Types.task -> bool
-val task_is_primary_claim_pool_candidate : Types.task -> bool
-val task_is_soft_reclaim_candidate : Types.task -> bool
+val task_status_label : Masc_domain.task_status -> string
+val task_is_claim_pool_candidate : Masc_domain.task -> bool
+val task_is_primary_claim_pool_candidate : Masc_domain.task -> bool
+val task_is_soft_reclaim_candidate : Masc_domain.task -> bool
 
 val verification_claim_state_of_status :
   Coord_verification_store.request_status -> verification_claim_state
@@ -23,9 +23,9 @@ val latest_verification_status_by_task :
 
 val verification_blocks_claim :
   (string, 'a * verification_claim_state) Hashtbl.t ->
-  Types.task -> bool
+  Masc_domain.task -> bool
 
-val task_required_tools : Types.task -> string list
+val task_required_tools : Masc_domain.task -> string list
 val string_list_contains : string list -> string -> bool
 
 val required_tools_allowed :
@@ -62,19 +62,19 @@ val latest_receipt_blocks_required_tool_claim :
   config -> agent_name:string -> required_tools:string list -> bool
 
 val agent_current_task_matches_backlog :
-  Types.backlog -> agent_name:string -> string -> bool
+  Masc_domain.backlog -> agent_name:string -> string -> bool
 
 val reconcile_agent_current_task_with_backlog :
-  config -> agent_name:string -> Types.backlog -> unit
+  config -> agent_name:string -> Masc_domain.backlog -> unit
 
 val claim_next_r :
   config ->
   agent_name:string ->
   ?agent_tool_names:string list ->
   ?exclude_task_ids:string list ->
-  ?task_filter:(Types.task -> bool) ->
+  ?task_filter:(Masc_domain.task -> bool) ->
   unit ->
-  Types.claim_next_result
+  Masc_domain.claim_next_result
 
 val claim_next : config -> agent_name:string -> string
 

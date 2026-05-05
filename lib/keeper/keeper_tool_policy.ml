@@ -179,10 +179,10 @@ let keeper_denied_set : (string, unit) Hashtbl.t =
     (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
   tbl
 
-let dedupe_tool_schemas (schemas : Types.tool_schema list) =
+let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in
   List.filter
-    (fun (schema : Types.tool_schema) ->
+    (fun (schema : Masc_domain.tool_schema) ->
       if Hashtbl.mem seen schema.name then
         false
       else (
@@ -197,7 +197,7 @@ let is_keeper_denied (name : string) : bool =
 
 let keeper_mcp_context_required_tools =
   Tool_schemas_inline.schemas
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 let is_keeper_mcp_context_required name =
   List.mem name keeper_mcp_context_required_tools
@@ -210,7 +210,7 @@ let keeper_supported_keeper_masc_tools =
   ; "masc_keeper_msg_result"
   ]
 
-let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
+let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
   let supported_in_keeper name =
     if Tool_dispatch.is_registered name then
       true
@@ -238,7 +238,7 @@ let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
     || eq Tool_name.Masc.Board_vote
     || eq Tool_name.Masc.Board_delete
   in
-  List.filter (fun (s : Types.tool_schema) ->
+  List.filter (fun (s : Masc_domain.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
@@ -248,10 +248,10 @@ let keeper_supported_masc_schemas (schemas : Types.tool_schema list) =
 
 let keeper_supported_masc_tool_names_from_schemas schemas =
   keeper_supported_masc_schemas schemas
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   |> dedupe_tool_names
 
-let inject_masc_schemas (schemas : Types.tool_schema list) =
+let inject_masc_schemas (schemas : Masc_domain.tool_schema list) =
   masc_schemas_ref := keeper_supported_masc_schemas schemas
 
 let select_existing_masc_tool_names names =
@@ -421,27 +421,27 @@ let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
-  |> List.filter_map (fun (schema : Types.tool_schema) ->
+  |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
     if filter_by_access ~lookup schema.name
     then Some schema.name
     else None)
 
-let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+let keeper_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
   let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
-  |> List.filter (fun (schema : Types.tool_schema) -> filter_by_access ~lookup schema.name)
+  |> List.filter (fun (schema : Masc_domain.tool_schema) -> filter_by_access ~lookup schema.name)
 
 (* ── Layer 2: Universe (all executable tools, policy-independent) ── *)
 
 (** Universe masc_* schemas: candidate minus denied, no policy filter.
     Used by make_tools to build Tool.t for BM25 retrieval scope. *)
-let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
   let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
-  |> List.filter (fun (schema : Types.tool_schema) ->
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
     filter_by_universe ~lookup schema.name)
 
-let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
+let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
   @ [ keeper_tool_search_schema ]
 
@@ -456,7 +456,7 @@ let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
 let failing_minimum_tool_names () : string list =
   Tool_shard.recovery_minimum_shard_names ()
   |> Tool_shard.tools_of_shards
-  |> List.map (fun (t : Types.tool_schema) -> t.Types.name)
+  |> List.map (fun (t : Masc_domain.tool_schema) -> t.Masc_domain.name)
 
 let keeper_allowed_tool_names ?(write_done = false)
     ?(phase = Keeper_state_machine.Running) (meta : keeper_meta) :
@@ -519,8 +519,8 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
     depending on the caller's access scope. *)
-let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Types.tool_schema list)
-    (meta : keeper_meta) : Types.tool_schema list =
+let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
+    (meta : keeper_meta) : Masc_domain.tool_schema list =
   (keeper_default_model_tools meta)
   @ Tool_shard.autoresearch_keeper_tools
   @ Tool_shard.coding_tools
@@ -532,21 +532,21 @@ let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Types.tool_schema list
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)
 let filter_schemas_by_names (names : string list)
-    (schemas : Types.tool_schema list) : Types.tool_schema list =
+    (schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
   let name_set = tool_name_set names in
   schemas
-  |> List.filter (fun (tool : Types.tool_schema) -> StringSet.mem tool.name name_set)
+  |> List.filter (fun (tool : Masc_domain.tool_schema) -> StringSet.mem tool.name name_set)
   |> dedupe_tool_schemas
 
 (** Preset-scoped model tool schemas for BM25 indexing.
     Returns schemas only for the preset-scoped universe. *)
-let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
+let keeper_preset_universe_model_tools (meta : keeper_meta) : Masc_domain.tool_schema list =
   let scoped = keeper_preset_universe_tool_names meta in
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
   |> filter_schemas_by_names scoped
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
-    Types.tool_schema list =
+    Masc_domain.tool_schema list =
   let allowed = keeper_allowed_tool_names ~write_done meta in
   if allowed = [] then
     []
@@ -566,7 +566,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
 
 (** Universe model tool schemas for make_tools.
     Returns schemas for all universe tools so Agent.run() can call them. *)
-let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
+let keeper_universe_model_tools (meta : keeper_meta) : Masc_domain.tool_schema list =
   let universe = keeper_universe_tool_names meta in
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
   |> filter_schemas_by_names universe
@@ -645,11 +645,11 @@ let tool_hint_of (name : string) : string option =
     @ !masc_schemas_ref
     @ Tool_code_write.schemas
   in
-  match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas with
+  match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) all_schemas with
   | Some s ->
     let base = first_sentence s.description in
-    let enums = enum_hints_of_schema s.Types.input_schema in
-    let required = required_hints_of_schema s.Types.input_schema in
+    let enums = enum_hints_of_schema s.Masc_domain.input_schema in
+    let required = required_hints_of_schema s.Masc_domain.input_schema in
     let parts = ref [base] in
     if enums <> "" then parts := !parts @ ["[" ^ enums ^ "]"];
     if required <> "" then parts := !parts @ [required];

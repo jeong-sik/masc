@@ -1,4 +1,4 @@
-(** MASC gRPC Coordination Types.
+(** MASC gRPC Coordination Masc_domain.
 
     Wire format: protobuf binary over gRPC framing.
     Types are generated from proto/masc_coordination.proto via ocaml-protoc-plugin.

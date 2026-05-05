@@ -15,27 +15,27 @@ let status config =
     paused = room_state.paused;
   }
 
-let task_status_matches status_filter (task : Types.task) =
+let task_status_matches status_filter (task : Masc_domain.task) =
   match status_filter with
   | None -> true
   | Some status ->
-      String.equal status (Types.string_of_task_status task.task_status)
+      String.equal status (Masc_domain.string_of_task_status task.task_status)
 
 let tasks ?status_filter ?(include_done = false) ?(include_cancelled = false)
     config =
   Coord.get_tasks_raw config
   |> List.filter (task_status_matches status_filter)
-  |> List.filter (fun (task : Types.task) ->
+  |> List.filter (fun (task : Masc_domain.task) ->
          match status_filter with
          | Some _ -> true
          | None ->
              let s = task.task_status in
-             if Types.task_status_is_done s then include_done
-             else if Types.task_status_is_terminal s then include_cancelled
+             if Masc_domain.task_status_is_done s then include_done
+             else if Masc_domain.task_status_is_terminal s then include_cancelled
              else true)
 
-let task_assignee (task : Types.task) =
-  Types.task_assignee_of_status task.task_status
+let task_assignee (task : Masc_domain.task) =
+  Masc_domain.task_assignee_of_status task.task_status
 
 let agents ?status_filter config =
   let agents =
@@ -46,8 +46,8 @@ let agents ?status_filter config =
   | None -> agents
   | Some status ->
       List.filter
-        (fun (agent : Types.agent) ->
-          String.equal status (Types.string_of_agent_status agent.status))
+        (fun (agent : Masc_domain.agent) ->
+          String.equal status (Masc_domain.string_of_agent_status agent.status))
         agents
 
 let messages ?agent_filter ~since_seq ~limit config =
@@ -56,6 +56,6 @@ let messages ?agent_filter ~since_seq ~limit config =
   | None -> messages
   | Some agent ->
       List.filter
-        (fun (message : Types.message) ->
+        (fun (message : Masc_domain.message) ->
           String.equal agent message.from_agent)
         messages

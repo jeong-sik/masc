@@ -14,7 +14,7 @@
     - Coord_backlog: read_backlog, write_backlog
     - Coord_broadcast: broadcast, emit_message_activity *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 (* ============================================ *)

@@ -280,8 +280,8 @@ let handoff_verified ~similarity : t =
     Variant SSOT prevents this from drifting again. *)
 let task_claimed ~task_id ~agent : t =
   let claimed_status =
-    Types.task_status_to_string
-      (Types.Claimed { assignee = agent; claimed_at = Types.now_iso () })
+    Masc_domain.task_status_to_string
+      (Masc_domain.Claimed { assignee = agent; claimed_at = Masc_domain.now_iso () })
   in
   ok
     ~message:(Printf.sprintf "Task '%s' claimed by '%s'" task_id agent)
@@ -310,16 +310,16 @@ let task_already_claimed ~task_id ~claimed_by : t =
 (** Task completed.
 
     Issue #8412: previously emitted [status="completed"], but
-    [Types.task_status_to_string Done = "done"] — the string "completed"
+    [Masc_domain.task_status_to_string Done = "done"] — the string "completed"
     is never produced by the Variant SSOT. Sister bug to #8364
     (task_claimed). Routing through the Variant guarantees the string
     matches what every other emitter and parser sees. *)
 let task_completed ~task_id ~agent ~notes : t =
   let done_status =
-    Types.task_status_to_string
-      (Types.Done {
+    Masc_domain.task_status_to_string
+      (Masc_domain.Done {
         assignee = agent;
-        completed_at = Types.now_iso ();
+        completed_at = Masc_domain.now_iso ();
         notes = if notes = "" then None else Some notes;
       })
   in

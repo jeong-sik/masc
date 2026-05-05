@@ -70,7 +70,7 @@ val tool_schemas_for_profile :
   ?include_keeper_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
-  Types.tool_schema list
+  Masc_domain.tool_schema list
 (** [tool_schemas_for_profile ?include_hidden ?include_deprecated
       ?include_keeper_internal state profile] returns the schema
     list visible on [profile]:
@@ -141,7 +141,7 @@ val tool_output_schema_field : string -> Yojson.Safe.t option
 val tool_json_for_profile :
   ?usage_summary:Telemetry_eio.tool_usage_summary ->
   tool_profile ->
-  Types.tool_schema ->
+  Masc_domain.tool_schema ->
   Yojson.Safe.t
 (** [tool_json_for_profile ?usage_summary profile schema] renders
     a tool descriptor object: [name], [title], [description],

@@ -9,7 +9,7 @@ val effective_keepalive_meta :
 val repair_identity_drift_for_keepalive :
   ctx:'a context -> keeper_meta -> keeper_meta option
 
-val keeper_agent_status : keeper_meta -> Types.agent_status
+val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val repair_identity_drift_for_keepalive :
   ctx:'a context -> keeper_meta -> keeper_meta option

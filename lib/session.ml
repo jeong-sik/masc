@@ -1,6 +1,6 @@
 (** Session Management - Track connected agents and rate limiting *)
 
-open Types
+open Masc_domain
 
 module AgentMap = Map.Make(String)
 

@@ -17,7 +17,7 @@ val keeper_internal_candidate_tool_names : string list
 
 (** Tool schemas declared by the [voice] shard, or [[]] when the
     shard is not registered. *)
-val keeper_voice_tool_schemas : Types.tool_schema list
+val keeper_voice_tool_schemas : Masc_domain.tool_schema list
 
 (** Tools that bypass policy restrictions: extend_turns,
     keeper_context_status, keeper_stay_silent, keeper_tool_search. *)
@@ -111,7 +111,7 @@ val all_tools_reconcile_safe : string list -> bool
 
 (** Mutable ref holding injected MASC tool schemas; populated at
     boot by the dashboard / tool_registration paths. *)
-val masc_schemas_ref : Types.tool_schema list ref
+val masc_schemas_ref : Masc_domain.tool_schema list ref
 
 (** Names extracted from [!masc_schemas_ref] in declaration order. *)
 val injected_masc_tool_names : unit -> string list
@@ -119,4 +119,4 @@ val injected_masc_tool_names : unit -> string list
 (** SSOT schema for [keeper_tool_search]. Defined here because this
     module is the canonical owner of keeper-internal tool metadata.
     Consumed by [Keeper_tool_policy.keeper_default_model_tools]. *)
-val keeper_tool_search_schema : Types.tool_schema
+val keeper_tool_search_schema : Masc_domain.tool_schema

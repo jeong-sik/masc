@@ -4,7 +4,7 @@
     Implementation is argv-based (no shell) to avoid injection and quoting bugs.
 *)
 
-open Types
+open Masc_domain
 
 let exec_gate_raw_source argv =
   String.concat " " (List.map Filename.quote argv)

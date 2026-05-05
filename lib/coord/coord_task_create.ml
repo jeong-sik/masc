@@ -4,7 +4,7 @@
     claiming, and transitions.  All bindings are re-exported by [Coord_task]
     via [include Coord_task_create]. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
@@ -37,7 +37,7 @@ let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string
          let t_norm = normalize_title_for_dedup t.title in
          t_norm = norm
          && Option.equal String.equal t.goal_id goal_id
-         && not (Types.task_status_is_terminal t.task_status))
+         && not (Masc_domain.task_status_is_terminal t.task_status))
       backlog.tasks
     |> Option.map (fun (t : task) -> t.id)
 ;;
@@ -191,7 +191,7 @@ let batch_add_tasks_internal ?created_by config tasks =
          in
          write_backlog config new_backlog;
          List.iter
-           (fun (task : Types.task) ->
+           (fun (task : Masc_domain.task) ->
               let created_by_json =
                 match task.created_by with
                 | Some value -> `String value
@@ -217,7 +217,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                       ]))
            added_tasks;
          let summary =
-           String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks)
+           String.concat ", " (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
          in
          (Atomic.get Coord_hooks.on_task_mutation_fn) ();
          let msg =

@@ -56,7 +56,7 @@ val parse_verdict : string -> (verdict, string) result
 
 (** MCP tool schema for [report_verdict]: [verdict] (enum of
     {!valid_verdict_strings}) + optional [reason]. *)
-val report_verdict_schema : Types.tool_schema
+val report_verdict_schema : Masc_domain.tool_schema
 
 (** Parse a [report_verdict] JSON arg payload. Empty/missing [reason]
     on [Warn]/[Fail] fills in a default reason (same as

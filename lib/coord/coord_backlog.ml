@@ -2,7 +2,7 @@
 
     Extracted from room_state.ml. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 let backlog_recovery_path config =

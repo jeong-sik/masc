@@ -720,12 +720,12 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
   | Some raw_token ->
       let already_synced =
         match Auth.verify_token base_path ~agent_name:admin_agent_name ~token:raw_token with
-        | Ok cred -> cred.role = Types.Admin
+        | Ok cred -> cred.role = Masc_domain.Admin
         | Error _ -> false
       in
       (match
          Auth.save_raw_token_credential base_path
-           ~agent_name:admin_agent_name ~role:Types.Admin ~raw_token
+           ~agent_name:admin_agent_name ~role:Masc_domain.Admin ~raw_token
        with
        | Ok _ ->
            if already_synced then
@@ -740,10 +740,10 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
            Log.Server.error
              "startup admin token sync failed for %s: %s"
              admin_agent_name
-             (Types.masc_error_to_string err))
+             (Masc_domain.masc_error_to_string err))
   | None ->
       (match
-         Auth.create_token base_path ~agent_name:admin_agent_name ~role:Types.Admin
+         Auth.create_token base_path ~agent_name:admin_agent_name ~role:Masc_domain.Admin
        with
        | Ok (raw_token, _cred) ->
            Unix.putenv Env_config_core.admin_token_env_key raw_token;
@@ -754,7 +754,7 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
           Log.Server.error
              "startup admin token mint failed for %s: %s"
              admin_agent_name
-             (Types.masc_error_to_string err))
+             (Masc_domain.masc_error_to_string err))
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in
@@ -1038,9 +1038,9 @@ let sync_client_token_file ~base_path ~agent_name ~role =
     | Error err ->
         Log.Server.error
           "startup failed to mint raw bearer token for %s: %s"
-          agent_name (Types.masc_error_to_string err)
+          agent_name (Masc_domain.masc_error_to_string err)
   in
-  let normalize_existing raw_token (cred : Types.agent_credential) =
+  let normalize_existing raw_token (cred : Masc_domain.agent_credential) =
     try
       (match cred.expires_at with
        | None -> ()
@@ -1081,7 +1081,7 @@ let sync_client_token_file ~base_path ~agent_name ~role =
        | Ok cred -> normalize_existing raw_token cred
        | Error _ -> (
            match Auth.load_credential base_path agent_name with
-           | Some (cred : Types.agent_credential)
+           | Some (cred : Masc_domain.agent_credential)
              when String.equal cred.token (Auth.sha256_hash raw_token) ->
                normalize_existing raw_token cred
            | _ -> create_and_persist ~reason:"repaired"))
@@ -1091,9 +1091,9 @@ let sync_client_token_file ~base_path ~agent_name ~role =
 
 let sync_mcp_client_token_files ~base_path =
   [
-    ("codex-mcp-client", Types.Worker);
-    ("claude", Types.Worker);
-    ("gemini", Types.Worker);
+    ("codex-mcp-client", Masc_domain.Worker);
+    ("claude", Masc_domain.Worker);
+    ("gemini", Masc_domain.Worker);
   ]
   |> List.iter (fun (agent_name, role) ->
          sync_client_token_file ~base_path ~agent_name ~role)
@@ -1113,7 +1113,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
         | Ok _ -> (synced_count + 1, failed)
         | Error err ->
             ( synced_count,
-              (keeper_name, Types.masc_error_to_string err) :: failed ))
+              (keeper_name, Masc_domain.masc_error_to_string err) :: failed ))
       (0, []) keeper_names keeper_agent_names
   in
   if synced_count > 0 then
@@ -1143,7 +1143,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
             Log.Server.warn
               "short-form alias write failed: keeper=%s canonical=%s: %s"
               keeper_name agent_name
-              (Types.masc_error_to_string err))
+              (Masc_domain.masc_error_to_string err))
     keeper_names keeper_agent_names;
   let rotation_outcomes =
     Auth.rotate_shared_tokens_for_agents base_path
@@ -1158,7 +1158,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
              | Ok () -> (agent_name :: ok, failed)
              | Error err ->
                  ( ok,
-                   (agent_name, Types.masc_error_to_string err) :: failed ))
+                   (agent_name, Masc_domain.masc_error_to_string err) :: failed ))
           ([], []) outcome.rotated_agents
       in
       let success_count = List.length successes in

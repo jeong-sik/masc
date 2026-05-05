@@ -431,6 +431,58 @@ let test_goal_attainment_does_not_fake_unparseable_target () =
   check int "evidence task retained" 1
     (attainment |> member "task_done_count" |> to_int)
 
+let test_goal_attainment_parses_grouped_count_target () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Grouped count target goal"
+        ~metric:"task_count" ~target_value:"1,000 tasks" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Single completed task";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "count target basis" "metric_target_count"
+    (attainment |> member "basis" |> to_string);
+  check string "grouped target parse status" "parseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check (float 0.001) "grouped target numeric" 1000.0
+    (attainment |> member "target_numeric" |> to_float);
+  check int "grouped target pct" 0
+    (attainment |> member "attainment_pct" |> to_int);
+  check string "grouped target not attained" "not_started"
+    (attainment |> member "state" |> to_string)
+
+let test_goal_attainment_rejects_substring_pr_metric () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Approval latency target goal"
+        ~metric:"approval_latency" ~target_value:"5" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Completed evidence task";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "substring pr metric remains unmeasured" "unmeasured"
+    (attainment |> member "state" |> to_string);
+  check string "substring pr metric unsupported" "unsupported_metric"
+    (attainment |> member "target_parse_status" |> to_string);
+  check (float 0.001) "unsupported target retained" 5.0
+    (attainment |> member "target_numeric" |> to_float);
+  check bool "unsupported metric has no pct" true
+    (attainment |> member "attainment_pct" = `Null)
+
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
   let _goal, _kind =
@@ -689,6 +741,10 @@ let () =
             test_goal_attainment_projects_percent_target;
           test_case "goal attainment does not fake unparseable targets" `Quick
             test_goal_attainment_does_not_fake_unparseable_target;
+          test_case "goal attainment parses grouped count targets" `Quick
+            test_goal_attainment_parses_grouped_count_target;
+          test_case "goal attainment rejects substring pr metrics" `Quick
+            test_goal_attainment_rejects_substring_pr_metric;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
           test_case

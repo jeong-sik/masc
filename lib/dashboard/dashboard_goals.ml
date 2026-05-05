@@ -276,6 +276,27 @@ let attainment_unit_to_string = function
 let contains_ci haystack needle =
   String_util.contains_substring_ci haystack needle
 
+let metric_word_tokens raw =
+  let tokens = ref [] in
+  let current = Buffer.create 16 in
+  let flush () =
+    if Buffer.length current > 0 then (
+      tokens := Buffer.contents current :: !tokens;
+      Buffer.clear current)
+  in
+  String.iter
+    (fun ch ->
+      match ch with
+      | 'A' .. 'Z' ->
+          Buffer.add_char current (Char.lowercase_ascii ch)
+      | 'a' .. 'z' | '0' .. '9' ->
+          Buffer.add_char current ch
+      | _ ->
+          flush ())
+    raw;
+  flush ();
+  List.rev !tokens
+
 let metric_implies_percent metric =
   match metric with
   | None -> false
@@ -286,34 +307,63 @@ let metric_implies_percent metric =
       || contains_ci raw "rate"
       || contains_ci raw "completion"
 
+let metric_count_token = function
+  | "task" | "tasks" | "todo" | "todos" | "issue" | "issues" | "ticket"
+  | "tickets" | "pr" | "prs" | "done" ->
+      true
+  | _ ->
+      false
+
+let metric_has_pull_request_phrase tokens =
+  let rec loop = function
+    | "pull" :: next :: _ when next = "request" || next = "requests" -> true
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop tokens
+
 let metric_supports_count_target metric =
   match metric with
   | None -> true
   | Some raw ->
-      contains_ci raw "task"
-      || contains_ci raw "todo"
-      || contains_ci raw "issue"
-      || contains_ci raw "ticket"
-      || contains_ci raw "pr"
-      || contains_ci raw "done"
+      let tokens = metric_word_tokens raw in
+      List.exists metric_count_token tokens
+      || metric_has_pull_request_phrase tokens
 
 let target_value_implies_percent raw =
   contains_ci raw "%"
   || contains_ci raw "percent"
   || contains_ci raw "pct"
 
+let strip_number_group_separators token =
+  let buffer = Buffer.create (String.length token) in
+  String.iter
+    (fun ch ->
+      if ch <> ',' then
+        Buffer.add_char buffer ch)
+    token;
+  Buffer.contents buffer
+
 let parse_first_float raw =
   let len = String.length raw in
+  let is_digit = function
+    | '0' .. '9' -> true
+    | _ -> false
+  in
   let is_start = function
     | '0' .. '9' | '+' | '-' | '.' -> true
     | _ -> false
   in
-  let is_part = function
+  let is_part index =
+    match raw.[index] with
     | '0' .. '9' | '+' | '-' | '.' -> true
+    | ',' ->
+        index > 0 && index + 1 < len && is_digit raw.[index - 1]
+        && is_digit raw.[index + 1]
     | _ -> false
   in
   let rec token_end index =
-    if index >= len || not (is_part raw.[index]) then index
+    if index >= len || not (is_part index) then index
     else token_end (index + 1)
   in
   let rec search index =
@@ -321,7 +371,7 @@ let parse_first_float raw =
     else if is_start raw.[index] then
       let stop = token_end index in
       let token = String.sub raw index (stop - index) in
-      match float_of_string_opt token with
+      match float_of_string_opt (strip_number_group_separators token) with
       | Some value -> Some value
       | None -> search (index + 1)
     else

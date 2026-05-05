@@ -3,7 +3,7 @@
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module KE = Masc_mcp.Keeper_exec_tools
-module Types = Types
+module Types = Masc_domain
 
 (** Helper: create a minimal tool_schema for registration. *)
 let make_schema name =

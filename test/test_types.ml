@@ -1,5 +1,6 @@
 (** Tests for Types module *)
 
+module Types = Masc_domain
 open Types
 
 let test_agent_status_roundtrip () =

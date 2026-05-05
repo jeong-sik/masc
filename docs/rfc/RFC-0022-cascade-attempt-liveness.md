@@ -409,9 +409,11 @@ The decision table in §4.5 is the source of truth. Tests:
 
 ## 9. Operational rollout
 
-Phase A (default-off, observation only):
-- New module + FSM + tests merged behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce` (default `observe`).
-- `observe`: liveness clock runs, kills are *logged* but not enforced; cascade still advances on real wire errors.
+Phase A (default-off, observation only) — **wiring landed (PR-2)**:
+- FSM module + tests in PR-1 (`lib/cascade/cascade_attempt_liveness.{ml,mli}`).
+- Observer + tick fiber + `oas_worker_named.ml::try_provider` integration in PR-2 (`lib/cascade/cascade_attempt_liveness_observer.{ml,mli}`, `lib/cascade/cascade_attempt_liveness_config.{ml,mli}`).
+- Behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce` (default `observe`).
+- `observe`: liveness clock runs, kills emit `masc_cascade_attempt_liveness_kill_total{mode=observe}` and `masc_cascade_attempt_liveness_observed_total{outcome=...}` but no `Switch.fail`; cascade still advances on real wire errors.
 - 24h on dev base path; compare `diag-keeper-cycle.sh` MAX_S/P95.
 
 Phase B (enforce per profile):

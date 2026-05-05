@@ -424,6 +424,13 @@ val metric_cascade_attempt_liveness_kill : string
     against [scripts/diag-keeper-cycle.sh] before flipping any profile
     to {b enforce}. *)
 
+val metric_cascade_attempt_liveness_observed : string
+(** RFC-0022 PR-2 §3 — per-attempt finalizer counter regardless of
+    outcome. Labels: [cascade], [provider], [outcome] ∈ {success |
+    kill | wire_error}. The kill-rate is
+    [kill_total / observed_total]. *)
+
+
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)

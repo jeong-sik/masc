@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -128,6 +129,15 @@ export function IdeConversationRailMock() {
   }, [])
   useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
+
+  // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
+  // keeper-trace event the first time it is observed, deduplicated by id
+  // across renders. The ref carries the cumulative known-id set so a
+  // re-render with the same posts is a no-op.
+  const knownPostIds = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownPostIds.current = bridgePostsToTrace(posts, knownPostIds.current)
+  }, [posts])
 
   const replayItems = replayRailItems(posts, decisions, cascadeEvents)
   const replayEvents = replayEventsForItems(replayItems)

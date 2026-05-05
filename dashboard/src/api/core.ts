@@ -311,11 +311,6 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
   return { detail: rawText }
 }
 
-export async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
-  const info = await errorResponseInfoFromResponse(res)
-  return info.detail
-}
-
 export async function apiRequestErrorFromResponse(
   method: string,
   path: string,
@@ -655,26 +650,6 @@ export async function patch<T>(
     throw await apiRequestErrorFromResponse('PATCH', path, res)
   }
   return parseJsonResponse<T>('PATCH', path, res)
-}
-
-export async function postRaw(
-  path: string,
-  body: unknown,
-  extraHeaders?: Record<string, string>,
-  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
-): Promise<string> {
-  const res = await fetchWithTimeout(path, {
-    method: 'POST',
-    headers: {
-      ...jsonHeaders(),
-      ...(extraHeaders ?? {}),
-    },
-    body: JSON.stringify(body),
-  }, timeoutMs)
-  if (!res.ok) {
-    throw await apiRequestErrorFromResponse('POST', path, res)
-  }
-  return res.text()
 }
 
 // --- Operator ---

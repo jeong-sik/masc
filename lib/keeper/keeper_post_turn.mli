@@ -90,11 +90,31 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Variant of {!apply_post_turn_lifecycle} for callers that own
-    concrete resilience recovery handles.  Passing [None] for both
-    handles is equivalent to {!apply_post_turn_lifecycle}; passing a
-    store and executor lets the feature-flagged resilience wire-in
-    write durable audit records and consume the selected recovery
-    strategy. *)
+    concrete resilience recovery handles.
+
+    Valid combinations of the two new arguments are:
+    - both [None]: equivalent to {!apply_post_turn_lifecycle}; no
+      audit envelope, no recovery side effect (legacy path).
+    - both [Some]: the feature-flagged resilience wire-in writes a
+      durable [RecoveryAttempted] envelope through the audit store
+      before invoking the executor, preserving auditability.
+
+    Passing [resilience_strategy_executor:(Some _)] together with
+    [resilience_audit_store:None] is rejected ({!Invalid_argument})
+    because retry/fallback/handoff/abort callbacks would mutate
+    live state without the pre-flight envelope that
+    [keeper_bridge] relies on.
+
+    @raise Invalid_argument when an executor is supplied without an
+      audit store.
+
+    Concurrency: [Shared_audit.Store.t] is a mutable single-writer
+    chain ([latest_hash] + append with no internal locking).  The
+    same store instance must not be threaded through concurrent
+    keeper turns — sharing one across fibers can produce envelopes
+    with duplicate [prev_hash] values and break audit-chain
+    verification.  Callers own serialization; the typical pattern
+    is one store per keeper, owned by the keeper bridge. *)
 
 (** Build the relaxed-policy meta used during forced overflow
     retry: zero compaction gates so the next compaction always

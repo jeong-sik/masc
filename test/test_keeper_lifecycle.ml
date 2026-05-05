@@ -617,6 +617,85 @@ let test_apply_post_turn_lifecycle_passes_resilience_handles () =
           | _ -> fail "expected assoc working context")
       | None -> fail "expected checkpoint")
 
+(* Reviewer #13214: pin the legacy compatibility guarantee that
+   apply_post_turn_lifecycle (which forwards to the resilience-handle
+   variant with both arguments [None]) does not invoke any recovery
+   side effect, even when the meta has handoff thresholds tripped.
+   Without this, a future change that accidentally activates
+   recovery from the legacy seam would slip past the existing tests
+   (which only exercise the fully wired Some/Some path). *)
+let test_apply_post_turn_lifecycle_legacy_path_skips_executor () =
+  let base_dir = temp_dir "keeper_lifecycle_legacy_skip_executor" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let now_ts = Time_compat.now () in
+      let meta =
+        let base = make_keeper_meta () in
+        {
+          base with
+          auto_handoff = false;
+          runtime =
+            { base.runtime with last_continuity_update_ts = now_ts -. 60.0 };
+        }
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~base_dir ~meta
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:None
+      in
+      check bool "no handoff attempted" false lifecycle.handoff_attempted;
+      check (option string) "no handoff failure" None
+        lifecycle.handoff_failure_reason)
+
+(* Reviewer #13214: pin the invariant that an executor without an
+   audit store is rejected at the seam, not silently allowed (which
+   would skip the RecoveryAttempted envelope and break durable
+   auditability). *)
+let test_apply_post_turn_lifecycle_rejects_executor_without_audit () =
+  let base_dir = temp_dir "keeper_lifecycle_executor_without_audit" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta = make_keeper_meta () in
+      let strategy_executor : Resilience.Recovery.strategy_executor =
+        {
+          run_retry_attempt = (fun ~attempt:_ -> Resilience.Recovery.Retry_success);
+          sleep = (fun _ -> ());
+          on_event = (fun _ -> ());
+          apply_fallback = (fun ~value:_ ~confidence_delta:_ -> Ok ());
+          request_handoff = (fun ~message:_ ~preserve_state:_ -> Ok ());
+          abort = (fun ~reason:_ -> Ok ());
+        }
+      in
+      let raised =
+        try
+          ignore
+            (KEC.apply_post_turn_lifecycle_with_resilience_handles
+               ~resilience_audit_store:None
+               ~resilience_strategy_executor:(Some strategy_executor)
+               ~base_dir ~meta
+               ~on_compaction_started:(fun () -> ())
+               ~on_handoff_started:(fun () -> ())
+               ~model:"llama:auto"
+               ~primary_model_max_tokens:4096
+               ~current_turn_overflow_blocker:None
+               ~checkpoint:None);
+          false
+        with Invalid_argument _ -> true
+      in
+      check bool "executor without audit store raises Invalid_argument" true
+        raised)
+
 let test_rollover_aborts_on_save_failure () =
   let base_dir = temp_dir "keeper_lifecycle_rollover_abort" in
   Fun.protect
@@ -2234,6 +2313,10 @@ let () =
             test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
           test_case "resilience handles reach bridge" `Quick
             test_apply_post_turn_lifecycle_passes_resilience_handles;
+          test_case "legacy path skips executor side effects" `Quick
+            test_apply_post_turn_lifecycle_legacy_path_skips_executor;
+          test_case "executor without audit store rejected" `Quick
+            test_apply_post_turn_lifecycle_rejects_executor_without_audit;
           test_case "rollover aborts on save failure" `Quick
             test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick

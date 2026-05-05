@@ -361,6 +361,20 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(primary_model_max_tokens : int)
     ~(current_turn_overflow_blocker : string option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+  (* Reviewer #13214: an executor without an audit store would let
+     retry/fallback/handoff/abort callbacks mutate live state
+     without the pre-flight RecoveryAttempted envelope that
+     keeper_bridge relies on for durable auditability.  Reject the
+     combination at the seam so the invariant fails fast at the
+     call site, not later when an envelope is missing. *)
+  (match resilience_audit_store, resilience_strategy_executor with
+   | None, Some _ ->
+     invalid_arg
+       "Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles: \
+        resilience_strategy_executor requires resilience_audit_store; \
+        executor without audit store would skip the RecoveryAttempted \
+        envelope and break durable auditability"
+   | _ -> ());
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let apply_continuity_summary

@@ -236,6 +236,7 @@ verify_agent_sdk_switch_artifacts() {
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmi"
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.cmxa"
   verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk.a"
+  verify_agent_sdk_artifact "agent_sdk" "${agent_sdk_dir}" "agent_sdk__metric_contract.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmxa"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.a"

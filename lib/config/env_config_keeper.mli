@@ -289,6 +289,12 @@ module KeeperRetryBackoff : sig
   val transient_backoff_base_sec : unit -> float
   val transient_backoff_cap_sec : unit -> float
   val transient_backoff_sec : int -> float
+
+  val degraded_retry_slot_phase_budget_sec : float
+  (** Phase budget (seconds) for the degraded-retry slot guard.
+      Read once at module-load from
+      [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC] (default 60.0,
+      floor 5.0); consumed by [keeper_turn_cascade_budget.ml]. *)
 end
 
 (** {1 Cascade attempt liveness — RFC-0022 §9 rollout flag} *)

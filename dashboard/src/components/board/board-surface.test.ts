@@ -198,6 +198,28 @@ describe('BoardSurface Component', () => {
     expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
   })
 
+  it('renders embedded reaction summaries on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-reacted',
+        title: 'Reaction preview',
+        body: 'content',
+        author: 'ani1999',
+        reactions: [{
+          emoji: '🔥',
+          count: 2,
+          reacted: true,
+          has_reacted: true,
+          recent_user_ids: ['ani1999'],
+        }],
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('hides system posts by default', () => {
     boardPosts.value = [
       makePost({

@@ -153,10 +153,17 @@ val board_current_vote_for_post :
 val board_current_vote_for_comment :
   voter:string option -> comment_id:string -> Board.vote_direction option option
 
+val board_reactions_for_post :
+  voter:string option -> post_id:string -> Board.reaction_summary list
+
+val board_reactions_for_comment :
+  voter:string option -> comment_id:string -> Board.reaction_summary list
+
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
   ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
   Board.comment ->
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
@@ -165,6 +172,7 @@ val board_comment_dashboard_json :
 
 val board_post_dashboard_json :
   ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
   author_karma:int ->
   Board.post ->
   Yojson.Safe.t

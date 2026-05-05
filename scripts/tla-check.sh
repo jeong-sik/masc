@@ -212,6 +212,9 @@ run_tlc_buggy "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
+run_tlc "$REPO_ROOT/specs/cascade" "CascadeAttemptLiveness.tla"
+run_tlc_buggy "$REPO_ROOT/specs/cascade" "CascadeAttemptLiveness.tla"
+
 # Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 

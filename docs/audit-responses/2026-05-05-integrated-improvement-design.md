@@ -294,11 +294,12 @@ cleanup 트랙에 추가 가능.
   §3-3-B, §3-3-D, §4-1 fallback, Phase 0 #1, #2, Phase 2 #9, Phase 3 #12, #14)
 - **C (real design idea, RFC 필요)**: 7건 (§1-2 N+1, §2-1 CLI, §2-2 CLI, §2-3,
   §3-1, §3-3-C, Phase 1 #4-7, Phase 2 #10, Phase 3 #13, #15, #18)
-- **D (stale)**: 9건 (§0 framing, §1-1, §1-3, §1-4, §3-3-A, §4-1 다수, Phase 2 #8, #11)
-- **TBD**: 5건 (Phase 0 #3, §4-1 일부 필드, §4-3 일부 env, Phase 4 #16-17)
+- **D (stale)**: 14건 (§0 framing, §1-1, §1-3, §1-4, §3-3-A, §4-1 다수,
+  Phase 2 #8, #11; **§10 추가 분류로 5건 더**)
+- **TBD**: 1건 (Phase 0 #3 — audit specific path 미명시)
 
-**Stale/B-track 비율 = 16/23 ≈ 70%**. 메모리의 `feedback_wave_pattern_60_80_stale_resolved`
-가 경고한 **60-80% pre-resolved** 임계 정확히 일치.
+**Stale/B-track 비율 ≈ 21/29 ≈ 72% (TBD 후속 분류 후)**. 메모리
+`feedback_wave_pattern_60_80_stale_resolved` 임계(60-80%) 정확히 일치.
 
 ## 8. 해소 계획
 
@@ -324,6 +325,84 @@ cleanup 트랙에 추가 가능.
 
 위 두 항목은 본 audit-response 머지 후 follow-up commit으로 처리. 본 PR에는
 포함 안 함 — audit-response 문서가 single concern.
+
+## 10. TBD 항목 후속 검증 (follow-up commit, 2026-05-05)
+
+§4-1 / §4-3 의 5개 TBD 필드를 caller-context grep으로 검증한 결과, 모두
+**D — false claim**으로 분류 가능합니다:
+
+### §10.1 §4-1 `work_discovery_sources` ("죽음, `work.source`로 대체")
+
+`rg "work_discovery_sources" lib/ test/` → 9 hit, 모두 active:
+
+| 위치 | 역할 |
+|------|------|
+| `lib/keeper/keeper_types_profile.ml:299, 473, 923` | `string list option` 타입 + default + ser/de |
+| `lib/keeper/keeper_meta_json_parse.ml:623-626` | TOML/JSON parse |
+| `lib/keeper/keeper_persona_authoring.ml:209, 544` | persona authoring path |
+| `lib/keeper/keeper_run_tools.ml:908` | `Option.value ~default:[] meta.work_discovery_sources` — runtime consumer |
+| `test/test_keeper_toml.ml:685, 712` | TOML round-trip 검증 |
+
+**`work.source`는 audit이 추정한 키이며 코드에 존재하지 않음**. 분류 **D**.
+
+### §10.2 §4-1 `github_identity` ("persona에서 파생 가능")
+
+`rg "github_identity\b" lib/keeper/` → 12 hit, 명시 필드:
+
+- `lib/keeper/keeper_turn_up_create.ml:116`:
+  `~github_identity:p.profile_defaults.github_identity` — 명시적 named arg.
+- `lib/keeper/keeper_types_profile.ml:290, 465, 714, 911`: type +
+  default + parse + ser.
+- `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `git_identity_mode`
+  의 valid value 중 하나로 사용 — 즉 *파생 가능한 다른 모드와의 enumeration*
+  으로 선택되는 명시 필드.
+
+**Persona에서 자동 파생되는 구조가 아님**; 분류 **D**.
+
+### §10.3 §4-3 `probe_timeout_sec` ("orphan")
+
+서로 다른 두 layer에서 active:
+
+- `lib/tool_local_runtime_probe.mli:90`: `val default_probe_timeout_sec :
+  int` export → `lib/tool_local_runtime.ml:169-171` `Option.value ~default:
+  Tool_local_runtime_probe.default_probe_timeout_sec` 로 default fallback
+  값으로 직접 사용.
+- `lib/server/server_startup_takeover.mli:20`: `?probe_timeout_sec:float ->`
+  startup takeover API의 optional arg.
+- `lib/cascade/cascade_catalog_runtime.ml:6`: `let probe_timeout_sec = 5.0`
+  module-internal const.
+
+세 위치 모두 active 사용. 분류 **D**.
+
+### §10.4 §4-3 `internal_model_rotation_count` ("dead, 정의만 있고 사용 없음")
+
+`rg "internal_model_rotation_count" lib/ scripts/ test/` → **zero hits**.
+즉 **정의 자체가 코드에 없음**. audit이 "정의만 있다"고 주장한 전제가 false.
+분류 **D**.
+
+### §10.5 §4-3 `MASC_CLIENT_CAPACITY` ("중복 with `cli_max_concurrent`")
+
+두 layer는 의도된 ortogonality:
+
+- `MASC_CLIENT_CAPACITY` (`lib/cascade/cascade_client_capacity.ml:153, 196,
+  201, 211, 216, 231, 254`): env-level override, `"url=max,url=max,..."`
+  포맷, runtime override.
+- `cli_max_concurrent` (`lib/cascade/cascade_toml_materializer.ml:283, 356`,
+  `lib/cascade/cascade_config.ml:1356-1362`, `lib/oas_worker_named.ml:892`):
+  config-file-level field, per-cascade.
+- `cascade_client_capacity.ml:216` 코멘트가 정확히 둘의 관계 명시:
+  "explicit `MASC_CLIENT_CAPACITY` entry. ... when this is missing,
+  capacity should use [the config field] (parsed above)".
+
+즉 env가 config-file의 explicit override layer이라는 표준 패턴. **중복이
+아니라 layer separation**. 분류 **D**.
+
+### §10.6 종합
+
+5건 모두 **D**. TBD 잔여는 Phase 0 #3 (audit specific path 미명시)뿐.
+**남은 진짜 design idea는 §8.2의 RFC-0029~0032 후보 4개 그대로**.
+
+---
 
 ## 9. 다음 audit이 같은 inflation 다시 일으키지 않도록
 

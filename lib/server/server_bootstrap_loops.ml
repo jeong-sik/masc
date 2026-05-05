@@ -6,6 +6,26 @@
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level
 
+let stable_keeper_name_hash name =
+  let acc = ref 5381 in
+  String.iter
+    (fun ch ->
+      acc := (((!acc lsl 5) + !acc) + Char.code ch) land max_int)
+    name;
+  !acc
+
+let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name =
+  let base_warmup = max 0 base_warmup in
+  let stagger_window_sec = max 0 stagger_window_sec in
+  if stagger_window_sec = 0 then base_warmup
+  else
+    base_warmup
+    + (stable_keeper_name_hash keeper_name mod (stagger_window_sec + 1))
+
+module For_testing = struct
+  let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
+end
+
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
@@ -637,9 +657,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         (List.length names) Keeper_keepalive.keeper_turn_throttle_limit;
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
-      let stagger_step = Keeper_config.keeper_bootstrap_stagger_step_sec () in
+      let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
       (* Attempt to boot a single keeper. Returns true if started. *)
-      let try_boot_one idx name =
+      let try_boot_one _idx name =
         try
           Log.Keeper.info "autoboot: loading meta for %s" name;
           match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
@@ -654,7 +674,10 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                 (if materialized then " (materialized from TOML)" else "");
               true
             ) else begin
-              let warmup = base_warmup + (idx * stagger_step) in
+              let warmup =
+                autoboot_proactive_warmup_sec ~base_warmup
+                  ~stagger_window_sec:stagger_window ~keeper_name:name
+              in
               Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
                 name warmup;
               let ctx : _ Keeper_types.context = {

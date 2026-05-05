@@ -24,6 +24,11 @@ val start_keeper_loops :
     fibers under [sw].  Each fiber is bound to the switch so a graceful
     shutdown cancels them in order. *)
 
+module For_testing : sig
+  val autoboot_proactive_warmup_sec :
+    base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
+end
+
 val start_background_maintenance :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

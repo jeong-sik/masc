@@ -24,6 +24,7 @@
 open Alcotest
 
 module KB = Env_config_keeper.KeeperBootstrap
+module Boot = Masc_mcp.Server_bootstrap_loops.For_testing
 
 let approx = float 0.001
 
@@ -60,6 +61,48 @@ let test_smoke_call_sites_compile () =
   let _ = KB.post_startup_settle_sec in
   check bool "all three accessors are reachable" true true
 
+let test_autoboot_warmup_jitter_is_bounded_not_linear () =
+  let names =
+    [
+      "analyst";
+      "executor";
+      "glm-coding-plan";
+      "issue_king";
+      "janitor";
+      "masc-improver";
+      "nick0cave";
+      "qa-king";
+      "ramarama";
+      "sangsu";
+      "scholar";
+      "taskmaster";
+      "velvet-hammer";
+      "verifier";
+    ]
+  in
+  let warmups =
+    List.map
+      (fun keeper_name ->
+        Boot.autoboot_proactive_warmup_sec ~base_warmup:60
+          ~stagger_window_sec:15 ~keeper_name)
+      names
+  in
+  check bool "every warmup stays inside the 60..75s jitter window" true
+    (List.for_all (fun value -> value >= 60 && value <= 75) warmups);
+  check bool "last keeper is not delayed by list position" true
+    (List.nth warmups 13 <= 75)
+
+let test_autoboot_warmup_is_order_independent () =
+  let warmup name =
+    Boot.autoboot_proactive_warmup_sec ~base_warmup:60 ~stagger_window_sec:15
+      ~keeper_name:name
+  in
+  check int "same keeper gets same warmup independent of boot order"
+    (warmup "verifier") (warmup "verifier");
+  check int "zero jitter keeps exact base warmup" 60
+    (Boot.autoboot_proactive_warmup_sec ~base_warmup:60
+       ~stagger_window_sec:0 ~keeper_name:"verifier")
+
 let () =
   run "env_config_keeper_bootstrap_intervals"
     [
@@ -81,5 +124,12 @@ let () =
         [
           test_case "all three accessors reachable" `Quick
             test_smoke_call_sites_compile;
+        ] );
+      ( "autoboot warmup fairness",
+        [
+          test_case "jitter bounded, not linear by boot order" `Quick
+            test_autoboot_warmup_jitter_is_bounded_not_linear;
+          test_case "warmup deterministic per keeper" `Quick
+            test_autoboot_warmup_is_order_independent;
         ] );
     ]

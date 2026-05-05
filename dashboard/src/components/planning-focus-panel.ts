@@ -54,10 +54,8 @@ const activeFocus = computed<PlanningFocus>(() => {
 
 function updateFocusParam(focus: PlanningFocus): void {
   if (focus === 'none') {
-    const view = route.value.params.view
-    replaceRoute('workspace', view && view !== 'goal-tree'
-      ? { section: 'planning', view }
-      : { section: 'planning' })
+    const { focus: _focus, ...params } = route.value.params
+    replaceRoute('workspace', { ...params, section: 'planning' })
     return
   }
 
@@ -132,6 +130,11 @@ function deriveAccountabilityRows(
     }))
     .sort((a, b) => b.stale - a.stale || b.active - a.active || b.total - a.total || a.principal.localeCompare(b.principal))
 }
+
+const staleEntriesForPlanning = computed<StaleEntry[]>(() => deriveStaleTaskEntries(tasks.value))
+const accountabilityRowsForPlanning = computed<AccountabilityRow[]>(() =>
+  deriveAccountabilityRows(tasks.value, goals.value, staleEntriesForPlanning.value),
+)
 
 function statusToneClass(status: TaskStatusBucket): string {
   switch (status) {
@@ -251,13 +254,17 @@ function LedgerFocus({ rows }: { rows: AccountabilityRow[] }) {
             <li key=${row.principal} class="rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-3">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
-                  <button
-                    type="button"
-                    class="font-mono text-xs font-semibold text-text-strong hover:underline"
-                    onClick=${() => row.principal !== 'unassigned' && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: row.principal })}
-                  >
-                    ${row.principal}
-                  </button>
+                  ${row.principal === 'unassigned' ? html`
+                    <span class="font-mono text-xs font-semibold text-text-muted">${row.principal}</span>
+                  ` : html`
+                    <button
+                      type="button"
+                      class="font-mono text-xs font-semibold text-text-strong hover:underline"
+                      onClick=${() => navigate('monitoring', { section: 'agents', view: 'keepers', keeper: row.principal })}
+                    >
+                      ${row.principal}
+                    </button>
+                  `}
                   <div class="mt-1 text-3xs text-text-muted">
                     active ${row.active} · total ${row.total}${row.stale > 0 ? ` · stale ${row.stale}` : ''}
                   </div>
@@ -341,8 +348,8 @@ function MatrixFocus({ rows }: { rows: AccountabilityRow[] }) {
 
 export function PlanningFocusPanel() {
   const focus = activeFocus.value
-  const staleEntries = deriveStaleTaskEntries(tasks.value)
-  const rows = deriveAccountabilityRows(tasks.value, goals.value, staleEntries)
+  const staleEntries = staleEntriesForPlanning.value
+  const rows = accountabilityRowsForPlanning.value
   const chips = FOCUS_CHIPS.map(chip => ({
     ...chip,
     count: chip.key === 'stale'

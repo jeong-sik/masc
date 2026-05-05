@@ -16,7 +16,9 @@ val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
     Supported: "pause", "resume", "wakeup", "claim:<task_id>". *)
 val process_directive : agent_name:string -> string -> unit
 
-(** Test-visible helper for the [current_task_id] sent in gRPC heartbeats. *)
+(** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.
+    This may reconcile registry state against the task backlog before reading
+    the value, and returns an empty string when reconciliation cannot be trusted. *)
 val current_task_id_for_agent : config:Coord.config -> string -> string
 
 (** Wake up a specific keeper immediately. Used by broadcast notification

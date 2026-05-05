@@ -205,7 +205,9 @@ let process_directive ~agent_name directive =
 (* ── gRPC heartbeat stream ── *)
 
 let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
-  try Keeper_current_task_reconcile.sync_current_task_id_for_agent_name ~config ~agent_name
+  try
+    Keeper_current_task_reconcile.sync_current_task_id_for_agent_name ~config ~agent_name;
+    true
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -216,14 +218,26 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
     Log.Keeper.warn
       "gRPC heartbeat: failed to reconcile current_task_id for %s: %s"
       agent_name
-      (Printexc.to_string exn)
+      (Printexc.to_string exn);
+    false
+;;
+
+let registry_current_task_id agent_name =
+  match Keeper_registry.find_by_agent_name agent_name with
+  | Some e -> e.meta.current_task_id
+  | None -> None
 ;;
 
 let current_task_id_for_agent ~config agent_name =
-  reconcile_current_task_id_for_heartbeat ~config ~agent_name;
-  match Keeper_registry.find_by_agent_name agent_name with
-  | Some e -> (match e.meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "")
+  match registry_current_task_id agent_name with
   | None -> ""
+  | Some _ ->
+    if reconcile_current_task_id_for_heartbeat ~config ~agent_name then
+      match registry_current_task_id agent_name with
+      | Some task_id -> Keeper_id.Task_id.to_string task_id
+      | None -> ""
+    else
+      ""
 ;;
 
 let make_grpc_heartbeat_ping ~config ~agent_name ~session_id =

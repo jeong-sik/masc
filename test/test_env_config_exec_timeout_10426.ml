@@ -49,6 +49,11 @@ let cases =
     E.Coord_identity, 5.0;
     E.Dashboard, 3.0;
     E.Http_routes, 15.0;
+    (* #13081 follow-up — added to fix reviewer-identified budget regressions:
+       repo_git.ml was 300s but was mapped to Unknown "misc" (30s fallback);
+       task_sandbox.ml was 30s but was mapped to Turn_sandbox (2s). *)
+    E.Repo_manager_git, 300.0;
+    E.Task_sandbox_git, 30.0;
     E.Test, 30.0;
   ]
 

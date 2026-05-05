@@ -50,7 +50,7 @@ type context = {
     Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
-(** Helper: run subprocess with 60s timeout *)
+(** Helper: run subprocess — uses [Dispatch] caller (default 120s) *)
 let safe_exec args =
   match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) args with
   | Unix.WEXITED 0, output -> (true, output)

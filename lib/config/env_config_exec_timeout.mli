@@ -76,6 +76,15 @@ type caller =
   | Http_routes
       (** Workspace API git command invoked via the HTTP routes layer.
           Default 15.0s. *)
+  | Repo_manager_git
+      (** Repo-manager git operations (clone, fetch, push).
+          Default 300.0s — these operations run against remote origins
+          over the network; the previous inline budget was 300s to
+          tolerate slow connections and large repos. *)
+  | Task_sandbox_git
+      (** Task-sandbox worktree git operations (create, diff, cleanup).
+          Default 30.0s — these are local operations (no network) but
+          can be slow on large repos; the previous inline budget was 30s. *)
   | Test
       (** Test fixtures driving the exec runtime.
           Default 30.0s — matches the [test_slow_command_promotes]

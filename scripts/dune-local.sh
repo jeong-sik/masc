@@ -72,9 +72,13 @@ fi
 #     (also common options).  Added to value list — the prior
 #     fallback `[[ "$a" == -* ]]` consumed only the flag and then
 #     misread the value as the subcommand.
+#   - `--cache-storage-mode VAL` and `--cache-check-probability VAL`
+#     are value-taking Dune cache options; do not treat their values
+#     as subcommands.
 _value_taking_flags=(--root --workspace --profile --build-dir --display \
                      --default-target -j --jobs -p --only-packages \
-                     -x --config-file --cache --cache-storage-backend \
+                     -x --config-file --cache --cache-check-probability \
+                     --cache-storage-mode \
                      --diff-command --error-reporting \
                      --terminal-persistence)
 _detect_subcommand() {

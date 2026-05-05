@@ -363,6 +363,38 @@ let test_clean_subcommand_after_short_x_flag_skips_pin_guard () =
         code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+let test_clean_subcommand_after_cache_storage_mode_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-cache-storage-mode" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--cache-storage-mode copy clean"
+      in
+      check int
+        "`--cache-storage-mode copy clean` (value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_cache_check_probability_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-cache-check-probability" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--cache-check-probability 0.5 clean"
+      in
+      check int
+        "`--cache-check-probability 0.5 clean` (value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_pin_ok_build_proceeds () =
   with_temp_dir "dune-local-pin-ok" (fun dir ->
       let bin_dir, dune_log =
@@ -541,6 +573,14 @@ let () =
           test_case
             "`-x dev clean` (short -x IS value-taking) skips pin guard"
             `Quick test_clean_subcommand_after_short_x_flag_skips_pin_guard;
+          test_case
+            "`--cache-storage-mode copy clean` skips pin guard"
+            `Quick
+            test_clean_subcommand_after_cache_storage_mode_skips_pin_guard;
+          test_case
+            "`--cache-check-probability 0.5 clean` skips pin guard"
+            `Quick
+            test_clean_subcommand_after_cache_check_probability_skips_pin_guard;
           test_case "pin OK allows build to proceed" `Quick
             test_pin_ok_build_proceeds;
           test_case "MASC_DUNE_DRY_RUN=1 skips pin check" `Quick

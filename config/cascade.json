@@ -46,7 +46,7 @@
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "tool_rerank_keeper_assignable": false,
-  "_comment_tier_small": "4B-class local models for simple tasks (classification, format, short summary). Operator opt-in: uncomment models when Ollama is running locally.",
+  "_comment_tier_small": "Operator opt-in slot for 4B-class local models. Empty by default; routes fall through to tier_medium.",
   "tier_small_models": [],
   "tier_small_temperature": 0.3,
   "tier_small_max_tokens": 1000,
@@ -58,6 +58,14 @@
   "tier_medium_max_tokens": 4096,
   "tier_medium_keeper_assignable": false,
   "tier_medium_fallback_cascade": "big_three",
+  "_comment___safe_lane": "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable.",
+  "__safe_lane_models": [
+    "claude_code:auto", "glm-coding:auto", "kimi_cli:kimi-for-coding"
+  ],
+  "__safe_lane_temperature": 0.2,
+  "__safe_lane_max_tokens": 16384,
+  "__safe_lane_keeper_assignable": false,
+  "__safe_lane_required_capability_profile": "tool_strict",
   "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
   "tier_fast_models": [
     "claude_code:claude-haiku-4-5-20251001", "codex_cli:gpt-5.3-codex-spark",

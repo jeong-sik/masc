@@ -13,7 +13,7 @@ describe('isCascadeInspectorFocus', () => {
     ['providers', false],
     ['', false],
     [undefined, false],
-  ])('returns %s for %s', (value, expected) => {
+  ])('classifies %s as %s', (value, expected) => {
     expect(isCascadeInspectorFocus(value)).toBe(expected)
   })
 })

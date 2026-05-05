@@ -429,7 +429,11 @@ export function CascadeInspector() {
         </div>
       </section>
 
-      ${focus === 'deep-dive'
+      ${traceLoading.value
+        ? html`<${LoadingState}>이벤트 불러오는 중...<//>`
+      : traceError.value
+        ? html`<${ErrorState} message=${traceError.value} onRetry=${refreshTrace} />`
+      : focus === 'deep-dive'
         ? html`<${CascadeDeepDivePanel} events=${events} />`
       : focus === 'compare'
         ? html`<${CascadeComparePanel} events=${events} />`
@@ -447,12 +451,7 @@ export function CascadeInspector() {
             />
           ` : null}
         </div>
-        ${traceLoading.value
-          ? html`<${LoadingState}>이벤트 불러오는 중...<//>`
-          : traceError.value
-            ? html`<${ErrorState} message=${traceError.value} onRetry=${refreshTrace} />`
-            : html`<${StrategyTraceTable} events=${filteredEvents.value} />`
-        }
+        <${StrategyTraceTable} events=${filteredEvents.value} />
       </section>`}
 
       <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">

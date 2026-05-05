@@ -74,9 +74,8 @@ export function severityChipClass(code: number): string {
   }
 }
 
-// Map exit code to atomic Pill kind. Used by callers that have
-// migrated from the bespoke severityChipClass to the Pill primitive.
-export function severityPillKind(code: number): PillKind {
+// Map exit code to atomic Pill kind.
+function severityPillKind(code: number): PillKind {
   switch (severityForExitCode(code)) {
     case 'ok':
       return 'ok'
@@ -91,7 +90,7 @@ export function severityPillKind(code: number): PillKind {
 // Mirrors severityPillKind so the band tone and the pill tone always
 // match — the SPEC pattern is "card-level state strip + body status
 // pill" reading the same severity.
-export function severityBandKind(code: number): BandKind {
+function severityBandKind(code: number): BandKind {
   switch (severityForExitCode(code)) {
     case 'ok':
       return 'ok'
@@ -119,11 +118,11 @@ export function summaryLine(summary: DoctorSummary): string {
 }
 
 // Async resource — module-scoped so the same data is shared across any
-// surface that mounts the panel (follow-up PR).
-export const doctorEnvelope: AsyncResource<DoctorEnvelope> =
+// surface that mounts the panel.
+const doctorEnvelope: AsyncResource<DoctorEnvelope> =
   createAsyncResource()
 
-export function loadDoctor(): Promise<void> {
+function loadDoctor(): Promise<void> {
   return doctorEnvelope.load(() =>
     get<DoctorEnvelope>('/api/v1/dashboard/doctor'),
   )

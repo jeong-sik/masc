@@ -117,7 +117,7 @@ export async function deleteRepository(id: string): Promise<void> {
   }
 }
 
-export function selectRepo(id: string | null): void {
+function selectRepo(id: string | null): void {
   selectedRepoId.value = id
 }
 

@@ -102,6 +102,17 @@ type blocker_class =
         supervisor's [Keeper_registry.Fiber_unresolved] cohort key
         used by self-preservation, so blocker_class stamping mirrors
         the same diagnosis on keeper_meta. *)
+  | Stale_turn_timeout
+    (** 2026-05-05 cycle 9: stale watchdog forced fiber termination
+        because the running turn exceeded [idle_turn] threshold (~5m).
+        Maps to [Keeper_registry.Stale_turn_timeout _] cohort.  Like
+        [Fiber_unresolved], this path runs through
+        [force_unresolved_watchdog_crash] and never visits
+        [handle_crash_auto_pause], so PR #12889's [last_blocker_class]
+        stamp does not apply.  Without this variant, dashboards and
+        per-keeper meta read [last_blocker_class = null] for the
+        majority cohort during a fleet stall (observed: 6/14 keepers
+        in cohort=stale_turn_timeout, every meta showing null). *)
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
@@ -115,6 +126,7 @@ let blocker_class_to_string = function
   | Completion_contract_violation -> "completion_contract_violation"
   | No_tool_capable_provider -> "no_tool_capable_provider"
   | Fiber_unresolved -> "fiber_unresolved"
+  | Stale_turn_timeout -> "stale_turn_timeout"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -129,6 +141,7 @@ let blocker_class_of_serialized_string = function
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "no_tool_capable_provider" -> Some No_tool_capable_provider
   | "fiber_unresolved" -> Some Fiber_unresolved
+  | "stale_turn_timeout" -> Some Stale_turn_timeout
   | _ -> None
 ;;
 

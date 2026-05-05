@@ -167,6 +167,7 @@ type blocker_class =
   | Completion_contract_violation
   | No_tool_capable_provider
   | Fiber_unresolved
+  | Stale_turn_timeout
 
 val blocker_class_to_string : blocker_class -> string
 val cascade_exhaustion_summary : cascade_exhaustion_reason -> string

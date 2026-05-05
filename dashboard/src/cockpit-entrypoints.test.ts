@@ -94,7 +94,6 @@ describe('cockpit entrypoint registry', () => {
       params: { section: 'ide-shell', view: 'source', find: 'open' },
     })
   })
-
   it('routes covered C3 composer variants to focused quick intervention modes', () => {
     const variants = [
       ['cm-bc', 'broadcast'],
@@ -163,6 +162,23 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-lat' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'cost', focus: 'latency' },
+    })
+  })
+
+  it('marks cascade cockpit entries as route-covered inspector focus surfaces', () => {
+    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
+    ))
+
+    expect(byAlias.get('cs-deep')?.coverage).toBe('covered')
+    expect(byAlias.get('cs-cmp')?.coverage).toBe('covered')
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cs-deep' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cascade-compare' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'inspector', focus: 'compare' },
     })
   })
 })

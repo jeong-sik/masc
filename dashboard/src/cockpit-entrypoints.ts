@@ -61,8 +61,8 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
 
   // Observe Plane: split prototype tabs across the consolidated production surfaces.
   { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector' } }, coverage: 'partial' },
-  { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } }, coverage: 'partial' },
+  { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-led', 'audit-ledger'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-act', 'audit-by-actor'], target: { tab: 'monitoring', params: { section: 'fleet-health', view: 'attribution' } }, coverage: 'partial' },
   { mode: 'observe', aliases: ['au-sum', 'audit-summary'], target: { tab: 'monitoring', params: { section: 'fleet-health', view: 'governance' } }, coverage: 'partial' },

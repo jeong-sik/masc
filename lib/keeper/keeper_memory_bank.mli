@@ -346,6 +346,16 @@ val append_memory_notes_from_reply :
 (** Persist new memory rows derived from a turn's [reply] (and
     optional [snapshot]); returns [(rows_written, drop_reasons)]. *)
 
+(** Promote explicitly tagged tool results into durable [long_term]
+    memory-bank rows. Only results carrying the existing
+    [Multimodal.Tool_emission] reserved kind/id tags are eligible. *)
+val append_memory_notes_from_tool_results :
+  Coord.config ->
+  Keeper_types.keeper_meta ->
+  turn:int ->
+  results:Yojson.Safe.t list ->
+  int
+
 (** {1 Summary} *)
 
 val summarize_memory_bank_lines :

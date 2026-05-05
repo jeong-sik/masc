@@ -999,6 +999,27 @@ let run_turn
                   ~reply:response_text
                   ()
               in
+              let tool_result_notes_written =
+                if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
+                then
+                  let tool_results =
+                    Keeper_tool_emission_hook.(
+                      snapshot (accumulator_for_keeper meta.name))
+                  in
+                  Keeper_memory_bank.append_memory_notes_from_tool_results
+                    config meta ~turn:result.turns
+                    ~results:tool_results
+                else 0
+              in
+              let notes_written =
+                notes_written + tool_result_notes_written
+              in
+              let kinds_written =
+                if tool_result_notes_written > 0
+                   && not (List.mem "long_term" kinds_written)
+                then kinds_written @ [ "long_term" ]
+                else kinds_written
+              in
               if notes_written > 0
               then
                 Keeper_turn_telemetry.log_keeper_memory_write

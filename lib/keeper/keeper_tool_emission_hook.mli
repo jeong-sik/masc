@@ -87,6 +87,10 @@ val drain_into_working_context :
   working_context:Yojson.Safe.t option ->
   Yojson.Safe.t option
 
+(** Snapshot currently captured tool-result JSONs without draining them.
+    The returned list preserves capture order. *)
+val snapshot : accumulator -> Yojson.Safe.t list
+
 (** Number of items currently held in the accumulator. Useful for
     tests and metrics. *)
 val accumulator_size : accumulator -> int

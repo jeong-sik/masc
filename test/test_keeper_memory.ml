@@ -532,6 +532,61 @@ let test_memory_write_persists_horizon_and_source () =
         check int "schema version persisted" 2
           Yojson.Safe.Util.(json |> member "schema_version" |> to_int))
 
+let test_tool_result_promotes_to_long_term_memory () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta =
+      keeper_meta ~name:"tool-result-keeper"
+        ~mention_targets:["tool-result-keeper"] ()
+    in
+    let tagged_result =
+      `Assoc
+        [
+          ("__multimodal_kind", `String "doc");
+          ( "__multimodal_id",
+            `String "01900000-0000-7000-8000-0000000000aa" );
+          ( "__multimodal_metadata",
+            `Assoc [ ("source_tool", `String "keeper_doc_probe") ] );
+          ( "body",
+            `String "durable tool result evidence for the next turn" );
+        ]
+    in
+    let untagged_result =
+      `Assoc
+        [
+          ( "body",
+            `String
+              "ordinary tool result should stay out of long term memory" );
+        ]
+    in
+    let written =
+      Keeper_memory_bank.append_memory_notes_from_tool_results
+        config meta ~turn:3 ~results:[ tagged_result; untagged_result ]
+    in
+    check int "only tagged tool result written" 1 written;
+    let entries =
+      read_memory_bank_entries config "tool-result-keeper"
+    in
+    check int "one memory row" 1 (List.length entries);
+    match entries with
+    | [ json ] ->
+        check string "kind is long_term" "long_term"
+          Yojson.Safe.Util.(json |> member "kind" |> to_string);
+        check string "horizon is long_term" "long_term"
+          Yojson.Safe.Util.(json |> member "horizon" |> to_string);
+        check string "source is tool_result" "tool_result"
+          Yojson.Safe.Util.(json |> member "source" |> to_string);
+        check string "artifact kind persisted" "doc"
+          Yojson.Safe.Util.(json |> member "artifact_kind" |> to_string);
+        let text =
+          Yojson.Safe.Util.(json |> member "text" |> to_string)
+        in
+        check bool "text carries payload evidence" true
+          (Astring.String.is_infix
+             ~affix:"durable tool result evidence" text)
+    | _ -> fail "expected a single tool-result memory row")
+
 let test_memory_candidates_capture_next_summary () =
   let snapshot =
     {
@@ -1392,6 +1447,8 @@ let () =
             test_memory_write_then_recall_meta_fallback;
           test_case "memory note persists horizon + source" `Quick
             test_memory_write_persists_horizon_and_source;
+          test_case "tagged tool result promotes to long_term" `Quick
+            test_tool_result_promotes_to_long_term_memory;
           test_case "next summary is preserved as memory" `Quick
             test_memory_candidates_capture_next_summary;
           test_case "long_term priority matches durable tier" `Quick

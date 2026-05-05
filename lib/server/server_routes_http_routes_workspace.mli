@@ -24,3 +24,16 @@ val source_header :
   | `PlaygroundMissing of string
   | `KeeperUnknown of string ] ->
   (string * string) list
+
+(** [rel_under base safe] returns the path of [safe] relative to [base],
+    handling [base = "/"], trailing slashes, and the [safe = base] case
+    (returns [""]). Caller must have already enforced the prefix
+    invariant via the internal [safe_path] helper. Exposed for unit
+    testing. *)
+val rel_under : string -> string -> string
+
+(** [valid_git_ref s] is [true] iff [s] is a non-empty, ≤256-char string
+    drawn from the conservative ref/SHA charset and not starting with
+    ["-"]. Used to refuse query-string values that could be parsed as
+    git options (e.g. [?base_ref=-L1,9999]). Exposed for unit testing. *)
+val valid_git_ref : string -> bool

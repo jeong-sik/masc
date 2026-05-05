@@ -9,6 +9,7 @@
      2. reset wipes the count back to 0
      3. distinct keeper names get independent counters
      4. set_for_test with strikes <= 0 is equivalent to remove
+     5. first bump can hydrate from persisted restart state
 *)
 
 open Masc_mcp
@@ -83,6 +84,21 @@ let test_set_zero_or_negative_removes () =
     "negative also removes" 0
     (KK.peek_budget_exhaustion_for_test ~keeper_name:k)
 
+let test_first_bump_hydrates_from_prior () =
+  let k = "zeta" in
+  reset_table k;
+  Alcotest.(check int)
+    "prior 2 becomes strike 3" 3
+    (KK.bump_budget_exhaustion_seeded ~keeper_name:k ~prior_strikes:2);
+  Alcotest.(check int)
+    "in-memory count wins after hydration" 4
+    (KK.bump_budget_exhaustion_seeded ~keeper_name:k ~prior_strikes:2);
+  reset_table k;
+  Alcotest.(check int)
+    "negative prior clamps to 0" 1
+    (KK.bump_budget_exhaustion_seeded ~keeper_name:k ~prior_strikes:(-9));
+  reset_table k
+
 (* The strike table is guarded by [Eio.Mutex], which requires an Eio
    fiber context. Run every case inside [Eio_main.run]. *)
 let in_eio f () = Eio_main.run (fun _env -> f ())
@@ -97,5 +113,7 @@ let () =
             (in_eio test_keepers_are_independent)
         ; Alcotest.test_case "set_for_test 0 or negative removes" `Quick
             (in_eio test_set_zero_or_negative_removes)
+        ; Alcotest.test_case "first bump hydrates from prior" `Quick
+            (in_eio test_first_bump_hydrates_from_prior)
         ] )
     ]

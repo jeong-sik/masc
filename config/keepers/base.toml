@@ -1,0 +1,7 @@
+[keeper]
+cascade_name = "big_three"
+sandbox_profile = "docker"
+network_mode = "inherit"
+work_discovery_enabled = true
+github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"

@@ -124,6 +124,10 @@ let autonomous_turn_semaphore_value_for_test () =
 let reactive_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value reactive_turn_semaphore
 
+let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
+let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
+let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -331,8 +335,14 @@ let reset_autonomous_completion_for_test () : unit =
    window with 0 restart.
 
    Promote to [Keeper_fiber_crash] after [oas_timeout_budget_strike_limit]
-   consecutive strikes so a fresh fiber retries with a clean context.
-   Counter is reset on any successful turn (see [Ok updated] branch). *)
+   consecutive strikes so the supervisor pauses the keeper instead of
+   restarting into the same budget loop.
+
+   Counter is in-memory for the common same-server case and is reset on
+   any successful turn (see [Ok updated] branch). On first bump after a
+   process restart, callers may seed it from the persisted
+   [Oas_timeout_budget_loop] failure reason so restart cannot erase a
+   partially observed loop. *)
 let consecutive_budget_exhaustions : (string, int) Hashtbl.t =
   Hashtbl.create 16
 let consecutive_budget_exhaustions_mutex = Eio.Mutex.create ()
@@ -341,15 +351,19 @@ let oas_timeout_budget_strike_limit = 3
 let with_budget_exhaustions f =
   Eio.Mutex.use_rw ~protect:true consecutive_budget_exhaustions_mutex f
 
-let bump_budget_exhaustion ~keeper_name : int =
+let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
   with_budget_exhaustions (fun () ->
     let prior =
-      Hashtbl.find_opt consecutive_budget_exhaustions keeper_name
-      |> Option.value ~default:0
+      match Hashtbl.find_opt consecutive_budget_exhaustions keeper_name with
+      | Some strikes -> strikes
+      | None -> max 0 prior_strikes
     in
     let next = prior + 1 in
     Hashtbl.replace consecutive_budget_exhaustions keeper_name next;
     next)
+
+let bump_budget_exhaustion ~keeper_name : int =
+  bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes:0
 
 let reset_budget_exhaustion ~keeper_name : unit =
   with_budget_exhaustions (fun () ->

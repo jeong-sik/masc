@@ -284,7 +284,7 @@ let test_ctx_composition_splits_history_and_residual () =
       ~temporal_context:"Temporal context"
       ~user_message:"Current user message"
       ~history_messages
-      ~actual_input_tokens:1000
+      ~actual_input_tokens:(Some 1000)
   in
   let segment_tokens key =
     metrics.segments

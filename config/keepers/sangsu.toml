@@ -1,12 +1,7 @@
 [keeper]
+base = "base.toml"
 persona_name = "sangsu"
-cascade_name = "big_three"
-sandbox_profile = "docker"
-network_mode = "inherit"
-work_discovery_enabled = true
 work_discovery_sources = ["unclaimed_tasks"]
-github_identity = "anyang-keepers"
-git_identity_mode = "github_identity"
 
 [keeper.tool_access]
 kind = "preset"

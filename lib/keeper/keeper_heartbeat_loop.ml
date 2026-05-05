@@ -352,6 +352,13 @@ let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
       Keeper_registry.set_failure_reason ~base_path keeper_name None
   | _ -> ()
 
+let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some { Keeper_registry.last_failure_reason =
+             Some (Keeper_registry.Oas_timeout_budget_loop { count }); _ } ->
+      count
+  | _ -> 0
+
 let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Oas_timeout_budget _) -> true
@@ -660,7 +667,16 @@ let run_keepalive_unified_turn
               if is_oas_timeout_budget_error err
               then begin
                 let keeper_name = meta_after_observe.name in
-                let strikes = Keeper_turn_slot.bump_budget_exhaustion ~keeper_name in
+                let prior_strikes =
+                  prior_oas_timeout_budget_strikes
+                    ~base_path:ctx.config.base_path
+                    ~keeper_name
+                in
+                let strikes =
+                  Keeper_turn_slot.bump_budget_exhaustion_seeded
+                    ~keeper_name
+                    ~prior_strikes
+                in
                 Keeper_registry.set_failure_reason
                   ~base_path:ctx.config.base_path keeper_name
                   (Some (Keeper_registry.Oas_timeout_budget_loop

@@ -632,7 +632,7 @@ let run_turn
              ~temporal_context
              ~user_message
              ~history_messages
-             ~actual_input_tokens:usage.input_tokens
+             ~actual_input_tokens:(Some usage.input_tokens)
          in
          (* Classify the most-specific actionable signal from the structured
             keeper world snapshot. This deliberately avoids re-parsing the

@@ -87,6 +87,9 @@ val metric_of_block :
 val history_bucket_of_block :
   role:Agent_sdk.Types.role -> Agent_sdk.Types.content_block -> string
 
+(** [actual_input_tokens] is the LLM-reported input token count and is
+    only known after a provider response. Pre-call sites (prompt build)
+    must pass [None]; post-response sites pass [Some n]. *)
 val build_ctx_composition_metrics :
   system_prompt:string ->
   dynamic_context:string ->
@@ -94,7 +97,7 @@ val build_ctx_composition_metrics :
   temporal_context:string ->
   user_message:string ->
   history_messages:Agent_sdk.Types.message list ->
-  actual_input_tokens:int ->
+  actual_input_tokens:int option ->
   ctx_composition_metrics
 
 val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t

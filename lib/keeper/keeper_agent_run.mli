@@ -171,6 +171,9 @@ val build_prompt_metrics :
   -> user_message:string
   -> prompt_metrics
 
+(** [actual_input_tokens] is the LLM-reported input token count and is
+    only known after a provider response. Pre-call sites (prompt build)
+    must pass [None]; post-response sites pass [Some n]. *)
 val build_ctx_composition_metrics :
      system_prompt:string
   -> dynamic_context:string
@@ -178,7 +181,7 @@ val build_ctx_composition_metrics :
   -> temporal_context:string
   -> user_message:string
   -> history_messages:Agent_sdk.Types.message list
-  -> actual_input_tokens:int
+  -> actual_input_tokens:int option
   -> ctx_composition_metrics
 
 val prompt_metrics_to_json : prompt_metrics -> Yojson.Safe.t

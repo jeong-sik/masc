@@ -118,6 +118,11 @@ let with_temp_masc_base_path prefix f =
       cleanup_dir base)
     f
 
+let seed_raw_token base_path agent_name raw =
+  let auth_dir = Auth.auth_dir base_path in
+  mkdir_p auth_dir;
+  Auth.save_private_text_file (Filename.concat auth_dir (agent_name ^ ".token")) raw
+
 let with_temp_masc_config cascade_json f =
   let base = temp_dir "test_masc_config" in
   let config_dir = Filename.concat base ".masc/config" in
@@ -1874,6 +1879,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
   in
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~tool_requirement:`Optional
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools ()
@@ -2085,6 +2091,28 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_reject
       Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
+let test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-keeper-claim" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools:[ make_named_noop_tool "keeper_task_claim" ] ()
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected codex_cli to reject required keeper_task_claim despite per-keeper token auth"
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      Alcotest.(check string) "field" "tool_support" field;
+      Alcotest.(check bool) "detail mentions keeper_task_claim" true
+        (contains_substring ~needle:"keeper_task_claim" detail)
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+
 let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   match
@@ -2201,6 +2229,31 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   | _ ->
       Alcotest.failf "expected only kimi_cli provider to remain, got %d"
         (List.length filtered)
+
+let test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-bound-token" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
+  let runtime_mcp_policy =
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+  in
+  Alcotest.(check (list string))
+    "codex remains rejected even when bearer auth can be sourced"
+    [ "kimi_cli:kimi-for-coding" ]
+    (List.map Provider_tool_support.provider_debug_label filtered)
 
 let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools
     () =
@@ -4329,6 +4382,10 @@ let () =
         "keeper-internal tools on codex_cli with keeper actor are rejected"
         `Quick
         test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects;
+      Alcotest.test_case
+        "keeper_task_claim on codex_cli with keeper actor is rejected"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects;
       Alcotest.test_case "keeper-internal tools on kimi_cli are rejected" `Quick
         test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects;
       Alcotest.test_case "optional keeper-internal tools on codex_cli drop to text" `Quick
@@ -4339,6 +4396,10 @@ let () =
         "provider-normalized filter drops codex keeper-bound actor tools"
         `Quick
         test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools;
+      Alcotest.test_case
+        "provider-normalized filter drops codex bound actor despite per-keeper token"
+        `Quick
+        test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token;
       Alcotest.test_case
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick

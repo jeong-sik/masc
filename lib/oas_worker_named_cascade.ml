@@ -111,9 +111,6 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     ->
       List.exists Oas_worker_exec.runtime_mcp_tool_requires_bound_actor
         policy.allowed_tool_names
-      && not
-           (Oas_worker_exec.codex_cli_can_auth_keeper_bound_runtime_mcp
-              ~agent_name policy)
   | _ -> false
 
 (* #10681: per-provider rejection reason produced by the cascade filter.

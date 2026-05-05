@@ -201,6 +201,14 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
           state: asString(approvalRaw.state) ?? null,
           summary: asString(approvalRaw.summary) ?? null,
           pending_count: asNumber(approvalRaw.pending_count) ?? null,
+          pending_first: isRecord(approvalRaw.pending_first)
+            ? {
+                id: asString(approvalRaw.pending_first.id) ?? null,
+                tool_name: asString(approvalRaw.pending_first.tool_name) ?? null,
+                task_id: asString(approvalRaw.pending_first.task_id) ?? null,
+                blocker_class: asString(approvalRaw.pending_first.blocker_class) ?? null,
+              }
+            : null,
         }
       : null,
     execution_summary: isRecord(executionRaw)

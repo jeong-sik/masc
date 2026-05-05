@@ -76,7 +76,7 @@ let to_json t =
     ; ("duration_ms", `Float t.duration_ms)
     ]
 
-let to_legacy t =
+let to_legacy_compat t =
   let message =
     match t.data with
     | `String s -> s

@@ -34,6 +34,15 @@ val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
 (** [to_json t] serializes to JSON for logging and observability. *)
 val to_json : t -> Yojson.Safe.t
 
-(** [to_legacy t] converts back to [(bool * string)] for callers that
-    still expect the old interface. *)
-val to_legacy : t -> bool * string
+(** [to_legacy_compat t] converts back to [(bool * string)] for callers
+    that have not yet migrated to the typed result interface.
+
+    @deprecated Prefer consuming {!t} directly.  This shim exists only
+    for the migration period; each call site should be tracked as a
+    remaining migration item.  The function is intentionally named
+    [to_legacy_compat] (not [to_legacy]) so that
+    [rg 'to_legacy_compat'] gives a precise count of un-migrated callers. *)
+val to_legacy_compat : t -> bool * string
+[@@alert legacy_tuple
+  "This function exists for migration only. \
+   Migrate the call site to use Tool_result.t directly."]

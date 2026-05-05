@@ -151,14 +151,14 @@ val tools : Masc_domain.tool_schema list
 
 (** {1 Tool dispatcher} *)
 
-val handle_tool : string -> Yojson.Safe.t -> bool * string
+val handle_tool : string -> Yojson.Safe.t -> Tool_result.t
 (** Routes [name] to the matching internal handler.
     Mutation tools (post / comment / vote / delete /
     cleanup) automatically invoke
     {!invalidate_board_list_cache} on completion so the
-    next [masc_board_list] reads fresh data.  Returns
-    [(success, json_message)] — the wrapper layer
-    composes the final JSON-RPC envelope around it. *)
+    next [masc_board_list] reads fresh data.  Returns a
+    {!Tool_result.t} carrying success flag, structured
+    payload, tool name, and elapsed duration. *)
 
 (** {1 Registry installation} *)
 

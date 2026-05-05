@@ -1115,42 +1115,46 @@ let tools = [
     Mutation tools (post, comment, vote, delete, cleanup) invalidate
     the board_list TTL cache so the next read sees fresh data. *)
 let handle_tool name args =
-  match name with
-  | "masc_board_post" ->
-    let result = handle_post_create args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_list" -> handle_post_list args
-  | "masc_board_get" -> handle_post_get args
-  | "masc_board_comment" ->
-    let result = handle_comment_add args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_vote" ->
-    let result = handle_vote args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_stats" -> handle_stats args
-  | "masc_board_search" -> handle_search args
-  | "masc_board_comment_vote" ->
-    let result = handle_comment_vote args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_reaction" ->
-    let result = handle_reaction args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_profile" -> handle_profile args
-  | "masc_board_hearths" -> handle_hearth_list args
-  | "masc_board_delete" ->
-    let result = handle_delete args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_cleanup" ->
-    let result = handle_board_cleanup args in
-    invalidate_board_list_cache ();
-    result
-  | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
+  let start_time = Time_compat.now () in
+  let result : bool * string =
+    match name with
+    | "masc_board_post" ->
+      let result = handle_post_create args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_list" -> handle_post_list args
+    | "masc_board_get" -> handle_post_get args
+    | "masc_board_comment" ->
+      let result = handle_comment_add args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_vote" ->
+      let result = handle_vote args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_stats" -> handle_stats args
+    | "masc_board_search" -> handle_search args
+    | "masc_board_comment_vote" ->
+      let result = handle_comment_vote args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_reaction" ->
+      let result = handle_reaction args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_profile" -> handle_profile args
+    | "masc_board_hearths" -> handle_hearth_list args
+    | "masc_board_delete" ->
+      let result = handle_delete args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_cleanup" ->
+      let result = handle_board_cleanup args in
+      invalidate_board_list_cache ();
+      result
+    | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
+  in
+  Tool_result.wrap ~tool_name:name ~start_time result
 
 let tool_spec_read_only =
   [
@@ -1163,7 +1167,7 @@ let tool_spec_read_only =
   ]
 
 let register () =
-  let handler = fun ~name ~args -> Some (handle_tool name args) in
+  let handler = fun ~name ~args -> Some (Tool_result.to_legacy_compat (handle_tool name args)) in
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"
     | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->

@@ -91,6 +91,7 @@
         test_keeper_supervisor
         test_keeper_alerting_path
         test_coord_eio_pure
+        test_coord_telemetry_drop_non_eio
         test_keeper_contract_classifier_pure
         test_keeper_compact_policy_pure
         test_heartbeat_smart
@@ -298,6 +299,7 @@
           test_keeper_supervisor
           test_keeper_alerting_path
           test_coord_eio_pure
+          test_coord_telemetry_drop_non_eio
           test_keeper_contract_classifier_pure
           test_keeper_compact_policy_pure
           test_heartbeat_smart

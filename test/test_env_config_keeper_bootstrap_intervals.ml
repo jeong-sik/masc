@@ -167,24 +167,14 @@ let test_hash_cross_platform_stability () =
     ("scheduler",  470674084,  64);
   ] in
   List.iter (fun (name, expected_hash, expected_warmup) ->
-    (* Probe the internal hash via the warmup API:
-       warmup(name, base=0, stagger=0x3FFFFFFF) = hash(name) mod 0x40000000
-       which, because hash is already masked to 30 bits, equals hash(name). *)
     let actual_warmup =
       Boot.autoboot_proactive_warmup_sec ~base_warmup:60
         ~stagger_window_sec:15 ~keeper_name:name
-    in
-    (* The warmup is base + hash mod (stagger+1); re-derive the hash. *)
-    let inferred_hash =
-      (actual_warmup - 60 + 16) mod 16 + (expected_hash / 16) * 16
     in
     (* Exact warmup check — if the hash changes, this fails on any arch. *)
     check int
       (Printf.sprintf "%s warmup bounded to expected (cross-platform hash)" name)
       expected_warmup actual_warmup;
-    (* Suppress unused-variable warning for inferred_hash, which is a
-       cross-check; actual equality is implied by the warmup check. *)
-    ignore inferred_hash;
     (* Direct warmup equality locks in the constant. *)
     check int
       (Printf.sprintf "%s expected_hash=%d yields warmup=%d" name expected_hash expected_warmup)

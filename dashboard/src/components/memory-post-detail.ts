@@ -264,8 +264,9 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
 
   const isFiltering = query.value.trim() !== ''
   const hiddenCount = filteredRoots.length - INITIAL_SHOW
-  // §H1: bypass INITIAL_SHOW depth cap while a filter query is active so
-  // matches are never hidden behind the "show more" button.
+  // §H1: bypass INITIAL_SHOW root-comment count limit while a filter
+  // query is active so matching results are never hidden behind the
+  // "show more" button.
   const visible = isFiltering || expanded || filteredRoots.length <= INITIAL_SHOW
     ? filteredRoots
     : filteredRoots.slice(-INITIAL_SHOW)

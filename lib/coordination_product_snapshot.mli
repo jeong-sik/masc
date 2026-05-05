@@ -49,3 +49,10 @@ val safe_build_yojson : Coord.config -> Yojson.Safe.t
 
     On projection failure the result keeps the normal snapshot shape with empty
     products/violations and a [projection_error] field. *)
+
+val safe_build_tool_yojson : Coord.config -> Yojson.Safe.t
+(** Bounded variant for MCP/tool calls.
+
+    Keeps the advisory summary shape but caps expensive evidence reads and
+    serialized products so live diagnostics cannot monopolize the tool call
+    worker on large runtime state. *)

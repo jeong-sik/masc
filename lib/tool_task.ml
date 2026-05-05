@@ -695,6 +695,9 @@ and handle_cancel_task ctx args =
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
+       Thompson_sampling.record_quality_signal
+         ~agent_name:ctx.agent_name
+         ~verdict:(Post_verifier.Fail "task_cancelled");
        (* Prometheus: record task failure *)
        Prometheus.record_task_failed ();
        (* Notification harness: push cancel event to all active sessions *)
@@ -1075,6 +1078,9 @@ and handle_transition ?agent_tool_names ctx args =
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
+       Thompson_sampling.record_quality_signal
+         ~agent_name:ctx.agent_name
+         ~verdict:Post_verifier.Pass;
        Prometheus.record_task_completed ()
    | Ok _, Types.Cancel ->
        let metric : Metrics_store_eio.task_metric = {
@@ -1092,6 +1098,9 @@ and handle_transition ?agent_tool_names ctx args =
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
+       Thompson_sampling.record_quality_signal
+         ~agent_name:ctx.agent_name
+         ~verdict:(Post_verifier.Fail "task_cancelled");
        Prometheus.record_task_failed ()
    | Ok _, (Types.Claim | Types.Start | Types.Submit_for_verification
             | Types.Approve_verification | Types.Reject_verification | Types.Release)

@@ -53,13 +53,6 @@ import {
 
 type StatusFilter = 'all' | RuntimeBand
 
-function runtimeBadgeClass(band: RuntimeBand): string {
-  if (band === 'active') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
-  if (band === 'attention') return 'border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)]'
-  if (band === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
-  return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
-}
-
 function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
   if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'

@@ -12,6 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "observe_goal_loop_logs.py"
 ORIENT_SCRIPT_PATH = REPO_ROOT / "scripts" / "orient_goal_loop_logs.py"
+DECIDE_SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
 
 spec = importlib.util.spec_from_file_location("observe_goal_loop_logs", SCRIPT_PATH)
 assert spec is not None
@@ -29,6 +30,15 @@ assert orient_spec.loader is not None
 sys.modules[orient_spec.name] = orient_goal_loop_logs
 orient_spec.loader.exec_module(orient_goal_loop_logs)
 
+decide_spec = importlib.util.spec_from_file_location(
+    "decide_goal_loop_findings", DECIDE_SCRIPT_PATH
+)
+assert decide_spec is not None
+decide_goal_loop_findings = importlib.util.module_from_spec(decide_spec)
+assert decide_spec.loader is not None
+sys.modules[decide_spec.name] = decide_goal_loop_findings
+decide_spec.loader.exec_module(decide_goal_loop_findings)
+
 
 class ObserveGoalLoopLogsTest(unittest.TestCase):
     def test_scan_counts_prompt_signatures(self) -> None:
@@ -40,6 +50,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         '{"status":"skipped","error":"runtime provider health is advisory; bootstrap skips live probe"}',
                         "[WARN] [Auth] archived credential sangsu.json (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
                         "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s)",
+                        "[WARN] keeper skipping turn after semaphore wait p99=240s",
+                        "pricing_catalog_miss model=glm-4.7",
                         "[WARN] [Governance] Governance judge returned unparseable response (Lenient_json fallback hit; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
                         "[INFO] verifier: warmup=255s",
@@ -54,7 +66,9 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
             report = observe_goal_loop_logs.scan_logs([str(path)], max_samples=2)
 
-        self.assertEqual(report.total_lines, 9)
+        self.assertEqual(report.total_lines, 11)
+        self.assertEqual(report.patterns["keeper_skipping_turn"].count, 1)
+        self.assertEqual(report.patterns["pricing_catalog_miss"].count, 1)
         self.assertEqual(report.patterns["provider_health_skipped"].count, 1)
         self.assertEqual(report.patterns["credential_archived_starvation"].count, 1)
         self.assertEqual(report.patterns["alive_but_stuck"].count, 1)
@@ -132,6 +146,24 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(by_id["NF-2"].status, "EVIDENCE_ABSENT")
         self.assertEqual(report.summary["evidence_present"], 2)
         self.assertEqual(report.summary["critical_present"], 1)
+
+    def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
+        report = decide_goal_loop_findings.decide_orient(
+            {
+                "findings": [
+                    {"finding_id": "NF-1", "status": "EVIDENCE_PRESENT"},
+                    {"finding_id": "NF-2", "status": "EVIDENCE_PRESENT"},
+                    {"finding_id": "NF-6", "status": "EVIDENCE_PRESENT"},
+                    {"finding_id": "NF-3", "status": "EVIDENCE_ABSENT"},
+                ]
+            }
+        )
+
+        decision_ids = [decision.decision_id for decision in report.decisions]
+        self.assertEqual(report.p0_count, 2)
+        self.assertEqual(report.decisions_total, 3)
+        self.assertEqual(decision_ids[:2], ["D-EMERGENCY-2", "D-EMERGENCY-1"])
+        self.assertIn("D-P2-1", decision_ids)
 
 
 if __name__ == "__main__":

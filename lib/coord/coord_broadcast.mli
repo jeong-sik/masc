@@ -15,5 +15,6 @@ val emit_message_activity : Coord_utils_backend_setup.config ->
 val broadcast_channel : Coord_utils_backend_setup.config -> string
 val on_broadcast_mention : (string option -> unit) ref
 val broadcast : ?trace_context:string ->
+           ?msg_type:string ->
            Coord_utils_backend_setup.config ->
            from_agent:string -> content:string -> string

@@ -344,6 +344,34 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let test_lifecycle_messages_are_typed () =
+  with_test_env (fun config ->
+    let join_result = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
+    Alcotest.(check bool) "join success" true
+      (str_contains join_result "joined");
+    let leave_result = Coord.leave config ~agent_name:"gemini" in
+    Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
+    let rejoin_result = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
+    Alcotest.(check bool) "rejoin success" true
+      (str_contains rejoin_result "already in the namespace");
+
+    let messages = Coord.get_all_messages_raw config ~since_seq:0 in
+    let has_msg_type msg_type =
+      List.exists
+        (fun (message : Types.message) -> String.equal message.msg_type msg_type)
+        messages
+    in
+    Alcotest.(check bool) "join typed" true (has_msg_type "lifecycle_join");
+    Alcotest.(check bool) "leave typed" true (has_msg_type "lifecycle_leave");
+    Alcotest.(check bool) "rejoin typed" true (has_msg_type "lifecycle_rejoin");
+    Alcotest.(check bool) "lifecycle pings not plain broadcasts" false
+      (List.exists
+         (fun (message : Types.message) ->
+           String.equal message.msg_type "broadcast"
+           && str_contains message.content "namespace")
+         messages)
+  )
+
 let with_memory_test_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1548,6 +1576,8 @@ let () =
     ];
     "messages", [
       Alcotest.test_case "broadcast" `Quick test_broadcast_message;
+      Alcotest.test_case "lifecycle messages are typed" `Quick
+        test_lifecycle_messages_are_typed;
     ];
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;

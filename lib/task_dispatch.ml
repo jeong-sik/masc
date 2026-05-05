@@ -15,33 +15,36 @@ type backend_state =
   | Uninitialized
   | Active of task_backend
 
-(** Current backend state. Single ref avoids contradictory initialized/backend pairs. *)
-let backend_state : backend_state ref = ref Uninitialized
+(** Current backend state. Single Atomic.t avoids contradictory
+    initialized/backend pairs and removes the OCaml 5 multidomain data
+    race that the previous [ref] cell had. Mirrors the pattern already
+    used by Board_dispatch.backend_state. *)
+let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 
 let is_initialized () =
-  match !backend_state with
+  match Atomic.get backend_state with
   | Active _ -> true
   | Uninitialized -> false
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
-  if match !backend_state with Active _ -> true | Uninitialized -> false then
+  if (match Atomic.get backend_state with Active _ -> true | Uninitialized -> false) then
     Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
-  else begin
-    backend_state := Active Jsonl;
+  else if Atomic.compare_and_set backend_state Uninitialized (Active Jsonl) then
     Log.Task.info "JSONL backend initialized (using Coord.* functions)."
-  end
+  else
+    Log.Task.warn "WARNING: backend was concurrently initialized; ignoring init_jsonl"
 
 (** Reset for testing *)
 let reset_for_test () =
-  backend_state := Uninitialized
+  Atomic.set backend_state Uninitialized
 
 (** Get current backend, auto-init JSONL if not set *)
 let backend () =
-  match !backend_state with
+  match Atomic.get backend_state with
   | Active backend -> backend
   | Uninitialized ->
-      backend_state := Active Jsonl;
+      let _ = Atomic.compare_and_set backend_state Uninitialized (Active Jsonl) in
       Log.Task.info "JSONL backend initialized (using Coord.* functions).";
       Jsonl
 

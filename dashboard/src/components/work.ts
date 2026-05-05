@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
-import { Memory } from './memory'
+import { BoardSurface } from './board'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
@@ -29,7 +29,7 @@ export function Work() {
     <div class="flex min-w-0 flex-col gap-3">
       <div class="min-w-0 transition-opacity duration-[var(--t-slow)]">
         <${ErrorBoundary} label=${current}>
-          ${current === 'board' ? html`<${Memory} />`
+          ${current === 'board' ? html`<${BoardSurface} />`
             : current === 'planning' ? html`<${PlanningPanel} />`
             : current === 'repositories' ? html`
               <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>

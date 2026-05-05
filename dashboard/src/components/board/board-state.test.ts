@@ -12,11 +12,11 @@ import {
   splitVisiblePosts,
   type ContentCategory,
   type VisibleBoardGroups,
-} from './memory-state'
-import type { BoardPost } from '../types'
+} from './board-state'
+import type { BoardPost } from '../../types'
 
 // Reset module-scope signals between tests
-import { boardHiddenCategories, boardExcludeAutomation } from '../store'
+import { boardHiddenCategories, boardExcludeAutomation } from '../../store'
 
 function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
   return {

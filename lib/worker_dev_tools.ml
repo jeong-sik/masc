@@ -759,7 +759,9 @@ let make_file_read ?workdir ?on_exec () =
              int_of_float ((Time_compat.now () -. started) *. 1000.0)
            in
            Option.iter
-             (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
+             (fun (f : tool_exec_observer) ->
+                f ~tool_name:"file_read" ~success:false ~duration_ms
+                  ~error_kind:"path_blocked" ~error_message:err ())
              on_exec;
            tool_error err
          else
@@ -769,7 +771,8 @@ let make_file_read ?workdir ?on_exec () =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
              in
              Option.iter
-               (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                  f ~tool_name:"file_read" ~success:true ~duration_ms ())
                on_exec;
              if String.length content > file_read_max_bytes then
                Ok { Agent_sdk.Types.content =
@@ -781,7 +784,9 @@ let make_file_read ?workdir ?on_exec () =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
              in
              Option.iter
-               (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                  f ~tool_name:"file_read" ~success:false ~duration_ms
+                    ~error_kind:"file_read_error" ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot read: %s" msg))
 
@@ -815,7 +820,9 @@ let make_file_write ?workdir ?on_exec () =
              int_of_float ((Time_compat.now () -. started) *. 1000.0)
            in
            Option.iter
-             (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
+             (fun (f : tool_exec_observer) ->
+                f ~tool_name:"file_write" ~success:false ~duration_ms
+                  ~error_kind:"path_blocked" ~error_message:err ())
              on_exec;
            tool_error err
          else
@@ -827,7 +834,8 @@ let make_file_write ?workdir ?on_exec () =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
              in
              Option.iter
-               (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                  f ~tool_name:"file_write" ~success:true ~duration_ms ())
                on_exec;
              Ok { Agent_sdk.Types.content =
                Printf.sprintf "Written %d bytes to %s"
@@ -837,7 +845,9 @@ let make_file_write ?workdir ?on_exec () =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
              in
              Option.iter
-               (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                  f ~tool_name:"file_write" ~success:false ~duration_ms
+                    ~error_kind:"file_write_error" ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot write: %s" msg))
 
@@ -969,18 +979,25 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
              in
              Option.iter
-               (fun f ->
-                 f ~tool_name:"shell_exec"
-                   ~success:(Result.is_ok result) ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                 let success = Result.is_ok result in
+                 if success then
+                   f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
+                 else
+                   f ~tool_name:"shell_exec" ~success:false ~duration_ms
+                     ~error_kind:"shell_error" ())
                on_exec;
              result
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              let duration_ms = 0 in
+             let exn_msg = Printexc.to_string exn in
              Option.iter
-               (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)
+               (fun (f : tool_exec_observer) ->
+                 f ~tool_name:"shell_exec" ~success:false ~duration_ms
+                   ~error_kind:"shell_error" ~error_message:exn_msg ())
                on_exec;
              tool_error
-               (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
+               (Printf.sprintf "Command failed: %s" exn_msg)))
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock

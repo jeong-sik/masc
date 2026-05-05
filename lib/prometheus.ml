@@ -659,6 +659,8 @@ let metric_keeper_oas_execution_errors =
   "masc_keeper_oas_execution_errors_total"
 let metric_keeper_episode_create_failures =
   "masc_keeper_episode_create_failures_total"
+let metric_keeper_memory_activity_emit_failures =
+  "masc_keeper_memory_activity_emit_failures_total"
 let metric_keeper_supervisor_sweep_failures =
   "masc_keeper_supervisor_sweep_failures_total"
 let metric_keeper_toml_reconcile_sweep_failures =
@@ -1838,6 +1840,10 @@ let init () =
   add metric_keeper_episode_create_failures
     "Total episode creation failures in keeper_agent_memory_episode. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_memory_activity_emit_failures
+    "Total memory flush activity emit callback failures in \
+     keeper_agent_memory_episode. Labeled by keeper and outcome."
     Counter;
   add metric_keeper_supervisor_sweep_failures
     "Total supervisor sweep failures in keeper_runtime periodic beat. \

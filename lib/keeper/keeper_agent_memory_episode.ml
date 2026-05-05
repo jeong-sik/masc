@@ -33,7 +33,19 @@ let emit_flush_activity
         ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
+    | exn ->
+      let outcome_label =
+        match outcome with
+        | None -> "success"
+        | Some value -> value
+      in
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_memory_activity_emit_failures
+        ~labels:[("keeper", keeper_name); ("outcome", outcome_label)]
+        ();
+      Log.Keeper.error
+        "keeper:%s episode.flush activity emit failed outcome=%s: %s"
+        keeper_name outcome_label (Printexc.to_string exn)
 
 let record_success
     ~(config : Coord_utils.config)

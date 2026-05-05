@@ -298,6 +298,7 @@ val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_turn_metrics_snapshot_failures : string
 val metric_keeper_oas_execution_errors : string
 val metric_keeper_episode_create_failures : string
+val metric_keeper_memory_activity_emit_failures : string
 val metric_keeper_supervisor_sweep_failures : string
 val metric_keeper_toml_reconcile_sweep_failures : string
 val metric_keeper_tool_usage_flush_failures : string

@@ -80,3 +80,8 @@ let provider_satisfies_profile p (caps : Provider_tool_support.capabilities) =
   && satisfies req.runtime_mcp_tools caps.supports_runtime_mcp_tools
   && satisfies req.runtime_tool_events caps.supports_runtime_tool_events
   && satisfies req.runtime_mcp_http_headers caps.supports_runtime_mcp_http_headers
+
+let safe_lane_cascade_name = "__safe_lane"
+
+let is_system_cascade_name name =
+  String.length name >= 2 && String.sub name 0 2 = "__"

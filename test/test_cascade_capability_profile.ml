@@ -126,6 +126,23 @@ let test_incident_2026_05_05_partition () =
         (CP.provider_satisfies_profile CP.Lite caps))
     cli_no_headers
 
+(* RFC-0027 PR-4: __safe_lane system cascade. *)
+let test_safe_lane_name_pinned () =
+  check string "safe_lane_cascade_name pinned" "__safe_lane"
+    CP.safe_lane_cascade_name
+
+let test_system_cascade_name_predicate () =
+  check bool "__safe_lane is system" true
+    (CP.is_system_cascade_name "__safe_lane");
+  check bool "__anything is system" true
+    (CP.is_system_cascade_name "__anything");
+  check bool "single underscore is not system" false
+    (CP.is_system_cascade_name "_single");
+  check bool "no prefix is not system" false
+    (CP.is_system_cascade_name "big_three");
+  check bool "empty string is not system" false
+    (CP.is_system_cascade_name "")
+
 let () =
   run "Cascade_capability_profile"
     [
@@ -151,5 +168,12 @@ let () =
         [
           test_case "2026-05-05 partition: tool_strict vs lite" `Quick
             test_incident_2026_05_05_partition;
+        ] );
+      ( "system cascade naming",
+        [
+          test_case "safe_lane_cascade_name pinned" `Quick
+            test_safe_lane_name_pinned;
+          test_case "is_system_cascade_name predicate" `Quick
+            test_system_cascade_name_predicate;
         ] );
     ]

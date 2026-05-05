@@ -81,3 +81,18 @@ val provider_satisfies_profile :
 (** [provider_satisfies_profile p caps] is [true] iff every
     [Required] field of {!required_capabilities_of}[ p] is [true]
     in [caps].  [Optional] fields are unconstrained. *)
+
+val safe_lane_cascade_name : string
+(** RFC-0027 PR-4 system-only cascade name, ["__safe_lane"].  This
+    cascade is shipped in the seed [config/cascade.toml] and contains
+    only providers that satisfy {!Tool_strict}.  Used as the absolute
+    last-resort fallback target by the cross-cascade resolver.
+    Operators must not assign this cascade to keepers — the [__]
+    prefix marks it as system-internal and the seed sets
+    [keeper_assignable = false]. *)
+
+val is_system_cascade_name : string -> bool
+(** [is_system_cascade_name name] is [true] iff [name] is a
+    system-reserved cascade name (currently: anything starting with
+    ["__"]).  Operator-authored cascades must not collide with this
+    namespace. *)

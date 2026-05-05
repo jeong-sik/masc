@@ -525,9 +525,7 @@ jobs:
           opam exec -- dune exec ./bin/cascade_materialize.exe -- \
             config/cascade.json
           if ! git diff --exit-code config/cascade.json; then
-            echo "::error::config/cascade.json is stale relative to \
-config/cascade.toml.  Run 'dune exec ./bin/cascade_materialize.exe -- \
-config/cascade.json' locally and commit the result."
+            echo "::error::config/cascade.json is stale relative to config/cascade.toml.  Run 'dune exec ./bin/cascade_materialize.exe -- config/cascade.json' locally and commit the result."
             exit 1
           fi
 

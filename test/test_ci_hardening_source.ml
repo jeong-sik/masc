@@ -815,6 +815,27 @@ let test_keeper_list_cache_atomic_contracts () =
   check bool "keeper list cache no longer mutates expiry field in place" true
     (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.expires_at <-")
 
+let test_keeper_zombie_field_contracts () =
+  let files =
+    [
+      "lib/keeper/keeper_meta_contract.ml";
+      "lib/keeper/keeper_meta_contract.mli";
+      "lib/keeper/keeper_types.ml";
+      "lib/keeper/keeper_types.mli";
+      "lib/keeper/keeper_meta_json.ml";
+      "lib/keeper/keeper_meta_json_parse.ml";
+      "dashboard/src/types/core.ts";
+      "dashboard/src/keeper-store-normalize.ts";
+    ]
+  in
+  check bool "last_tools_used stays removed from keeper meta surfaces" true
+    (List.for_all
+       (fun file -> file_not_contains_pattern file "last_tools_used")
+       files);
+  check bool "per-turn tools_used remains on execution receipts" true
+    (file_contains_pattern "lib/keeper/keeper_execution_receipt.mli"
+       "tools_used : string list")
+
 let test_keeper_sandbox_credential_volume_contracts () =
   check bool "keeper sandbox documents credential projection path" true
     (file_contains_pattern "Dockerfile.keeper-sandbox"
@@ -1616,6 +1637,8 @@ let () =
              test_keeper_direct_reply_contracts;
            test_case "keeper list cache atomic contracts" `Quick
              test_keeper_list_cache_atomic_contracts;
+           test_case "keeper zombie field contracts" `Quick
+             test_keeper_zombie_field_contracts;
            test_case "keeper sandbox credential volume contracts" `Quick
              test_keeper_sandbox_credential_volume_contracts;
            test_case "board flusher start retry contracts" `Quick

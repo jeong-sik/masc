@@ -79,19 +79,22 @@ let warn_telemetry_drop ~event_family ~event_kind exn =
         ("exception", `String exn_str);
       ]
   in
-  (* Inner swallow: the call sites that invoke this helper rely on the
-     "[Effect.Unhandled] is fully absorbed" contract — propagating an
-     exception out of the lifecycle hook would crash the caller. Both
-     observability side effects below can in principle raise (Log.emit
-     reaches into formatters / IO buffers; Prometheus.inc_counter takes
-     a global lock). If they do, we still drop the warn signal — the
-     primary contract is "do not break the caller". (#13096 review,
-     codex P2) *)
+  (* Isolated swallows: the call sites that invoke this helper rely on
+     the "[Effect.Unhandled] is fully absorbed" contract — propagating
+     an exception out of the lifecycle hook would crash the caller.
+     Each observability side effect is wrapped separately so a failure
+     in one (e.g. [Log.emit] hitting a sink failure) does not skip the
+     other (the counter still increments and stays observable). The
+     primary contract remains "do not break the caller". (#13096
+     review, copilot P1; supersedes the single-try wrapping noted in
+     codex P2.) *)
   (try
     Log.emit Log.Warn ~module_name:"Coord" ~details
       (Printf.sprintf
          "telemetry/audit dropped (non-Eio context): %s/%s"
-         event_family event_kind);
+         event_family event_kind)
+  with _ -> ());
+  (try
     Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
       ~labels:
         [ ("event_family", event_family); ("event_kind", event_kind) ]

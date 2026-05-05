@@ -359,28 +359,16 @@ NextBuggyLeak ==
     \/ Next
     \/ \E p \in Providers : BugAction_LeakedToken(p)
 
-\* Fairness for the Greedy bug variant intentionally drops weak fairness
-\* on EnqueueOverflow.  Models the bug where the admission router never
-\* enqueues stalled keepers (the heuristic-revert PR #12910 documented
-\* the parallel symptom in OCaml).  Combined with BugAction_GreedyKeeper
-\* a Waiting keeper that has no free candidate is allowed to spin in
-\* Waiting forever, violating LivenessInvariant.
-FairnessBuggyGreedy ==
-    /\ \A k \in Keepers : WF_vars(StartTurn(k))
-    /\ \A k \in Keepers : WF_vars(StartWork(k))
-    /\ \A k \in Keepers : WF_vars(CompleteWork(k))
-    \* INTENTIONALLY MISSING: WF_vars(EnqueueOverflow(k))
-    /\ \A p \in Providers : WF_vars(RefillToken(p))
-    /\ WF_vars(WakeFromQueue)
-    \* Weakened to WF (was SF in clean spec).  Models the bug where the
-    \* admission router does NOT retry across the candidate list when
-    \* a token flickers — a keeper whose only candidate is briefly
-    \* enabled by RefillToken can miss it if BugAction_GreedyKeeper or
-    \* a peer's TryDispatch consumes the token first, leaving the
-    \* original keeper stuck in Waiting.
-    /\ \A k \in Keepers, p \in Providers : WF_vars(TryDispatch(k, p))
-
-SpecBuggyGreedy == Init /\ [][NextBuggyGreedy]_vars /\ FairnessBuggyGreedy
+\* SpecBuggyGreedy strips ALL fairness assumptions.  This is the
+\* maximum-strength mutation: no scheduler guarantee that any progress
+\* action ever fires when enabled.  Combined with BugAction_GreedyKeeper
+\* (silent UNCHANGED in the Waiting + ~AnyCandidateFree + ~Queue state),
+\* the spec admits behaviours where a keeper enters Waiting and never
+\* leaves — exactly the operator-observed symptom (#12910 root pattern,
+\* `feedback_keeper_starvation_capacity_vs_turn_duration_mismatch`).
+\* Under this spec, LivenessInvariant and WaitingMustEnqueueOrDispatch
+\* must be violated by TLC.
+SpecBuggyGreedy == Init /\ [][NextBuggyGreedy]_vars
 SpecBuggyLeak   == Init /\ [][NextBuggyLeak]_vars   /\ Fairness
 
 \* Notes for follow-up iterations ──────────────────────────────────

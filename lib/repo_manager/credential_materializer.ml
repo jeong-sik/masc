@@ -29,9 +29,10 @@ let close_fd_noerr fd =
   try Unix.close fd with Unix.Unix_error _ -> ()
 
 (* [Unix.waitpid] raises [Unix_error EINTR] when a signal interrupts
-   the wait.  Without retry the exception escapes through this
-   module's callers — verify_state, gh_token_lookup, materialize —
-   and ultimately surfaces as [tools/call crashed: Unix_error EINTR
+   the wait.  Without retry the exception escapes the three call
+   sites in this module — [gh_auth_status_ok],
+   [read_operator_ambient_token], [provision_via_with_token] — and
+   ultimately surfaces as [tools/call crashed: Unix_error EINTR
    waitpid] for keeper_bash / docker shell paths.  Observed live at
    ~5/hr (2026-05-05).  Retry is the canonical Posix idiom and
    matches the prior-art helper in lib/process/process_eio.ml:281. *)

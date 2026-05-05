@@ -79,27 +79,51 @@ let () =
     ~label:"EINTR retry arm"
     src
     "Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_intr pid";
-  (* Anchor 3: no bare blocking [Unix.waitpid [] pid] outside the
-     helper.  The helper itself contains [Unix.waitpid [] pid] on
-     its single defining line, so we expect *exactly one*
-     occurrence of that exact pattern. *)
-  let bare_blocking_uses = count_substring ~needle:"Unix.waitpid [] pid" src in
-  if bare_blocking_uses <> 1 then
+  (* Anchor 3: only one bare [Unix.waitpid] call may exist in the
+     module — the one inside [waitpid_no_intr].  Anchoring on
+     [Unix.waitpid] (without the trailing [[] pid]) defends against
+     renames of the local variable as well as a reintroduced bare
+     [Unix.waitpid [] child_pid] in a future refactor.  Comments are
+     out of scope: we strip them before counting so the explanatory
+     comment that names [Unix.waitpid] does not skew the result. *)
+  let strip_ocaml_comments s =
+    let buf = Buffer.create (String.length s) in
+    let depth = ref 0 in
+    let i = ref 0 in
+    let n = String.length s in
+    while !i < n do
+      if !i + 1 < n && s.[!i] = '(' && s.[!i + 1] = '*' then begin
+        incr depth; i := !i + 2
+      end else if !depth > 0 && !i + 1 < n && s.[!i] = '*' && s.[!i + 1] = ')' then begin
+        decr depth; i := !i + 2
+      end else begin
+        if !depth = 0 then Buffer.add_char buf s.[!i];
+        incr i
+      end
+    done;
+    Buffer.contents buf
+  in
+  let code_only = strip_ocaml_comments src in
+  let bare_waitpid = count_substring ~needle:"Unix.waitpid" code_only in
+  if bare_waitpid <> 1 then
     failwith
       (Printf.sprintf
-         "expected exactly 1 [Unix.waitpid [] pid] occurrence \
-          (the helper definition); found %d.  Every blocking \
-          waitpid in credential_materializer.ml must route \
-          through waitpid_no_intr — see issue #13060."
-         bare_blocking_uses);
-  (* Anchor 4: at least one call site uses the helper.  Catches
-     a refactor that deletes all helper call sites without also
-     deleting the helper. *)
-  let helper_uses = count_substring ~needle:"waitpid_no_intr pid" src in
-  if helper_uses < 4 then
+         "expected exactly 1 [Unix.waitpid] use in code (inside \
+          waitpid_no_intr); found %d.  Every blocking waitpid in \
+          credential_materializer.ml must route through \
+          waitpid_no_intr — see issue #13060."
+         bare_waitpid);
+  (* Anchor 4: ≥3 distinct call sites route the result of
+     [waitpid_no_intr] through [snd (waitpid_no_intr ...)] — the
+     pattern every caller uses to discard the [pid] half.  This is
+     a call-site-only pattern (no false credit for the helper
+     definition or the recursive tail call) so the count is exactly
+     "number of true caller invocations". *)
+  let call_sites = count_substring ~needle:"snd (waitpid_no_intr" code_only in
+  if call_sites < 3 then
     failwith
       (Printf.sprintf
-         "expected ≥4 references to [waitpid_no_intr pid] (1 \
-          definition + ≥3 call sites); found %d"
-         helper_uses);
+         "expected ≥3 [snd (waitpid_no_intr ...)] caller invocations; \
+          found %d.  See issue #13060."
+         call_sites);
   print_endline "test_credential_materializer_waitpid_eintr: OK"

@@ -196,18 +196,44 @@ function canonicalToolName(value: string | null): string | null {
   return normalizeText(value)
 }
 
+/** Per-keeper polling artifacts that fill the 100-entry window with no
+ *  per-event signal: keeper_metric/heartbeat snapshots and the matching
+ *  oas_event/masc:keeper:{snapshot,lifecycle} relays. We classify them as
+ *  one fleet-wide "heartbeat" category so all instances collapse into a
+ *  single group regardless of (a) which keeper emitted it or
+ *  (b) whether they are consecutive in the stream — see #13002 for the
+ *  before/after screenshot. */
+const FLEET_POLLING_OAS_EVENT_TYPES = new Set([
+  'masc:keeper:snapshot',
+  'masc:keeper:lifecycle',
+  'oas:masc:keeper:snapshot',
+  'oas:masc:keeper:lifecycle',
+])
+
+function isFleetPollingEntry(entry: TelemetryEntry): boolean {
+  if (entry.source === 'keeper_metric' && normalizeText(entry.channel) === 'heartbeat') {
+    return true
+  }
+  if (entry.source === 'oas_event') {
+    const eventType = normalizeText(entry.event_type) ?? normalizeText(entry.type)
+    if (eventType != null && FLEET_POLLING_OAS_EVENT_TYPES.has(eventType)) return true
+  }
+  return false
+}
+
 function entryGroupingDescriptor(entry: TelemetryEntry): {
   key: string
   category: TelemetryCondensedCategory
   label: string
 } | null {
-  if (entry.source === 'keeper_metric' && normalizeText(entry.channel) === 'heartbeat') {
-    const keeper = normalizeText(entry.name) ?? 'unknown'
-    const scope = normalizeText(entry.session_id) ?? normalizeText(entry.operation_id) ?? keeper
+  if (isFleetPollingEntry(entry)) {
     return {
-      key: `heartbeat:${scope}:${keeper}`,
+      // Fleet-wide single key so ALL polling artifacts (heartbeat + snapshot
+      // + lifecycle, across every keeper) merge into one group regardless of
+      // arrival order.
+      key: 'heartbeat:fleet',
       category: 'heartbeat',
-      label: `${keeper} heartbeat`,
+      label: 'fleet heartbeat',
     }
   }
 
@@ -353,7 +379,8 @@ export function filterTelemetryDisplayItems(
 export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
   const items: TelemetryDisplayItem[] = []
   let nextItemId = 0
-  let activeGroup: {
+
+  type ActiveGroup = {
     key: string
     category: TelemetryCondensedCategory
     label: string
@@ -362,60 +389,109 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
     oldestTs: number
     sourceKeys: Set<TelemetrySource>
     scopeBadges: string[]
-  } | null = null
+    /** Position in [items] where this group's row will eventually be
+     *  inserted via [flushGroup]. Used by the fleet-heartbeat group so it
+     *  stays at the position of its first entry even when intervening
+     *  rows of other categories have already been pushed past it. */
+    insertIndex: number
+  }
+
+  let activeGroup: ActiveGroup | null = null
+
+  /** A persistent group for the fleet polling/heartbeat category. Heartbeat
+   *  entries arrive interleaved with real activity, so we accumulate ALL
+   *  of them here regardless of position and only emit the merged row at
+   *  the end. The row is then spliced into [items] at the position of the
+   *  first heartbeat we saw — preserving rough chronology while collapsing
+   *  the noise. */
+  let fleetHeartbeat: ActiveGroup | null = null
+
+  const renderGroup = (g: ActiveGroup): TelemetryDisplayItem => {
+    if (g.entries.length === 1) {
+      const entry = g.entries[0] as TelemetryEntry
+      const item: TelemetryDisplayItem = {
+        kind: 'entry',
+        key: `${g.key}:${g.latestTs}:${nextItemId}`,
+        entry,
+      }
+      nextItemId += 1
+      return item
+    }
+    const item: TelemetryDisplayItem = {
+      kind: 'group',
+      key: `${g.key}:${g.latestTs}:${g.entries.length}:${nextItemId}`,
+      category: g.category,
+      label: g.label,
+      count: g.entries.length,
+      latestTs: g.latestTs,
+      oldestTs: g.oldestTs,
+      entries: g.entries,
+      sourceKeys: Array.from(g.sourceKeys),
+      scopeBadges: g.scopeBadges,
+    }
+    nextItemId += 1
+    return item
+  }
 
   const flushGroup = () => {
     if (!activeGroup) return
-    if (activeGroup.entries.length === 1) {
-      const entry = activeGroup.entries[0] as TelemetryEntry
-      items.push({
-        kind: 'entry',
-        key: `${activeGroup.key}:${activeGroup.latestTs}:${nextItemId}`,
-        entry,
-      })
-      nextItemId += 1
-    } else {
-      items.push({
-        kind: 'group',
-        key: `${activeGroup.key}:${activeGroup.latestTs}:${activeGroup.entries.length}:${nextItemId}`,
-        category: activeGroup.category,
-        label: activeGroup.label,
-        count: activeGroup.entries.length,
-        latestTs: activeGroup.latestTs,
-        oldestTs: activeGroup.oldestTs,
-        entries: activeGroup.entries,
-        sourceKeys: Array.from(activeGroup.sourceKeys),
-        scopeBadges: activeGroup.scopeBadges,
-      })
-      nextItemId += 1
-    }
+    items.push(renderGroup(activeGroup))
     activeGroup = null
+  }
+
+  const accumulate = (target: ActiveGroup, entry: TelemetryEntry, ts: number) => {
+    target.entries.push(entry)
+    if (target.latestTs === 0 && ts !== 0) target.latestTs = ts
+    else if (ts !== 0) target.latestTs = Math.max(target.latestTs, ts)
+    if (target.oldestTs === 0) target.oldestTs = ts
+    else if (ts !== 0) target.oldestTs = Math.min(target.oldestTs, ts)
+    target.sourceKeys.add(entry.source)
+    target.scopeBadges = uniqueStrings([
+      ...target.scopeBadges,
+      ...telemetryScopeBadges(entry),
+    ])
   }
 
   for (const entry of entries) {
     const descriptor = entryGroupingDescriptor(entry)
+    const ts = entryTimestamp(entry)
+
+    // Special path: fleet-wide polling/heartbeat artifacts always merge
+    // into a single group regardless of position. Without this, 14
+    // keepers heartbeating every 60s produce 14 separate single-entry
+    // rows that drown out real activity (#13002).
+    if (descriptor && descriptor.key === 'heartbeat:fleet') {
+      if (!fleetHeartbeat) {
+        fleetHeartbeat = {
+          key: descriptor.key,
+          category: descriptor.category,
+          label: descriptor.label,
+          entries: [entry],
+          latestTs: ts,
+          oldestTs: ts,
+          sourceKeys: new Set([entry.source]),
+          scopeBadges: telemetryScopeBadges(entry),
+          insertIndex: items.length + (activeGroup ? 1 : 0),
+        }
+      } else {
+        accumulate(fleetHeartbeat, entry, ts)
+      }
+      continue
+    }
+
     if (!descriptor) {
       flushGroup()
       items.push({
         kind: 'entry',
-        key: `${entry.source}:${entryTimestamp(entry)}:${nextItemId}`,
+        key: `${entry.source}:${ts}:${nextItemId}`,
         entry,
       })
       nextItemId += 1
       continue
     }
 
-    const ts = entryTimestamp(entry)
     if (activeGroup && activeGroup.key === descriptor.key) {
-      activeGroup.entries.push(entry)
-      if (activeGroup.latestTs === 0 && ts !== 0) activeGroup.latestTs = ts
-      if (activeGroup.oldestTs === 0) activeGroup.oldestTs = ts
-      else if (ts !== 0) activeGroup.oldestTs = Math.min(activeGroup.oldestTs, ts)
-      activeGroup.sourceKeys.add(entry.source)
-      activeGroup.scopeBadges = uniqueStrings([
-        ...activeGroup.scopeBadges,
-        ...telemetryScopeBadges(entry),
-      ])
+      accumulate(activeGroup, entry, ts)
       continue
     }
 
@@ -429,10 +505,17 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
       oldestTs: ts,
       sourceKeys: new Set([entry.source]),
       scopeBadges: telemetryScopeBadges(entry),
+      insertIndex: items.length,
     }
   }
 
   flushGroup()
+
+  if (fleetHeartbeat) {
+    const idx = Math.max(0, Math.min(fleetHeartbeat.insertIndex, items.length))
+    items.splice(idx, 0, renderGroup(fleetHeartbeat))
+  }
+
   return items
 }
 

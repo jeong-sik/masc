@@ -44,7 +44,9 @@
     long-term memory recall.  This module re-exports policy types
     only — no behavior. *)
 
-include module type of Keeper_types_profile
+include module type of struct
+  include Keeper_types_profile
+end
 
 (** {1 Policy types (remain in keeper_meta top-level)} *)
 
@@ -400,7 +402,9 @@ val read_meta_if_changed :
 
 (** {1 Re-exports from Keeper_types_support} *)
 
-include module type of Keeper_types_support
+include module type of struct
+  include Keeper_types_support
+end
 
 (** {1 Fiber health (for keeper supervisor)} *)
 

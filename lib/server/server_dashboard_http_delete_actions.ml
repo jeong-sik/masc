@@ -462,8 +462,9 @@ let add_delete_action_routes router =
                          {|{"ok":false,"error":"invalid request: requires {\"target_id\":\"...\"}"}|} reqd
                    | Some target_id ->
                        let reason =
-                         Safe_ops.json_string_opt "reason" json
-                         |> Option.bind Board_moderation.flag_reason_of_string
+                         Option.bind
+                           (Safe_ops.json_string_opt "reason" json)
+                           Board_moderation.flag_reason_of_string
                        in
                        let note = Safe_ops.json_string_opt "note" json in
                        let actor =

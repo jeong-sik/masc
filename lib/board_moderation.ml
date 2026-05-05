@@ -125,7 +125,7 @@ let flag ~target_kind ~target_id ~reporter ~reason =
   (* Reject duplicate unresolved flags for the same target *)
   let duplicate =
     Hashtbl.fold
-      (fun _k e acc ->
+      (fun _k (e : queue_entry) acc ->
          acc ||
          (e.target_id = target_id && e.target_kind = target_kind && not e.resolved))
       s.queue false
@@ -193,7 +193,7 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
   } in
   (* Resolve any open queue entry for this target *)
   Hashtbl.iter
-    (fun _k qe ->
+    (fun _k (qe : queue_entry) ->
        if qe.target_id = target_id && qe.target_kind = target_kind && not qe.resolved then
          Hashtbl.replace s.queue qe.entry_id { qe with resolved = true })
     s.queue;

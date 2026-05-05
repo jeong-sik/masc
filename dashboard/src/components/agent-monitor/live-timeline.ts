@@ -12,7 +12,7 @@ import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
 
-export type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
+type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
 
 const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
@@ -29,7 +29,7 @@ const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
 
 type EventBadgeTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>
 
-export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
+function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   if (filter === 'all') return true
   const et = entry.eventType ?? 'unknown'
   switch (filter) {

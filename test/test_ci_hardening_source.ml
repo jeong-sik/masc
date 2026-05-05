@@ -293,9 +293,18 @@ let test_pr_automation_draft_guard_contracts () =
     (match live_state_skip, draft_restore with
      | Some skip_pos, Some restore_pos -> skip_pos < restore_pos
      | _ -> false);
+  check bool "pr automation reads live labels for policy" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "const labels = (currentPr.labels || []).map(normalizeLabelName).filter(Boolean)");
+  check bool "pr automation does not use stale payload labels for policy" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "const labels = (pr.labels || [])");
   check bool "draft-only state does not suppress missing approval" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
-       "verifiedBypassLabels.length === 0 &&\n              !safeDraftOnlyState");
+       "(!safeDraftOnlyState &&");
+  check bool "agent-like PRs always require verified approval" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "const approvalRequired =\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
   check bool "pr automation has hard-stop label policy" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "hard-stop label present");

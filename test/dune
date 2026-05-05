@@ -1130,6 +1130,7 @@
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 (include stanzas/test_keeper_turn_slot_holders.inc)
+(include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 (include stanzas/test_keeper_turn_up_create_meta_retry.inc)
 (include stanzas/test_keeper_usage_trust_anthropic_cache_9959.inc)
 (include stanzas/test_keeper_wfq_overflow.inc)

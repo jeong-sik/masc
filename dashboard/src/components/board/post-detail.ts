@@ -195,6 +195,7 @@ function CommentItem({
   const showReplies = replies.length > 0 && !collapsedByUser && !cappedByDepth
   const childForceExpanded = forceThreadExpanded || deepExpanded
   const repliesExpanded = !collapsedByUser
+  const canToggleReplies = replies.length > 0 && !cappedByDepth && !suppressCollapseToggle && !forceThreadExpanded
   const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
@@ -215,7 +216,7 @@ function CommentItem({
     <div style=${indentStyle}>
       <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
-          ${replies.length > 0 && !cappedByDepth && !suppressCollapseToggle ? html`
+          ${canToggleReplies ? html`
             <button
               type="button"
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"

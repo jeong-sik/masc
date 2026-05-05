@@ -39,7 +39,13 @@ vi.mock('../../api/board', () => ({
     user_id: 'dashboard-reviewer',
     emoji: '🚀',
     reacted: true,
-    summary: [{ emoji: '🚀', count: 1, reacted: true }],
+    summary: [{
+      emoji: '🚀',
+      count: 1,
+      reacted: true,
+      has_reacted: true,
+      recent_user_ids: ['dashboard-reviewer'],
+    }],
   }),
 }))
 

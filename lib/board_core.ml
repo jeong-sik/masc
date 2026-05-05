@@ -325,6 +325,10 @@ let reaction_summary_to_yojson (summary : reaction_summary) : Yojson.Safe.t =
     ("emoji", `String summary.emoji);
     ("count", `Int summary.count);
     ("reacted", `Bool summary.reacted);
+    ("has_reacted", `Bool summary.reacted);
+    ( "recent_user_ids",
+      `List (List.map (fun user_id -> `String user_id) summary.recent_user_ids)
+    );
   ]
 
 let reaction_toggle_result_to_yojson (result : reaction_toggle_result) :
@@ -856,17 +860,25 @@ let ensure_reaction_target_unlocked store ~target_type ~target_id =
 let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
   let counts = Hashtbl.create 8 in
   let reacted = Hashtbl.create 8 in
+  let recent_users = Hashtbl.create 8 in
   Hashtbl.iter
     (fun _ (reaction : reaction) ->
        if (=) reaction.target_type target_type
           && String.equal reaction.target_id target_id
        then begin
+         let reaction_user_id = Agent_id.to_string reaction.user_id in
          let current =
            Hashtbl.find_opt counts reaction.emoji |> Option.value ~default:0
          in
          Hashtbl.replace counts reaction.emoji (current + 1);
+         let users =
+           Hashtbl.find_opt recent_users reaction.emoji
+           |> Option.value ~default:[]
+         in
+         Hashtbl.replace recent_users reaction.emoji
+           ((reaction_user_id, reaction.created_at) :: users);
          match user_id with
-         | Some user when String.equal (Agent_id.to_string reaction.user_id) user ->
+         | Some user when String.equal reaction_user_id user ->
              Hashtbl.replace reacted reaction.emoji true
          | Some _ | None -> ()
        end)
@@ -882,6 +894,13 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
              count;
              reacted =
                Hashtbl.find_opt reacted emoji |> Option.value ~default:false;
+             recent_user_ids =
+               Hashtbl.find_opt recent_users emoji
+               |> Option.value ~default:[]
+               |> List.sort (fun (_, a_ts) (_, b_ts) ->
+                      Stdlib.Float.compare b_ts a_ts)
+               |> List.map fst
+               |> List.filteri (fun idx _ -> idx < 5);
            })
     board_reaction_emojis
 

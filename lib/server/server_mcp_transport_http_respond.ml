@@ -7,6 +7,13 @@
     progress and httpun's error_handler has already started responding
     (2026-05-05 cycle9 FATAL incident). *)
 let safe_respond_with_string reqd response body =
+  (* #13102 follow-up: backtraces are enabled at process start in
+     [bin/main_eio.ml] (Printexc.record_backtrace true), so the
+     unexpected-exception arm attaches the backtrace whenever it is
+     available.  The known-race arm (Failure path) keeps its compact
+     one-line format because the failure mode is well-classified and
+     the surrounding incident note already captures the diagnostic
+     intent — adding a backtrace there would just churn parsers. *)
   try Httpun.Reqd.respond_with_string reqd response body
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -16,9 +23,16 @@ let safe_respond_with_string reqd response body =
          2026-05-05 OAS cancel race): %s"
         msg
   | exn ->
-      Log.Server.warn
-        "[mcp-http] respond_with_string unexpected exception: %s"
-        (Printexc.to_string exn)
+      let backtrace = Printexc.get_backtrace () in
+      let summary = Printexc.to_string exn in
+      if String.trim backtrace = "" then
+        Log.Server.warn
+          "[mcp-http] respond_with_string unexpected exception: %s"
+          summary
+      else
+        Log.Server.warn
+          "[mcp-http] respond_with_string unexpected exception: %s\n%s"
+          summary backtrace
 
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 

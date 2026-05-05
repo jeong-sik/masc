@@ -692,7 +692,7 @@ let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
       ~output_text:{|{"ok":false,"cmd":"git push origin feat/x"}|}
   in
   check (list string) "git action sequence"
-    [ "GIT_ADD"; "GIT_COMMIT"; "GIT_PUSH" ]
+    [ "GIT_ADD" ]
     (work_actions events);
   check bool "failure propagated to every action" true
     (List.for_all (fun e -> not e.Hooks.success) events)
@@ -725,6 +725,29 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
       ~output_text:{|{"ok":true}|}
   in
   check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
+
+let test_pr_work_action_metric_skips_shell_control_flow_segments () =
+  let and_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:(`Assoc [ ("cmd", `String "false && git push origin feat/x") ])
+      ~output_text:{|{"ok":false}|}
+  in
+  check (list string) "skipped && segment" [] (work_actions and_events);
+  let or_events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                "git commit -m reviewed || gh pr create --draft --title retry" );
+          ])
+      ~output_text:{|{"ok":true}|}
+  in
+  check (list string) "skipped || fallback segment" [ "GIT_COMMIT" ]
+    (work_actions or_events)
 
 let () =
   run "keeper_hooks_oas/telemetry"
@@ -789,9 +812,11 @@ let () =
             test_pr_work_action_metric_extracts_masc_code_git_push
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
-        ; test_case "extracts bash git sequence and failure" `Quick
+        ; test_case "extracts conservative bash git failure" `Quick
             test_pr_work_action_metric_extracts_bash_git_sequence_failure
         ; test_case "ignores quoted command words" `Quick
             test_pr_work_action_metric_ignores_quoted_command_words
+        ; test_case "skips conditional control-flow segments" `Quick
+            test_pr_work_action_metric_skips_shell_control_flow_segments
         ] )
     ]

@@ -48,6 +48,20 @@ let keeper_metrics_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex metrics_store_mu lookup
 
+let keeper_pr_action_metrics_store config name : Dated_jsonl.t =
+  let dir =
+    Filename.concat (keeper_dir_ config) (name ^ "/pr-action-metrics")
+  in
+  let lookup () =
+    match Hashtbl.find_opt metrics_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace metrics_store_cache dir store;
+      store
+  in
+  Eio_guard.with_mutex metrics_store_mu lookup
+
 let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
   Hashtbl.create 8
 

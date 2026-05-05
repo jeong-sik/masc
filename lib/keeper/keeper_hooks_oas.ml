@@ -1060,34 +1060,41 @@ let pr_review_action_metric_event_of_tool_io
 
 let split_top_level_command_segments command =
   let len = String.length command in
-  let push_segment start stop acc =
+  let push_segment unconditional start stop acc =
     let segment = String.sub command start (stop - start) |> String.trim in
-    if segment = "" then acc else segment :: acc
+    if segment = "" then acc else (unconditional, segment) :: acc
   in
-  let rec loop acc start i in_single in_double escaped =
-    if i >= len then List.rev (push_segment start len acc)
+  let rec loop acc unconditional start i in_single in_double escaped =
+    if i >= len then List.rev (push_segment unconditional start len acc)
     else
       let c = command.[i] in
-      if escaped then loop acc start (i + 1) in_single in_double false
+      if escaped then loop acc unconditional start (i + 1) in_single in_double false
       else
         match c with
         | '\\' when not in_single ->
-            loop acc start (i + 1) in_single in_double true
+            loop acc unconditional start (i + 1) in_single in_double true
         | '\'' when not in_double ->
-            loop acc start (i + 1) (not in_single) in_double false
+            loop acc unconditional start (i + 1) (not in_single) in_double false
         | '"' when not in_single ->
-            loop acc start (i + 1) in_single (not in_double) false
+            loop acc unconditional start (i + 1) in_single (not in_double) false
         | '&' when (not in_single) && (not in_double) && i + 1 < len
                    && command.[i + 1] = '&' ->
-            let acc = push_segment start i acc in
-            loop acc (i + 2) (i + 2) in_single in_double false
+            let acc = push_segment unconditional start i acc in
+            loop acc false (i + 2) (i + 2) in_single in_double false
+        | '|' when (not in_single) && (not in_double) && i + 1 < len
+                   && command.[i + 1] = '|' ->
+            let acc = push_segment unconditional start i acc in
+            loop acc false (i + 2) (i + 2) in_single in_double false
+        | '\n' when (not in_single) && not in_double ->
+            let acc = push_segment unconditional start i acc in
+            loop acc true (i + 1) (i + 1) in_single in_double false
         | ';' when (not in_single) && not in_double ->
-            let acc = push_segment start i acc in
-            loop acc (i + 1) (i + 1) in_single in_double false
+            let acc = push_segment unconditional start i acc in
+            loop acc true (i + 1) (i + 1) in_single in_double false
         | _ ->
-            loop acc start (i + 1) in_single in_double false
+            loop acc unconditional start (i + 1) in_single in_double false
   in
-  loop [] 0 0 false false false
+  loop [] true 0 0 false false false
 
 let pr_work_action_of_git_action raw =
   match String.trim raw |> String.lowercase_ascii with
@@ -1121,10 +1128,15 @@ let pr_work_actions_of_gh_segment segment =
 
 let pr_work_actions_of_command command =
   split_top_level_command_segments command
-  |> List.concat_map (fun segment ->
-       match pr_work_actions_of_gh_segment segment with
-       | [] -> pr_work_actions_of_git_segment segment
-       | actions -> actions)
+  |> List.concat_map (fun (unconditional, segment) ->
+       (* Shell conditionals can skip later segments at runtime.  Without
+          per-segment exit data, count only top-level segments that are
+          unconditionally reached. *)
+       if not unconditional then []
+       else
+         match pr_work_actions_of_gh_segment segment with
+         | [] -> pr_work_actions_of_git_segment segment
+         | actions -> actions)
 
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
   match tool_name with
@@ -1204,7 +1216,7 @@ let append_pr_review_action_metric
   | None -> ()
   | Some event ->
       let now = Time_compat.now () in
-      let store = Keeper_types.keeper_metrics_store config meta.name in
+      let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
       let snapshot =
         `Assoc
           [
@@ -1246,7 +1258,7 @@ let append_pr_work_action_metrics
   match events with
   | [] -> ()
   | _ ->
-      let store = Keeper_types.keeper_metrics_store config meta.name in
+      let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
       List.iter
         (fun event ->
            let now = Time_compat.now () in

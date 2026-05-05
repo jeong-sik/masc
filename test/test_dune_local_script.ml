@@ -309,6 +309,45 @@ let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+(* Codex-connector follow-ups (#13117, 2026-05-05):
+   - `--auto-promote` is a BOOLEAN common option (no arg).  Treating
+     it as value-taking made `--auto-promote clean` skip both tokens
+     and fall back to `build`.
+   - `-p PACKAGES` and `-x VAL` are SHORT value-taking common
+     options; the original `[[ "$a" == -* ]]` fallback consumed
+     only the flag and misread the value as the subcommand. *)
+let test_clean_subcommand_after_auto_promote_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-auto-promote" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--auto-promote clean"
+      in
+      check int
+        "`--auto-promote clean` (boolean flag, NOT value-taking) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_after_short_packages_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-short-p" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "-p mypkg clean"
+      in
+      check int
+        "`-p mypkg clean` (short value-taking flag) skips guards"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_pin_ok_build_proceeds () =
   with_temp_dir "dune-local-pin-ok" (fun dir ->
       let bin_dir, dune_log =
@@ -476,6 +515,14 @@ let () =
             "`--display=quiet clean` (--flag=value before subcommand) skips \
              pin guard"
             `Quick test_clean_subcommand_with_eq_flag_skips_pin_guard;
+          test_case
+            "`--auto-promote clean` (boolean flag is NOT value-taking) skips \
+             pin guard"
+            `Quick test_clean_subcommand_after_auto_promote_skips_pin_guard;
+          test_case
+            "`-p mypkg clean` (short -p IS value-taking) skips pin guard"
+            `Quick
+            test_clean_subcommand_after_short_packages_flag_skips_pin_guard;
           test_case "pin OK allows build to proceed" `Quick
             test_pin_ok_build_proceeds;
           test_case "MASC_DUNE_DRY_RUN=1 skips pin check" `Quick

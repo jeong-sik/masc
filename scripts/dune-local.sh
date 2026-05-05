@@ -64,10 +64,19 @@ fi
 # like `scripts/dune-local.sh --root . clean` as non-clean, making the
 # guards below fire on a clean target that never compiles.  The subcommand
 # is the first positional token after any leading global-option flags.
+#
+# Two follow-up reviews (codex-connector P2, 2026-05-05):
+#   - `--auto-promote` is a boolean flag, NOT value-taking (per
+#     `dune build --help` common options).  Removed from value list.
+#   - `-p PACKAGES` and `-x VAL` ARE value-taking short options
+#     (also common options).  Added to value list — the prior
+#     fallback `[[ "$a" == -* ]]` consumed only the flag and then
+#     misread the value as the subcommand.
 _value_taking_flags=(--root --workspace --profile --build-dir --display \
-                     --default-target -j --jobs --config-file --cache \
-                     --cache-storage-backend --auto-promote --diff-command \
-                     --error-reporting --terminal-persistence)
+                     --default-target -j --jobs -p --only-packages \
+                     -x --config-file --cache --cache-storage-backend \
+                     --diff-command --error-reporting \
+                     --terminal-persistence)
 _detect_subcommand() {
   local i=0
   while (( i < ${#args[@]} )); do

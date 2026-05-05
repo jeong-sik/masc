@@ -88,6 +88,22 @@ function agentsToPresence(
 }
 
 /** Parse SSE text/event-stream body into an array of WorktreeEntry objects. */
+/** Type predicate that validates all required WorktreeEntry fields. */
+function isWorktreeEntry(value: unknown): value is WorktreeEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj['worktree_path'] === 'string' &&
+    typeof obj['branch'] === 'string' &&
+    typeof obj['changed_count'] === 'number' &&
+    typeof obj['staged_count'] === 'number' &&
+    typeof obj['head_sha'] === 'string' &&
+    (obj['pr_number'] === null || typeof obj['pr_number'] === 'number') &&
+    (obj['pr_state'] === null || typeof obj['pr_state'] === 'string') &&
+    typeof obj['keeper_attached'] === 'boolean'
+  )
+}
+
 export function parseWorktreeSSE(body: string): WorktreeEntry[] {
   const entries: WorktreeEntry[] = []
   for (const line of body.split('\n')) {
@@ -97,13 +113,8 @@ export function parseWorktreeSSE(body: string): WorktreeEntry[] {
     if (!json || json === '{}') continue
     try {
       const obj = JSON.parse(json) as unknown
-      if (
-        typeof obj === 'object' &&
-        obj !== null &&
-        'worktree_path' in obj &&
-        'branch' in obj
-      ) {
-        entries.push(obj as WorktreeEntry)
+      if (isWorktreeEntry(obj)) {
+        entries.push(obj)
       }
     } catch {
       // skip malformed lines

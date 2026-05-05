@@ -141,6 +141,17 @@ let filter_rejection_reason_label = function
   | Required_tool_use r ->
       Provider_tool_support.rejection_reason_label r
 
+let log_skip_decision ~label ~keeper_name provider_cfg reason =
+  match reason with
+  | Codex_keeper_bound_actor_required ->
+      Log.Misc.info
+        "cascade %s: skipping provider=%s for keeper=%s reason=%s; continuing with remaining providers or secondary fallback"
+        label
+        (Provider_tool_support.provider_debug_label provider_cfg)
+        keeper_name
+        (filter_rejection_reason_label reason)
+  | Tool_lane_unsupported | Required_tool_use _ -> ()
+
 let classify_filter_rejection
     ~(keeper_name : string)
     ?runtime_mcp_policy
@@ -304,6 +315,7 @@ let filter_candidate_providers_for_tool_support
            with
            | None -> (provider_cfg :: kept, rejected, provider_index + 1)
            | Some reason ->
+               log_skip_decision ~label ~keeper_name provider_cfg reason;
                let swap =
                  match secondary_resolver with
                  | None -> Either.Right (provider_cfg, reason)

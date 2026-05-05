@@ -122,10 +122,10 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
     | None ->
         `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
     | Some json -> (
-        match Types.agent_of_yojson json with
+        match Masc_domain.agent_of_yojson json with
         | Error _ ->
             `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
-        | Ok (agent : Types.agent) ->
+        | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
             let joined_ts =
               Coord_resilience.Time.parse_iso8601_opt agent.joined_at
@@ -144,7 +144,7 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ("exists", `Bool true);
                 ("name", `String agent.name);
                 ("agent_type", `String agent.agent_type);
-                ("status", `String (Types.string_of_agent_status agent.status));
+                ("status", `String (Masc_domain.string_of_agent_status agent.status));
                 ( "capabilities",
                   `List (List.map (fun s -> `String s) agent.capabilities) );
                 ( "current_task", Json_util.string_opt_to_json agent.current_task );

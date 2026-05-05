@@ -304,7 +304,8 @@ let test_tool_exec_observer_bridges_to_telemetry () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      let on_exec ~tool_name ~success ~duration_ms =
+      let on_exec ~tool_name ~success ~duration_ms
+          ?error_kind:_ ?error_message:_ () =
         Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
           ~duration_ms ~agent_id:"llama-local-worker" ()
       in

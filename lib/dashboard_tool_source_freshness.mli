@@ -19,7 +19,7 @@ val latest_ts_of_record : Yojson.Safe.t -> float option
 (** Extract the most recent timestamp from a JSON record,
     trying [ts_unix] / [ts] / [timestamp] (numeric) first and
     [ts_iso] (ISO-8601) as a fallback via
-    [Types.parse_iso8601_opt]. Returns [None] for non-object
+    [Masc_domain.parse_iso8601_opt]. Returns [None] for non-object
     JSON, missing fields, and unparseable ISO strings. *)
 
 val count_source_entries : string -> int

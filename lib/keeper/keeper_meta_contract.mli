@@ -316,7 +316,7 @@ val scheduled_autonomous_cycle_outcome_of_string :
 
 val now_iso : unit -> string
 (** [now_iso ()] is the ISO-8601 timestamp from
-    {!Types.now_iso}. *)
+    {!Masc_domain.now_iso}. *)
 
 val map_runtime :
   (agent_runtime_state -> agent_runtime_state) ->

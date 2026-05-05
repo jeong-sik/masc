@@ -3,7 +3,7 @@
     Extracted from Coord module. Renders the full room status view
     including agents, tasks, and message summary. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 
@@ -80,16 +80,16 @@ let status config =
     List.fold_left
       (fun (active, done_cnt, cancelled_cnt) task ->
         let s = task.task_status in
-        if Types.task_status_is_done s then (active, done_cnt + 1, cancelled_cnt)
-        else if Types.task_status_is_terminal s then (active, done_cnt, cancelled_cnt + 1)
+        if Masc_domain.task_status_is_done s then (active, done_cnt + 1, cancelled_cnt)
+        else if Masc_domain.task_status_is_terminal s then (active, done_cnt, cancelled_cnt + 1)
         else (task :: active, done_cnt, cancelled_cnt))
       ([], 0, 0) sorted_tasks
   in
   let active_tasks = List.rev active_tasks in
   let shown_active_tasks = take max_active_tasks_display active_tasks in
   List.iter (fun task ->
-    let status_icon = Types.task_status_icon task.task_status in
-    let assignee = Types.task_display_assignee task.task_status in
+    let status_icon = Masc_domain.task_status_icon task.task_status in
+    let assignee = Masc_domain.task_display_assignee task.task_status in
     Printf.bprintf buf "  %s %s: %s (%s)\n" status_icon task.id task.title assignee
   ) shown_active_tasks;
 

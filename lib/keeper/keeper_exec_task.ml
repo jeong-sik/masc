@@ -5,7 +5,7 @@ let keeper_task_result_json = function
   | Ok msg -> Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String msg ])
   | Error e ->
     Yojson.Safe.to_string
-      (`Assoc [ "ok", `Bool false; "error", `String (Types.masc_error_to_string e) ])
+      (`Assoc [ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ])
 ;;
 
 let keeper_tool_result_json ~(ok : bool) ~(message : string) =
@@ -43,7 +43,7 @@ let parse_task_contract_arg args =
   match Yojson.Safe.Util.member "contract" args with
   | `Null -> Ok None
   | (`Assoc _ as json) -> (
-      match Types.task_contract_of_yojson json with
+      match Masc_domain.task_contract_of_yojson json with
       | Ok contract -> Ok (Some contract)
       | Error message ->
           Error (Printf.sprintf "Invalid contract payload: %s" message))
@@ -86,7 +86,7 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
 ;;
 
 type claim_goal_scope = {
-  task_filter : Types.task -> bool;
+  task_filter : Masc_domain.task -> bool;
   mode : string;
   effective_goal_ids : string list;
   fallback_reason : string option;
@@ -117,7 +117,7 @@ let active_goal_ids_have_claim_pool_task config goal_ids =
 let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
   match meta.active_goal_ids with
   | [] ->
-    { task_filter = (fun (_task : Types.task) -> true);
+    { task_filter = (fun (_task : Masc_domain.task) -> true);
       mode = "all_tasks";
       effective_goal_ids = [];
       fallback_reason = None;
@@ -129,7 +129,7 @@ let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
     if active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
        && not (active_goal_ids_have_claim_pool_task config goal_ids)
     then
-      { task_filter = (fun (_task : Types.task) -> true);
+      { task_filter = (fun (_task : Masc_domain.task) -> true);
         mode = "auto_goal_fallback_all_tasks";
         effective_goal_ids = [];
         fallback_reason =
@@ -146,7 +146,7 @@ let resolve_claim_goal_scope ~(config : Coord.config) ~(meta : keeper_meta) =
 
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
-  |> List.find_map (fun (task : Types.task) ->
+  |> List.find_map (fun (task : Masc_domain.task) ->
          if String.equal task.id task_id then task.goal_id else None)
 ;;
 
@@ -213,12 +213,12 @@ let handle_keeper_task_tool
     let items =
       List.map
         (fun (task, assignee) ->
-           let task : Types.task = task in
+           let task : Masc_domain.task = task in
            `Assoc
              [ "task_id", `String task.id
              ; "title", `String task.title
              ; "assignee", `String assignee
-             ; "status", `String (Types.string_of_task_status task.task_status)
+             ; "status", `String (Masc_domain.string_of_task_status task.task_status)
              ])
         orphans
     in

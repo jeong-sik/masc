@@ -16,7 +16,7 @@ type context = {
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> (bool * string) option
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 
 (** Handle masc_agents *)
 val handle_agents : context -> Yojson.Safe.t -> bool * string

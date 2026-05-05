@@ -1,6 +1,6 @@
 (** Tool schemas for Tool_misc — separated to break Config dependency cycle *)
 
-open Types
+open Masc_domain
 
 (** Issue #8546: mirror of [Tool_misc_admin.valid_admin_section_strings].
     Schema previously advertised [auth; unit_policy] but the handler only

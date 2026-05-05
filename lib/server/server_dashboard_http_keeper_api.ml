@@ -1072,7 +1072,7 @@ let handle_keeper_get_subroutes state req request reqd =
           match latest_ts with Some ts -> `Float ts | None -> `Null );
         ( "latest_ts_iso",
           match latest_ts with
-          | Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
           | None -> `Null );
         ( "latest_age_s",
           match latest_age_s with Some age -> `Float age | None -> `Null );
@@ -1167,7 +1167,7 @@ let handle_keeper_get_subroutes state req request reqd =
           match latest_ts with Some ts -> `Float ts | None -> `Null );
         ( "latest_ts_iso",
           match latest_ts with
-          | Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
           | None -> `Null );
         ( "latest_age_s",
           match latest_age_s with Some age -> `Float age | None -> `Null );

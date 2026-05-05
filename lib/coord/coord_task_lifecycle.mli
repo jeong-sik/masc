@@ -13,7 +13,7 @@ type invalid =
   | Invalid_transition
 
 type decision =
-  { new_status : Types.task_status
+  { new_status : Masc_domain.task_status
   ; set_current : string option
   ; drift : drift option
   }
@@ -24,8 +24,8 @@ val decide
   -> new_verification_id:(unit -> string)
   -> agent_name:string
   -> task_id:string
-  -> task_status:Types.task_status
-  -> action:Types.task_action
+  -> task_status:Masc_domain.task_status
+  -> action:Masc_domain.task_action
   -> now:string
   -> force:bool
   -> notes:string

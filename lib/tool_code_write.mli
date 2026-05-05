@@ -229,8 +229,8 @@ val dispatch :
     [handle_code_git]).  Returns [None] when [name] is not a
     code-write tool — caller treats as "not my tool". *)
 
-val schemas : Types.tool_schema list
-(** [schemas] is the [Types.tool_schema list] consumed by
+val schemas : Masc_domain.tool_schema list
+(** [schemas] is the [Masc_domain.tool_schema list] consumed by
     {!Tools.schemas} / {!Config.visible_tool_schemas}.  Used by
     the side-effect [Tool_spec.register] block at module load. *)
 

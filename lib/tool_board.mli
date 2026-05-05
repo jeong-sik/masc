@@ -138,13 +138,13 @@ val invalidate_board_list_cache : unit -> unit
 
 (** {1 Tools advertised to MCP} *)
 
-val tool_post_create : Types.tool_schema
+val tool_post_create : Masc_domain.tool_schema
 (** Schema for [masc_board_post].  Pinned at this
     boundary because the dashboard tool inspector renders
     the schema directly (other [tool_*] schemas are
     reached only through {!tools}). *)
 
-val tools : Types.tool_schema list
+val tools : Masc_domain.tool_schema list
 (** All 11 board tool schemas in advertisement order:
     post / list / get / comment / vote / stats / search /
     comment_vote / profile / hearth_list / delete. *)

@@ -77,7 +77,7 @@ let ts_of_record = function
               | Some ts -> Some ts
               | None -> (
                   match List.assoc_opt "ts_iso" fields with
-                  | Some (`String iso) -> Types.parse_iso8601_opt iso
+                  | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
                   | _ -> None))))
   | _ -> None
 
@@ -94,7 +94,7 @@ let freshness_fields ~now latest_ts =
   | Some ts ->
     [
       ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
       ("latest_age_s", `Float (Stdlib.Float.max 0.0 (now -. ts)));
     ]
   | None ->
@@ -143,7 +143,7 @@ let synthetic_store_gap ~durable_store ~stale_reason ~error =
   `Assoc
     [
       ("ts_unix", `Float now);
-      ("ts_iso", `String (Types.iso8601_of_unix_seconds now));
+      ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds now));
       ("source", `String source_name);
       ("producer", `String source_producer);
       ("durable_store", `String durable_store);

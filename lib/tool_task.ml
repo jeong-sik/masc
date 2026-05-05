@@ -35,7 +35,7 @@ open Tool_args
 
 let result_to_response = function
   | Ok msg -> (true, msg)
-  | Error e -> (false, Types.masc_error_to_string e)
+  | Error e -> (false, Masc_domain.masc_error_to_string e)
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) : Yojson.Safe.t =
@@ -128,7 +128,7 @@ let build_verdict_sse_payload
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
-  if String.equal task_id "" then Error (Types.Task (Types.Task_error.InvalidId "empty task ID"))
+  if String.equal task_id "" then Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId "empty task ID"))
   else Ok task_id
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
@@ -146,15 +146,15 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
   in
   let owned_task =
     Coord.get_tasks_raw ctx.config
-    |> List.find_map (fun (task : Types.task) ->
+    |> List.find_map (fun (task : Masc_domain.task) ->
            match task.task_status with
-           | Types.Claimed { assignee; _ }
-           | Types.InProgress { assignee; _ } ->
+           | Masc_domain.Claimed { assignee; _ }
+           | Masc_domain.InProgress { assignee; _ } ->
                if matches_you assignee then Some task.id else None
-           | Types.Todo
-           | Types.AwaitingVerification _
-           | Types.Done _
-           | Types.Cancelled _ -> None)
+           | Masc_domain.Todo
+           | Masc_domain.AwaitingVerification _
+           | Masc_domain.Done _
+           | Masc_domain.Cancelled _ -> None)
   in
   match owned_task with
   | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
@@ -187,7 +187,7 @@ let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_cascade : string option)
     ~(ctx : context)
-    ~(task_opt : Types.task option)
+    ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
     ~(notes : string) : string option =
   match task_opt with
@@ -226,22 +226,22 @@ let review_completion_notes
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None
 
-let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string) =
+let can_review_completion ~(task_opt : Masc_domain.task option) ~(agent_name : string) =
   match task_opt with
   | Some task ->
       (match task.task_status with
-       | Types.Claimed { assignee; _ }
-       | Types.InProgress { assignee; _ } ->
+       | Masc_domain.Claimed { assignee; _ }
+       | Masc_domain.InProgress { assignee; _ } ->
            String.equal assignee agent_name
-       | Types.Todo
-       | Types.AwaitingVerification _
-       | Types.Done _
-       | Types.Cancelled _ -> false)
+       | Masc_domain.Todo
+       | Masc_domain.AwaitingVerification _
+       | Masc_domain.Done _
+       | Masc_domain.Cancelled _ -> false)
   | None -> false
 
-let persisted_completion_contract ~(task_opt : Types.task option) =
+let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
   match task_opt with
-  | Some ({ contract = Some contract; _ } : Types.task)
+  | Some ({ contract = Some contract; _ } : Masc_domain.task)
     when Stdlib.List.length contract.completion_contract > 0 ->
       Some contract.completion_contract
   | _ -> None
@@ -275,7 +275,7 @@ let parse_task_contract args =
   match args |> member "contract" with
   | `Null -> Ok None
   | (`Assoc _ as json) -> (
-      match Types.task_contract_of_yojson json with
+      match Masc_domain.task_contract_of_yojson json with
       | Ok contract -> Ok (Some contract)
       | Error error ->
           Error
@@ -330,7 +330,7 @@ let parse_handoff_context ~(agent_name : string) args =
   match args |> member "handoff_context" with
   | `Null -> Ok None
   | (`Assoc _ as json) -> (
-      match Types.task_handoff_context_of_yojson json with
+      match Masc_domain.task_handoff_context_of_yojson json with
       | Error error ->
           Error
             (Printf.sprintf "Invalid handoff_context payload: %s" error)
@@ -356,52 +356,52 @@ let parse_handoff_context ~(agent_name : string) args =
                    summary;
                    evidence_refs =
                      List.sort_uniq String.compare handoff_context.evidence_refs;
-                   updated_at = Some (Types.now_iso ());
+                   updated_at = Some (Masc_domain.now_iso ());
                    updated_by = Some agent_name;
                  }))
   | _ -> Error "handoff_context must be an object when provided"
 
 let task_has_persisted_contract = function
-  | Some (task : Types.task) -> Option.is_some task.contract
+  | Some (task : Masc_domain.task) -> Option.is_some task.contract
   | None -> false
 
 let strict_release_requires_handoff = function
-  | Some ({ contract = Some contract; _ } : Types.task) -> contract.strict
+  | Some ({ contract = Some contract; _ } : Masc_domain.task) -> contract.strict
   | _ -> false
 
 let completion_state_error ~(task_id : string) ~(agent_name : string)
-    ~(task_opt : Types.task option) =
+    ~(task_opt : Masc_domain.task option) =
   match task_opt with
-  | None -> Some (Types.Task (Types.Task_error.NotFound task_id))
+  | None -> Some (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
   | Some task ->
     match task.task_status with
-    | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
+    | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
       if String.equal assignee agent_name then
         None
       else
-        Some (Types.Task (Types.Task_error.AlreadyClaimed { task_id; by = assignee }))
-    | Types.Todo -> Some (Types.Task (Types.Task_error.NotClaimed task_id))
-    | Types.Done { assignee; _ } ->
+        Some (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = assignee }))
+    | Masc_domain.Todo -> Some (Masc_domain.Task (Masc_domain.Task_error.NotClaimed task_id))
+    | Masc_domain.Done { assignee; _ } ->
       Some
-        (Types.Task (Types.Task_error.InvalidState
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
               "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
               task_id assignee)))
-    | Types.Cancelled { cancelled_by; _ } ->
+    | Masc_domain.Cancelled { cancelled_by; _ } ->
       Some
-        (Types.Task (Types.Task_error.InvalidState
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
               "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
               task_id cancelled_by)))
-    | Types.AwaitingVerification { assignee; _ } ->
+    | Masc_domain.AwaitingVerification { assignee; _ } ->
       Some
-        (Types.Task (Types.Task_error.InvalidState
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
 
 let persisted_contract_rejection ~(ctx : context)
-    ~(task_opt : Types.task option) ~(notes : string) =
+    ~(task_opt : Masc_domain.task option) ~(notes : string) =
   ignore notes;
   match task_opt with
   | None -> None
@@ -507,7 +507,7 @@ let handle_batch_add_tasks ctx args =
       match t |> member "contract" with
       | `Null -> Ok None
       | (`Assoc _ as json) -> (
-          match Types.task_contract_of_yojson json with
+          match Masc_domain.task_contract_of_yojson json with
           | Ok contract -> Ok (Some contract)
           | Error error ->
               Error
@@ -550,7 +550,7 @@ let handle_batch_add_tasks ctx args =
 
 let handle_claim ?agent_tool_names ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    result_to_response (Error (Types.Agent (Types.Agent_error.NotJoined ctx.agent_name)))
+    result_to_response (Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined ctx.agent_name)))
   else if not ((=) (args |> member "agent_role") `Null) then
     (false, "agent_role is no longer supported")
   else
@@ -577,7 +577,7 @@ let handle_claim ?agent_tool_names ctx args =
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
        ])
-   | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
+   | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response result
 
 let handle_claim_next ?agent_tool_names ctx _args =
@@ -612,7 +612,7 @@ let handle_release ctx args =
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
   (match handoff_context with
    | Error error -> (false, error)
@@ -663,13 +663,13 @@ and handle_cancel_task ctx args =
   | Ok task_id ->
   let reason = get_string args "reason" "" in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
-        | Types.InProgress { started_at; _ } ->
-            Types.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) started_at
-        | Types.Claimed { claimed_at; _ } ->
-            Types.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) claimed_at
+        | Masc_domain.InProgress { started_at; _ } ->
+            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) started_at
+        | Masc_domain.Claimed { claimed_at; _ } ->
+            Masc_domain.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) claimed_at
         | _ -> Time_compat.now () -. 60.0)
     | None -> Time_compat.now () -. 60.0
   in
@@ -709,7 +709,7 @@ and handle_cancel_task ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
-       Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
+       Log.Task.error "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response result
 
 and handle_transition ?agent_tool_names ctx args =
@@ -724,7 +724,7 @@ and handle_transition ?agent_tool_names ctx args =
      - target-state aliases via [to] instead of canonical [action]
      - singular [note] instead of [notes]
      Normalize before strict-schema validation so callers do not have
-     to memorize canonical vocabulary. The Variant ([Types.task_action])
+     to memorize canonical vocabulary. The Variant ([Masc_domain.task_action])
      remains the SSOT — only the transport-level keys get rewritten.
      Existing canonical keys are never overridden. *)
   let normalize_args = function
@@ -785,12 +785,12 @@ and handle_transition ?agent_tool_names ctx args =
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
   if String.equal action_raw "" then
-    (false, Printf.sprintf "action is required (%s)" (String.concat ", " Types.valid_task_action_strings))
+    (false, Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
-  match Types.task_action_of_string_lenient action_raw with
+  match Masc_domain.task_action_of_string_lenient action_raw with
   | Error msg -> (false, msg)
   | Ok action ->
-  let action_s = Types.task_action_to_string action in
+  let action_s = Masc_domain.task_action_to_string action in
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
   let completion_contract =
@@ -814,31 +814,31 @@ and handle_transition ?agent_tool_names ctx args =
     else false
   in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   match handoff_context with
   | Error error -> (false, error)
   | Ok handoff_context ->
-  if (=) action Types.Release && strict_release_requires_handoff task_opt
+  if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
     (false, "Strict task release requires handoff_context.summary")
   else
   let completion_state_error =
-    if (=) action Types.Done_action && not force then
+    if (=) action Masc_domain.Done_action && not force then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
     else
       None
   in
   match completion_state_error with
   | Some err ->
-    Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err);
+    Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err);
     result_to_response (Error err)
   | None ->
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
   let persisted_gate_rejection =
-    if (=) action Types.Done_action && not force then
+    if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -853,7 +853,7 @@ and handle_transition ?agent_tool_names ctx args =
     (false, reason)
   | None ->
   let review_gate_rejection =
-    if (=) action Types.Done_action && not force then
+    if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -883,7 +883,7 @@ and handle_transition ?agent_tool_names ctx args =
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
   let action =
-    if (=) action Types.Done_action
+    if (=) action Masc_domain.Done_action
        && Env_config_runtime.Verification.fsm_enabled ()
        && completion_owned_by_caller
     then
@@ -896,7 +896,7 @@ and handle_transition ?agent_tool_names ctx args =
              "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
              task_id ctx.agent_name
              (List.length contract.completion_contract + List.length contract.required_evidence);
-           Types.Submit_for_verification
+           Masc_domain.Submit_for_verification
          | _ -> action)
       | None -> action
     else action
@@ -904,12 +904,12 @@ and handle_transition ?agent_tool_names ctx args =
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
-        | Types.InProgress { started_at; assignee } ->
-            let ts = Types.parse_iso8601 ~default_time started_at in
+        | Masc_domain.InProgress { started_at; assignee } ->
+            let ts = Masc_domain.parse_iso8601 ~default_time started_at in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
-        | Types.Claimed { claimed_at; assignee } ->
-            let ts = Types.parse_iso8601 ~default_time claimed_at in
+        | Masc_domain.Claimed { claimed_at; assignee } ->
+            let ts = Masc_domain.parse_iso8601 ~default_time claimed_at in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | _ -> (default_time, []))
@@ -918,7 +918,7 @@ and handle_transition ?agent_tool_names ctx args =
   let max_cas_retries = 3 in
   let cas_retry_delay_s = 0.05 in
   let is_version_mismatch = function
-    | Error (Types.Task (Types.Task_error.InvalidState msg)) ->
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
         let prefix = "Version mismatch" in
         String.length msg >= String.length prefix
         && String.equal (Stdlib.String.sub msg 0 (String.length prefix)) prefix
@@ -926,7 +926,7 @@ and handle_transition ?agent_tool_names ctx args =
   in
   let prepare_verification_request =
     match action with
-    | Types.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification ->
       Some
         (fun ~task ~assignee ~verification_id ~evidence_refs ->
            Verification_protocol.create_submit_request
@@ -935,21 +935,21 @@ and handle_transition ?agent_tool_names ctx args =
              ~assignee
              ~verification_id
              ~evidence_refs)
-    | Types.Claim
-    | Types.Start
-    | Types.Done_action
-    | Types.Cancel
-    | Types.Release
-    | Types.Approve_verification
-    | Types.Reject_verification ->
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
       None
   in
   let prepare_verification_verdict =
     match action with
-    | Types.Approve_verification
-    | Types.Reject_verification ->
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
       Some
-        (fun ~(task : Types.task) ~verifier ~verification_id ~decision ->
+        (fun ~(task : Masc_domain.task) ~verifier ~verification_id ~decision ->
            match decision with
            | `Approve notes ->
              Verification_protocol.record_approve_verification
@@ -965,12 +965,12 @@ and handle_transition ?agent_tool_names ctx args =
                ~verifier
                ~verification_id
                ~reason)
-    | Types.Claim
-    | Types.Start
-    | Types.Done_action
-    | Types.Cancel
-    | Types.Release
-    | Types.Submit_for_verification ->
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Submit_for_verification ->
       None
   in
   let rec try_transition attempt =
@@ -998,7 +998,7 @@ and handle_transition ?agent_tool_names ctx args =
   let verification_id_before =
     match task_opt with
     | Some t -> (match t.task_status with
-        | Types.AwaitingVerification { verification_id; _ } -> Some verification_id
+        | Masc_domain.AwaitingVerification { verification_id; _ } -> Some verification_id
         | _ -> None)
     | None -> None
   in
@@ -1020,21 +1020,21 @@ and handle_transition ?agent_tool_names ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ]);
        (match action with
-        | Types.Submit_for_verification ->
+        | Masc_domain.Submit_for_verification ->
           let tasks = Coord.get_tasks_raw ctx.config in
-          (match List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks with
+          (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
            | Some task ->
              let evidence_refs = match task.contract with
                | Some c -> c.verify_gate_evidence
                | None -> [] in
              (match task.task_status with
-              | Types.AwaitingVerification { verification_id; assignee; _ } ->
+              | Masc_domain.AwaitingVerification { verification_id; assignee; _ } ->
                 Verification_protocol.notify_submit_for_verification
                   ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
-              | Types.Todo | Types.Claimed _ | Types.InProgress _
-              | Types.Done _ | Types.Cancelled _ -> ())
+              | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+              | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
            | None -> ())
-        | Types.Approve_verification ->
+        | Masc_domain.Approve_verification ->
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_approve_verification
             ~task_id ~verifier:ctx.agent_name ~verification_id ~notes;
@@ -1050,19 +1050,19 @@ and handle_transition ?agent_tool_names ctx args =
              [gate_check] performs internally. *)
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore (Cdal_verdict_gate.gate_check ~task_id ())
-        | Types.Reject_verification ->
+        | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_reject_verification
             ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore (Cdal_verdict_gate.gate_check ~task_id ())
-        | Types.Claim | Types.Start | Types.Done_action | Types.Cancel | Types.Release -> ())
+        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
-       Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
+       Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err));
   (* Record metrics *)
   (match result, action with
-   | Ok _, Types.Done_action ->
+   | Ok _, Masc_domain.Done_action ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
@@ -1082,7 +1082,7 @@ and handle_transition ?agent_tool_names ctx args =
          ~agent_name:ctx.agent_name
          ~verdict:Post_verifier.Pass;
        Prometheus.record_task_completed ()
-   | Ok _, Types.Cancel ->
+   | Ok _, Masc_domain.Cancel ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
@@ -1102,8 +1102,8 @@ and handle_transition ?agent_tool_names ctx args =
          ~agent_name:ctx.agent_name
          ~verdict:(Post_verifier.Fail "task_cancelled");
        Prometheus.record_task_failed ()
-   | Ok _, (Types.Claim | Types.Start | Types.Submit_for_verification
-            | Types.Approve_verification | Types.Reject_verification | Types.Release)
+   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
   result_to_response result
 
@@ -1173,18 +1173,18 @@ let _tool_spec_requires_join = [ "masc_claim_next"; "masc_transition" ]
 
 let tool_required_permission = function
   | "masc_tasks" | "masc_task_history" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_add_task" | "masc_batch_add_tasks" ->
-      Some Types.CanAddTask
+      Some Masc_domain.CanAddTask
   | "masc_claim_next" ->
-      Some Types.CanClaimTask
+      Some Masc_domain.CanClaimTask
   | "masc_transition" | "masc_update_priority" ->
-      Some Types.CanCompleteTask
+      Some Masc_domain.CanCompleteTask
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

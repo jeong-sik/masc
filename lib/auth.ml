@@ -1,6 +1,6 @@
 (** MASC Authentication & Authorization Module *)
 
-open Types
+open Masc_domain
 
 (* ============================================ *)
 (* Crypto utilities                             *)
@@ -1264,7 +1264,7 @@ let enable_auth config ~require_token ~agent_name : string * string option =
       match create_token config ~agent_name ~role:Admin with
       | Ok (token, _cred) -> Some token
       | Error e ->
-        Log.Auth.warn "[enable_auth] bootstrap token creation failed for %s: %s" agent_name (Types.show_masc_error e);
+        Log.Auth.warn "[enable_auth] bootstrap token creation failed for %s: %s" agent_name (Masc_domain.show_masc_error e);
         None
     end else None
   in

@@ -4,7 +4,7 @@
     This file assembles cycle-free schemas; config.ml adds
     modules that depend on Config (Tool_control, Tool_a2a, Tool_misc). *)
 
-open Types
+open Masc_domain
 
 let retired_front_door_schema_names =
   [
@@ -46,4 +46,4 @@ let all_schemas_extended =
 
 (** Get tool by name *)
 let find_tool name =
-  List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas_extended
+  List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) all_schemas_extended

@@ -49,7 +49,7 @@ let max_recent_messages () = Runtime_params.get Governance_registry.dashboard_ma
 (** Minimum section border length. *)
 let min_border_length () = Runtime_params.get Governance_registry.dashboard_min_border_length
 
-(* ===== Types ===== *)
+(* ===== Masc_domain ===== *)
 
 (** Dashboard section *)
 type section = {
@@ -87,9 +87,9 @@ let scope_of_string_opt = function
 type room_snapshot = Dashboard_labels.room_snapshot = {
   room_id: string;
   is_current: bool;
-  agents: Types.agent list;
-  tasks: Types.task list;
-  messages: Types.message list;
+  agents: Masc_domain.agent list;
+  tasks: Masc_domain.task list;
+  messages: Masc_domain.message list;
   locks: int;
 }
 
@@ -125,40 +125,40 @@ let truncate_message (msg : string) : string =
   String_util.utf8_safe ~max_bytes:limit ~suffix:"..." msg
   |> String_util.to_string
 
-let agent_lines now (agents : Types.agent list) =
-  List.map (fun (agent : Types.agent) ->
-    let status_str = Types.agent_status_to_string agent.status in
+let agent_lines now (agents : Masc_domain.agent list) =
+  List.map (fun (agent : Masc_domain.agent) ->
+    let status_str = Masc_domain.agent_status_to_string agent.status in
     let elapsed_str = format_elapsed now agent.last_seen agent.last_seen in
     Printf.sprintf "[%s] %s (%s)" status_str agent.name elapsed_str
   ) agents
 
-let split_tasks (tasks : Types.task list) =
+let split_tasks (tasks : Masc_domain.task list) =
   let active =
     List.filter (fun task ->
-      match task.Types.task_status with
-      | Types.InProgress _ | Types.Claimed _ | Types.AwaitingVerification _ -> true
-      | Types.Todo | Types.Done _ | Types.Cancelled _ -> false
+      match task.Masc_domain.task_status with
+      | Masc_domain.InProgress _ | Masc_domain.Claimed _ | Masc_domain.AwaitingVerification _ -> true
+      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
     ) tasks
   in
-  let pending = List.filter (fun task -> (=) task.Types.task_status Types.Todo) tasks in
+  let pending = List.filter (fun task -> (=) task.Masc_domain.task_status Masc_domain.Todo) tasks in
   (active, pending)
 
-let task_lines (tasks : Types.task list) =
+let task_lines (tasks : Masc_domain.task list) =
   let (active, pending) = split_tasks tasks in
   let pending_limit = max_pending_tasks () in
   let content =
-    (List.map (fun (task : Types.task) ->
+    (List.map (fun (task : Masc_domain.task) ->
       let assignee =
         match task.task_status with
-        | Types.InProgress { assignee; _ } -> assignee
-        | Types.Claimed { assignee; _ } -> assignee
-        | Types.AwaitingVerification { assignee; _ } -> assignee
-        | Types.Todo | Types.Done _ | Types.Cancelled _ -> "?"
+        | Masc_domain.InProgress { assignee; _ } -> assignee
+        | Masc_domain.Claimed { assignee; _ } -> assignee
+        | Masc_domain.AwaitingVerification { assignee; _ } -> assignee
+        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> "?"
       in
       Printf.sprintf "[P%d] %s (@%s)" task.priority task.title assignee
     ) active)
     @ (List.filteri (fun idx _ -> idx < pending_limit) pending
-       |> List.map (fun (task : Types.task) ->
+       |> List.map (fun (task : Masc_domain.task) ->
               Printf.sprintf "[P%d] %s (pending)" task.priority task.title))
   in
   let pending_more = List.length pending - pending_limit in
@@ -167,8 +167,8 @@ let task_lines (tasks : Types.task list) =
   else
     content
 
-let message_lines (messages : Types.message list) =
-  List.map (fun (message : Types.message) ->
+let message_lines (messages : Masc_domain.message list) =
+  List.map (fun (message : Masc_domain.message) ->
     Printf.sprintf "%s: %s" message.from_agent (truncate_message message.content)
   ) messages
 
@@ -319,15 +319,15 @@ let room_section now (snapshot : room_snapshot) : section =
     empty_msg = "";
   }
 
-let agents_section now (agents : Types.agent list) : section =
+let agents_section now (agents : Masc_domain.agent list) : section =
   let content = agent_lines now agents in
   { title = "Agents"; content; empty_msg = "(no agents)" }
 
-let tasks_section (tasks : Types.task list) : section =
+let tasks_section (tasks : Masc_domain.task list) : section =
   let content = task_lines tasks in
   { title = "Tasks"; content; empty_msg = "(no tasks)" }
 
-let messages_section (messages : Types.message list) : section =
+let messages_section (messages : Masc_domain.message list) : section =
   let content = message_lines messages in
   { title = "Recent Messages"; content; empty_msg = "(no messages)" }
 
@@ -339,17 +339,17 @@ let count_locks (config : Coord_utils.config) : int =
   count_locks_for_room config "default"
 
 (* Agent workflow summaries: recent activity per active agent *)
-let agent_workflow_section now (_config : Coord_utils.config) (agents : Types.agent list) : section =
+let agent_workflow_section now (_config : Coord_utils.config) (agents : Masc_domain.agent list) : section =
   let content =
     agents
-    |> List.filter (fun (a : Types.agent) ->
-           match a.status with Types.Active | Types.Busy -> true | Types.Listening | Types.Inactive -> false)
-    |> List.map (fun (agent : Types.agent) ->
+    |> List.filter (fun (a : Masc_domain.agent) ->
+           match a.status with Masc_domain.Active | Masc_domain.Busy -> true | Masc_domain.Listening | Masc_domain.Inactive -> false)
+    |> List.map (fun (agent : Masc_domain.agent) ->
            let status_icon =
              match agent.status with
-             | Types.Active -> "[active]"
-             | Types.Busy -> "[busy]"
-             | Types.Listening | Types.Inactive -> "[idle]"
+             | Masc_domain.Active -> "[active]"
+             | Masc_domain.Busy -> "[busy]"
+             | Masc_domain.Listening | Masc_domain.Inactive -> "[idle]"
            in
            let task_info =
              match agent.current_task with
@@ -362,8 +362,8 @@ let agent_workflow_section now (_config : Coord_utils.config) (agents : Types.ag
   { title = "Agent Workflows"; content; empty_msg = "(no active agents)" }
 
 (** Operator-friendly agents section grouped by Working / Stuck / Idle *)
-let agents_grouped_section now (agents : Types.agent list) : section =
-  let format_agent (agent : Types.agent) =
+let agents_grouped_section now (agents : Masc_domain.agent list) : section =
+  let format_agent (agent : Masc_domain.agent) =
     let status_label =
       Dashboard_labels.translate_agent_status ~now agent.status agent.last_seen
     in
@@ -546,11 +546,11 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
   let (active_tasks, pending_tasks) = split_tasks all_tasks in
   let blocked_tasks =
-    List.filter (fun (t : Types.task) ->
+    List.filter (fun (t : Masc_domain.task) ->
       match t.task_status with
-      | Types.Claimed _ -> true (* claimed but not in-progress = potentially blocked *)
-      | Types.Todo | Types.InProgress _ | Types.AwaitingVerification _
-      | Types.Done _ | Types.Cancelled _ -> false
+      | Masc_domain.Claimed _ -> true (* claimed but not in-progress = potentially blocked *)
+      | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
     ) all_tasks
   in
   (* Agent counts by group *)

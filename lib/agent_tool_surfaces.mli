@@ -41,7 +41,7 @@ val unique_preserve_order : string list -> string list
     {!Json_util.dedupe_keep_order} re-exported for siblings. *)
 
 val dedupe_schemas :
-  Types.tool_schema list -> Types.tool_schema list
+  Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 (** [dedupe_schemas schemas] removes duplicate-by-[name] entries
     while preserving first-occurrence order. *)
 
@@ -53,9 +53,9 @@ val prefixed_tool_names : string list -> string list
 
 val lookup_schemas_by_name_exn :
   label:string ->
-  Types.tool_schema list ->
+  Masc_domain.tool_schema list ->
   string list ->
-  Types.tool_schema list
+  Masc_domain.tool_schema list
 (** [lookup_schemas_by_name_exn ~label all_schemas values] returns
     the schemas in [all_schemas] whose names appear in [values],
     raising [Invalid_argument "<label>: unknown tool schema(s): <list>"]
@@ -82,7 +82,7 @@ val local_worker_public_tool_names : string list
 (** SSOT: {!Tool_catalog.tools_for_surface}
     {!Tool_catalog.Local_worker}. *)
 
-val local_worker_contract_schemas : Types.tool_schema list
+val local_worker_contract_schemas : Masc_domain.tool_schema list
 (** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
 
 val local_worker_compat_passthrough_tool_names : string list
@@ -94,25 +94,25 @@ val local_worker_compat_passthrough_tool_names : string list
     exact six names. *)
 
 val local_worker_compat_passthrough_schemas :
-  Types.tool_schema list
+  Masc_domain.tool_schema list
 (** Resolved schemas for the passthrough names.  Computed at
     module init via {!lookup_schemas_by_name_exn}; an unknown name
     fails fast at startup. *)
 
-val local_worker_internal_schemas : Types.tool_schema list
+val local_worker_internal_schemas : Masc_domain.tool_schema list
 (** Internal-only schemas (currently just [masc_heartbeat]).
     Filtered from {!Tool_schemas_coord_core.schemas}. *)
 
-val local_worker_code_schemas : Types.tool_schema list
-val local_worker_worktree_schemas : Types.tool_schema list
-val local_worker_run_schemas : Types.tool_schema list
-val local_worker_spawn_schemas : Types.tool_schema list
+val local_worker_code_schemas : Masc_domain.tool_schema list
+val local_worker_worktree_schemas : Masc_domain.tool_schema list
+val local_worker_run_schemas : Masc_domain.tool_schema list
+val local_worker_spawn_schemas : Masc_domain.tool_schema list
 (** Domain-grouped schema bundles (code / worktree / run / spawn)
     used by {!select_public_local_worker_schemas} and the
     autonomous catalogue resolver. *)
 
 val select_public_local_worker_schemas :
-  unit -> Types.tool_schema list
+  unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
     board / coord-core / coord-extra / code / worktree / run /
     spawn schemas, deduped, intersected with
@@ -120,9 +120,9 @@ val select_public_local_worker_schemas :
     worker surface as the dashboard sees it. *)
 
 val resolve_named_schemas :
-  Types.tool_schema list ->
+  Masc_domain.tool_schema list ->
   string list ->
-  (Types.tool_schema list, string) Result.t
+  (Masc_domain.tool_schema list, string) Result.t
 (** [resolve_named_schemas all_schemas values] is the [Result]-
     typed sibling of {!lookup_schemas_by_name_exn}: returns
     [Error "unknown tool schema(s): <list>"] for missing names
@@ -131,7 +131,7 @@ val resolve_named_schemas :
 val local_worker_tool_schemas :
   ?names:string list ->
   unit ->
-  (Types.tool_schema list, string) Result.t
+  (Masc_domain.tool_schema list, string) Result.t
 (** [local_worker_tool_schemas ?names ()] returns the full local-
     worker schema set when [names] is omitted, or the named
     subset when provided.  The full set is the deduped union of

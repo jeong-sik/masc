@@ -42,13 +42,13 @@ let should_orchestrate ~min_priority room_config =
       false
   | Ok backlog ->
       (* Get unclaimed tasks with priority <= min_priority *)
-      let unclaimed_important = List.filter (fun (task: Types.task) ->
-        task.task_status = Types.Todo && task.priority <= min_priority
+      let unclaimed_important = List.filter (fun (task: Masc_domain.task) ->
+        task.task_status = Masc_domain.Todo && task.priority <= min_priority
       ) backlog.tasks in
 
       (* Get active (non-zombie) agents *)
       let agents = Coord.get_agents_raw room_config in
-      let active_agents = List.filter (fun (agent: Types.agent) ->
+      let active_agents = List.filter (fun (agent: Masc_domain.agent) ->
         not (Coord_resilience.Zombie.is_zombie agent.last_seen)
       ) agents in
 

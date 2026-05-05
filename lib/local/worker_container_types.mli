@@ -210,7 +210,7 @@ val list_masc_tools :
   session_id:string ->
   ?names:string list option ->
   unit ->
-  (Types.tool_schema list, string) result
+  (Masc_domain.tool_schema list, string) result
 (** Lists the MASC tool schemas visible to a local worker.
     [sw], [auth_token], and [session_id] are accepted for
     parity with {!call_masc_tool} but currently unused — the
@@ -220,7 +220,7 @@ val list_masc_tools :
 
 val inject_default_agent_name :
   worker_name:string ->
-  schema:Types.tool_schema option ->
+  schema:Masc_domain.tool_schema option ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 (** When [schema] declares an [agent_name] property and the
@@ -258,7 +258,7 @@ val worker_auth_token :
     unauthenticated.  Otherwise mints a fresh token via
     {!Auth.create_token} with the [Worker] role and returns
     [Ok (Some token)].  Auth errors are converted to a
-    string via {!Types.masc_error_to_string}. *)
+    string via {!Masc_domain.masc_error_to_string}. *)
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model

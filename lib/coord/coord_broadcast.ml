@@ -3,7 +3,7 @@
     Extracted from room_state.ml. Depends on Coord_state for
     next_seq and normalized_string_list. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 let emit_message_activity config ~from_agent ~content ~mention

@@ -266,14 +266,14 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
       in
       let open_count =
         linked_tasks
-        |> List.filter (fun (task : Types.task) ->
-               not (Types.task_status_is_terminal task.task_status))
+        |> List.filter (fun (task : Masc_domain.task) ->
+               not (Masc_domain.task_status_is_terminal task.task_status))
         |> List.length
       in
       let done_count =
         linked_tasks
-        |> List.filter (fun (task : Types.task) ->
-               Types.task_status_is_done task.task_status)
+        |> List.filter (fun (task : Masc_domain.task) ->
+               Masc_domain.task_status_is_done task.task_status)
         |> List.length
       in
       if (match linked_tasks with [] -> true | _ -> false) then
@@ -371,7 +371,7 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note
     () =
   let last_review_note, last_review_at =
     match note with
-    | Some note -> (Some note, Some (Types.now_iso ()))
+    | Some note -> (Some note, Some (Masc_domain.now_iso ()))
     | None -> (goal.last_review_note, goal.last_review_at)
   in
   Goal_store.update_goal ctx.config ~goal_id:goal.id (fun current ->
@@ -407,7 +407,7 @@ let handle_goal_list (ctx : context) args =
       let rollup = Goal_store.compute_rollup goals in
       ok_result
         [
-          ("generated_at", `String (Types.now_iso ()));
+          ("generated_at", `String (Masc_domain.now_iso ()));
           ("count", `Int (List.length goals));
           ("goals", `List (List.map Goal_store.goal_to_yojson goals));
           ("rollup", Goal_store.rollup_to_yojson rollup);

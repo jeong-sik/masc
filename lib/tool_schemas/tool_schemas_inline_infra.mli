@@ -11,4 +11,4 @@ val mcp_session_action_enum_strings : string list
 
 (** Tool schema list: [masc_mcp_session], [masc_approval_get],
     [masc_spawn]. *)
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

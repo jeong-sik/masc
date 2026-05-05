@@ -29,9 +29,9 @@ type scope =
 type room_snapshot = Dashboard_labels.room_snapshot = {
   room_id : string;
   is_current : bool;
-  agents : Types.agent list;
-  tasks : Types.task list;
-  messages : Types.message list;
+  agents : Masc_domain.agent list;
+  tasks : Masc_domain.task list;
+  messages : Masc_domain.message list;
   locks : int;
 }
 
@@ -51,9 +51,9 @@ val truncate_message : string -> string
 
 (** {1 Section Builders} *)
 
-val agents_section : float -> Types.agent list -> section
-val tasks_section : Types.task list -> section
-val messages_section : Types.message list -> section
+val agents_section : float -> Masc_domain.agent list -> section
+val tasks_section : Masc_domain.task list -> section
+val messages_section : Masc_domain.message list -> section
 val keepers_section : float -> section
 val worktrees_section : Coord_utils.config -> section
 val parse_worktrees : Yojson.Safe.t -> (string * string) list

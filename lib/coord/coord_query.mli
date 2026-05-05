@@ -18,27 +18,27 @@ val update_priority : config -> task_id:string -> priority:int -> string
 
 (** Return raw task list (used by orchestrator).
     Requires initialization. *)
-val get_tasks_raw : config -> Types.task list
+val get_tasks_raw : config -> Masc_domain.task list
 
 (** Like {!get_tasks_raw} but returns [[]] when not initialized. *)
-val get_tasks_safe : config -> Types.task list
+val get_tasks_safe : config -> Masc_domain.task list
 
 (** Return all agents including inactive (for orchestrator).
     Requires initialization. *)
-val get_agents_raw : config -> Types.agent list
+val get_agents_raw : config -> Masc_domain.agent list
 
 (** Return active agents only.  Returns [[]] when MASC is not
     initialized — safe for dashboard and display contexts. *)
-val get_active_agents : config -> Types.agent list
+val get_active_agents : config -> Masc_domain.agent list
 
 (** Like {!get_agents_raw} but returns [[]] when not initialized
     instead of raising.  Includes inactive agents.
     Useful for keeper backlog-triage enrollment. *)
-val get_all_agents : config -> Types.agent list
+val get_all_agents : config -> Masc_domain.agent list
 
 (** Find claimed/in_progress tasks whose assignees are not active.
     Returns [(task, assignee)] pairs for orphaned tasks. *)
-val audit_orphan_tasks : config -> (Types.task * string) list
+val audit_orphan_tasks : config -> (Masc_domain.task * string) list
 
 (** {1 Agent Membership} *)
 
@@ -49,12 +49,12 @@ val is_agent_joined : config -> agent_name:string -> bool
 
 (** Return raw messages since [since_seq], up to [limit]. *)
 val get_messages_raw :
-  config -> since_seq:int -> limit:int -> Types.message list
+  config -> since_seq:int -> limit:int -> Masc_domain.message list
 
 (** Return all raw messages after [since_seq], ordered
     from oldest unseen to newest unseen. *)
 val get_all_messages_raw :
-  config -> since_seq:int -> Types.message list
+  config -> since_seq:int -> Masc_domain.message list
 
 (** {1 Formatted Output} *)
 
@@ -88,4 +88,4 @@ val take_first : int -> 'a list -> 'a list
     parsing the entire history directory. *)
 val collect_recent_messages :
   config -> msgs_path:string -> since_seq:int -> limit:int ->
-  warn_label:string -> Types.message list
+  warn_label:string -> Masc_domain.message list

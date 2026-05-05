@@ -1,4 +1,4 @@
-open Types
+open Masc_domain
 
 (** Issue #8520: hand-mirrored from [Mcp_session.valid_action_strings].
     [masc_tool_schemas] only depends on [masc_types], so it cannot

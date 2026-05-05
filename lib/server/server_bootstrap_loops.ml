@@ -459,7 +459,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~build_facts:(fun () ->
         let base = `Assoc
           [
-            ("generated_at", `String (Types.now_iso ()));
+            ("generated_at", `String (Masc_domain.now_iso ()));
             ("items", `List []);
             ("activity", `List []);
           ]

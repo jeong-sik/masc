@@ -145,7 +145,7 @@ type goal_verification_vote = {
   submitted_at : string;
 }
 (** Single submitted verdict.  [submitted_at] is the
-    ISO-8601 timestamp from {!Types.now_iso} at submission
+    ISO-8601 timestamp from {!Masc_domain.now_iso} at submission
     time. *)
 
 val goal_verification_vote_to_yojson :

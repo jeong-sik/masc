@@ -544,7 +544,7 @@ let make_tool_bundle
   (* No mutex: Hashtbl ops are non-yielding, single domain. *)
   (* Pass A: existing internal tools. Behavior unchanged from pre-A.2. *)
   let internal_tools =
-    List.filter_map (fun (td : Types.tool_schema) ->
+    List.filter_map (fun (td : Masc_domain.tool_schema) ->
       if List.mem td.name universe_names then
         Some (Tool_bridge.oas_tool_of_masc
           ~name:td.name
@@ -568,7 +568,7 @@ let make_tool_bundle
       if not (List.mem internal universe_names) then None
       else
         match
-          List.find_opt (fun (td : Types.tool_schema) ->
+          List.find_opt (fun (td : Masc_domain.tool_schema) ->
             String.equal td.name internal) tool_defs
         with
         | None -> None

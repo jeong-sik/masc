@@ -9,7 +9,7 @@ val iso_of_unix : float -> string
 (** Format a Unix epoch as ISO-8601 in UTC, e.g. ["2026-04-28T10:34:12Z"]. *)
 
 val parse_iso_opt : string option -> float option
-(** Parse an ISO-8601 timestamp via {!Types.parse_iso8601}.
+(** Parse an ISO-8601 timestamp via {!Masc_domain.parse_iso8601}.
     Returns [None] for [None], empty/whitespace strings, or parse failures. *)
 
 (** {1 Strings} *)

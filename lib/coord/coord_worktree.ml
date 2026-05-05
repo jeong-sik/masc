@@ -6,7 +6,7 @@
     Extracted from room.ml for modularity.
 *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 let exec_gate_raw_source argv =

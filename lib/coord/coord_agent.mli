@@ -4,7 +4,7 @@
     as a [Yojson.Safe.t] document for the MCP resource handlers and
     the [tool_agent] tool. *)
 
-open Types
+open Masc_domain
 include module type of Coord_utils
 include module type of Coord_state
 
@@ -24,7 +24,7 @@ val update_agent_r :
   ?status:string ->
   ?capabilities:string list ->
   unit ->
-  string Types.masc_result
+  string Masc_domain.masc_result
 
 (** Find every registered agent advertising [capability]; returns
     [{ count; capability; agents = [...] }] or an error envelope. *)

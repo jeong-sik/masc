@@ -4,4 +4,4 @@
     dispatch surface. The module remains as a registration slot for
     future inline episode schemas. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

@@ -605,18 +605,18 @@ let _tool_spec_system_internal =
 
 let tool_required_permission = function
   | "masc_autoresearch_status" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_autoresearch_search_findings" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | "masc_autoresearch_record_finding"
   | "masc_autoresearch_start" | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
-      Some Types.CanAdmin
+      Some Masc_domain.CanAdmin
   | _ -> None
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create

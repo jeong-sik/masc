@@ -139,10 +139,10 @@ let classify_dashboard_dev_token_candidate ~base_path raw :
         Ok (Reusable trimmed)
     | Ok _owner ->
         Ok Rotate
-    | Error (Types.Auth (Types.Auth_error.InvalidToken _ | Types.Auth_error.TokenExpired _ | Types.Auth_error.Unauthorized _)) ->
+    | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _ | Masc_domain.Auth_error.Unauthorized _)) ->
         Ok Rotate
     | Error err ->
-        Error (Types.masc_error_to_string err)
+        Error (Masc_domain.masc_error_to_string err)
 
 let read_reusable_dashboard_dev_token ~base_path path :
     (string option, string) result =
@@ -178,14 +178,14 @@ let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
 let mint_dashboard_dev_token base_path : (string, string) result =
   match
     Auth.create_token base_path
-      ~agent_name:dashboard_dev_actor_name ~role:Types.Admin
+      ~agent_name:dashboard_dev_actor_name ~role:Masc_domain.Admin
   with
   | Ok (raw, _cred) ->
       (match persist_dashboard_dev_token ~base_path raw with
        | Ok () -> Ok raw
        | Error msg -> Error msg)
   | Error err ->
-      Error (Types.masc_error_to_string err)
+      Error (Masc_domain.masc_error_to_string err)
 
 let ensure_dashboard_dev_token base_path : (string, string) result =
   let token_path = dashboard_dev_token_path base_path in
@@ -276,7 +276,7 @@ let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
-       with_token_permission_auth ~permission:Types.CanBroadcast
+       with_token_permission_auth ~permission:Masc_domain.CanBroadcast
          (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            handle_broadcast state agent_name reqd body_str
@@ -284,7 +284,7 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.post "/broadcast" (fun request reqd ->
        (* POST /broadcast - Alias for autocov compatibility *)
-       with_token_permission_auth ~permission:Types.CanBroadcast
+       with_token_permission_auth ~permission:Masc_domain.CanBroadcast
          (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            handle_broadcast state agent_name reqd body_str
@@ -420,7 +420,7 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              try
@@ -477,7 +477,7 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
-       with_permission_auth ~permission:Types.CanReadState
+       with_permission_auth ~permission:Masc_domain.CanReadState
          (fun state req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              handle_dashboard_link_previews state req reqd body_str))
@@ -774,7 +774,7 @@ let rec add_routes ~sw ~clock router =
                    ~agent_name:(String.trim name) ~limit
                in
                `Assoc [
-                 ("generated_at", `String (Types.now_iso ()));
+                 ("generated_at", `String (Masc_domain.now_iso ()));
                  ("agent_name", `String (String.trim name));
                  ("count", `Int (List.length snapshots));
                  ("snapshots", `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
@@ -799,7 +799,7 @@ let rec add_routes ~sw ~clock router =
                  ) agents
                in
                `Assoc [
-                 ("generated_at", `String (Types.now_iso ()));
+                 ("generated_at", `String (Masc_domain.now_iso ()));
                  ("agent_count", `Int (List.length agents));
                  ("agents", `List per_agent);
                ]
@@ -852,7 +852,7 @@ let rec add_routes ~sw ~clock router =
              ?since_ts ?until_ts ~n ()
          in
          let json = `Assoc [
-           ("generated_at", `String (Types.now_iso ()));
+           ("generated_at", `String (Masc_domain.now_iso ()));
            ("count", `Int (List.length result.entries));
            ("total_matching_entries", `Int result.total_matching_entries);
            ("truncated", `Bool result.truncated);
@@ -909,7 +909,7 @@ let rec add_routes ~sw ~clock router =
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
        if Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request) then
-         with_token_permission_auth ~permission:Types.CanAdmin
+         with_token_permission_auth ~permission:Masc_domain.CanAdmin
            (fun state _agent_name req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
            ) request reqd
@@ -930,32 +930,32 @@ let rec add_routes ~sw ~clock router =
                Keeper_api.handle_keeper_tools_post state req reqd
              ) request reqd
        | Keeper_api.Keeper_post_config ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_boot ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_up"
                  ~action:"boot" state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_shutdown ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_down"
                  ~action:"shutdown" state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_reset ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_reset"
                  ~action:"reset" state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_clear ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_lifecycle_post ~body_str ~sw ~clock
@@ -964,14 +964,14 @@ let rec add_routes ~sw ~clock router =
                )
              ) request reqd
        | Keeper_api.Keeper_post_checkpoints ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_checkpoints_post state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_directive ->
-           with_token_permission_auth ~permission:Types.CanAdmin
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_directive_post state agent_name req reqd body_str

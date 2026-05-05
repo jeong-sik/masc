@@ -6,7 +6,7 @@
     no-ops; the runtime overrides each ref via the wiring in
     [lib/coord.ml]. *)
 
-open Types
+open Masc_domain
 
 type activity_entity = { kind: string; id: string }
 type agent_lifecycle_event =
@@ -16,7 +16,7 @@ type agent_lifecycle_event =
 
 val force_release_task_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
-            task_id:string -> unit -> string Types.masc_result)
+            task_id:string -> unit -> string Masc_domain.masc_result)
            Atomic.t
 val activity_emit_fn : (Coord_utils_backend_setup.config ->
             actor:activity_entity ->
@@ -44,7 +44,7 @@ val observe_agent_lifecycle_fn : (Coord_utils_backend_setup.config ->
 val observe_task_transition_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
             task_id:string ->
-            transition:Types.task_action ->
+            transition:Masc_domain.task_action ->
             details:Yojson.Safe.t -> unit)
            Atomic.t
 val cleanup_board_artifacts_fn : (unit -> int) Atomic.t

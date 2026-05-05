@@ -26,6 +26,6 @@ val handle_run_list : context -> Yojson.Safe.t -> tool_result
 
 (** Dispatch run tool by name. Returns None if not a run tool. *)
 (** Tool schemas for MCP tools/list *)
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option

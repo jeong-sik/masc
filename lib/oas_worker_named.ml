@@ -1146,7 +1146,7 @@ let run_named_with_masc_tools
     ~goal
     ?priority
     ?(system_prompt = "")
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
@@ -1175,7 +1175,7 @@ let run_named_with_masc_tools
     ?net
     ()
   : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
-  let oas_tools = List.map (fun (td : Types.tool_schema) ->
+  let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
@@ -1197,7 +1197,7 @@ let run_model_with_masc_tools
     ~(model_label : string)
     ~goal
     ?(system_prompt = "")
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
     ?stream_idle_timeout_s

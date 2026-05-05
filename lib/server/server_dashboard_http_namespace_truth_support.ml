@@ -842,7 +842,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
   in
   `Assoc
       [
-        ("generated_at", `String (Types.now_iso ()));
+        ("generated_at", `String (Masc_domain.now_iso ()));
         ("root", namespace_block);
         ( "execution",
         `Assoc

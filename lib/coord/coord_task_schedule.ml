@@ -3,7 +3,7 @@
     Extracted from Coord_task to separate scheduling logic (priority queue,
     stale detection, auto-release) from task CRUD and state transitions. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 
@@ -12,7 +12,7 @@ include Coord_state
     [task_transition] from→to fields already use so dashboards can
     join the new auto-release rows on identical vocabulary.  Pure;
     exposed for tests. *)
-let task_status_label (status : Types.task_status) : string =
+let task_status_label (status : Masc_domain.task_status) : string =
   match status with
   | Todo -> "todo"
   | Claimed _ -> "claimed"
@@ -21,7 +21,7 @@ let task_status_label (status : Types.task_status) : string =
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
 
-let task_is_claim_pool_candidate (task : Types.task) =
+let task_is_claim_pool_candidate (task : Masc_domain.task) =
   match task.task_status with
   | Todo ->
       Option.is_none
@@ -29,13 +29,13 @@ let task_is_claim_pool_candidate (task : Types.task) =
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
       false
 
-let task_is_primary_claim_pool_candidate (task : Types.task) =
+let task_is_primary_claim_pool_candidate (task : Masc_domain.task) =
   match task.task_status with
   | Todo -> Option.is_none task.do_not_reclaim_reason
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
       false
 
-let task_is_soft_reclaim_candidate (task : Types.task) =
+let task_is_soft_reclaim_candidate (task : Masc_domain.task) =
   match task.task_status, task.do_not_reclaim_reason with
   | Todo, Some reason ->
       Option.is_none (Coord_task.do_not_reclaim_reason_blocks_claim (Some reason))
@@ -71,7 +71,7 @@ let latest_verification_status_by_task config =
              Hashtbl.replace latest req.task_id (req.created_at, state));
   latest
 
-let verification_blocks_claim latest_status_by_task (task : Types.task) =
+let verification_blocks_claim latest_status_by_task (task : Masc_domain.task) =
   match Hashtbl.find_opt latest_status_by_task task.id with
   | Some (_, `Pending)
   | Some (_, `Assigned)
@@ -79,7 +79,7 @@ let verification_blocks_claim latest_status_by_task (task : Types.task) =
   | Some (_, `Passed)
   | None -> false
 
-let task_required_tools (task : Types.task) =
+let task_required_tools (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> contract.required_tools
   | None -> []
@@ -278,7 +278,7 @@ let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
     List.find_opt
-      (fun (task : Types.task) -> String.equal task.id task_id)
+      (fun (task : Masc_domain.task) -> String.equal task.id task_id)
       backlog.tasks
   with
   | Some task -> (
@@ -358,7 +358,7 @@ let claim_next_r
          back to Todo before proceeding. AwaitingVerification is deliberately
          excluded: releasing it would drop the verification FSM edge and reopen
          work before a verifier approve/reject decision. *)
-      let previous_claim = List.find_opt (fun (t : Types.task) ->
+      let previous_claim = List.find_opt (fun (t : Masc_domain.task) ->
         match t.task_status with
         | Claimed { assignee; _ } | InProgress { assignee; _ } ->
             String.equal assignee agent_name
@@ -368,10 +368,10 @@ let claim_next_r
         match previous_claim with
         | Some prev ->
             Coord_task.observe_task_transition config ~agent_name ~task_id:prev.id
-              ~transition:Types.Release
+              ~transition:Masc_domain.Release
               ~details:
                 (Coord_task.task_transition_details ~from_status:prev.task_status
-                   ~to_status:Types.Todo
+                   ~to_status:Masc_domain.Todo
                    ~reason:"auto_release_before_claim_next" ())
         | None -> ()
       in
@@ -415,7 +415,7 @@ let claim_next_r
              | Eio.Cancel.Cancelled _ as e -> raise e
              | _ -> ());
             (* No broadcast — internal state transition, log_event suffices. *)
-            let updated = List.map (fun (t : Types.task) ->
+            let updated = List.map (fun (t : Masc_domain.task) ->
               if String.equal t.id prev.id then { t with task_status = Todo }
               else t
             ) backlog.tasks in
@@ -427,7 +427,7 @@ let claim_next_r
       let now = Time_compat.now () in
       (* Reuse canonical UTC parser from Types_core *)
       let parse_time = Types_core.parse_iso8601_opt in
-      let effective_priority (task : Types.task) =
+      let effective_priority (task : Masc_domain.task) =
         let age_hours =
           match parse_time task.created_at with
           | Some created -> (now -. created) /. 3600.0
@@ -445,10 +445,10 @@ let claim_next_r
         else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
       ) working_tasks in
       (* Identify blocked Todo tasks for observability *)
-      let all_todo = List.filter (fun (t : Types.task) ->
-        t.task_status = Types.Todo
+      let all_todo = List.filter (fun (t : Masc_domain.task) ->
+        t.task_status = Masc_domain.Todo
       ) sorted in
-      let blocked_todo = List.filter (fun (t : Types.task) ->
+      let blocked_todo = List.filter (fun (t : Masc_domain.task) ->
         Option.is_some
           (Coord_task.do_not_reclaim_reason_blocks_claim t.do_not_reclaim_reason)
       ) all_todo in
@@ -485,8 +485,8 @@ let claim_next_r
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
       let blocked_ids =
-        List.map (fun (t : Types.task) -> t.id) blocked_todo
-        @ List.map (fun (t : Types.task) -> t.id) verification_blocked_todo
+        List.map (fun (t : Masc_domain.task) -> t.id) blocked_todo
+        @ List.map (fun (t : Masc_domain.task) -> t.id) verification_blocked_todo
         |> List.sort_uniq String.compare
       in
       let all_excluded = match released_task_id with
@@ -658,11 +658,11 @@ let claim_next_r
             ("ts", `String (now_iso ()));
           ]);
           Coord_task.observe_task_transition config ~agent_name ~task_id:task.id
-            ~transition:Types.Claim
+            ~transition:Masc_domain.Claim
             ~details:
-              (Coord_task.task_transition_details ~from_status:Types.Todo
+              (Coord_task.task_transition_details ~from_status:Masc_domain.Todo
                  ~to_status:
-                   (Types.Claimed
+                   (Masc_domain.Claimed
                       { assignee = agent_name; claimed_at = now_iso () })
                  ());
 

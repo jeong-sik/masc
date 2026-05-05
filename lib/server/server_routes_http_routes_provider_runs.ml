@@ -32,7 +32,7 @@ let add_routes ~sw router =
            (Yojson.Safe.to_string (Model_inference_metrics.to_json agg)) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
              try

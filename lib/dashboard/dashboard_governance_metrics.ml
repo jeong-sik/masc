@@ -194,7 +194,7 @@ let governance_tool_events_json ?(now_ts = Unix.gettimeofday ())
   let rejections = tool_rejections_json ~window_minutes ~now_ts () in
   let approval = approval_queue_summary () in
   `Assoc [
-    ("generated_at", `String (Types.iso8601_of_unix_seconds now_ts));
+    ("generated_at", `String (Masc_domain.iso8601_of_unix_seconds now_ts));
     ("window_minutes", `Int window_minutes);
     ("tool_rejections", `List rejections);
     ("approval_queue", approval_queue_json approval);

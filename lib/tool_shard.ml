@@ -95,7 +95,7 @@ let keeper_shell_op_enum_strings =
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
-  tools : Types.tool_schema list;
+  tools : Masc_domain.tool_schema list;
   read_only_tools : string list;
   removable : bool;  (** true = can be revoked at runtime *)
   description : string;
@@ -105,7 +105,7 @@ module StringMap = Map.Make(String)
 
 (** Predefined shards *)
 
-let base_tools : Types.tool_schema list = [
+let base_tools : Masc_domain.tool_schema list = [
   (* Stay silent: no-op tool for tool_choice=Any turns.
      Lets the model explicitly skip a turn without being forced
      to call a real tool when there is nothing to do. *)
@@ -178,7 +178,7 @@ current preset and policy.";
   };
 ]
 
-let board_tools : Types.tool_schema list = [
+let board_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_board_get";
     description = "Read a single board post with all its comments and votes. \
@@ -324,15 +324,15 @@ Safe defaults: only targets posts older than 24h with no comments and no votes."
   };
 ]
 
-let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :
-    Types.tool_schema list =
+let select_named_schemas (names : string list) (schemas : Masc_domain.tool_schema list) :
+    Masc_domain.tool_schema list =
   names
   |> List.filter_map (fun name ->
          List.find_opt
-           (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+           (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
            schemas)
 
-let filesystem_tools : Types.tool_schema list = [
+let filesystem_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_fs_read";
     description = "Read a file as text (truncated at max_bytes). \
@@ -371,7 +371,7 @@ Creates parent dirs.";
   };
 ]
 
-let shell_tools : Types.tool_schema list = [
+let shell_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_shell";
     description = "Run a structured project shell operation. \
@@ -407,7 +407,7 @@ git_log/git_diff for repo history, gh for GitHub PR/issue/CI.";
   };
 ]
 
-let coding_keeper_bridge_tools : Types.tool_schema list = [
+let coding_keeper_bridge_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_bash";
     description = "Execute ONE shell command through the keeper_bash safety gates. \
@@ -467,7 +467,7 @@ Mirrors claude-code KillShell semantics.";
 ]
 
 (** Pre-flight validation for keeper autonomous work. *)
-let keeper_preflight_tools : Types.tool_schema list = [
+let keeper_preflight_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_preflight_check";
     description = "Validate prerequisites before starting autonomous work: \
@@ -485,7 +485,7 @@ Returns structured JSON with all check results. Read-only, no side effects.";
 ]
 
 (** PR review tools — read diffs, leave comments, approve/request changes. *)
-let keeper_pr_review_tools : Types.tool_schema list = [
+let keeper_pr_review_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_pr_review_read";
     description = "Read PR metadata, diff, reviews, and comments. \
@@ -552,16 +552,16 @@ let coding_workspace_tool_names : string list =
   [ "masc_worktree_create"; "masc_worktree_list"; "masc_code_search";
     "masc_code_symbols"; "masc_code_read" ]
 
-let coding_workspace_tools : Types.tool_schema list =
+let coding_workspace_tools : Masc_domain.tool_schema list =
   select_named_schemas coding_workspace_tool_names
     (Tool_schemas_worktree.schemas @ Tool_code.schemas)
 
 (** Coding tools — shell/github bridges plus worktree-first code workflow.
     Always granted. *)
-let coding_tools : Types.tool_schema list =
+let coding_tools : Masc_domain.tool_schema list =
   coding_keeper_bridge_tools @ coding_workspace_tools
 
-let voice_tools : Types.tool_schema list = [
+let voice_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_voice_speak";
     description = "Speak a short utterance via the voice bridge. Blocks until playback finishes and returns played_seconds. Do NOT call again until you receive the result — concurrent calls are serialized by a global lock. Duplicate identical messages within 30s are silently skipped.";
@@ -622,7 +622,7 @@ let voice_tools : Types.tool_schema list = [
   };
 ]
 
-let library_tools : Types.tool_schema list = [
+let library_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_library_search";
     description = "Search the knowledge library by keyword. Returns matching document titles, \
@@ -651,7 +651,7 @@ a known topic name. Returns full document text.";
   };
 ]
 
-let taskboard_tools : Types.tool_schema list = [
+let taskboard_tools : Masc_domain.tool_schema list = [
   {
     name = "keeper_tasks_list";
     description = "List tasks on the MASC backlog. Returns task_id, title, status, assignee, \
@@ -661,9 +661,9 @@ and priority for each task. Use to see what work is available or in progress.";
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
-          (* Issue #8354: derived from Types.task_status Variant SSOT.
+          (* Issue #8354: derived from Masc_domain.task_status Variant SSOT.
              Hand-rolled enum used to drop awaiting_verification. *)
-          ("enum", `List (List.map (fun s -> `String s) Types.valid_task_status_strings));
+          ("enum", `List (List.map (fun s -> `String s) Masc_domain.valid_task_status_strings));
           ("description", `String "Filter by task status");
         ]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
@@ -886,7 +886,7 @@ let shard_taskboard : shard = {
 }
 
 (** Autoresearch tools available to keepers. *)
-let autoresearch_keeper_tools : Types.tool_schema list =
+let autoresearch_keeper_tools : Masc_domain.tool_schema list =
   Tool_autoresearch_schemas.schemas
 
 let shard_autoresearch : shard = {
@@ -973,7 +973,7 @@ let all_read_only_keeper_tools () : string list =
    single tool can appear under multiple shards (e.g. tools that
    [shard_coding] composes from [shard_shell]) and the schema
    list may overlap with other roots (Tools.raw_schemas). *)
-let all_keeper_tool_schemas : Types.tool_schema list =
+let all_keeper_tool_schemas : Masc_domain.tool_schema list =
   let shard_schemas =
     StringMap.fold
       (fun _name (shard : shard) acc -> shard.tools @ acc)
@@ -992,7 +992,7 @@ let get_shard (name : string) : shard option =
   StringMap.find_opt name all_shards
 
 (** Combine tools from multiple shard names *)
-let tools_of_shards (shard_names : string list) : Types.tool_schema list =
+let tools_of_shards (shard_names : string list) : Masc_domain.tool_schema list =
   shard_names
   |> List.filter_map (fun name -> StringMap.find_opt name all_shards)
   |> List.concat_map (fun (s : shard) -> s.tools)
@@ -1033,12 +1033,12 @@ let list_all_shards () : (string * bool * int) list =
   |> List.rev
 
 (** Default keeper tool set from [default_shard_names]. *)
-let keeper_model_tools : Types.tool_schema list =
+let keeper_model_tools : Masc_domain.tool_schema list =
   tools_of_shards default_shard_names
 
 (** {1 MCP Schemas} *)
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   {
     name = "masc_tool_grant";
     description = "Grant a capability group to an agent. \
@@ -1158,8 +1158,8 @@ let _tool_spec_read_only = [ "masc_tool_list" ]
 let _tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
 
 let tool_required_permission = function
-  | "masc_tool_list" -> Some Types.CanReadState
-  | "masc_tool_grant" | "masc_tool_revoke" -> Some Types.CanAdmin
+  | "masc_tool_list" -> Some Masc_domain.CanReadState
+  | "masc_tool_grant" | "masc_tool_revoke" -> Some Masc_domain.CanAdmin
   | _ -> None
 
 let tool_effect_domain name =
@@ -1172,7 +1172,7 @@ let tool_effect_domain name =
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

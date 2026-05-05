@@ -45,7 +45,7 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  required_permission : Types.permission option;
+  required_permission : Masc_domain.permission option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -87,8 +87,8 @@ let create
 (* Conversion                                                       *)
 (* ================================================================ *)
 
-let to_tool_schema (spec : t) : Types.tool_schema =
-  { Types.name = spec.name;
+let to_tool_schema (spec : t) : Masc_domain.tool_schema =
+  { Masc_domain.name = spec.name;
     description = spec.description;
     input_schema = spec.input_schema }
 

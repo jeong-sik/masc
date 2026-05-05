@@ -310,27 +310,27 @@ let dashboard_auth_success_payload session =
 
 let verify_dashboard_token ~base_path token =
   let auth_cfg = Auth.load_auth_config base_path in
-  if not auth_cfg.Types.enabled then
+  if not auth_cfg.Masc_domain.enabled then
     Ok None
   else
     match token with
     | None when not auth_cfg.require_token ->
         (match Auth.check_permission base_path ~agent_name:"dashboard"
-                 ~token:None ~permission:Types.CanReadState with
+                 ~token:None ~permission:Masc_domain.CanReadState with
          | Ok () -> Ok None
-         | Error err -> Error (Types.masc_error_to_string err))
+         | Error err -> Error (Masc_domain.masc_error_to_string err))
     | None ->
         Error "dashboard/hello requires a bearer token"
     | Some raw_token -> (
         match Auth.find_credential_by_token base_path ~token:raw_token with
-        | Error err -> Error (Types.masc_error_to_string err)
+        | Error err -> Error (Masc_domain.masc_error_to_string err)
         | Ok cred -> (
             match
-              Auth.check_permission base_path ~agent_name:cred.Types.agent_name
-                ~token:(Some raw_token) ~permission:Types.CanReadState
+              Auth.check_permission base_path ~agent_name:cred.Masc_domain.agent_name
+                ~token:(Some raw_token) ~permission:Masc_domain.CanReadState
             with
-            | Ok () -> Ok (Some cred.Types.agent_name)
-            | Error err -> Error (Types.masc_error_to_string err)))
+            | Ok () -> Ok (Some cred.Masc_domain.agent_name)
+            | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let dashboard_hello ~base_path ~session_id ?token () =
   match find_session session_id with

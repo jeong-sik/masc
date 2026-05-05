@@ -411,8 +411,8 @@ let social_edges_json ~limit sources =
 
 let active_task_count tasks =
   List_util.count_if
-    (fun (task : Types.task) ->
-       not (Types.task_status_is_terminal task.task_status))
+    (fun (task : Masc_domain.task) ->
+       not (Masc_domain.task_status_is_terminal task.task_status))
     tasks
 
 let stagnation_score ~active_agents ~active_tasks ~idle_signal_count
@@ -519,7 +519,7 @@ let snapshot_json ?hearth ~limit config =
   let active_tasks = active_task_count tasks in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ( "room_state",
         `Assoc
           [

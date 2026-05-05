@@ -35,7 +35,7 @@ type keeper_policy_observation =
 val observation_has_question : string -> bool
 val keeper_policy_observation_of_room_message :
   meta:Keeper_types.keeper_meta ->
-  room_id:string -> Types.message -> keeper_policy_observation
+  room_id:string -> Masc_domain.message -> keeper_policy_observation
 
 type alert_channel_result =
   Keeper_memory_policy.alert_channel_result = {

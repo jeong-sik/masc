@@ -132,19 +132,19 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
   let claimed = ref 0 in
   let completed = ref 0 in
   Coord.get_tasks_safe config
-  |> List.iter (fun (task : Types.task) ->
+  |> List.iter (fun (task : Masc_domain.task) ->
          match task.task_status with
-         | Types.Claimed { assignee; _ }
-         | Types.InProgress { assignee; _ }
-         | Types.AwaitingVerification { assignee; _ }
+         | Masc_domain.Claimed { assignee; _ }
+         | Masc_domain.InProgress { assignee; _ }
+         | Masc_domain.AwaitingVerification { assignee; _ }
            when String.equal assignee agent_name ->
              Stdlib.incr claimed
-         | Types.Done { assignee; _ } when String.equal assignee agent_name ->
+         | Masc_domain.Done { assignee; _ } when String.equal assignee agent_name ->
              Stdlib.incr claimed;
              Stdlib.incr completed
-         | Types.Todo
-         | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
-         | Types.Done _ | Types.Cancelled _ -> ());
+         | Masc_domain.Todo
+         | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+         | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ());
   (!claimed, !completed)
 
 (** {1 Board Counting} *)

@@ -83,7 +83,7 @@ type metadata = {
   readonly : bool option;
   destructive : bool option;
   idempotent : bool option;
-  required_permission : Types.permission option;
+  required_permission : Masc_domain.permission option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -217,26 +217,26 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_join",
-      { actor_bound_masc_coordination_tool with required_permission = Some Types.CanJoin } );
+      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanJoin } );
     ( "masc_leave",
-      { actor_bound_masc_coordination_tool with required_permission = Some Types.CanLeave } );
+      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanLeave } );
     ("masc_claim_next", actor_bound_masc_coordination_tool);
     ("masc_transition", actor_bound_masc_coordination_tool);
     ("masc_plan_set_task", actor_bound_masc_coordination_tool);
     ( "masc_broadcast",
-      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ( "masc_messages",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
+      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
     ( "masc_who",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
+      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
     ( "channel_gate",
-      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ( "masc_portal_open",
-      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_close",
-      { masc_coordination_tool with required_permission = Some Types.CanOpenPortal } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_send",
-      { masc_coordination_tool with required_permission = Some Types.CanSendPortal } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
     ( "masc_room_status",
       hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
         "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
@@ -284,7 +284,7 @@ let explicit_metadata : (string * metadata) list =
            (hidden_active
               "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface."))
         with
-        required_permission = Some Types.CanAdmin;
+        required_permission = Some Masc_domain.CanAdmin;
       } );
     ( "masc_execute",
       with_semantic_flags ~destructive:true
@@ -292,12 +292,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
     ( "masc_keeper_reset",
-      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ( "masc_keeper_compact",
-      { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
+      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ( "masc_keeper_clear",
       with_semantic_flags ~destructive:true
-        { masc_coordination_tool with required_permission = Some Types.CanBroadcast } );
+        { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",
@@ -349,7 +349,7 @@ let keeper_internal_metadata name =
   in
   {
     meta with
-    required_permission = Some Types.CanBroadcast;
+    required_permission = Some Masc_domain.CanBroadcast;
     requires_actor_binding = Some true;
   }
 
@@ -909,7 +909,7 @@ let metadata_to_fields name =
   in
   match meta.required_permission with
   | Some permission ->
-      ("requiredPermission", `String (Types.show_permission permission))
+      ("requiredPermission", `String (Masc_domain.show_permission permission))
       :: with_actor_binding
   | None -> with_actor_binding
 

@@ -297,35 +297,35 @@ let build_internal_signals incidents actions =
   |> List.sort (fun left right -> Int.compare right.pressure_rank left.pressure_rank)
   |> List.map (fun (row : keeper_context) -> row.json)
 
-let task_operation_status (task : Types.task) =
+let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Some "active"
-  | Types.AwaitingVerification _ -> Some "paused"
-  | Types.Done _ | Types.Cancelled _ -> None
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
+  | Masc_domain.AwaitingVerification _ -> Some "paused"
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
-let task_operation_updated_at (task : Types.task) =
+let task_operation_updated_at (task : Masc_domain.task) =
   match task.task_status with
-  | Types.Done { completed_at; _ } -> completed_at
-  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Types.InProgress { started_at; _ } -> started_at
-  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Types.Claimed { claimed_at; _ } -> claimed_at
-  | Types.Todo -> task.created_at
+  | Masc_domain.Done { completed_at; _ } -> completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.InProgress { started_at; _ } -> started_at
+  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Todo -> task.created_at
 
-let task_operation_links (task : Types.task) =
+let task_operation_links (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> contract.links
-  | None -> { Types.operation_id = None; session_id = None; autoresearch_loop_id = None }
+  | None -> { Masc_domain.operation_id = None; session_id = None; autoresearch_loop_id = None }
 
-let task_operation_id (task : Types.task) =
+let task_operation_id (task : Masc_domain.task) =
   let links = task_operation_links task in
   match trim_to_option (Option.value ~default:"" links.operation_id) with
   | Some operation_id -> operation_id
   | None -> task.id
 
-let build_operation_contexts ~(tasks : Types.task list) =
+let build_operation_contexts ~(tasks : Masc_domain.task list) =
   tasks
-  |> List.filter_map (fun (task : Types.task) ->
+  |> List.filter_map (fun (task : Masc_domain.task) ->
          match task_operation_status task with
          | None -> None
          | Some status ->

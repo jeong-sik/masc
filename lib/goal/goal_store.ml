@@ -386,7 +386,7 @@ let ensure_dirs config =
   Coord.mkdir_p (snapshots_dir config)
 
 let default_state () =
-  { version = 1; updated_at = Types.now_iso (); goals = [] }
+  { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
 let read_state config =
   ensure_dirs config;
@@ -433,7 +433,7 @@ let update_goal config ~goal_id f =
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
       | Some goal ->
-          let now = Types.now_iso () in
+          let now = Masc_domain.now_iso () in
           let updated_goal = normalize_goal (f { goal with updated_at = now }) in
           let next_state =
             {
@@ -455,7 +455,7 @@ let delete_goal config ~goal_id =
            {
              version = state.version + 1;
              goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals;
-             updated_at = Types.now_iso ();
+             updated_at = Masc_domain.now_iso ();
            }));
     Ok ()
   end
@@ -516,7 +516,7 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     match resolved_phase with
     | Error msg -> Error msg
     | Ok default_phase ->
-        let now = Types.now_iso () in
+        let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         let was_created = ref false in
         let state =
@@ -629,7 +629,7 @@ let snapshot config ~mode =
   let snapshot =
     {
       snapshot_id;
-      created_at = Types.now_iso ();
+      created_at = Masc_domain.now_iso ();
       mode;
       goals = state.goals;
       rollup = compute_rollup state.goals;
@@ -696,7 +696,7 @@ let reprioritize mode goal =
   if next_priority = goal.priority then
     (goal, false)
   else
-    ( { goal with priority = next_priority; updated_at = Types.now_iso () }
+    ( { goal with priority = next_priority; updated_at = Masc_domain.now_iso () }
       |> normalize_goal,
       true )
 
@@ -717,7 +717,7 @@ let refresh config ~mode =
                  goal)
              state.goals
          in
-         { version = state.version + 1; updated_at = Types.now_iso (); goals }))
+         { version = state.version + 1; updated_at = Masc_domain.now_iso (); goals }))
   ;
   let snapshot = snapshot config ~mode:(snapshot_mode_of_refresh_mode mode) in
   {
@@ -728,7 +728,7 @@ let refresh config ~mode =
   }
 
 let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note () =
-  let now = Types.now_iso () in
+  let now = Masc_domain.now_iso () in
   update_goal config ~goal_id (fun goal ->
       let phase, priority =
         match outcome with

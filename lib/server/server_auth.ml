@@ -1,5 +1,5 @@
 
-open Types
+open Masc_domain
 open Server_utils
 
 let trim_opt = function
@@ -57,7 +57,7 @@ let strict_http_auth_error endpoint =
 let ensure_strict_http_token_auth ~endpoint auth_config =
   if not (http_auth_strict_enabled ()) then
     Ok auth_config
-  else if not auth_config.Types.enabled then
+  else if not auth_config.Masc_domain.enabled then
     Error (strict_http_auth_error endpoint)
   else if not auth_config.require_token then
     Error (strict_http_auth_error endpoint)
@@ -143,14 +143,14 @@ let internal_keeper_agent_from_request request =
       else Some (Printf.sprintf "keeper-%s-agent" normalized)
 
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
-    (string option, Types.masc_error) result =
+    (string option, Masc_domain.masc_error) result =
   match token with
   | Some t when Auth.verify_internal_keeper_token base_path ~token:t ->
       (match internal_keeper_agent_from_request request with
        | Some agent_name -> Ok (Some agent_name)
        | None ->
            Error
-             (Types.Auth (Types.Auth_error.Unauthorized
+             (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
                 "Internal keeper auth requires x-masc-keeper-name header.")))
   | Some t -> (
       match Auth.resolve_agent_from_token base_path ~token:t with
@@ -168,7 +168,7 @@ let verify_mcp_auth ~base_path request =
   match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
   | Error msg -> Error msg
   | Ok auth_config ->
-      if not auth_config.Types.enabled then
+      if not auth_config.Masc_domain.enabled then
         Ok None  (* Auth disabled - allow all *)
       else
         match auth_token_from_request request with
@@ -179,7 +179,7 @@ let verify_mcp_auth ~base_path request =
               "Authentication required. Use 'Authorization: Bearer <token>' header."
         | Some token -> (
             match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-            | Error err -> Error (Types.masc_error_to_string err)
+            | Error err -> Error (Masc_domain.masc_error_to_string err)
             | Ok None ->
                 (* Fail-closed: dead branch today (resolver:154-157 returns
                    [Ok (Some _)] or [Error] for [Some token]) but kept
@@ -193,17 +193,17 @@ let verify_mcp_auth ~base_path request =
             | Ok (Some agent_name) ->
                 (match
                    Auth.check_permission base_path ~agent_name ~token:(Some token)
-                     ~permission:Types.CanReadState
+                     ~permission:Masc_domain.CanReadState
                  with
                  | Ok () -> Ok None
-                 | Error err -> Error (Types.masc_error_to_string err)))
+                 | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let verify_mcp_observer_stream_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
   | Error msg -> Error msg
   | Ok auth_config ->
-      if not auth_config.Types.enabled then
+      if not auth_config.Masc_domain.enabled then
         Ok None
       else
         match observer_sse_auth_token_from_request request with
@@ -215,7 +215,7 @@ let verify_mcp_observer_stream_auth ~base_path request =
                or 'token' query param for the observer/presence SSE stream."
         | Some token -> (
             match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-            | Error err -> Error (Types.masc_error_to_string err)
+            | Error err -> Error (Masc_domain.masc_error_to_string err)
             | Ok None ->
                 (* Fail-closed: see verify_mcp_auth above. *)
                 Error
@@ -224,14 +224,14 @@ let verify_mcp_observer_stream_auth ~base_path request =
             | Ok (Some agent_name) ->
                 (match
                    Auth.check_permission base_path ~agent_name ~token:(Some token)
-                     ~permission:Types.CanReadState
+                     ~permission:Masc_domain.CanReadState
                  with
                  | Ok () -> Ok None
-                 | Error err -> Error (Types.masc_error_to_string err)))
+                 | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
-  if not auth_config.Types.enabled then
+  if not auth_config.Masc_domain.enabled then
     Error
       "/mcp/operator requires room auth enabled with require_token=true."
   else if not auth_config.require_token then
@@ -242,7 +242,7 @@ let verify_operator_mcp_auth ~base_path request =
         Error "Authentication required. Use 'Authorization: Bearer <token>' header."
     | Some token -> (
         match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-        | Error err -> Error (Types.masc_error_to_string err)
+        | Error err -> Error (Masc_domain.masc_error_to_string err)
         | Ok None ->
             (* Fail-closed: see verify_mcp_auth above. *)
             Error
@@ -251,10 +251,10 @@ let verify_operator_mcp_auth ~base_path request =
         | Ok (Some agent_name) ->
             (match
                Auth.check_permission base_path ~agent_name ~token:(Some token)
-                 ~permission:Types.CanAdmin
+                 ~permission:Masc_domain.CanAdmin
              with
              | Ok () -> Ok None
-             | Error err -> Error (Types.masc_error_to_string err)))
+             | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let request_actor_hint request =
   match agent_from_request request with
@@ -312,7 +312,7 @@ let dashboard_actor_for_request ~base_path request =
              showed the warn firing 1–2 times/second with no diagnostic
              surface, so the WARN was loud noise without root-cause
              attribution.  Surface both the error class and the hint. *)
-          let err_str = Types.masc_error_to_string err in
+          let err_str = Masc_domain.masc_error_to_string err in
           let hint =
             match request_actor_hint request with
             | Some s -> s
@@ -436,12 +436,12 @@ let is_allowlisted_loopback_dev_origin origin =
   | _ -> false
 
 let ensure_same_origin_browser_request request :
-    (unit, Types.masc_error) result =
+    (unit, Masc_domain.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
     if allow_anonymous_mutations then Ok ()
     else
-      Error (Types.Auth (Types.Auth_error.Unauthorized
+      Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
         "Authentication required: provide a bearer token or Origin header. \
          Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."))
   | Some origin -> (
@@ -471,7 +471,7 @@ let ensure_same_origin_browser_request request :
               (match Httpun.Headers.get request.Httpun.Request.headers "host" with
                | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
             Error
-              (Types.Auth (Types.Auth_error.Forbidden
+              (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
                  { agent = "browser";
                    action = "cross-origin HTTP mutation" })))
       | _ ->
@@ -481,13 +481,13 @@ let ensure_same_origin_browser_request request :
             (match Httpun.Headers.get request.Httpun.Request.headers "host" with
              | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
           Error
-            (Types.Auth (Types.Auth_error.Forbidden
+            (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
                { agent = "browser";
                  action = "cross-origin HTTP mutation" })))
 
 let http_status_of_auth_error = function
-  | Types.Auth (Types.Auth_error.Unauthorized _ | Types.Auth_error.InvalidToken _ | Types.Auth_error.TokenExpired _) -> `Unauthorized
-  | Types.Auth (Types.Auth_error.Forbidden _) -> `Forbidden
+  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _ | Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _) -> `Unauthorized
+  | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> `Forbidden
   | _ -> `Internal_server_error
 
 (** Server state - initialized at startup *)
@@ -560,7 +560,7 @@ let respond_public_read_json ?(status = `OK) request reqd body =
 
 let auth_error_json err =
   Yojson.Safe.to_string
-    (`Assoc [ ("error", `String (Types.masc_error_to_string err)) ])
+    (`Assoc [ ("error", `String (Masc_domain.masc_error_to_string err)) ])
 
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
@@ -681,15 +681,15 @@ let is_public_read_path path =
   || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path
 
 let resolve_agent_name_for_auth ~base_path request ~token :
-    (string option, Types.masc_error) result =
+    (string option, Masc_domain.masc_error) result =
   resolve_agent_name_for_auth_raw ~base_path request ~token
 
 let authorize_permission_request ~base_path ~permission request :
-    (unit, Types.masc_error) result =
+    (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
-  | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -700,16 +700,16 @@ let authorize_permission_request ~base_path ~permission request :
             && agent_name_opt = None
           then
             Error
-              (Types.Auth (Types.Auth_error.Unauthorized
+              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
                  "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
           else
             Auth.check_permission base_path ~agent_name ~token ~permission)
 
-let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
-  authorize_permission_request ~base_path ~permission:Types.CanReadState request
+let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
+  authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
 let authorize_tool_request ~base_path ~tool_name request :
-    (unit, Types.masc_error) result =
+    (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match
@@ -721,7 +721,7 @@ let authorize_tool_request ~base_path ~tool_name request :
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with
-  | Error msg -> Error (Types.Auth (Types.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -732,40 +732,40 @@ let authorize_tool_request ~base_path ~tool_name request :
             && agent_name_opt = None
           then
             Error
-              (Types.Auth (Types.Auth_error.Unauthorized
+              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
                  "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
           else
             Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
-    (string, Types.masc_error) result =
+    (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   if not auth_cfg.enabled then
     Error
-      (Types.Auth (Types.Auth_error.Unauthorized
+      (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
          "HTTP mutation requires room auth enabled with require_token=true."))
   else if not auth_cfg.require_token then
     Error
-      (Types.Auth (Types.Auth_error.Unauthorized
+      (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
          "HTTP mutation requires bearer token auth (require_token=true)."))
   else
     match auth_token_from_request request with
     | None ->
         Error
-          (Types.Auth (Types.Auth_error.Unauthorized
+          (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
              "Authentication required. Use 'Authorization: Bearer <token>' header."))
     | Some token -> (
         match Auth.find_credential_by_token base_path ~token with
         | Error err -> Error err
         | Ok cred ->
-            if Types.has_permission cred.role permission then
+            if Masc_domain.has_permission cred.role permission then
               Ok cred.agent_name
             else
               Error
-                (Types.Auth (Types.Auth_error.Forbidden
+                (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
                    {
                      agent = cred.agent_name;
-                     action = Types.show_permission permission;
+                     action = Masc_domain.show_permission permission;
                    })))
 
 let is_dashboard_bootstrap_path path =

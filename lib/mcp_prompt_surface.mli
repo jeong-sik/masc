@@ -68,7 +68,7 @@ val get_json :
   config:Coord.config ->
   name:string ->
   arguments:Yojson.Safe.t ->
-  Types.tool_schema list ->
+  Masc_domain.tool_schema list ->
   (Yojson.Safe.t, string) result
 (** [get_json ~config ~name ~arguments schemas] is the JSON-RPC
     [prompts/get] entry point.

@@ -1,7 +1,7 @@
 (** Coord broadcast — emit room-wide messages and the
     accompanying message-activity event. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 val emit_message_activity : Coord_utils_backend_setup.config ->

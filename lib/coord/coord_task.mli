@@ -24,58 +24,58 @@ include module type of Coord_task_claim
 (** {1 Task transitions} *)
 
 val transition_task_r :
-  config -> agent_name:string -> task_id:string -> action:Types.task_action ->
+  config -> agent_name:string -> task_id:string -> action:Masc_domain.task_action ->
   ?agent_tool_names:string list ->
   ?prepare_verification_request:
-    (task:Types.task ->
+    (task:Masc_domain.task ->
      assignee:string ->
      verification_id:string ->
      evidence_refs:string list ->
      (unit, string) result) ->
   ?prepare_verification_verdict:
-    (task:Types.task ->
+    (task:Masc_domain.task ->
      verifier:string ->
      verification_id:string ->
      decision:[ `Approve of string | `Reject of string ] ->
      (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
-  ?handoff_context:Types.task_handoff_context ->
-  ?force:bool -> unit -> string Types.masc_result
+  ?handoff_context:Masc_domain.task_handoff_context ->
+  ?force:bool -> unit -> string Masc_domain.masc_result
 
 val release_task_r :
   config -> agent_name:string -> task_id:string ->
   ?expected_version:int ->
-  ?handoff_context:Types.task_handoff_context -> unit -> string Types.masc_result
+  ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
 val force_release_task_r :
   config -> agent_name:string -> task_id:string ->
-  ?handoff_context:Types.task_handoff_context -> unit -> string Types.masc_result
+  ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
 val force_done_task_r :
   config -> agent_name:string -> task_id:string ->
-  notes:string -> unit -> string Types.masc_result
+  notes:string -> unit -> string Masc_domain.masc_result
 
 (** {1 Task cancellation} *)
 
 val cancel_task_r :
   config -> agent_name:string -> task_id:string ->
-  reason:string -> string Types.masc_result
+  reason:string -> string Masc_domain.masc_result
 
 (** Force-cancel a task regardless of assignee. System privilege.
     Used by {!Verification_protocol.check_timeouts} to expire
     [AwaitingVerification] tasks whose verifier deadline has passed. *)
 val force_cancel_task_r :
   config -> agent_name:string -> task_id:string ->
-  reason:string -> unit -> string Types.masc_result
+  reason:string -> unit -> string Masc_domain.masc_result
 
 val link_task_execution_artifacts_r :
   config -> task_id:string ->
   ?session_id:string -> ?operation_id:string -> ?autoresearch_loop_id:string ->
-  unit -> string Types.masc_result
+  unit -> string Masc_domain.masc_result
 
 (** {1 Re-exported type (backward compatibility)} *)
 
-type claim_next_result = Types.claim_next_result =
+type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of {
       task_id : string;
       title : string;

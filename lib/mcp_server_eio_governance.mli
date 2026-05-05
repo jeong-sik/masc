@@ -67,7 +67,7 @@ val save_governance :
   Coord.config -> governance_config -> unit
 (** Persist [g] to [governance.json] under [config]'s [.masc/]
     root. The [updated_at] field is appended (current
-    [Types.now_iso ()]) when the encoder produces an [`Assoc].
+    [Masc_domain.now_iso ()]) when the encoder produces an [`Assoc].
     Creates the [.masc/] directory if absent. *)
 
 (** {1 MCP sessions} *)

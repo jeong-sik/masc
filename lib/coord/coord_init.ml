@@ -3,7 +3,7 @@
     Extracted from Coord module. Handles room directory bootstrapping,
     state creation, and pause/resume lifecycle. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 open Coord_state
 open Coord_broadcast

@@ -18,4 +18,4 @@ val compact_session_json : Yojson.Safe.t -> Yojson.Safe.t
 
 val compact_keeper_json : Yojson.Safe.t -> Yojson.Safe.t
 
-val compact_agent_json : Types.agent -> Yojson.Safe.t
+val compact_agent_json : Masc_domain.agent -> Yojson.Safe.t

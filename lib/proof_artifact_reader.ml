@@ -16,3 +16,5 @@ let run_artifact_path (config : Agent_sdk.Proof_store.config)
   resolve_path config ref_
 
 let read_json = Agent_sdk.Proof_store.read_json
+
+let read_jsonl = Agent_sdk.Proof_store.read_jsonl

@@ -97,6 +97,9 @@ let make_ref ~run_id =
 let make_effects_ref ~run_id =
   Printf.sprintf "proof-store://%s/evidence/effects.json" run_id
 
+let make_events_ref ~run_id =
+  Printf.sprintf "proof-store://%s/evidence/events.jsonl" run_id
+
 let make_effect ?source_path ?source_line () : Yojson.Safe.t =
   let opt name f = function
     | Some value -> [ name, f value ]
@@ -465,6 +468,36 @@ let test_path_traversal_rejected () =
   | Ok path ->
     Alcotest.fail (Printf.sprintf "should reject, got Ok: %s" path)
 
+let test_read_jsonl_delegates_to_oas_reader () =
+  let store, _dir = setup_store () in
+  let run_id = "jsonl-reader-001" in
+  let path =
+    match
+      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+        ~relative_path:"evidence/events.jsonl"
+    with
+    | Ok path -> path
+    | Error msg -> Alcotest.fail msg
+  in
+  mkdirp (Filename.dirname path);
+  let oc = open_out path in
+  output_string oc {|{"event":"one"}|};
+  output_char oc '\n';
+  output_string oc {|{"event":"two"}|};
+  output_char oc '\n';
+  close_out oc;
+  match
+    Masc_mcp.Proof_artifact_reader.read_jsonl store (make_events_ref ~run_id)
+  with
+  | Ok [`Assoc [("event", `String "one")]; `Assoc [("event", `String "two")]] ->
+      ()
+  | Ok rows ->
+      Alcotest.fail
+        (Printf.sprintf "unexpected JSONL rows: %s"
+           (Yojson.Safe.to_string (`List rows)))
+  | Error msg ->
+      Alcotest.fail (Printf.sprintf "expected JSONL rows, got error: %s" msg)
+
 (* ================================================================ *)
 (* Cross-run window tests                                            *)
 (* ================================================================ *)
@@ -670,6 +703,8 @@ let () =
          test_effect_source_path_satisfies_gap;
        Alcotest.test_case "path traversal rejected" `Quick
          test_path_traversal_rejected;
+       Alcotest.test_case "jsonl reader delegates to OAS" `Quick
+         test_read_jsonl_delegates_to_oas_reader;
      ]);
     ("cross_run", [
        Alcotest.test_case "single run via project_window" `Quick

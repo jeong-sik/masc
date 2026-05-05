@@ -504,6 +504,79 @@ let test_doc_truth_guard_contracts () =
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "command-plane.ts         -- Command plane types")
 
+let test_proof_store_reader_truth_contracts () =
+  check bool "proof artifact reader delegates ref resolution to OAS" true
+    (file_contains_pattern "lib/proof_artifact_reader.ml"
+       "Agent_sdk.Proof_store.resolve_ref");
+  check bool "proof artifact reader delegates JSON reads to OAS" true
+    (file_contains_pattern "lib/proof_artifact_reader.ml"
+       "Agent_sdk.Proof_store.read_json");
+  check bool "proof artifact reader delegates JSONL reads to OAS" true
+    (file_contains_pattern "lib/proof_artifact_reader.ml"
+       "Agent_sdk.Proof_store.read_jsonl");
+  check bool "proof artifact reader interface names OAS ownership" true
+    (file_contains_pattern "lib/proof_artifact_reader.mli"
+       "Agent_sdk.Proof_store");
+  check bool "proof artifact reader interface no longer documents local layout ownership" true
+    (file_not_contains_pattern "lib/proof_artifact_reader.mli"
+       "paths under [{config.root}/proofs/]");
+  check bool "cross-run design marks OAS read side implemented" true
+    (file_contains_pattern "docs/design/cross-run-loader-and-window-spec.md"
+       "Proof_store Read-Side API (OAS, Implemented)");
+  check bool "cross-run design no longer calls list_runs unordered current truth" true
+    (file_not_contains_pattern "docs/design/cross-run-loader-and-window-spec.md"
+       "The current `Proof_store.list_runs` returns `string list`");
+  check bool "cdal design no longer calls proof-store write-side only" true
+    (file_not_contains_pattern "docs/design/cdal-contract-kernel-and-advisory-split.md"
+       "write-side naming convention");
+  check bool "cdal design no longer defers OAS reader ownership" true
+    (file_not_contains_pattern "docs/design/cdal-contract-kernel-and-advisory-split.md"
+       "Long-term, OAS should own the read side");
+  check bool "cdal design no longer claims unsupported schemas lack fail-closed handling" true
+    (file_not_contains_pattern "docs/design/cdal-contract-kernel-and-advisory-split.md"
+       "no strict fail-closed handling for unsupported schema versions");
+  check bool "cdal design preserves OAS reader authority" true
+    (file_contains_pattern "docs/design/cdal-contract-kernel-and-advisory-split.md"
+       "OAS owns the read side for the `proof-store://` scheme")
+
+let test_keeper_agent_upgrade_source_contracts () =
+  check bool "shared types substrate exists" true
+    (Sys.file_exists (source_path "lib/shared_types/resilience_outcome.mli"));
+  check bool "shared audit substrate exists" true
+    (Sys.file_exists (source_path "lib/shared_audit/store.mli"));
+  check bool "multimodal hydrator is separate from keeper artifact plumbing" true
+    (Sys.file_exists (source_path "lib/multimodal/multimodal_hydrator.mli"));
+  check bool "resilience recovery strategy GADT exists" true
+    (file_contains_pattern "lib/resilience/recovery.ml" "type _ strategy =");
+  let autonomous =
+    file_pattern_position "lib/keeper/keeper_post_turn.ml"
+      "let body = apply_autonomous_wirein ~now:now_ts body"
+  in
+  let resilience =
+    file_pattern_position "lib/keeper/keeper_post_turn.ml"
+      "let body =\n    apply_resilience_wirein"
+  in
+  let tool_emission =
+    file_pattern_position "lib/keeper/keeper_post_turn.ml"
+      "let body = apply_tool_emission_wirein ~now:now_ts body"
+  in
+  let multimodal =
+    file_pattern_position "lib/keeper/keeper_post_turn.ml"
+      "apply_multimodal_wirein ~now:now_ts body"
+  in
+  check bool "keeper post-turn tail order is autonomous before resilience" true
+    (match autonomous, resilience with
+     | Some a, Some r -> a < r
+     | _ -> false);
+  check bool "keeper post-turn tail order is resilience before tool emission" true
+    (match resilience, tool_emission with
+     | Some r, Some t -> r < t
+     | _ -> false);
+  check bool "keeper post-turn tail order is tool emission before multimodal" true
+    (match tool_emission, multimodal with
+     | Some t, Some m -> t < m
+     | _ -> false)
+
 let test_contract_harness_contracts () =
   check bool "contract harness exposes extract_text helper" true
     (file_contains_pattern "scripts/harness/lib/test_framework.sh"
@@ -1482,6 +1555,10 @@ let () =
            test_case "release truth contracts" `Quick test_release_truth_contracts;
            test_case "oas pin source contracts" `Quick test_oas_pin_source_contracts;
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
+           test_case "proof store reader truth contracts" `Quick
+             test_proof_store_reader_truth_contracts;
+           test_case "keeper agent upgrade source contracts" `Quick
+             test_keeper_agent_upgrade_source_contracts;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "tool admin snapshot auth contracts" `Quick

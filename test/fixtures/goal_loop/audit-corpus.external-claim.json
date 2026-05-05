@@ -7,62 +7,62 @@
   "scope_note": "Manifest for the 12 prompt-supplied GOAL LOOP and improvement documents. This file records aggregate claims and itemized IDs without inventing missing rows.",
   "external_sources": [
     {
-      "path": "/Users/dancer/Downloads/INTEGRATED_IMPROVEMENT_DESIGN.md",
+      "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
       "line_refs": [4, 453, 456, 458, 460, 461, 462, 463, 467],
       "claim": "Claims a 214-finding audit basis, a 36-keeper operating goal, 18 action items, and concrete Verify metrics for 36 healthy keepers."
     },
     {
-      "path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md",
+      "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
       "line_refs": [4, 9, 331, 334, 335, 336, 340, 348, 352, 359, 382, 402, 531, 589],
       "claim": "Claims 206 audit findings and itemizes 18 finding IDs, but does not contain the full 206-row corpus."
     },
     {
-      "path": "/Users/dancer/Downloads/issues_analysis_done_vs_todo.md",
+      "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
       "line_refs": [3, 4, 5, 6, 12, 16, 17, 94, 109, 148, 173],
       "claim": "Separates closed issue work from remaining open root-cause work; records 53 open issues and identifies turn-slot, dashboard, FSM, telemetry, and deterministic-boundary gaps."
     },
     {
-      "path": "/Users/dancer/Downloads/live_incident_analysis.md",
+      "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
       "line_refs": [16, 29, 60, 100, 156, 169, 172, 193, 215],
       "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/cascade failures."
     },
     {
-      "path": "/Users/dancer/Downloads/fundamental_roadmap.md",
+      "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
       "line_refs": [3, 1934],
       "claim": "Claims the roadmap is based on 206 audit findings, but does not contain the full 206-row corpus."
     },
     {
-      "path": "/Users/dancer/Downloads/deep_audit_dashboard_heuristic.md",
+      "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
       "line_refs": [1, 3, 10, 13, 18, 24, 63, 74, 126],
       "claim": "Audits dashboard, heuristic metrics, admission queue, resilience, cancellation, local runtime pool, bounded token heuristics, and LLM metric bridge for fake data, silent failures, and no-op recovery."
     },
     {
-      "path": "/Users/dancer/Downloads/audit_derived_state.md",
+      "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
       "line_refs": [1, 3, 4, 20, 44, 90],
       "claim": "Claims 32 derived-state anti-patterns across masc-mcp, oas, and dashboard files, including 8 critical consistency risks."
     },
     {
-      "path": "/Users/dancer/Downloads/progress-evaluation.md",
+      "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
       "line_refs": [62, 74, 148, 149, 165],
       "claim": "Evaluates current progress after prior PRs and records improvements in dashboard utilities, typed keepers, error handling, and remaining unchanged areas."
     },
     {
-      "path": "/Users/dancer/Downloads/llm_compatibility.agent.final.md",
+      "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
       "line_refs": [147, 398, 415, 499, 531, 747, 782, 798, 1071, 1138],
       "claim": "Analyzes OAS/MASC LLM provider compatibility, tool capability routing, reasoning/thinking exposure, structured error boundaries, provider metrics, and capability drift."
     },
     {
-      "path": "/Users/dancer/Downloads/masc_final_diagnosis.md",
+      "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
       "line_refs": [8, 10, 30, 46, 72, 86, 105, 146, 155, 157],
       "claim": "Diagnoses simultaneous provider failures and cascade exhaustion as the reason keepers repeatedly die or restart without useful progress."
     },
     {
-      "path": "/Users/dancer/Downloads/RUTHLESS_JUDGMENT.md",
+      "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
       "line_refs": [103, 133, 148, 296, 302],
       "claim": "Proposes a keeper event queue and wakeup layering changes, including implementation targets and TLA+ follow-up."
     },
     {
-      "path": "/Users/dancer/Downloads/artifact_synthesis.md",
+      "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
       "line_refs": [24, 53, 57, 62, 71, 87, 94, 131, 154, 210],
       "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio cascade death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
     }
@@ -72,22 +72,22 @@
       "claim_id": "audit_total_206",
       "claimed_total": 206,
       "source_paths": [
-        "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md",
-        "/Users/dancer/Downloads/fundamental_roadmap.md",
-        "/Users/dancer/Downloads/live_incident_analysis.md"
+        "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+        "prompt_corpus/GOAL_LOOP/live_incident_analysis.md"
       ],
       "status": "aggregate_only_not_row_level"
     },
     {
       "claim_id": "audit_total_214",
       "claimed_total": 214,
-      "source_paths": ["/Users/dancer/Downloads/INTEGRATED_IMPROVEMENT_DESIGN.md"],
+      "source_paths": ["prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md"],
       "status": "aggregate_only_not_row_level"
     },
     {
       "claim_id": "goal_36_keepers",
       "claimed_total": 36,
-      "source_paths": ["/Users/dancer/Downloads/INTEGRATED_IMPROVEMENT_DESIGN.md"],
+      "source_paths": ["prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md"],
       "status": "goal_metric_claim"
     }
   ],
@@ -99,8 +99,8 @@
       "severity": "warning",
       "reason": "The supplied documents disagree on whether the audit basis is 206 or 214 findings, and neither aggregate has a row-level corpus in the checked artifacts.",
       "source_paths": [
-        "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md",
-        "/Users/dancer/Downloads/INTEGRATED_IMPROVEMENT_DESIGN.md"
+        "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md"
       ]
     }
   ],
@@ -112,7 +112,7 @@
       "patterns": ["keeper_skipping_turn"],
       "actionability": "actionable",
       "decision_id": "D-P1-1",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [295, 340, 390]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [295, 340, 390]}
     },
     {
       "finding_id": "R-FATAL-5",
@@ -121,7 +121,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": "D-P2-2",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [348, 402]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [348, 402]}
     },
     {
       "finding_id": "CD-1",
@@ -130,7 +130,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [345]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [345]}
     },
     {
       "finding_id": "CD-2",
@@ -139,7 +139,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [346]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [346]}
     },
     {
       "finding_id": "CD-5",
@@ -148,7 +148,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [309, 342]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [309, 342]}
     },
     {
       "finding_id": "CD-8",
@@ -157,7 +157,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": "D-P1-1",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [315, 341, 390]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [315, 341, 390]}
     },
     {
       "finding_id": "CD-10",
@@ -166,7 +166,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [349]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [349]}
     },
     {
       "finding_id": "CE-1",
@@ -175,7 +175,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": "D-P2-1",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [285, 344, 398]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [285, 344, 398]}
     },
     {
       "finding_id": "CE-3",
@@ -184,7 +184,7 @@
       "patterns": [],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [291]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [291]}
     },
     {
       "finding_id": "CF-1",
@@ -193,7 +193,7 @@
       "patterns": ["pricing_catalog_miss"],
       "actionability": "actionable",
       "decision_id": "D-P1-2",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [302, 343, 394]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [302, 343, 394]}
     },
     {
       "finding_id": "NF-1",
@@ -202,7 +202,7 @@
       "patterns": ["provider_health_skipped"],
       "actionability": "actionable",
       "decision_id": "D-EMERGENCY-2",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [352, 386]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [352, 386]}
     },
     {
       "finding_id": "NF-2",
@@ -211,7 +211,7 @@
       "patterns": ["credential_archived_starvation"],
       "actionability": "actionable",
       "decision_id": "D-EMERGENCY-1",
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [353, 382]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [353, 382]}
     },
     {
       "finding_id": "NF-3",
@@ -220,7 +220,7 @@
       "patterns": ["alive_but_stuck"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [354]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [354]}
     },
     {
       "finding_id": "NF-4",
@@ -229,7 +229,7 @@
       "patterns": ["governance_unparseable", "lenient_json_fallback"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [355]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [355]}
     },
     {
       "finding_id": "NF-5",
@@ -238,7 +238,7 @@
       "patterns": ["autoboot_warmup"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [356]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [356]}
     },
     {
       "finding_id": "NF-6",
@@ -247,7 +247,7 @@
       "patterns": ["config_unknown_key"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [357]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [357]}
     },
     {
       "finding_id": "NF-7",
@@ -256,7 +256,7 @@
       "patterns": ["tool_policy_unknown_tools"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [358]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [358]}
     },
     {
       "finding_id": "NF-8",
@@ -265,7 +265,7 @@
       "patterns": ["keeper_checkpoint_migration_data_loss"],
       "actionability": "actionable",
       "decision_id": null,
-      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [359]}
+      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [359]}
     }
   ]
 }

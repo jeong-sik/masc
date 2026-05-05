@@ -69,13 +69,19 @@
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json --format text`
   checked at 2026-05-05T14:54:50Z, confidence High: the external 206-audit
-  claim catalog is `INCOMPLETE`, with 18 itemized findings and 188 missing
-  itemized rows.
+  claim catalog is `INCOMPLETE`, with 18 itemized findings, 188 missing
+  itemized rows, and all 12 prompt-supplied source documents covered by the
+  manifest.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --require-complete-catalog` checked at 2026-05-05T14:54:50Z, confidence
   High: exits non-zero until the full 206-row corpus is attached or checked in.
+- [근거] `rg --only-matching --no-filename
+  "(R-FATAL|CD|CE|CF|NF)-[0-9]+"
+  /Users/dancer/Downloads -g "*.md" -g "*.json" | sort -u` checked at
+  2026-05-05T20:29:28Z, confidence High: the supplied Markdown/JSON corpus
+  itemizes only 18 unique audit IDs.
 
 ## Current Completion State
 
@@ -110,10 +116,13 @@ fallback, unknown TOML keys, all-zero metrics, linear warmup.
 
 The fixture pins concrete startup evidence for NF-1, NF-2, NF-3, NF-4, and
 NF-6. The external claim catalog itemizes 18 finding IDs from the supplied
-documents and records the source paths that claim 206 findings. It does not
-yet prove all 206 audit findings from live production state; 188 rows remain
-missing from the itemized corpus, and several prompt claims remain
-evidence-absent in the fixture (`NF-5`, `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
+documents and records all 12 prompt-supplied source paths. It also records the
+aggregate-count mismatch: some documents claim a 206-finding audit basis while
+`INTEGRATED_IMPROVEMENT_DESIGN.md` claims 214 findings and 36 related findings.
+It does not yet prove either aggregate from live production state; 188 rows
+remain missing from the 206-itemized corpus, the 214 claim has no row-level
+corpus, and several prompt claims remain evidence-absent in the fixture
+(`NF-5`, `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
 
 **Verification command**:
 
@@ -190,10 +199,12 @@ current runtime/code state, including 206 findings.
 
 **Status**: **PARTIAL**.
 
-The Orient skeleton is testable, and the prompt's external 206-finding claim is
-now machine-visible. The full set is still not encoded: current catalog replay
-reports 18 itemized findings, 188 missing itemized rows, and 8 itemized rows
-that are not evaluable from the startup log patterns.
+The Orient skeleton is testable, and the prompt's external 206/214 aggregate
+claims are now machine-visible. The full set is still not encoded: current
+catalog replay reports 12/12 source documents covered, 18 itemized findings,
+188 missing 206-itemized rows, one open consistency finding for the 206-vs-214
+count mismatch, and 8 itemized rows that are not evaluable from the startup log
+patterns.
 
 ### 4. DECIDE
 
@@ -301,14 +312,18 @@ No convergence claim is valid yet. The only safe current statement is:
 
 ## Next Concrete ACT
 
-1. Attach or check in the full 206-row audit corpus. The current
-   `audit-corpus.external-claim.json` records source paths and 18 itemized
-   findings, but `--require-complete-catalog` still fails with 188 missing rows.
-2. Re-run Orient against the complete corpus without changing code and update
+1. Attach or check in the full row-level audit corpus. The current
+   `audit-corpus.external-claim.json` records all 12 prompt source paths,
+   three aggregate claims, one 206-vs-214 consistency finding, and 18 itemized
+   findings, but `--require-complete-catalog` still fails with 188 missing rows
+   against the 206 claim.
+2. Reconcile whether the governing audit total is 206 or 214 before closing
+   the GOAL LOOP objective.
+3. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
-3. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
+4. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
-4. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+5. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule
@@ -318,4 +333,5 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
 - `verify.fail.json` is the latest Verify fixture.
 - The full 206-finding audit corpus is not replayed by Orient with
   `--require-complete-catalog` passing.
+- The 206-vs-214 aggregate-count mismatch is still open.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.

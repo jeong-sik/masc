@@ -239,6 +239,21 @@ def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | No
     specs = catalog_specs(catalog)
     expected_raw = catalog.get("expected_findings_total")
     expected = expected_raw if isinstance(expected_raw, int) else None
+    external_sources_raw = catalog.get("external_sources", [])
+    external_sources = (
+        external_sources_raw if isinstance(external_sources_raw, list) else []
+    )
+    source_expected_raw = catalog.get("source_documents_expected")
+    source_expected = (
+        source_expected_raw if isinstance(source_expected_raw, int) else None
+    )
+    source_covered = len(external_sources)
+    if source_expected is None:
+        source_status = "UNBOUNDED"
+    elif source_covered == source_expected:
+        source_status = "COMPLETE"
+    else:
+        source_status = "INCOMPLETE"
     itemized = len(specs)
     missing = max(expected - itemized, 0) if expected is not None else None
     if expected is None:
@@ -254,7 +269,13 @@ def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | No
         "expected_findings_total": expected,
         "itemized_findings_total": itemized,
         "missing_itemized_findings": missing,
-        "external_sources": catalog.get("external_sources", []),
+        "external_sources_total": source_covered,
+        "source_documents_expected": source_expected,
+        "source_documents_covered": source_covered,
+        "source_documents_status": source_status,
+        "external_sources": external_sources,
+        "aggregate_claims": catalog.get("aggregate_claims", []),
+        "consistency_findings": catalog.get("consistency_findings", []),
     }
 
 
@@ -343,6 +364,15 @@ def report_to_text(report: OrientReport) -> str:
             f"itemized={report.audit_catalog['itemized_findings_total']} "
             f"expected={report.audit_catalog['expected_findings_total']}"
         )
+        lines.append(
+            "source_documents: "
+            f"{report.audit_catalog['source_documents_status']} "
+            f"covered={report.audit_catalog['source_documents_covered']} "
+            f"expected={report.audit_catalog['source_documents_expected']}"
+        )
+        consistency_findings = report.audit_catalog.get("consistency_findings", [])
+        if isinstance(consistency_findings, list) and consistency_findings:
+            lines.append(f"consistency_findings: {len(consistency_findings)}")
     for finding in report.findings:
         if finding.status == "EVIDENCE_ABSENT":
             continue

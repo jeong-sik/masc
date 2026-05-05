@@ -67,7 +67,9 @@ python3 scripts/orient_goal_loop_logs.py \
 Expected key facts:
 
 - `audit_catalog` is `INCOMPLETE`.
-- The source documents claim 206 findings, but only 18 finding IDs are
-  itemized in the checked artifacts.
+- The manifest covers all 12 prompt-supplied source documents.
+- The source documents disagree on the aggregate audit total: 206 vs 214.
+- The source documents claim 206 findings for the current catalog total, but
+  only 18 finding IDs are itemized in the checked artifacts.
 - `--require-complete-catalog` intentionally exits non-zero until the full
-  206-row corpus is attached or checked in.
+  row-level corpus is attached or checked in.

@@ -180,6 +180,16 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.audit_catalog["expected_findings_total"], 206)
         self.assertEqual(report.audit_catalog["itemized_findings_total"], 18)
         self.assertEqual(report.audit_catalog["missing_itemized_findings"], 188)
+        self.assertEqual(report.audit_catalog["source_documents_expected"], 12)
+        self.assertEqual(report.audit_catalog["source_documents_covered"], 12)
+        self.assertEqual(report.audit_catalog["source_documents_status"], "COMPLETE")
+        self.assertEqual(report.audit_catalog["external_sources_total"], 12)
+        self.assertEqual(len(report.audit_catalog["aggregate_claims"]), 3)
+        self.assertEqual(len(report.audit_catalog["consistency_findings"]), 1)
+        self.assertEqual(
+            report.audit_catalog["consistency_findings"][0]["finding_id"],
+            "CONSISTENCY-1",
+        )
         self.assertEqual(report.summary["findings_total"], 18)
         self.assertEqual(report.summary["not_evaluated"], 8)
         self.assertEqual(by_id["NF-2"].status, "EVIDENCE_PRESENT")

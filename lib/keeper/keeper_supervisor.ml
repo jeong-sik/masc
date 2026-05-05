@@ -1813,7 +1813,8 @@ let alive_but_stuck_scan (ctx : _ context) =
             entry.meta.runtime.autonomous_turn_count
             entry.meta.runtime.proactive_rt.count_total
             recovery;
-          request_alive_but_stuck_recovery ~base_path ~elapsed entry
+          if String.equal recovery "queued" then
+            request_alive_but_stuck_recovery ~base_path ~elapsed entry
         end
     ) entries
   end

@@ -1429,6 +1429,82 @@ let () =
                     check bool "fiber wakeup set" true
                       (Atomic.get entry.fiber_wakeup)
                 | None -> fail "expected registered keeper"));
+        (* PR #13123 review: the safety property of this change is
+           "at most one queued wakeup per dedup window".  Without a
+           repeated-scan test, a future regression could enqueue one
+           recovery stimulus on every 30s sweep without failing the
+           suite.  Run [alive_but_stuck_scan] twice within the dedup
+           window and assert the queue length stays at 1. *)
+        test_case
+          "repeated scan within dedup window queues at most one recovery"
+          `Quick
+          (fun () ->
+            Eio_main.run @@ fun env ->
+            Eio.Switch.run @@ fun sw ->
+            let base_dir = temp_dir () in
+            Fun.protect
+              ~finally:(fun () ->
+                Reg.clear ();
+                Sup.alive_but_stuck_reset_for_test ();
+                cleanup_dir base_dir)
+              (fun () ->
+                Reg.clear ();
+                Sup.alive_but_stuck_reset_for_test ();
+                let name = "abs-scan-recovery-repeat" in
+                let config = Masc_mcp.Coord.default_config base_dir in
+                let base = make_meta name in
+                let meta =
+                  {
+                    base with
+                    proactive = { base.proactive with cooldown_sec = 60 };
+                    runtime = {
+                      base.runtime with
+                      autonomous_turn_count = 7;
+                      proactive_rt = {
+                        base.runtime.proactive_rt with
+                        last_ts = 1.0;
+                      };
+                    };
+                  }
+                in
+                ignore (Reg.register ~base_path:config.base_path name meta);
+                ignore (Reg.dispatch_event ~base_path:config.base_path name
+                          KSM.Fiber_started);
+                let ctx : _ KT.context =
+                  {
+                    config;
+                    agent_name = "supervisor";
+                    sw;
+                    clock = Eio.Stdenv.clock env;
+                    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+                    net = Some (Eio.Stdenv.net env);
+                  }
+                in
+                (* Three back-to-back sweeps simulate the supervisor
+                   loop firing every 30s while the keeper is still
+                   stuck.  Without dedup the queue would have 3
+                   stimuli; with dedup it must stay at 1 (until the
+                   reset_for_test below clears the table). *)
+                Sup.alive_but_stuck_scan ctx;
+                Sup.alive_but_stuck_scan ctx;
+                Sup.alive_but_stuck_scan ctx;
+                let queue =
+                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                in
+                check int
+                  "dedup window holds queue length to 1 across 3 sweeps"
+                  1
+                  (Masc_mcp.Keeper_event_queue.length queue);
+                (* Manual dedup reset → next scan re-queues. *)
+                Sup.alive_but_stuck_reset_for_test ();
+                Sup.alive_but_stuck_scan ctx;
+                let queue2 =
+                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                in
+                check int
+                  "after dedup reset, the next scan re-queues (now 2 total)"
+                  2
+                  (Masc_mcp.Keeper_event_queue.length queue2)));
         test_case "never_started + autonomous + old started_at → Some" `Quick
           (fun () ->
             (* Mirrors production case: glm-coding-plan with

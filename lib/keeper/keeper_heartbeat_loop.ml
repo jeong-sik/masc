@@ -438,7 +438,14 @@ let run_keepalive_unified_turn
                    meta_after_triage.name;
                  None
              | Alive_but_stuck_recovery ->
-                 Log.Keeper.warn
+                 (* PR #13123 review: the supervisor already emits a
+                    [Log.Keeper.warn] when it detects + enqueues this
+                    recovery stimulus.  Logging another warn on the
+                    consumer side doubled the alert volume for the
+                    same event.  Demote to [info]: this is just a
+                    confirmation that the wakeup arrived, not a new
+                    signal worth alerting on. *)
+                 Log.Keeper.info
                    "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s (keeper=%s)"
                    stim.post_id meta_after_triage.name;
                  None

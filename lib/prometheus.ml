@@ -2438,8 +2438,33 @@ let to_prometheus_text () =
     else
     match ms with
     | [] -> ()
-    | m :: _ ->
-      Printf.bprintf buf "# HELP %s %s\n" name m.help;
+    | _ :: _ ->
+      (* Pick HELP deterministically from the unlabeled parent row that
+         [register_histogram] created at startup; without this, the
+         exported HELP becomes nondeterministically either the real
+         description or the raw metric name once any labelled phase row
+         is added by [observe_histogram] (which fills [help = name]
+         when no entry exists yet).  Fall back to the first entry's
+         [help] when no unlabeled parent exists, then to the metric
+         name. *)
+      let chosen_help =
+        let unlabeled =
+          List.find_opt (fun (m : metric) -> m.labels = []) ms
+        in
+        match unlabeled with
+        | Some m when m.help <> "" && m.help <> m.name -> m.help
+        | _ ->
+          let descriptive =
+            List.find_opt (fun (m : metric) ->
+                m.help <> "" && m.help <> m.name)
+              ms
+          in
+          (match descriptive with
+           | Some m -> m.help
+           | None -> name)
+      in
+      let m = List.hd ms in
+      Printf.bprintf buf "# HELP %s %s\n" name chosen_help;
       (match m.metric_type with
        | Histogram ->
          (* No bucket distribution is tracked, so emit as summary

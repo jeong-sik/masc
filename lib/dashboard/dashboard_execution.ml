@@ -118,7 +118,18 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
   observe_render_phase "snapshot" t.snapshot_ms;
   observe_render_phase "operations" t.operations_ms;
   observe_render_phase "enrich" t.enrich_ms;
-  observe_render_phase "enrich_per_keeper" (per_keeper_enrich_ms t);
+  (* Idle renders (n_keepers = 0) would otherwise inject a fake 0s sample
+     that drags the per-keeper average toward zero and hides slow renders.
+     Observe once per keeper so Prometheus [sum / count] yields the actual
+     average per-keeper enrich time, weighted by fleet size, instead of
+     averaging render-level means (a 1-keeper render and a 100-keeper
+     render contributing equally). *)
+  if t.n_keepers > 0 then begin
+    let per_keeper_value = per_keeper_enrich_ms t in
+    for _ = 1 to t.n_keepers do
+      observe_render_phase "enrich_per_keeper" per_keeper_value
+    done
+  end;
   observe_render_phase "data_load" t.data_load_ms;
   observe_render_phase "assemble" t.assemble_ms
 
@@ -448,6 +459,58 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       (* Yield between heavy phases so SSE / health-check fibers can progress *)
       Eio.Fiber.yield ();
       let t_start = Time_compat.now () in
+      (* Phase markers are mutable so that the Fun.protect [finally] below can
+         emit a partial render timing even when [json_render] raises (e.g.
+         render timeout, PG stall propagated as exception).  Without this, the
+         pathologically slow renders the metric is meant to surface stay
+         invisible because the previous record_render_phase_timings call site
+         was at the very end of the function and was skipped on raise. *)
+      let t_after_snapshot : float option ref = ref None in
+      let t_after_operations : float option ref = ref None in
+      let t_after_enrich : float option ref = ref None in
+      let t_after_data_load : float option ref = ref None in
+      let n_keepers_emitted = ref 0 in
+      let timings_emitted = ref false in
+      let emit_render_timings () =
+        if not !timings_emitted then begin
+          timings_emitted := true;
+          let t_end = Time_compat.now () in
+          let phase_ms_between start_opt end_opt =
+            match start_opt, end_opt with
+            | Some s, Some e -> (e -. s) *. 1000.0
+            | _ -> 0.0
+          in
+          let timings : render_phase_timings_ms = {
+            total_ms = (t_end -. t_start) *. 1000.0;
+            snapshot_ms =
+              (match !t_after_snapshot with
+               | Some t -> (t -. t_start) *. 1000.0
+               | None -> 0.0);
+            operations_ms =
+              phase_ms_between !t_after_snapshot !t_after_operations;
+            enrich_ms =
+              phase_ms_between !t_after_operations !t_after_enrich;
+            data_load_ms =
+              phase_ms_between !t_after_enrich !t_after_data_load;
+            assemble_ms =
+              (match !t_after_data_load with
+               | Some s -> (t_end -. s) *. 1000.0
+               | None -> 0.0);
+            n_keepers = !n_keepers_emitted;
+          } in
+          record_render_phase_timings timings;
+          if timings.total_ms > 10000.0 then
+            Log.Dashboard.warn "[dashboard_execution] slow render: %s"
+              (format_slow_render_timings timings)
+          else
+            Log.Dashboard.debug
+              "[dashboard_execution] timing: total=%.0fms snapshot=%.0fms \
+               enrich=%.0fms data_load=%.0fms assemble=%.0fms"
+              timings.total_ms timings.snapshot_ms timings.enrich_ms
+              timings.data_load_ms timings.assemble_ms
+        end
+      in
+      Fun.protect ~finally:emit_render_timings (fun () ->
       let snapshot_json =
         Dashboard_projection_cache.get_or_compute_snapshot_json
           ~config ~actor:(Some effective_actor) (fun actor_name ->
@@ -460,7 +523,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
               ~lightweight_summary:true
               ctx)
       in
-      let t_after_snapshot = Time_compat.now () in
+      t_after_snapshot := Some (Time_compat.now ());
       Eio.Fiber.yield ();
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
@@ -472,7 +535,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let execution_queue =
         build_execution_queue session_contexts operation_contexts
       in
-      let t_after_operations = Time_compat.now () in
+      t_after_operations := Some (Time_compat.now ());
       let keepers =
         member_assoc "keepers" snapshot_json |> member_assoc "items"
         |> function
@@ -500,7 +563,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
               items
         | _ -> []
       in
-      let t_after_enrich = Time_compat.now () in
+      t_after_enrich := Some (Time_compat.now ());
+      n_keepers_emitted := List.length keepers;
       let execution_queue =
         merge_execution_queue execution_queue
           (build_keeper_execution_queue keepers)
@@ -512,7 +576,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          worker_support_briefs computation. *)
       let agents = agents_safe config in
       let messages = messages_safe config in
-      let t_after_data_load = Time_compat.now () in
+      t_after_data_load := Some (Time_compat.now ());
       let now_ts = Time_compat.now () in
       let worker_rows =
         build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts
@@ -603,32 +667,11 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ("shown", `Int (List.length all_visible));
         ]);
       ] in
-      let t_end = Time_compat.now () in
-      let phase_ms a b = (b -. a) *. 1000.0 in
-      let timings : render_phase_timings_ms = {
-        total_ms = phase_ms t_start t_end;
-        snapshot_ms = phase_ms t_start t_after_snapshot;
-        operations_ms = phase_ms t_after_snapshot t_after_operations;
-        enrich_ms = phase_ms t_after_operations t_after_enrich;
-        data_load_ms = phase_ms t_after_enrich t_after_data_load;
-        assemble_ms = phase_ms t_after_data_load t_end;
-        n_keepers = List.length keepers;
-      } in
-      record_render_phase_timings timings;
-      (* #9766: surface phase breakdown in the slow-render WARN so the
-         59.8s/9-keeper sample (~6.6s/keeper) can be attributed to a
-         specific phase without rebuilding the binary with extra
-         instrumentation.  enrich covers the per-keeper [List.map
-         enrich_keeper_with_diagnostic] which is the suspected hot path. *)
-      if timings.total_ms > 10000.0 then
-        Log.Dashboard.warn "[dashboard_execution] slow render: %s"
-          (format_slow_render_timings timings)
-      else
-        Log.Dashboard.debug
-          "[dashboard_execution] timing: total=%.0fms snapshot=%.0fms \
-           enrich=%.0fms data_load=%.0fms assemble=%.0fms"
-          timings.total_ms timings.snapshot_ms timings.enrich_ms
-          timings.data_load_ms timings.assemble_ms;
+      (* #9766: phase breakdown is emitted by [emit_render_timings] in the
+         Fun.protect [finally] above, so timeout/exception paths still
+         surface partial render telemetry.  The slow-render WARN is also
+         emitted from there, off the same captured timings. *)
+      emit_render_timings ();
       if light then
         `Assoc (base_fields @ task_fields)
       else
@@ -636,7 +679,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         `Assoc
           (base_fields @ task_fields @ [
             ("messages", `List (List.map message_json messages));
-          ])
+          ]))
 
 let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in

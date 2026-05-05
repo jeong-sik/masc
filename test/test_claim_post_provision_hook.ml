@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Regression test for [Coord_hooks.claim_post_provision_fn] dispatch.
 
     task-103: a successful [Coord.claim_task_r] must invoke the

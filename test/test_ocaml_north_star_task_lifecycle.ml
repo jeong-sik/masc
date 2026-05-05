@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Behavior-locking tests for the current task lifecycle.
 
     These tests document existing semantics before any north-star refactor.

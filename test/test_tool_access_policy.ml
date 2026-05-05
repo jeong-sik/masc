@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Tool_access_policy — shared allow/deny selector ADT.
 
     Covers: selector variants, normalize_names edge cases, deny-wins

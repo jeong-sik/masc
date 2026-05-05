@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for [Keeper_tool_registry.is_read_only_with_input].
 
     Validates input-aware read-only classification for keeper_shell op=gh:

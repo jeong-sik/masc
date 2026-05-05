@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 open Alcotest
 
 module WO = Masc_mcp.Keeper_world_observation

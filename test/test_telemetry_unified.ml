@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** test_telemetry_unified — Tests for unified telemetry read aggregation. *)
 
 open Masc_mcp

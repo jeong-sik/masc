@@ -420,11 +420,21 @@ function PostCard({ post }: { post: BoardPost }) {
     }
   }
 
+  const openPost = () => navigateToPost(post.id)
+  const handlePostKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    openPost()
+  }
+
   return html`
-    <button
-      type="button"
+    <article
+      role="button"
+      tabIndex=${0}
+      aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
       class=${`board-post group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
-      onClick=${() => navigateToPost(post.id)}
+      onClick=${openPost}
+      onKeyDown=${handlePostKeyDown}
     >
       <!-- Select checkbox -->
       <div class="flex items-start pt-1">
@@ -468,8 +478,12 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-xs text-[var(--color-fg-muted)]">${authorAvatar(authorAvatarKey)}</span>
           <a
             class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
+            href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
             title=${authorTitle}
-            onClick=${(e: Event) => navigateToAuthor(post.author, e, post.author_identity)}
+            onClick=${(e: Event) => {
+              e.preventDefault()
+              navigateToAuthor(post.author, e, post.author_identity)
+            }}
           >${authorLabel}</a>
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-3xs text-[var(--color-fg-muted)] opacity-50">(수정됨)</span>` : null}
@@ -499,7 +513,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <//>
         </div>
       </div>
-    </button>
+    </article>
   `
 }
 
@@ -513,7 +527,7 @@ export function BoardSurface() {
     [rawPosts, contentQuery],
   )
   const isFiltering = contentQuery.trim() !== ''
-  const grouped = splitVisiblePosts(filteredPosts as BoardPost[])
+  const grouped = splitVisiblePosts(filteredPosts)
   const posts = grouped.groups.flatMap(g => g.posts)
   const hint = filterHint(grouped)
   const postId = route.value.params.post ?? null

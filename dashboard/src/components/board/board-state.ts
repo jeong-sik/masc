@@ -178,7 +178,7 @@ export type VisibleBoardGroups = {
   hiddenSystem: number
 }
 
-export function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
+export function splitVisiblePosts(posts: readonly BoardPost[]): VisibleBoardGroups {
   const hidden = boardHiddenCategories.value
   const buckets: Record<ContentCategory, { posts: BoardPost[]; total: number; hidden: number }> = {
     article: { posts: [], total: 0, hidden: 0 },

@@ -159,6 +159,21 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
   })
 
+  it('renders post authors as keyboard-discoverable links', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-1',
+        title: 'Accessible author link',
+        body: 'content',
+        author: 'ani1999',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
+  })
+
   it('hides system posts by default', () => {
     boardPosts.value = [
       makePost({

@@ -8,6 +8,15 @@
 
 module B = Masc_mcp.Briefing_json_helpers
 
+(* Diagnostic helper — prints the actual JSON value when a
+   pattern-match fallback fires, instead of bare [assert false].
+   Keeps the runner [assert]-driven for consistency with sibling
+   test suites while improving failure messages. *)
+let unexpected_json ~where j =
+  failwith
+    (Printf.sprintf "%s: unexpected JSON %s" where
+       (Yojson.Safe.to_string j))
+
 (* ─── compact_text ─────────────────────────────────────────── *)
 
 let test_compact_text_empty () =
@@ -78,7 +87,7 @@ let test_string_json_default_default () =
   (* implicit default = "unknown" *)
   match B.string_json `Null with
   | `String s -> assert (s = "unknown")
-  | _ -> assert false
+  | other -> unexpected_json ~where:"string_json_default_default" other
 
 (* ─── string_list_json ─────────────────────────────────────── *)
 
@@ -142,7 +151,10 @@ let test_float_json_int_promotes () =
   assert (B.float_json (`Int 7) = `Float 7.0)
 
 let test_float_json_intlit_parses () =
-  assert (B.float_json (`Intlit "3.14") = `Float 3.14)
+  (* Use exactly-representable doubles to avoid float-literal
+     parsing edge cases. *)
+  assert (B.float_json (`Intlit "1.5") = `Float 1.5);
+  assert (B.float_json (`Intlit "0.25") = `Float 0.25)
 
 let test_float_json_intlit_garbage_uses_default () =
   assert (
@@ -199,7 +211,8 @@ let test_option_string_json_some () =
   | _ -> assert false
 
 let test_option_string_json_some_blank () =
-  (* trim_to "" → Null per impl line 75 *)
+  (* Behaviour contract: blank/whitespace-only strings are
+     trimmed to "" and projected to `Null. *)
   assert (B.option_string_json (Some "   ") = `Null);
   assert (B.option_string_json (Some "") = `Null)
 

@@ -6,6 +6,7 @@ import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
+import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
@@ -159,7 +160,7 @@ export function IdeShell() {
           class="ide-plane-conversation"
           style=${{
             display: 'grid',
-            gridTemplateRows: 'auto auto auto 1fr',
+            gridTemplateRows: 'auto auto auto auto 1fr',
             minHeight: 0,
             overflow: 'auto',
           }}
@@ -168,6 +169,7 @@ export function IdeShell() {
             activeRepositoryId=${coordinator.activeRepositoryId}
             subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
           />
+          <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
           <${IdePersistencePanel} keeperName=${terminalKeeper} />
           <${InspectorKeeperBDI} />
           <${IdeConversationRailMock} />

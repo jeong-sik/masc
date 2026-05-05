@@ -138,6 +138,7 @@ afterEach(() => {
 describe('dashboardSlicesForRoute', () => {
   it('keeps global shell namespace and transport slices on every route', () => {
     expect(dashboardSlicesForRoute({ tab: 'overview', params: {} })).toEqual([
+      'execution',
       'namespace',
       'shell',
       'transport',

@@ -355,7 +355,7 @@ export function WorldVisualizer() {
         </div>
       ` : html`
         <p class="mt-3 text-3xs text-[var(--color-fg-muted)] m-0">
-          keeper 플릿 데이터 대기 중 — SSE가 keeper 상태를 수신하면 자동으로 시각화됩니다.
+          keeper 플릿 데이터 대기 중 — 서버에서 keeper 상태를 수신하면 자동으로 시각화됩니다.
         </p>
       `}
     </div>

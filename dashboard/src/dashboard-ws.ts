@@ -158,6 +158,10 @@ function routeKey(routeState: DashboardRouteState): string {
 export function dashboardSlicesForRoute(routeState: DashboardRouteState): string[] {
   const slices = new Set(['shell', 'namespace', 'transport'])
 
+  // Overview tab needs execution slice for World Visualizer keeper fleet data.
+  if (routeState.tab === 'overview') {
+    slices.add('execution')
+  }
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
     slices.add('goals')

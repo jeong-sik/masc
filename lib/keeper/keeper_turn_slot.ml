@@ -71,17 +71,25 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    never names *which* peer.  Operators are then blind to which keeper
    is the actual blocker.
 
-   Track holders in a single Hashtbl keyed by (label, keeper_name) so
-   [acquire_bounded] can dump the live list on timeout.  Mutex-guarded
-   because Eio fibers may release/acquire concurrently.
+   Track holders in a single Hashtbl keyed by (label, keeper_name,
+   acquisition_id) so [acquire_bounded] can dump the live list on timeout.
+   Mutex-guarded because Eio fibers may release/acquire concurrently.
 
-   Holder rows are tuples [(label, keeper_name) → acquire_ts].
+   Holder rows are tuples [(label, keeper_name, acquisition_id) → acquire_ts].
    [label] disambiguates the three pools (turn / autonomous / reactive)
-   without requiring three separate tables.  Cardinality is bounded by
-   the deployment's keeper count (typically <50). *)
-let holder_table : (string * string, float) Hashtbl.t = Hashtbl.create 32
-let force_released_holders : (string * string, int) Hashtbl.t =
-  Hashtbl.create 32
+   without requiring three separate tables.  [acquisition_id] prevents a
+   restarted keeper generation from consuming a stale predecessor's
+   force-release marker when the predecessor never reaches its finalizer.
+   Cardinality is bounded by the deployment's keeper count (typically <50). *)
+type holder_key = {
+  holder_label : string;
+  holder_keeper_name : string;
+  holder_acquisition_id : int;
+}
+
+let holder_table : (holder_key, float) Hashtbl.t = Hashtbl.create 32
+let force_released_holders : (holder_key, unit) Hashtbl.t = Hashtbl.create 32
+let next_holder_acquisition_id = ref 0
 let holder_mutex = Eio.Mutex.create ()
 
 let with_holder_lock f =
@@ -89,30 +97,47 @@ let with_holder_lock f =
 
 let record_holder ~label ~keeper_name ~acquired_at =
   with_holder_lock (fun () ->
-    Hashtbl.replace holder_table (label, keeper_name) acquired_at)
+    incr next_holder_acquisition_id;
+    let acquisition_id = !next_holder_acquisition_id in
+    let key =
+      {
+        holder_label = label;
+        holder_keeper_name = keeper_name;
+        holder_acquisition_id = acquisition_id;
+      }
+    in
+    Hashtbl.replace holder_table key acquired_at;
+    acquisition_id)
 
 let mark_holder_force_released ~label ~keeper_name =
   with_holder_lock (fun () ->
-    let key = (label, keeper_name) in
-    if Hashtbl.mem holder_table key then begin
-      Hashtbl.remove holder_table key;
-      let count =
-        Hashtbl.find_opt force_released_holders key
-        |> Option.value ~default:0
-      in
-      Hashtbl.replace force_released_holders key (count + 1);
-      true
-    end else
-      false)
+    let keys =
+      Hashtbl.fold
+        (fun key _ acc ->
+           if String.equal key.holder_label label
+              && String.equal key.holder_keeper_name keeper_name
+           then key :: acc
+           else acc)
+        holder_table []
+    in
+    List.iter
+      (fun key ->
+         Hashtbl.remove holder_table key;
+         Hashtbl.replace force_released_holders key ())
+      keys;
+    List.length keys)
 
-let consume_force_release ~label ~keeper_name =
+let consume_force_release ~label ~keeper_name ~acquisition_id =
   with_holder_lock (fun () ->
-    let key = (label, keeper_name) in
+    let key =
+      {
+        holder_label = label;
+        holder_keeper_name = keeper_name;
+        holder_acquisition_id = acquisition_id;
+      }
+    in
     match Hashtbl.find_opt force_released_holders key with
-    | Some count when count > 1 ->
-      Hashtbl.replace force_released_holders key (count - 1);
-      true
-    | Some _ ->
+    | Some () ->
       Hashtbl.remove force_released_holders key;
       true
     | None ->
@@ -126,8 +151,10 @@ let consume_force_release ~label ~keeper_name =
 let snapshot_holders ~label ~now =
   with_holder_lock (fun () ->
     Hashtbl.fold
-      (fun (l, name) ts acc ->
-        if String.equal l label then (name, now -. ts) :: acc else acc)
+      (fun key ts acc ->
+        if String.equal key.holder_label label
+        then (key.holder_keeper_name, now -. ts) :: acc
+        else acc)
       holder_table [])
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 
@@ -181,10 +208,11 @@ let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
 let force_release_stale_holder ~keeper_name =
   let released = ref [] in
   let release_if_held ~label sem =
-    if mark_holder_force_released ~label ~keeper_name then begin
+    let release_count = mark_holder_force_released ~label ~keeper_name in
+    for _ = 1 to release_count do
       Eio.Semaphore.release sem;
       released := label :: !released
-    end
+    done
   in
   release_if_held ~label:"turn" turn_semaphore;
   release_if_held ~label:"autonomous" autonomous_turn_semaphore;
@@ -228,12 +256,12 @@ let format_slot_holders ?(limit = 5) holders =
 let snapshot_all_holders ~now =
   with_holder_lock (fun () ->
     Hashtbl.fold
-      (fun (label, name) ts (turn, auto, reactive) ->
+      (fun key ts (turn, auto, reactive) ->
         let held = now -. ts in
-        match label with
-        | "turn" -> ((name, held) :: turn, auto, reactive)
-        | "autonomous" -> (turn, (name, held) :: auto, reactive)
-        | "reactive" -> (turn, auto, (name, held) :: reactive)
+        match key.holder_label with
+        | "turn" -> ((key.holder_keeper_name, held) :: turn, auto, reactive)
+        | "autonomous" -> (turn, (key.holder_keeper_name, held) :: auto, reactive)
+        | "reactive" -> (turn, auto, (key.holder_keeper_name, held) :: reactive)
         | _ -> (turn, auto, reactive))
       holder_table ([], [], []))
   |> fun (t, a, r) ->
@@ -401,6 +429,9 @@ type keeper_turn_slot_state = {
   acquired_autonomous : bool ref;
   acquired_reactive : bool ref;
   acquired_turn : bool ref;
+  autonomous_acquisition_id : int option ref;
+  reactive_acquisition_id : int option ref;
+  turn_acquisition_id : int option ref;
   autonomous_ticket : int option ref;
 }
 
@@ -435,19 +466,27 @@ let safe_bookkeeping ~op f =
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
       op (Printexc.to_string exn)
 
-let release_recorded_holder ~keeper_name ~label sem =
-  let force_released =
-    try consume_force_release ~label ~keeper_name with exn ->
-      Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
-        label (Printexc.to_string exn);
-      false
-  in
-  if force_released then
+let release_recorded_holder ~keeper_name ~label ~acquisition_id sem =
+  match acquisition_id with
+  | None ->
     Log.Keeper.warn
-      "release_keeper_turn_slot: %s holder for %s was already force-released"
-      label keeper_name
-  else
+      "release_keeper_turn_slot: %s holder for %s missing acquisition id; \
+       releasing semaphore defensively"
+      label keeper_name;
     Eio.Semaphore.release sem
+  | Some acquisition_id ->
+    let force_released =
+      try consume_force_release ~label ~keeper_name ~acquisition_id with exn ->
+        Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
+          label (Printexc.to_string exn);
+        false
+    in
+    if force_released then
+      Log.Keeper.warn
+        "release_keeper_turn_slot: %s holder for %s was already force-released"
+        label keeper_name
+    else
+      Eio.Semaphore.release sem
 
 let release_keeper_turn_slot ~keeper_name state =
   safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
@@ -458,7 +497,9 @@ let release_keeper_turn_slot ~keeper_name state =
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
-    release_recorded_holder ~keeper_name ~label:"turn" turn_semaphore
+    release_recorded_holder ~keeper_name ~label:"turn"
+      ~acquisition_id:!(state.turn_acquisition_id)
+      turn_semaphore
   end;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
@@ -467,10 +508,12 @@ let release_keeper_turn_slot ~keeper_name state =
     safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
       record_autonomous_completion ~keeper_name);
     release_recorded_holder ~keeper_name ~label:"autonomous"
+      ~acquisition_id:!(state.autonomous_acquisition_id)
       autonomous_turn_semaphore
   end;
   if !(state.acquired_reactive) then begin
     release_recorded_holder ~keeper_name ~label:"reactive"
+      ~acquisition_id:!(state.reactive_acquisition_id)
       reactive_turn_semaphore
   end
 
@@ -663,6 +706,9 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       acquired_autonomous = ref false;
       acquired_reactive = ref false;
       acquired_turn = ref false;
+      autonomous_acquisition_id = ref None;
+      reactive_acquisition_id = ref None;
+      turn_acquisition_id = ref None;
       autonomous_ticket = ref None;
     }
   in
@@ -768,8 +814,11 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
               slot_state.acquired_autonomous := true;
               run_after_acquire_flag_hook_for_test
                 ~label:"autonomous" ~keeper_name;
-              record_holder ~label:"autonomous" ~keeper_name
-                ~acquired_at:(Time_compat.now ());
+              let acquisition_id =
+                record_holder ~label:"autonomous" ~keeper_name
+                  ~acquired_at:(Time_compat.now ())
+              in
+              slot_state.autonomous_acquisition_id := Some acquisition_id;
               drop_autonomous_waiter ~ticket;
               slot_state.autonomous_ticket := None;
               Ok ()
@@ -794,8 +843,11 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
               slot_state.acquired_reactive := true;
               run_after_acquire_flag_hook_for_test
                 ~label:"reactive" ~keeper_name;
-              record_holder ~label:"reactive" ~keeper_name
-                ~acquired_at:(Time_compat.now ());
+              let acquisition_id =
+                record_holder ~label:"reactive" ~keeper_name
+                  ~acquired_at:(Time_compat.now ())
+              in
+              slot_state.reactive_acquisition_id := Some acquisition_id;
               Ok ()
         in
         match reactive_result with
@@ -808,8 +860,11 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           slot_state.acquired_turn := true;
           run_after_acquire_flag_hook_for_test
             ~label:"turn" ~keeper_name;
-          record_holder ~label:"turn" ~keeper_name
-            ~acquired_at:(Time_compat.now ());
+          let acquisition_id =
+            record_holder ~label:"turn" ~keeper_name
+              ~acquired_at:(Time_compat.now ())
+          in
+          slot_state.turn_acquisition_id := Some acquisition_id;
           let semaphore_wait_ms =
             int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
           Ok (f ~semaphore_wait_ms))

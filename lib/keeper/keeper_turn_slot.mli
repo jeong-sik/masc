@@ -65,8 +65,10 @@ val reactive_slot_holders : now:float -> (string * float) list
 
     This is intentionally narrower than normal cleanup: it only releases
     holders still present in the diagnostic holder table, and the normal
-    [with_keeper_turn_slot] finalizer consumes the force-release marker so a
-    late-returning fiber cannot double-release the same permit. *)
+    [with_keeper_turn_slot] finalizer consumes the same acquisition's
+    force-release marker so a late-returning fiber cannot double-release the
+    same permit, and a newer keeper generation cannot consume the stale
+    predecessor's marker. *)
 val force_release_stale_holder : keeper_name:string -> string list
 
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].

@@ -271,6 +271,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let turn_timeout = Keeper_runtime_resolved.turn_timeout_sec () in
                Float.max turn_timeout threshold
              in
+             let active_slot_holder_age = slot_holder_age ~now meta.name in
              let idle_stale, in_turn_stale, in_turn_age,
                  idle_skip_suppressed =
                match entry.current_turn_observation with
@@ -282,7 +283,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  , elapsed
                  , false )
                | None -> (
-                 match slot_holder_age ~now meta.name with
+                 match active_slot_holder_age with
                  | Some elapsed ->
                    (* A keeper can still own reactive/turn semaphores even
                       when the registry observation is absent or has been
@@ -405,7 +406,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  (Keeper_registry.stale_watchdog_failure_reason
                     ~prior:prior_failure_reason ~kill_class);
                let force_released_slots =
-                 if in_turn_stale then
+                 if in_turn_stale || Option.is_some active_slot_holder_age then
                    Keeper_turn_slot.force_release_stale_holder
                      ~keeper_name:meta.name
                  else

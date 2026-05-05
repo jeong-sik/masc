@@ -238,6 +238,55 @@ let test_force_release_stale_holder_restores_slots_once () =
     ~expected:reactive_before
     ~actual:(KK.reactive_turn_semaphore_value_for_test ())
 
+let test_force_release_marker_is_acquisition_scoped () =
+  let keeper_name = "diag-force-generation" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ ->
+        let released = KK.force_release_stale_holder ~keeper_name in
+        if not (List.mem "turn" released) then
+          failwith "force release did not report turn slot";
+        if not (List.mem "reactive" released) then
+          failwith "force release did not report reactive slot";
+        assert_eq ~msg:"turn restored by force release" ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq ~msg:"reactive restored by force release"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+        let nested =
+          KK.with_keeper_turn_slot_for_test
+            ~keeper_name
+            ~channel:Masc_mcp.Keeper_world_observation.Reactive
+            (fun ~semaphore_wait_ms:_ -> ())
+        in
+        (match nested with
+         | Ok () -> ()
+         | Error (`Semaphore_wait_timeout _) ->
+             failwith "unexpected nested semaphore wait timeout");
+        assert_eq
+          ~msg:"nested normal finalizer did not consume stale turn marker"
+          ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq
+          ~msg:"nested normal finalizer did not consume stale reactive marker"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test");
+  assert_eq ~msg:"old turn marker consumed by old finalizer"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq ~msg:"old reactive marker consumed by old finalizer"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
+
 let () =
   let cases =
     [
@@ -259,6 +308,8 @@ let () =
         test_watchdog_slot_holder_age_reflects_active_holder;
       "force release restores stale holder slots once",
         test_force_release_stale_holder_restores_slots_once;
+      "force release markers are acquisition scoped",
+        test_force_release_marker_is_acquisition_scoped;
     ]
   in
   List.iter

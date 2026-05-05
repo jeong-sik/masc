@@ -43,10 +43,10 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'work', aliases: ['goal-t', 'goal-tree'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['goal-d', 'goal-snapshot', 'goal-snapshot-diff'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree', focus: 'snapshot' } }, coverage: 'backend-blocked' },
   { mode: 'work', aliases: ['task-bl', 'task-backlog'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['task-st', 'task-stale'], target: { tab: 'workspace', params: { section: 'planning', view: 'default', focus: 'stale' } }, coverage: 'partial' },
+  { mode: 'work', aliases: ['task-st', 'task-stale'], target: { tab: 'workspace', params: { section: 'planning', view: 'default', focus: 'stale' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['task-w', 'task-wall'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['acc-led', 'accountability-ledger'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-ledger' } }, coverage: 'partial' },
-  { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'partial' },
+  { mode: 'work', aliases: ['acc-led', 'accountability-ledger'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-ledger' } }, coverage: 'covered' },
+  { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'covered' },
 
   // Comms Plane: board, message focus, and composer surfaces have production coverage.
   { mode: 'comms', aliases: ['bd-feed', 'board-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },

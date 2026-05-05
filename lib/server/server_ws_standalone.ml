@@ -152,12 +152,17 @@ let start
                     try connection_handler client_addr flow
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
-                    | Failure "cannot write to closed writer" ->
-                      Log.Server.debug
-                        "WS standalone handler closed before write completed"
-                    | exn ->
-                      Log.Server.warn "WS standalone handler error: %s"
-                        (Printexc.to_string exn)));
+                    | exn -> (
+                      match
+                        Http_server_eio.Late_response.classify_write_failure
+                          exn
+                      with
+                      | Some _ ->
+                          Log.Server.debug
+                            "WS standalone handler closed before write completed"
+                      | None ->
+                          Log.Server.warn "WS standalone handler error: %s"
+                            (Printexc.to_string exn))));
                 accept_loop 0.05
               with
               | Eio.Cancel.Cancelled _ as e -> raise e

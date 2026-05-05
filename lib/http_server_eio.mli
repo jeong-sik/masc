@@ -164,6 +164,35 @@ module Response : sig
       concatenated with the caller-supplied message). *)
 end
 
+(** {1 Late-response failure classifier (#13059)} *)
+
+(** Classification helper for the cancellation-vs-late-write race.
+
+    When a handler's request is cancelled (peer closed, deadline hit,
+    or upstream switch failed) the underlying writer enters either
+    "invalid state" or "closed writer" — calling
+    {!Response.internal_error} from a top-level handler
+    [exception] arm at that point raises a *secondary* failure that
+    masks the original cancellation.  The classifier identifies the
+    two well-known failure shapes so callers can downgrade to a
+    log-and-skip rather than emit a 500 onto a closed wire. *)
+module Late_response : sig
+  val classify_write_failure : exn -> string option
+  (** [classify_write_failure exn] returns [Some msg] when [exn] is
+      one of the two well-known late-response failure modes:
+
+      - [Failure "httpun.Reqd.respond_with_string: invalid state ..."]
+        — httpun rejected a write because the response handle
+        already moved past the writable state.
+      - [Failure "cannot write to closed writer"] — the underlying
+        writer was closed while a deferred handler was still
+        attempting to drain.
+
+      Returns [None] for every other exception (including
+      [Eio.Cancel.Cancelled] which the caller MUST re-raise rather
+      than classify). *)
+end
+
 (** {1 Request helpers} *)
 
 (** Per-request projections + body readers.  Body size is

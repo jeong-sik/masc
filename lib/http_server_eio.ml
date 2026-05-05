@@ -249,6 +249,35 @@ module Response = struct
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd
 end
 
+(** Late-response failure classifier (#13059).
+
+    [Failure] string-literal patterns are fragile (warning 52) — the
+    upstream library is free to change them.  We accept that risk
+    because:
+
+    - These exact strings ARE the public API surface for the upstream
+      libraries (httpun + the [Faraday]-style writer).  Library
+      authors treat the message text as user-facing diagnostics.
+    - This module is a defensive log-and-skip path only — if a
+      future library version reshapes the message we lose the
+      log-downgrade and revert to the fallback 500 attempt, not a
+      crash.
+    - Substring-match guards (via [String.starts_with] /
+      [String.equal]) localise the dependency rather than spreading
+      the literal across many call sites. *)
+[@@@warning "-52"]
+module Late_response = struct
+  let classify_write_failure = function
+    | Failure msg
+      when String.starts_with msg
+             ~prefix:"httpun.Reqd.respond_with_string: invalid state" ->
+        Some msg
+    | Failure msg when String.equal msg "cannot write to closed writer" ->
+        Some "cannot write to closed writer"
+    | _ -> None
+end
+[@@@warning "+52"]
+
 (** Request helpers *)
 module Request = struct
   (** Read request body - loops until EOF (httpun requires repeated schedule_read) *)

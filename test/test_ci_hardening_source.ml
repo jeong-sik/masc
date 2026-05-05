@@ -1,5 +1,3 @@
-module Types = Masc_domain
-
 (** CI/dashboard hardening source guards. *)
 
 open Alcotest

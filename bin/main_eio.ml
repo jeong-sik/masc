@@ -318,15 +318,6 @@ let dispatch_route ~routes ~request ~path reqd =
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd
 
-let response_write_failure_msg = function
-  | Failure msg
-    when String.starts_with msg
-           ~prefix:"httpun.Reqd.respond_with_string: invalid state" ->
-      Some msg
-  | Failure "cannot write to closed writer" ->
-      Some "cannot write to closed writer"
-  | _ -> None
-
 let log_late_response_failure ~context msg =
   Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
     context msg
@@ -335,7 +326,7 @@ let try_internal_error_response reqd msg =
   try Http.Response.internal_error msg reqd with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> (
-      match response_write_failure_msg exn with
+      match Http.Late_response.classify_write_failure exn with
       | Some failure_msg ->
           log_late_response_failure ~context:"main_eio internal_error"
             failure_msg
@@ -369,7 +360,7 @@ let make_extended_handler routes =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> (
       let msg = Printexc.to_string exn in
-      match response_write_failure_msg exn with
+      match Http.Late_response.classify_write_failure exn with
       | Some failure_msg ->
           log_late_response_failure ~context:"main_eio request handler"
             failure_msg

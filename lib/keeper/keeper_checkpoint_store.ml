@@ -182,27 +182,58 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : stri
   Printf.sprintf "%s%013d-g%d%s"
     oas_history_prefix created_ms generation oas_history_suffix
 
+let prune_oas_history ~(session_dir : string) : unit =
+  let files = list_oas_history_files ~session_dir in
+  if List.length files > max_oas_history_retained then
+    files
+    |> List.filteri (fun index _ -> index >= max_oas_history_retained)
+    |> List.iter (fun filename ->
+         let path = oas_history_path ~session_dir ~snapshot_id:filename in
+         try Sys.remove path with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
+               path (Printexc.to_string exn);
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_checkpoint_failures
+               ~labels:[("site", "oas_cleanup")]
+               ())
+
+let hardlink_oas_history_from_canonical
+    ~(session_dir : string)
+    ~(session_id : string)
+    ~(snapshot_id : string) : (unit, string) result =
+  let canonical_path = oas_checkpoint_path ~session_dir ~session_id in
+  let snapshot_path = oas_history_path ~session_dir ~snapshot_id in
+  if not (Fs_compat.file_exists canonical_path) then
+    Error "canonical OAS checkpoint is missing"
+  else
+    try
+      if Fs_compat.file_exists snapshot_path then Sys.remove snapshot_path;
+      Unix.link canonical_path snapshot_path;
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Error (Printexc.to_string exn)
+
 let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
-  match Keeper_fs.save_atomic
-    (oas_history_path ~session_dir ~snapshot_id)
-    (Agent_sdk.Checkpoint.to_string ckpt) with
+  let save_snapshot_file () =
+    Keeper_fs.save_atomic
+      (oas_history_path ~session_dir ~snapshot_id)
+      (Agent_sdk.Checkpoint.to_string ckpt)
+  in
+  let save_result =
+    match
+      hardlink_oas_history_from_canonical
+        ~session_dir ~session_id:ckpt.session_id ~snapshot_id
+    with
+    | Ok () -> Ok ()
+    | Error _ -> save_snapshot_file ()
+  in
+  match save_result with
   | Ok () ->
-    let files = list_oas_history_files ~session_dir in
-    if List.length files > max_oas_history_retained then
-      files
-      |> List.filteri (fun index _ -> index >= max_oas_history_retained)
-      |> List.iter (fun filename ->
-           let path = oas_history_path ~session_dir ~snapshot_id:filename in
-           try Sys.remove path with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
-                 path (Printexc.to_string exn);
-               Prometheus.inc_counter
-                 Prometheus.metric_keeper_checkpoint_failures
-                 ~labels:[("site", "oas_cleanup")]
-                 ())
+    prune_oas_history ~session_dir
   | Error msg ->
     Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg;
     Prometheus.inc_counter

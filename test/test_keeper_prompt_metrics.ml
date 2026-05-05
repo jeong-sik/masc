@@ -17,6 +17,10 @@ let estimate_tokens s =
   if s = "" then 0
   else Agent_sdk.Context_reducer.estimate_char_tokens s
 
+let has_in s needle =
+  try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
+  with Not_found -> false
+
 (* ── Fixture: realistic keeper prompt components ──────── *)
 
 let base_system_prompt =
@@ -178,14 +182,44 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
       ~instructions:""
       ()
   in
-  let has_in s needle =
-    try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
-    with Not_found -> false
-  in
   check bool "mentions server-managed heartbeat" true
     (has_in prompt "Heartbeat is server-managed");
   check bool "does not mention masc_heartbeat" false
     (has_in prompt "masc_heartbeat")
+
+let test_keeper_prompt_preserves_snapshot_delta_anchors () =
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Keep live snapshot continuity safe"
+      ~short_goal:"verify technical anchors"
+      ~mid_goal:"prevent persona-only prompt regression"
+      ~long_goal:"preserve operator safety through compaction"
+      ~will:"maintain coherent identity"
+      ~needs:"runtime truth and durable continuity"
+      ~desires:"observable progress"
+      ~instructions:""
+      ()
+  in
+  check bool "continuity anchor present" true (has_in prompt "<continuity>");
+  check bool "PR merge rules retained" true (has_in prompt "PR merge rules");
+  check bool "state block template retained" true
+    (has_in prompt "State block template");
+  check bool "world anchor present" true (has_in prompt "<world>")
+
+let test_prompt_recovery_guard_restores_missing_anchors () =
+  let prompt =
+    KP.ensure_critical_prompt_anchors
+      "You are imseonghan, a keeper agent.\nWill: keep going."
+  in
+  check bool "original persona text kept" true
+    (has_in prompt "You are imseonghan");
+  check bool "recovery continuity anchor present" true
+    (has_in prompt "<continuity>");
+  check bool "recovery PR merge rules present" true
+    (has_in prompt "PR merge rules");
+  check bool "recovery state template present" true
+    (has_in prompt "State block template");
+  check bool "recovery world anchor present" true (has_in prompt "<world>")
 
 let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   let prompt =
@@ -199,10 +233,6 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
       ~desires:"safe execution"
       ~instructions:""
       ()
-  in
-  let has_in s needle =
-    try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
-    with Not_found -> false
   in
   check bool "mentions operator approval" true
     (has_in prompt "operator approval may be required by the runtime");
@@ -329,6 +359,10 @@ let () =
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
             test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
+          test_case "keeper prompt preserves snapshot delta anchors" `Quick
+            test_keeper_prompt_preserves_snapshot_delta_anchors;
+          test_case "prompt recovery guard restores missing anchors" `Quick
+            test_prompt_recovery_guard_restores_missing_anchors;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
         ] );

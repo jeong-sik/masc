@@ -6,6 +6,11 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 
 val keeper_constitution : unit -> string
 
+val ensure_critical_prompt_anchors : string -> string
+(** Append a minimal technical recovery block when the keeper system prompt
+    lost critical continuity/world/policy anchors. Normal prompts are returned
+    unchanged. *)
+
 val build_keeper_system_prompt :
   goal:string ->
   short_goal:string ->

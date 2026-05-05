@@ -780,9 +780,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                          meta.name (Printexc.to_string exn);
                        `Null
                  in
-                 emit_timing_log (Time_compat.now () -. t_work_start);
-                 Some
-                   (`Assoc
+                 let row =
+                   `Assoc
                      ([
                        ("runtime_class", `String "keeper");
                        ("pipeline_stage", `String pipeline_stage);
@@ -971,7 +970,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                      @ keeper_context_snapshot_fields context_snapshot
                      @ Keeper_status_bridge.runtime_blocker_fields_json config meta
                      @ Keeper_status_bridge.attention_fields_json config meta
-                     @ [ ("runtime_trust", runtime_trust) ]))
+                     @ [ ("runtime_trust", runtime_trust) ])
+                 in
+                 emit_timing_log (Time_compat.now () -. t_work_start);
+                 Some row
                  end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"

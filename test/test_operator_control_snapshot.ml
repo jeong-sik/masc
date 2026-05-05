@@ -1,6 +1,53 @@
 open Masc_mcp
 open Test_operator_control_support
 
+let last_substring_index haystack needle =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0 || n_len > h_len then None
+  else
+    let rec loop i last =
+      if i + n_len > h_len then last
+      else
+        let last =
+          if String.sub haystack i n_len = needle then Some i else last
+        in
+        loop (i + 1) last
+    in
+    loop 0 None
+
+let expect_source_marker source marker =
+  match last_substring_index source marker with
+  | Some idx -> idx
+  | None -> Alcotest.failf "source marker not found: %s" marker
+
+let test_keeper_subop_timing_log_after_profile_activity () =
+  let root = Masc_test_deps.find_project_root () in
+  let path =
+    Filename.concat root "lib/operator/operator_control_snapshot.ml"
+  in
+  let source =
+    match Safe_ops.read_file_safe path with
+    | Ok text -> text
+    | Error err -> Alcotest.failf "read %s failed: %s" path err
+  in
+  let profile_idx =
+    expect_source_marker source
+      "dt_profile := Time_compat.now () -. t_profile"
+  in
+  let activity_idx =
+    expect_source_marker source
+      "dt_activity := Time_compat.now () -. t_act"
+  in
+  let emit_idx =
+    expect_source_marker source
+      "emit_timing_log (Time_compat.now () -. t_work_start)"
+  in
+  Alcotest.(check bool) "profile timing computed before log" true
+    (profile_idx < emit_idx);
+  Alcotest.(check bool) "activity timing computed before log" true
+    (activity_idx < emit_idx)
+
 let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
   let status =
     Operator_control_snapshot.align_keeper_runtime_status

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
+import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -138,6 +139,15 @@ export function IdeConversationRailMock() {
   useEffect(() => {
     knownPostIds.current = bridgePostsToTrace(posts, knownPostIds.current)
   }, [posts])
+
+  // RFC-0028 PR-δ-2 cascade-hop producer: each cascade strategy_trace
+  // event becomes a keeper-trace event the first time it is observed.
+  // Dedup key is `cascade:${cascade_name}:${cycle}:${ts}` so a server
+  // restart that resets cycle counters cannot collide with prior runs.
+  const knownCascadeKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownCascadeKeys.current = bridgeCascadeEventsToTrace(cascadeEvents, knownCascadeKeys.current)
+  }, [cascadeEvents])
 
   const replayItems = replayRailItems(posts, decisions, cascadeEvents)
   const replayEvents = replayEventsForItems(replayItems)

@@ -490,20 +490,59 @@ let test_observe_claimable_backlog_respects_active_goal_ids () =
       ignore
         (Masc_mcp.Coord.add_task ~goal_id:other_goal.id config
            ~title:"Out-of-scope task" ~priority:1 ~description:"desc");
+      ignore
+        (Masc_mcp.Coord.add_task ~goal_id:goal.id config
+           ~title:"Scoped task" ~priority:2 ~description:"desc");
       let meta = { minimal_meta with active_goal_ids = [ goal.id ] } in
       let obs =
         WO.observe ~allowed_tool_names:(Some [ "keeper_task_claim" ])
           ~pending_board_events:(Some []) ~config ~meta
       in
-      check int "absolute todo backlog" 1 obs.unclaimed_task_count;
-      check int "scoped claimable backlog" 0 obs.claimable_task_count;
+      check int "absolute todo backlog" 2 obs.unclaimed_task_count;
+      check int "scoped claimable backlog" 1 obs.claimable_task_count;
       let signal =
         obs
         |> KCC.of_keeper_world_observation
         |> KCC.classify_actionable_signal_for_tools
              ~allowed_tool_names:[ "keeper_task_claim" ]
       in
-      check bool "out-of-scope backlog is not actionable" false
+      check bool "scoped backlog is actionable" true
+        (KCC.is_actionable signal))
+
+let test_observe_claimable_backlog_falls_back_from_empty_active_goal_scope () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let goal, _ =
+        match Masc_mcp.Goal_store.upsert_goal config ~title:"Empty scope" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      let other_goal, _ =
+        match Masc_mcp.Goal_store.upsert_goal config ~title:"Product goal" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      ignore
+        (Masc_mcp.Coord.add_task ~goal_id:other_goal.id config
+           ~title:"Fallback product task" ~priority:1 ~description:"desc");
+      let meta = { minimal_meta with active_goal_ids = [ goal.id ] } in
+      let obs =
+        WO.observe ~allowed_tool_names:(Some [ "keeper_task_claim" ])
+          ~pending_board_events:(Some []) ~config ~meta
+      in
+      check int "absolute todo backlog" 1 obs.unclaimed_task_count;
+      check int "fallback claimable backlog" 1 obs.claimable_task_count;
+      let signal =
+        obs
+        |> KCC.of_keeper_world_observation
+        |> KCC.classify_actionable_signal_for_tools
+             ~allowed_tool_names:[ "keeper_task_claim" ]
+      in
+      check bool "fallback backlog is actionable" true
         (KCC.is_actionable signal))
 
 let test_observe_claimable_backlog_uses_auto_goal_fallback_scope () =
@@ -7107,6 +7146,8 @@ let () =
             test_observe_splits_absolute_and_claimable_backlog;
           test_case "claimable backlog respects active goals" `Quick
             test_observe_claimable_backlog_respects_active_goal_ids;
+          test_case "claimable backlog falls back from empty active goal scope" `Quick
+            test_observe_claimable_backlog_falls_back_from_empty_active_goal_scope;
           test_case "claimable backlog mirrors auto-goal fallback" `Quick
             test_observe_claimable_backlog_uses_auto_goal_fallback_scope;
           test_case "durable signal sees claimable backlog" `Quick

@@ -57,4 +57,18 @@ describe('cockpit entrypoint registry', () => {
       params: { section: 'runtime', view: 'heuristics', focus: 'log' },
     })
   })
+
+  it('routes the covered IDE search entrypoint directly to the find panel', () => {
+    const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes('find'))
+
+    expect(entrypoint?.coverage).toBe('covered')
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'search' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', find: 'open' },
+    })
+    expect(cockpitTargetForParams({ mode: 'CODE', tab: 'find' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', find: 'open' },
+    })
+  })
 })

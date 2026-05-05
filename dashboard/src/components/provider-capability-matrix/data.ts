@@ -176,19 +176,6 @@ export const PROVIDER_LABELS: Record<string, string> = {
   codex_cli: 'Codex CLI',
 }
 
-// Cascade tier in default OAS routing order (1 = primary).
-export const PROVIDER_CASCADE_TIER: Record<string, number> = {
-  anthropic: 1, openai: 2, kimi: 3, google: 4,
-  deepseek: 5, xai: 6, ollama: 7,
-}
-
-export const PROVIDER_KIND: Record<string, 'direct' | 'cli'> = {
-  openai: 'direct', claude: 'direct', gemini: 'direct', deepseek: 'direct',
-  qwen36: 'direct', mistral: 'direct', nemotron: 'direct', kimi: 'direct',
-  ollama: 'direct', llamacpp: 'direct', glm: 'direct',
-  gemini_cli: 'cli', codex_cli: 'cli',
-}
-
 // Provider category (Cloud API / CLI / Local). Source: sec01 §1.2.
 export type ProviderCategory = 'cloud' | 'cli' | 'local'
 

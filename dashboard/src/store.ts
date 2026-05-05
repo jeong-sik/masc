@@ -48,6 +48,7 @@ import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { boardMetricNow, recordBoardLatency } from './board-metrics'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionQueueItem,
@@ -874,6 +875,9 @@ function boardPageSize(): number {
 }
 
 export async function refreshBoard(): Promise<void> {
+  const startedAt = boardMetricNow()
+  let ok = false
+  let failure: unknown = null
   boardLoading.value = true
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard')
@@ -894,10 +898,13 @@ export async function refreshBoard(): Promise<void> {
       : next.length >= limit
     boardTotal.value = typeof data.total === 'number' ? data.total : null
     lastBoardRefreshAt.value = new Date().toISOString()
+    ok = true
   } catch (err) {
+    failure = err
     console.warn('[Board] fetch error:', err)
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
+    recordBoardLatency('list', startedAt, ok, failure)
     boardLoading.value = false
   }
 }
@@ -920,6 +927,9 @@ export function hydrateBoardSnapshot(data: DashboardMemoryResponse): void {
 export async function loadMoreBoardPosts(): Promise<void> {
   if (boardLoadingMore.value || boardLoading.value) return
   if (!boardHasMore.value) return
+  const startedAt = boardMetricNow()
+  let ok = false
+  let failure: unknown = null
   boardLoadingMore.value = true
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard')
@@ -941,10 +951,13 @@ export async function loadMoreBoardPosts(): Promise<void> {
       ? data.has_more
       : incoming.length >= limit
     boardTotal.value = typeof data.total === 'number' ? data.total : null
+    ok = true
   } catch (err) {
+    failure = err
     console.warn('[Board] loadMore error:', err)
     showToast('다음 페이지를 불러오지 못했습니다', 'error')
   } finally {
+    recordBoardLatency('list_more', startedAt, ok, failure)
     boardLoadingMore.value = false
   }
 }

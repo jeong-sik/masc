@@ -1,5 +1,6 @@
 import { currentDashboardActor, get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
+import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
@@ -588,7 +589,7 @@ export async function fetchBoard(
   sortBy?: BoardSortMode,
   options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
 ): Promise<{ posts: BoardPost[] }> {
-  return withRetries('fetchBoard', async () => {
+  return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
     if (options?.excludeSystem) params.set('exclude_system', 'true')
@@ -603,7 +604,7 @@ export async function fetchBoard(
       ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
       : []
     return { posts }
-  })
+  }))
 }
 
 export async function fetchBoardHearths(): Promise<BoardHearth[]> {
@@ -626,7 +627,7 @@ export async function fetchBoardReactions(
   targetType: BoardReactionTargetType,
   targetId: string,
 ): Promise<BoardReactionSummary[]> {
-  return withRetries('fetchBoardReactions', async () => {
+  return timeBoardRequest('reaction_summary', () => withRetries('fetchBoardReactions', async () => {
     const params = new URLSearchParams({
       target_type: targetType,
       target_id: targetId,
@@ -636,11 +637,11 @@ export async function fetchBoardReactions(
     return Array.isArray(raw.reactions)
       ? raw.reactions.map(normalizeBoardReactionSummary).filter((row): row is BoardReactionSummary => row !== null)
       : []
-  })
+  }))
 }
 
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
-  return withRetries('fetchBoardPost', async () => {
+  return timeBoardRequest('detail', () => withRetries('fetchBoardPost', async () => {
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
@@ -670,7 +671,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
       .map(normalizeBoardComment)
       .filter((row): row is BoardComment => row !== null)
     return { ...post, comments }
-  })
+  }))
 }
 
 export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
@@ -696,17 +697,19 @@ export async function toggleReaction(
   targetId: string,
   emoji: string,
 ): Promise<BoardReactionToggleResult> {
-  const raw = await post<unknown>('/api/v1/board/reactions', {
-    target_type: targetType,
-    target_id: targetId,
-    user_id: defaultBoardVoter(),
-    emoji,
+  return timeBoardRequest('reaction_toggle', async () => {
+    const raw = await post<unknown>('/api/v1/board/reactions', {
+      target_type: targetType,
+      target_id: targetId,
+      user_id: defaultBoardVoter(),
+      emoji,
+    })
+    const normalized = normalizeBoardReactionToggleResult(raw)
+    if (!normalized) {
+      throw new Error('Malformed board reaction response')
+    }
+    return normalized
   })
-  const normalized = normalizeBoardReactionToggleResult(raw)
-  if (!normalized) {
-    throw new Error('Malformed board reaction response')
-  }
-  return normalized
 }
 
 export function createPost(

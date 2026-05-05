@@ -20,9 +20,12 @@ import {
   normalizeGovernanceJudgeSummary,
   normalizeSubBoard,
 } from './board'
+import { boardLatencyMetrics, resetBoardLatencyMetrics } from '../board-metrics'
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  resetBoardLatencyMetrics()
 })
 
 // ================================================================
@@ -810,6 +813,9 @@ describe('voteComment', () => {
 describe('board reactions', () => {
   it('fetches reaction summaries with the dashboard voter', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(18)
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         reactions: [{
@@ -839,10 +845,18 @@ describe('board reactions', () => {
     expect(url).toContain('target_type=post')
     expect(url).toContain('target_id=post-1')
     expect(url).toContain('user_id=dashboard-reviewer')
+    expect(boardLatencyMetrics.value.reaction_summary).toMatchObject({
+      last_latency_ms: 18,
+      last_ok: true,
+      sample_count: 1,
+    })
   })
 
   it('toggles a reaction through the board reaction endpoint', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(10)
+      .mockReturnValueOnce(31)
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         target_type: 'comment',
@@ -879,6 +893,11 @@ describe('board reactions', () => {
       target_id: 'comment-1',
       user_id: 'dashboard-reviewer',
       emoji: '🚀',
+    })
+    expect(boardLatencyMetrics.value.reaction_toggle).toMatchObject({
+      last_latency_ms: 21,
+      last_ok: true,
+      sample_count: 1,
     })
   })
 })

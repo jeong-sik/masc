@@ -133,6 +133,11 @@ let board_current_vote_for_comment ~voter ~comment_id =
       | Ok vote -> Some vote
       | Error _ -> Some None)
 
+let board_reaction_summaries ~target_type ~target_id ~user_id =
+  match Board_dispatch.list_reactions ~target_type ~target_id ?user_id () with
+  | Ok summaries -> summaries
+  | Error _ -> []
+
 let max_filtered_board_window = 5200
 
 let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
@@ -149,17 +154,23 @@ let board_vote_state_fields = function
         ("has_voted", `Bool true);
       ]
 
-let board_comment_dashboard_json ?current_vote (c : Board.comment) : Yojson.Safe.t =
+let board_reaction_summary_fields = function
+  | None -> []
+  | Some summaries ->
+      [ ("reactions", `List (List.map Board.reaction_summary_to_yojson summaries)) ]
+
+let board_comment_dashboard_json ?current_vote ?reactions (c : Board.comment) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
   match Board.comment_to_yojson c with
   | `Assoc fields ->
       `Assoc
         (fields
          @ [ ("author_identity", board_actor_identity_json author) ]
+         @ board_reaction_summary_fields reactions
          @ board_vote_state_fields current_vote)
   | other -> other
 
-let board_post_dashboard_json ?current_vote ~author_karma (p : Board.post) : Yojson.Safe.t =
+let board_post_dashboard_json ?current_vote ?reactions ~author_karma (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let base_fields =
     match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
@@ -188,6 +199,7 @@ let board_post_dashboard_json ?current_vote ~author_karma (p : Board.post) : Yoj
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);
         ]
+      @ board_reaction_summary_fields reactions
       @ board_vote_state_fields current_vote )
 
 let dashboard_compact_mode request =

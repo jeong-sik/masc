@@ -151,6 +151,7 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
+  reactions?: BoardReactionSummary[]
 }
 
 export interface BoardComment {
@@ -167,6 +168,7 @@ export interface BoardComment {
   votes_down?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
+  reactions?: BoardReactionSummary[]
 }
 
 export type BoardReactionTargetType = 'post' | 'comment'

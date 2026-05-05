@@ -371,6 +371,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const tags = Array.isArray(raw.tags)
     ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
     : []
+  const reactions = normalizeBoardReactionSummaries(raw.reactions)
 
   return {
     id,
@@ -405,6 +406,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
+    ...(Array.isArray(raw.reactions) ? { reactions } : {}),
   }
 }
 
@@ -421,6 +423,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const reactions = normalizeBoardReactionSummaries(raw.reactions)
   return {
     id,
     post_id: postId,
@@ -435,6 +438,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     votes_down: votesDown,
     current_vote: currentVote,
     has_voted: hasVoted,
+    ...(Array.isArray(raw.reactions) ? { reactions } : {}),
   }
 }
 
@@ -465,6 +469,12 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
     has_reacted: hasReacted,
     recent_user_ids: recentUserIds,
   }
+}
+
+function normalizeBoardReactionSummaries(raw: unknown): BoardReactionSummary[] {
+  return Array.isArray(raw)
+    ? raw.map(normalizeBoardReactionSummary).filter((row): row is BoardReactionSummary => row !== null)
+    : []
 }
 
 function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleResult | null {

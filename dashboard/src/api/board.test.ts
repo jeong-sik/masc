@@ -498,6 +498,49 @@ describe('fetchBoard', () => {
     expect(url).toContain('hearth=ops')
     expect(url).toContain('limit=150')
   })
+
+  it('normalizes embedded post reaction summaries from the board list payload', async () => {
+    const rawResponse = {
+      posts: [
+        {
+          id: 'post-1',
+          author: 'analyst',
+          title: 'Status',
+          body: 'Working',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          reactions: [
+            {
+              emoji: '🚀',
+              count: 3,
+              has_reacted: true,
+              recent_user_ids: ['agent-a', 'agent-b'],
+            },
+            { emoji: ' ', count: 99 },
+          ],
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.reactions).toEqual([
+      {
+        emoji: '🚀',
+        count: 3,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['agent-a', 'agent-b'],
+      },
+    ])
+  })
 })
 
 describe('fetchBoardHearths', () => {
@@ -536,6 +579,14 @@ describe('fetchBoardPost', () => {
         updated_at: 1_713_000_000,
         current_vote: 'down',
         has_voted: true,
+        reactions: [
+          {
+            emoji: '👍',
+            count: 4,
+            has_reacted: false,
+            recent_user_ids: ['analyst'],
+          },
+        ],
       },
       comments: [
         {
@@ -549,6 +600,14 @@ describe('fetchBoardPost', () => {
           score: 3,
           current_vote: 'up',
           has_voted: true,
+          reactions: [
+            {
+              emoji: '👏',
+              count: 2,
+              reacted: true,
+              recent_user_ids: ['reviewer'],
+            },
+          ],
         },
       ],
     }
@@ -570,8 +629,22 @@ describe('fetchBoardPost', () => {
       votes_down: 2,
       current_vote: 'up',
       has_voted: true,
+      reactions: [{
+        emoji: '👏',
+        count: 2,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['reviewer'],
+      }],
     })
     expect(result.current_vote).toBe('down')
+    expect(result.reactions).toEqual([{
+      emoji: '👍',
+      count: 4,
+      reacted: false,
+      has_reacted: false,
+      recent_user_ids: ['analyst'],
+    }])
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')

@@ -49,7 +49,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
-        board_post_dashboard_json ?current_vote ~author_karma:(get_karma author) p
+        let reactions =
+          board_reaction_summaries ~target_type:Board.Reaction_post
+            ~target_id:post_id ~user_id:voter
+        in
+        board_post_dashboard_json ?current_vote ~reactions
+          ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
         ("posts", `List posts_json);

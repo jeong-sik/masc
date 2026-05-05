@@ -153,10 +153,20 @@ val board_current_vote_for_post :
 val board_current_vote_for_comment :
   voter:string option -> comment_id:string -> Board.vote_direction option option
 
+val board_reaction_summaries :
+  target_type:Board.reaction_target_type ->
+  target_id:string ->
+  user_id:string option ->
+  Board.reaction_summary list
+(** [board_reaction_summaries ~target_type ~target_id ~user_id] returns
+    the current reaction summary for dashboard embedding. Lookup failures
+    degrade to [] so stale/deleted rows do not break the board list. *)
+
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
   ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
   Board.comment ->
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
@@ -165,6 +175,7 @@ val board_comment_dashboard_json :
 
 val board_post_dashboard_json :
   ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
   author_karma:int ->
   Board.post ->
   Yojson.Safe.t

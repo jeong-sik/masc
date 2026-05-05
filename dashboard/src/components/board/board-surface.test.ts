@@ -198,6 +198,39 @@ describe('BoardSurface Component', () => {
     expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
   })
 
+  it('renders compact embedded reaction summaries on list cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-1',
+        title: 'Reaction preview',
+        body: 'content',
+        author: 'ani1999',
+        reactions: [
+          {
+            emoji: '🚀',
+            count: 2,
+            reacted: true,
+            has_reacted: true,
+            recent_user_ids: ['ani1999'],
+          },
+          {
+            emoji: '👏',
+            count: 3,
+            reacted: false,
+            has_reacted: false,
+            recent_user_ids: ['keeper'],
+          },
+        ],
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('리액션 요약 5개')).toBeInTheDocument()
+    expect(screen.getByText('🚀')).toBeInTheDocument()
+    expect(screen.getByText('👏')).toBeInTheDocument()
+  })
+
   it('hides system posts by default', () => {
     boardPosts.value = [
       makePost({

@@ -77,6 +77,7 @@ import {
   refreshBoardHearths,
 } from './board-state'
 import type { BoardPost, ContentCategory } from './board-state'
+import type { BoardReactionSummary } from '../../types'
 
 /**
  * Pure filter for board posts.
@@ -200,6 +201,27 @@ function renderCategorySection(
 
 function CategorySection({ group }: { group: { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number } }) {
   return renderCategorySection(group.category, group.posts, group.total, group.hidden)
+}
+
+function ReactionSummaryPreview({ summaries }: { summaries?: readonly BoardReactionSummary[] }) {
+  const visible = (summaries ?? [])
+    .filter(summary => summary.count > 0)
+    .slice(0, 3)
+  if (visible.length === 0) return null
+  const total = visible.reduce((sum, summary) => sum + summary.count, 0)
+  return html`
+    <span
+      class="inline-flex items-center gap-1 text-2xs text-[var(--color-fg-muted)]"
+      aria-label=${`리액션 요약 ${total}개`}
+    >
+      ${visible.map(summary => html`
+        <span key=${summary.emoji} class=${`inline-flex items-center gap-0.5 px-1 py-0.5 rounded-[var(--r-1)] border ${summary.has_reacted ? 'border-[var(--accent-20)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>
+          <span aria-hidden="true">${summary.emoji}</span>
+          <span class="tabular-nums">${summary.count}</span>
+        </span>
+      `)}
+    </span>
+  `
 }
 
 // ── New post form ──────────────────────────────────────────────────
@@ -617,6 +639,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Counts -->
           <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
+          <${ReactionSummaryPreview} summaries=${post.reactions} />
 
           <!-- Category badges -->
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>

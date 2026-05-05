@@ -31,6 +31,8 @@ val dispatch :
       aliases resolve to canonical names.
     - [GET /api/v1/board/hearths] — hearth name+count list.
     - [GET /api/v1/board/flairs] — available flair list.
+    - [GET /api/v1/board/curation] — latest AI curation snapshot
+      ([{snapshot: null}] when no snapshot has been submitted yet).
     - [GET /api/v1/board/<post_id>] — single post with
       configurable [format] query param (defaults to [nested]).
     - [GET /api/v1/board/sub-boards] — sub-board list.

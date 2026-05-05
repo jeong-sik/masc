@@ -30,6 +30,7 @@ let cleanup () =
   end;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Board_curation.reset_for_test ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
@@ -477,7 +478,24 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed comment vote reaches board handler" true
     (contains_substring comment_vote "comment_id required");
   Alcotest.(check bool) "typed comment vote is not unknown" false
-    (contains_substring comment_vote "unknown_board_tool")
+    (contains_substring comment_vote "unknown_board_tool");
+  let curation =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_curation_read"
+      ~args:(make_args [])
+  in
+  Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
+  Alcotest.(check bool) "typed curation read is not unknown" false
+    (contains_substring curation "unknown_board_tool")
+
+let test_board_curation_read_empty_returns_json_null () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_curation_read" (make_args []) in
+  Alcotest.(check bool) "curation read ok" true ok;
+  Alcotest.(check string) "empty curation snapshot is JSON null" "null" body
 
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
@@ -927,6 +945,8 @@ let () =
             test_keeper_board_post_preserves_meta_reason;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;
+          Alcotest.test_case "curation read empty returns JSON null" `Quick
+            test_board_curation_read_empty_returns_json_null;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

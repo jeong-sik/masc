@@ -63,6 +63,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 
+  | `GET, "/api/v1/board/curation" ->
+      let json =
+        match Board_dispatch.latest_curation_snapshot () with
+        | None -> `Assoc [("snapshot", `Null)]
+        | Some snap ->
+            `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
+      in
+      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      true
+
   | `GET, "/api/v1/board/hearths" ->
       let hearths = Board_dispatch.list_hearths () in
       let json = `Assoc [

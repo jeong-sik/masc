@@ -1262,16 +1262,8 @@ let handle_keeper_status ctx args : tool_result =
                Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
-               let cache_path = Filename.concat playground_abs
-                 ".playground_state.json" in
-               try
-                 match Yojson.Safe.from_file cache_path with
-                 | `Assoc _ as json ->
-                   (match Yojson.Safe.Util.member "repos" json with
-                    | `Null -> `List []
-                    | repos -> repos)
-                 | _ -> `List []
-               with Sys_error _ | Yojson.Json_error _ -> `List []);
+               Keeper_sandbox_control.playground_repos_json
+                 ~config:ctx.config ~meta:m);
              ("pr_history",
                let pr_path = Filename.concat playground_abs
                  ".playground_pr_history.jsonl" in

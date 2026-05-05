@@ -254,6 +254,68 @@ let cleanup_stale ~(config : Coord.config) ~(timeout_sec : float) () =
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
+let safe_file_exists path =
+  try Fs_compat.file_exists path with
+  | Sys_error _ -> false
+
+let safe_is_dir path =
+  try Fs_compat.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+
+let repo_name_of_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "name" fields with
+      | Some (`String name) when String.trim name <> "" -> Some name
+      | _ -> None)
+  | _ -> None
+
+let cached_playground_repo_entries playground_abs =
+  let cache_path = Filename.concat playground_abs ".playground_state.json" in
+  try
+    match Yojson.Safe.from_file cache_path with
+    | `Assoc _ as json -> (
+        match Yojson.Safe.Util.member "repos" json with
+        | `List repos -> repos
+        | _ -> [])
+    | _ -> []
+  with
+  | Sys_error _ | Yojson.Json_error _ -> []
+
+let filesystem_playground_repo_names playground_abs =
+  let repos_dir = Filename.concat playground_abs "repos" in
+  if not (safe_is_dir repos_dir) then []
+  else
+    try
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        let repo_path = Filename.concat repos_dir name in
+        safe_is_dir repo_path
+        && safe_file_exists (Filename.concat repo_path ".git"))
+      |> List.sort String.compare
+    with
+    | Sys_error _ -> []
+
+let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
+  let playground_abs =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> normalize_path
+  in
+  let cached = cached_playground_repo_entries playground_abs in
+  let cached_names = List.filter_map repo_name_of_json cached in
+  let fs_entries =
+    filesystem_playground_repo_names playground_abs
+    |> List.filter (fun name -> not (List.mem name cached_names))
+    |> List.map (fun name ->
+      `Assoc
+        [
+          ("name", `String name);
+          ("path", `String (Filename.concat "repos" name));
+          ("source", `String "filesystem");
+        ])
+  in
+  `List (cached @ fs_entries)
+
 let preflight_status_json ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
   |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
@@ -383,5 +445,6 @@ let live_status_json ?(include_preflight = true)
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ("recommendation", Json_util.string_opt_to_json recommendation);
+      ("playground_repos", playground_repos_json ~config ~meta);
       ("identity", identity_json meta);
     ]

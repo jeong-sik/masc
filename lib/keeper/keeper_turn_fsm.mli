@@ -56,13 +56,13 @@ type _ turn_state =
   | Failed : failure_reason -> [`Failed] turn_state [@tla.terminal]
   | Cancelled : cancel_reason -> [`Cancelled] turn_state [@tla.terminal]
 
-(** TLA+ symbol mapping derived by [ppx_tla].
+(** TLA+ symbol mapping backed by a private [ppx_tla]-derived symbol enum.
 
-    [to_tla_symbol] / [all_symbols] match [TurnStateSet], while
-    [active_symbols] / [terminal_symbols] and the generated
-    [is_active] / [is_terminal] predicates match [ActiveStateSet] and
-    [TerminalStateSet] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]
-    (verified by [test_keeper_turn_fsm_tla_parity]).
+    [to_tla_symbol] / [all_symbols] match [TurnStateSet]. The public
+    [active_symbols] / [terminal_symbols] / [is_active] / [is_terminal]
+    wrappers match [ActiveStateSet] and [TerminalStateSet] in
+    [specs/keeper-turn-fsm/KeeperTurnFSM.tla] (verified by
+    [test_keeper_turn_fsm_tla_parity]).
 
     [@tla.symbol "awaiting_tool"] on [Awaiting_tool_result] covers the
     OCaml-vs-TLA+ naming difference without renaming either side. *)

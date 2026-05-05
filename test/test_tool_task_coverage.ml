@@ -1025,6 +1025,32 @@ let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun
   | None -> failwith "dispatch returned None"
 )
 
+(* Regression for issue: keeper_bash-gated tasks stay todo after merged Codex PR
+   evidence. submit_pr_evidence must bypass the required_tool claim guard and
+   transition Todo -> AwaitingVerification without claiming. *)
+let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    let success, result =
+      Tool_task.handle_transition ~agent_tool_names:[ "masc_status" ] ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("notes", `String "PR jeong-sik/masc-mcp#13169 merged 2026-05-05");
+          ])
+    in
+    if not success then
+      failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" result);
+    match (only_task ctx).Masc_domain.task_status with
+    | Masc_domain.AwaitingVerification _ -> ()
+    | other ->
+        failwith
+          (Printf.sprintf "expected AwaitingVerification after submit_pr_evidence, got: %s"
+             (Masc_domain.task_status_to_string other)))
+)
+
 let () = test "transition_release_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition release")]) in

@@ -218,10 +218,13 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description = "Move a task through its lifecycle: claim, start, done, cancel, release, \
-submit_for_verification, approve, or reject. \
+submit_for_verification, approve, reject, or submit_pr_evidence. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'. \
 Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
+Use submit_pr_evidence to submit a merged PR as evidence for a todo task that requires tools \
+unavailable to you — this transitions the task directly to awaiting_verification so a keeper \
+with the required tools can verify and close it. \
 Tasks created through masc_add_task normally route action='done' into awaiting_verification rather than final done.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -236,7 +239,7 @@ Tasks created through masc_add_task normally route action='done' into awaiting_v
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject");
+          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject | submit_pr_evidence");
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");

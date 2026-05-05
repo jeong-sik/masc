@@ -384,7 +384,8 @@ let dashboard_verification_resolve_http_json
            Verification_protocol.notify_reject_verification
              ~task_id ~verifier ~verification_id ~reason
        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
-       | Masc_domain.Release | Masc_domain.Submit_for_verification -> ());
+       | Masc_domain.Release | Masc_domain.Submit_for_verification
+       | Masc_domain.Submit_pr_evidence -> ());
       Ok (`Assoc [
         ("ok", `Bool true);
         ("task_id", `String task_id);

@@ -926,7 +926,7 @@ and handle_transition ?agent_tool_names ctx args =
   in
   let prepare_verification_request =
     match action with
-    | Masc_domain.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
       Some
         (fun ~task ~assignee ~verification_id ~evidence_refs ->
            Verification_protocol.create_submit_request
@@ -970,7 +970,8 @@ and handle_transition ?agent_tool_names ctx args =
     | Masc_domain.Done_action
     | Masc_domain.Cancel
     | Masc_domain.Release
-    | Masc_domain.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification
+    | Masc_domain.Submit_pr_evidence ->
       None
   in
   let rec try_transition attempt =
@@ -1020,7 +1021,7 @@ and handle_transition ?agent_tool_names ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ]);
        (match action with
-        | Masc_domain.Submit_for_verification ->
+        | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
           let tasks = Coord.get_tasks_raw ctx.config in
           (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
            | Some task ->
@@ -1103,6 +1104,7 @@ and handle_transition ?agent_tool_names ctx args =
          ~verdict:(Post_verifier.Fail "task_cancelled");
        Prometheus.record_task_failed ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
   result_to_response result

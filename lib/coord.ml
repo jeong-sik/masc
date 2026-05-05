@@ -112,6 +112,7 @@ let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = fu
   | Masc_domain.Cancel -> Audit_log.CancelTask
   | Masc_domain.Release -> Audit_log.ReleaseTask
   | (Masc_domain.Submit_for_verification
+    | Masc_domain.Submit_pr_evidence
     | Masc_domain.Approve_verification
     | Masc_domain.Reject_verification) as action ->
       Audit_log.Custom ("task_" ^ Masc_domain.task_action_to_string action)
@@ -196,7 +197,8 @@ let observe_task_transition_event config ~agent_name ~task_id
     match transition with
     | Masc_domain.Cancel -> Log.Warn
     | (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Release
-      | Masc_domain.Submit_for_verification | Masc_domain.Approve_verification
+      | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence
+      | Masc_domain.Approve_verification
       | Masc_domain.Reject_verification) -> Log.Info
   in
   let message =
@@ -224,6 +226,7 @@ let observe_task_transition_event config ~agent_name ~task_id
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
             ~success:false
       | (Masc_domain.Release | Masc_domain.Submit_for_verification
+        | Masc_domain.Submit_pr_evidence
         | Masc_domain.Reject_verification) -> ()
   with Stdlib.Effect.Unhandled _ as exn ->
     warn_telemetry_drop ~event_family:"task_transition"

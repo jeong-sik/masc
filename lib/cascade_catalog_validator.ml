@@ -170,11 +170,75 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
       }
   else None
 
+(* RFC-0027 PR-3: capability lint severity is operator-controlled via
+   MASC_CAPABILITY_LINT.  Default [warn] keeps rollout safe — operators
+   see drift in logs without breaking startup until they explicitly opt
+   in to enforcement.  [off] is provided so emergency operators can
+   silence the lint without removing the [required_capability_profile]
+   field. *)
+let capability_lint_severity () : severity option =
+  match Sys.getenv_opt "MASC_CAPABILITY_LINT" with
+  | Some "off" -> None
+  | Some "error" -> Some Catalog_error
+  | _ -> Some Catalog_warn
+
+let capability_mismatch_issues ~profile ~required_profile model_specs =
+  match capability_lint_severity () with
+  | None -> []
+  | Some severity ->
+      let mismatches =
+        model_specs
+        |> Cascade_config.expand_auto_models
+        |> List.filter_map (fun spec ->
+               match Cascade_config.parse_model_string_result spec with
+               | Ok cfg ->
+                   let caps = Provider_tool_support.capabilities_of_config cfg in
+                   if Cascade_capability_profile.provider_satisfies_profile
+                        required_profile caps
+                   then None
+                   else Some spec
+               | Error _ -> None)
+      in
+      if mismatches = [] then []
+      else
+        [
+          {
+            profile = Some profile;
+            severity;
+            message =
+              Printf.sprintf
+                "Cascade preset %s declares required_capability_profile=%S \
+                 but %d model(s) do not satisfy it: %s"
+                profile
+                (Cascade_capability_profile.profile_to_string required_profile)
+                (List.length mismatches)
+                (String.concat ", " mismatches);
+          };
+        ]
+
 let diagnose_profile ~config_path ~profile =
   let model_specs =
     Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
     |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
            entry.model)
+  in
+  let required_profile_opt =
+    match Cascade_config_loader.load_catalog ~config_path with
+    | Error _ -> None
+    | Ok entries ->
+        List.find_map
+          (fun (e : Cascade_config_loader.catalog_entry) ->
+            if String.equal e.name profile then
+              Some e.required_capability_profile
+            else None)
+          entries
+        |> Option.value ~default:None
+  in
+  let capability_issues =
+    match required_profile_opt with
+    | None -> []
+    | Some required_profile ->
+        capability_mismatch_issues ~profile ~required_profile model_specs
   in
   let invalid_specs =
     model_specs
@@ -239,8 +303,11 @@ let diagnose_profile ~config_path ~profile =
   let bound_actor_issue =
     codex_with_bound_actor_only_issue ~profile model_specs
   in
-  [ invalid_model_issue; strategy_issue; bound_actor_issue ]
-  |> List.filter_map (fun issue -> issue)
+  let issues =
+    [ invalid_model_issue; strategy_issue; bound_actor_issue ]
+    |> List.filter_map (fun issue -> issue)
+  in
+  issues @ capability_issues
 
 let diagnose_catalog ~config_path =
   match Cascade_config_loader.load_json config_path with

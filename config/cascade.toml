@@ -87,6 +87,28 @@ max_tokens = 4096
 keeper_assignable = false
 fallback_cascade = "big_three"
 
+[__safe_lane]
+# RFC-0027 PR-4: system-only baseline cascade that satisfies every
+# capability profile (tool_strict / inline_tools / lite / local).
+# All entries carry runtime MCP HTTP headers AND inline tools, so
+# any keeper-bound MCP turn or any inline-tools turn can route here
+# as last-resort fallback after upstream cascades exhaust.
+#
+# Members must remain (provider, model) pairs that:
+#   - support_runtime_mcp_http_headers = true (claude_code, kimi_cli)
+#   - or expose direct inline tools (HTTP-based glm-coding)
+# Adding gemini_cli or codex_cli here breaks the safe-lane contract.
+comment = "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable."
+models = [
+  "claude_code:auto",
+  "glm-coding:auto",
+  "kimi_cli:kimi-for-coding",
+]
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false
+required_capability_profile = "tool_strict"
+
 [tier_fast]
 comment = "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion."
 models = [

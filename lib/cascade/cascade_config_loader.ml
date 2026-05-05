@@ -165,6 +165,7 @@ type catalog_entry = {
   name : string;
   keeper_assignable : bool;
   fallback_cascade : string option;
+  required_capability_profile : Cascade_capability_profile.profile option;
 }
 
 module StringMap = Map.Make (String)
@@ -173,6 +174,7 @@ type catalog_field =
   | Schema_field
   | Keeper_assignable_field
   | Fallback_cascade_field
+  | Required_capability_profile_field
 
 let catalog_key_specs =
   [
@@ -202,6 +204,7 @@ let catalog_key_specs =
     ("_server_error_skip_after", Schema_field);
     ("_keeper_assignable", Keeper_assignable_field);
     ("_fallback_cascade", Fallback_cascade_field);
+    ("_required_capability_profile", Required_capability_profile_field);
   ]
 
 let split_catalog_key key =
@@ -217,10 +220,22 @@ let split_catalog_key key =
         else None)
       catalog_key_specs
 
+(* [required_capability_profile] is a Result so unknown profile names
+   surface to [load_catalog] as a fail-closed [Error] instead of a
+   silent [None].  Keeping the error inside the builder lets us defer
+   the abort to entry-construction time after every key has been
+   visited, so the operator gets one consolidated error message even
+   when multiple profiles are misconfigured. *)
+type capability_profile_parse =
+  | Cp_unset
+  | Cp_set of Cascade_capability_profile.profile
+  | Cp_invalid of string
+
 type catalog_builder = {
   has_schema_field : bool;
   keeper_assignable : bool option;
   fallback_cascade : string option;
+  required_capability_profile : capability_profile_parse;
 }
 
 let deprecated_logical_profile_names =
@@ -263,6 +278,7 @@ let empty_catalog_builder = {
   has_schema_field = false;
   keeper_assignable = None;
   fallback_cascade = None;
+  required_capability_profile = Cp_unset;
 }
 
 let update_catalog_builder builder field value =
@@ -284,6 +300,19 @@ let update_catalog_builder builder field value =
         | _ -> builder.fallback_cascade
       in
       { builder with fallback_cascade }
+  | Required_capability_profile_field ->
+      let required_capability_profile =
+        match value with
+        | `String s ->
+            let trimmed = String.trim s in
+            if String.equal trimmed "" then Cp_unset
+            else
+              (match Cascade_capability_profile.profile_of_string trimmed with
+               | Some p -> Cp_set p
+               | None -> Cp_invalid trimmed)
+        | _ -> builder.required_capability_profile
+      in
+      { builder with required_capability_profile }
 
 (* Detect fallback_cascade cycles in a freshly loaded catalog.
 
@@ -352,21 +381,49 @@ let load_catalog ~config_path =
           StringMap.empty
           fields
       in
-      let entries =
+      let active_builders =
         builders
         |> StringMap.bindings
-        |> List.filter_map (fun (name, builder) ->
-               if (not builder.has_schema_field)
-                  || is_deprecated_logical_profile_name name
-               then None
-               else
-                 Some
-                   {
-                     name;
-                     keeper_assignable =
-                       Option.value builder.keeper_assignable ~default:true;
-                     fallback_cascade = builder.fallback_cascade;
-                   })
+        |> List.filter (fun (name, builder) ->
+               builder.has_schema_field
+               && not (is_deprecated_logical_profile_name name))
+      in
+      let invalid_profile_errors =
+        List.filter_map
+          (fun (name, builder) ->
+            match builder.required_capability_profile with
+            | Cp_invalid raw ->
+                Some
+                  (Printf.sprintf
+                     "cascade %s: unknown required_capability_profile %S \
+                      (known: %s)"
+                     name raw
+                     (Cascade_capability_profile.all_profiles
+                      |> List.map Cascade_capability_profile.profile_to_string
+                      |> String.concat ", "))
+            | _ -> None)
+          active_builders
+      in
+      if invalid_profile_errors <> [] then
+        Error (String.concat "; " invalid_profile_errors)
+      else
+      let entries =
+        List.map
+          (fun (name, builder) ->
+            let required_capability_profile =
+              match builder.required_capability_profile with
+              | Cp_set p -> Some p
+              | Cp_unset -> None
+              | Cp_invalid _ -> None  (* unreachable: filtered above *)
+            in
+            {
+              name;
+              keeper_assignable =
+                Option.value builder.keeper_assignable ~default:true;
+              fallback_cascade = builder.fallback_cascade;
+              required_capability_profile;
+            })
+          active_builders
       in
       let cycles = detect_fallback_cycles entries in
       let key = cycle_set_key cycles in

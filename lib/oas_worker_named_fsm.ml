@@ -12,6 +12,12 @@ let retry_message_looks_like_not_found (message : string) : bool =
   || String_util.contains_substring_ci message "status code: 404"
   || String_util.contains_substring_ci message "404 page not found"
 
+let retry_message_looks_like_model_access_denied (message : string) : bool =
+  String_util.contains_substring_ci message "permission to access"
+  || String_util.contains_substring_ci message "not have access to"
+  || String_util.contains_substring_ci message "does not have access to"
+  || String_util.contains_substring_ci message "not authorized to access"
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -29,10 +35,19 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api api_err ->
     let http_err = match[@warning "-8"] api_err with
       | Llm_provider.Retry.InvalidRequest { message } ->
-        let code =
-          if retry_message_looks_like_not_found message then 404 else 400
-        in
-        Llm_provider.Http_client.HttpError { code; body = message }
+        if retry_message_looks_like_model_access_denied message then
+          Llm_provider.Http_client.ProviderFailure
+            {
+              kind =
+                Llm_provider.Http_client.Capability_mismatch
+                  { capability = Some "model_access" };
+              message;
+            }
+        else
+          let code =
+            if retry_message_looks_like_not_found message then 404 else 400
+          in
+          Llm_provider.Http_client.HttpError { code; body = message }
       | Llm_provider.Retry.ContextOverflow { message; _ } ->
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.RateLimited { message; _ } ->

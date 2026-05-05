@@ -49,6 +49,48 @@ function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly ha
   return firstFile?.path ?? null
 }
 
+function isManagedMirrorRepository(repository: Repository): boolean {
+  const localPath = repository.local_path.replace(/\\/g, '/')
+  return localPath === `.masc/repos/${repository.id}`
+    || localPath.startsWith('.masc/repos/')
+    || localPath.includes('/.masc/repos/')
+}
+
+// Reviewer #13232: detect Windows drive-letter absolute paths
+// (e.g. "C:/Users/.../repo" or "D:\\projects\\repo") after
+// backslash normalization so workspace repos on Windows are not
+// classified as managed mirrors and dropped from IDE default
+// selection.  Posix absolute paths still match via the
+// leading-slash branch.
+const WINDOWS_DRIVE_LETTER_PREFIX = /^[A-Za-z]:\//
+function isWorkspaceRepository(repository: Repository): boolean {
+  const localPath = repository.local_path.replace(/\\/g, '/')
+  const isAbsolute =
+    localPath.startsWith('/') ||
+    WINDOWS_DRIVE_LETTER_PREFIX.test(localPath)
+  return isAbsolute && !localPath.includes('/.masc/')
+}
+
+function isMascMcpRepository(repository: Repository): boolean {
+  return repository.id === 'masc-mcp' || repository.name === 'masc-mcp'
+}
+
+export function selectPreferredIdeRepositoryId(
+  repositories: ReadonlyArray<Repository>,
+  current: string | null,
+): string | null {
+  if (current && repositories.some(repository => repository.id === current)) {
+    return current
+  }
+
+  return repositories.find(repository => isMascMcpRepository(repository) && isWorkspaceRepository(repository))?.id
+    ?? repositories.find(isWorkspaceRepository)?.id
+    ?? repositories.find(isMascMcpRepository)?.id
+    ?? repositories.find(repository => !isManagedMirrorRepository(repository))?.id
+    ?? repositories[0]?.id
+    ?? null
+}
+
 export function createIdeDataCoordinator(): IdeDataCoordinator {
   const documentStore = createCodeDocumentStore({
     file_path: activeIdeFile.value,
@@ -67,10 +109,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
-    const nextActive = current && repositories.some(repository => repository.id === current)
-      ? current
-      : repositories[0]?.id ?? null
-    activeRepositoryIdSignal.value = nextActive
+    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current)
     repositoriesSignal.value = repositories
   }
 

@@ -937,6 +937,18 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
            (attribution_of_validation ~cmd:command validation);
          (match validation with
           | Error reason ->
+            (* #13078: emit [command_blocked] telemetry so observers
+               see validation failures.  Without this, the .mli's
+               documented [command_blocked] error_kind never appears
+               on the wire — operators can't distinguish "policy
+               denied" from "no shell_exec attempt".  duration_ms = 0
+               because no subprocess was spawned. *)
+            Option.iter
+              (fun (f : tool_exec_observer) ->
+                f ~tool_name:"shell_exec" ~success:false ~duration_ms:0
+                  ~error_kind:(tool_exec_error_kind_of_string "command_blocked")
+                  ~error_message:(block_reason_to_string reason) ())
+              on_exec;
             tool_error (block_reason_to_string reason)
           | Ok () ->
            let timeout =

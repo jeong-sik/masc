@@ -245,6 +245,29 @@ let test_self_preservation_allows_bounded_partial_stale_recovery () =
   Sup.reset_self_preservation_escape_state_for_test ();
   Reg.clear ()
 
+let test_self_preservation_allows_mixed_partial_stale_recovery () =
+  Reg.clear ();
+  Sup.reset_self_preservation_escape_state_for_test ();
+  let stale = stale_entries [ "a"; "b"; "c"; "d"; "e"; "f" ] in
+  let crash =
+    let name = "non-stale-crash" in
+    ignore (Reg.register ~base_path:bp name (make_meta name));
+    Reg.set_failure_reason ~base_path:bp name
+      (Some (Reg.Heartbeat_consecutive_failures 3));
+    match Reg.get ~base_path:bp name with
+    | Some e -> [ e, "crash" ]
+    | None -> fail name
+  in
+  let entries = stale @ crash in
+  let result =
+    Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers"
+      ~total_keepers:17 entries
+  in
+  check int "mixed partial stale recovery keeps full restart set"
+    (List.length entries) (List.length result);
+  Sup.reset_self_preservation_escape_state_for_test ();
+  Reg.clear ()
+
 let test_self_preservation_suppresses_large_partial_stale_recovery () =
   Reg.clear ();
   Sup.reset_self_preservation_escape_state_for_test ();
@@ -1204,6 +1227,8 @@ let () =
       test_case "empty input → empty output" `Quick test_self_preservation_empty_input;
       test_case "bounded partial stale recovery cohort allowed" `Quick
         test_self_preservation_allows_bounded_partial_stale_recovery;
+      test_case "mixed partial stale recovery keeps full restart set" `Quick
+        test_self_preservation_allows_mixed_partial_stale_recovery;
       test_case "large partial stale recovery cohort suppressed" `Quick
         test_self_preservation_suppresses_large_partial_stale_recovery;
       test_case "universal stale recovery cohort suppressed" `Quick

@@ -88,12 +88,20 @@ type holder_key = {
 }
 
 let holder_table : (holder_key, float) Hashtbl.t = Hashtbl.create 32
-let force_released_holders : (holder_key, unit) Hashtbl.t = Hashtbl.create 32
+let force_released_holders : (holder_key, float) Hashtbl.t = Hashtbl.create 32
 let next_holder_acquisition_id = ref 0
 let holder_mutex = Eio.Mutex.create ()
+let force_release_marker_ttl_sec = 3600.0
 
 let with_holder_lock f =
   Eio.Mutex.use_rw ~protect:true holder_mutex f
+
+let purge_expired_force_released_holders_locked ~now =
+  Hashtbl.filter_map_inplace
+    (fun _ marked_at ->
+       if now -. marked_at > force_release_marker_ttl_sec then None
+       else Some marked_at)
+    force_released_holders
 
 let record_holder ~label ~keeper_name ~acquired_at =
   with_holder_lock (fun () ->
@@ -111,6 +119,8 @@ let record_holder ~label ~keeper_name ~acquired_at =
 
 let mark_holder_force_released ~label ~keeper_name =
   with_holder_lock (fun () ->
+    let now = Time_compat.now () in
+    purge_expired_force_released_holders_locked ~now;
     let keys =
       Hashtbl.fold
         (fun key _ acc ->
@@ -123,12 +133,13 @@ let mark_holder_force_released ~label ~keeper_name =
     List.iter
       (fun key ->
          Hashtbl.remove holder_table key;
-         Hashtbl.replace force_released_holders key ())
+         Hashtbl.replace force_released_holders key now)
       keys;
     List.length keys)
 
 let consume_force_release ~label ~keeper_name ~acquisition_id =
   with_holder_lock (fun () ->
+    purge_expired_force_released_holders_locked ~now:(Time_compat.now ());
     let key =
       {
         holder_label = label;
@@ -137,7 +148,7 @@ let consume_force_release ~label ~keeper_name ~acquisition_id =
       }
     in
     match Hashtbl.find_opt force_released_holders key with
-    | Some () ->
+    | Some _ ->
       Hashtbl.remove force_released_holders key;
       true
     | None ->
@@ -466,13 +477,19 @@ let safe_bookkeeping ~op f =
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
       op (Printexc.to_string exn)
 
-let release_recorded_holder ~keeper_name ~label ~acquisition_id sem =
+let release_recorded_holder
+    ?(before_release = fun () -> ())
+    ~keeper_name
+    ~label
+    ~acquisition_id
+    sem =
   match acquisition_id with
   | None ->
     Log.Keeper.warn
       "release_keeper_turn_slot: %s holder for %s missing acquisition id; \
        releasing semaphore defensively"
       label keeper_name;
+    before_release ();
     Eio.Semaphore.release sem
   | Some acquisition_id ->
     let force_released =
@@ -485,8 +502,10 @@ let release_recorded_holder ~keeper_name ~label ~acquisition_id sem =
       Log.Keeper.warn
         "release_keeper_turn_slot: %s holder for %s was already force-released"
         label keeper_name
-    else
+    else begin
+      before_release ();
       Eio.Semaphore.release sem
+    end
 
 let release_keeper_turn_slot ~keeper_name state =
   safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
@@ -502,13 +521,15 @@ let release_keeper_turn_slot ~keeper_name state =
       turn_semaphore
   end;
   if !(state.acquired_autonomous) then begin
-    (* Stamp completion time BEFORE releasing the semaphore so that
-       [maybe_yield_for_fairness] can measure the correct interval
-       when this keeper's heartbeat loops back immediately. *)
-    safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
-      record_autonomous_completion ~keeper_name);
     release_recorded_holder ~keeper_name ~label:"autonomous"
       ~acquisition_id:!(state.autonomous_acquisition_id)
+      ~before_release:(fun () ->
+        (* Stamp completion time only for normal completion, before releasing
+           the semaphore so that [maybe_yield_for_fairness] can measure the
+           correct interval when this keeper's heartbeat loops back
+           immediately. *)
+        safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+          record_autonomous_completion ~keeper_name))
       autonomous_turn_semaphore
   end;
   if !(state.acquired_reactive) then begin

@@ -346,6 +346,45 @@ let test_force_release_marker_does_not_leak_to_replacement () =
     ~expected:reactive_before
     ~actual:(KK.reactive_turn_semaphore_value_for_test ())
 
+let test_force_released_autonomous_holder_does_not_stamp_completion () =
+  let keeper_name = "diag-force-autonomous" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let autonomous_before = KK.autonomous_turn_semaphore_value_for_test () in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      (fun ~semaphore_wait_ms:_ ->
+         let released = KK.force_release_stale_holder ~keeper_name in
+         if not (List.mem "turn" released) then
+           failwith "force release did not report turn slot";
+         if not (List.mem "autonomous" released) then
+           failwith "force release did not report autonomous slot";
+         assert_eq ~msg:"turn restored by force release" ~expected:turn_before
+           ~actual:(KK.turn_semaphore_value_for_test ());
+         assert_eq ~msg:"autonomous restored by force release"
+           ~expected:autonomous_before
+           ~actual:(KK.autonomous_turn_semaphore_value_for_test ()))
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test");
+  assert_eq ~msg:"turn not double-released by autonomous finalizer"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq ~msg:"autonomous not double-released by finalizer"
+    ~expected:autonomous_before
+    ~actual:(KK.autonomous_turn_semaphore_value_for_test ());
+  let delay =
+    KK.fairness_delay_sec_at ~keeper_name ~now:(Time_compat.now ())
+  in
+  if delay <> 0.0 then
+    failwith
+      (Printf.sprintf
+         "force-released autonomous holder stamped normal completion: delay=%.3f"
+         delay)
+
 let () =
   let cases =
     [
@@ -371,6 +410,8 @@ let () =
         test_force_release_marker_is_acquisition_scoped;
       "force release marker does not leak to replacement",
         test_force_release_marker_does_not_leak_to_replacement;
+      "force released autonomous holder skips completion stamp",
+        test_force_released_autonomous_holder_does_not_stamp_completion;
     ]
   in
   List.iter

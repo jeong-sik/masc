@@ -848,7 +848,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
            overall_candidates=%d/%d ratio_overall=%.2f)"
           dominant_count n_total dominant_ratio
           n_candidates n_total ratio;
-        dominant_entries
+        to_restart
       end else begin
       (* #10887: track consecutive suppressions of the same dominant
          cohort.  Different cohort -> counter resets to 1; same

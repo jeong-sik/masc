@@ -4764,7 +4764,7 @@ let () =
       Alcotest.test_case "last tool name wins over earlier ones" `Quick
         test_enrich_idle_detail_picks_last_tool;
     ];
-    "cascade_circuit_breaker_fallback", [
+    "circuit_breaker_cascade_fallback", [
       Alcotest.test_case
         "P0: open provider is skipped and fallback succeeds at run_named boundary"
         `Quick

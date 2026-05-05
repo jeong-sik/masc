@@ -99,7 +99,11 @@ let sanitize_event_traced (value : event) : event =
     || entity_ref_changed sanitized.actor value.actor
     || entity_ref_changed sanitized.subject value.subject
     || not (sanitized.payload == value.payload)
-    || List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags
+    (* tags: List.map preserves length, so this guard is defensive but the
+       right idiom — explicitly handle length mismatch before exists2. *)
+    || (let n = List.length value.tags in
+        List.length sanitized.tags <> n
+        || List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags)
   in
   if changed then begin
     let actor_str = match value.actor with

@@ -636,10 +636,8 @@ let transition_task_r
                    Log.RoomTask.info
                      "%s worktree auto-cleanup: %s" reason_label msg
                  | Error (System (System_error.IoError msg))
-                   when (let lc = String.lowercase_ascii msg in
-                         String.length lc >= 9
-                         && (let sub = String.sub lc 0 9 in
-                             sub = "worktree ")) ->
+                   when String.starts_with ~prefix:"Worktree " msg
+                     || String.starts_with ~prefix:"worktree " msg ->
                    (* P2-1: "Worktree … not found" means the task had a
                       worktree record (worktree = Some _) but the directory
                       was never physically created on this host — typical for

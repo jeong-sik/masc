@@ -6655,6 +6655,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
   let state, transition_reason =
     KSM.derive_failure_state ~meta:minimal_meta ~observation ~previous_state
       ~is_auto_recoverable:true
+      ~sdk_error:None
       ~reason:
         "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
   in
@@ -6673,6 +6674,32 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
   check bool "blocker keeps failure detail" true
     (match state.blocker with
     | Some blocker -> contains_substring blocker "cascade_exhausted"
+    | None -> false)
+
+let test_social_model_required_tool_failure_requests_help () =
+  let state, transition_reason =
+    KSM.derive_failure_state ~meta:minimal_meta ~observation:base_observation
+      ~previous_state:None ~is_auto_recoverable:false
+      ~sdk_error:(Some (required_tool_contract_violation_error ()))
+      ~reason:
+        "Completion contract [require_tool_use] violated: actionable keeper \
+         signal was present, but the model called no keeper tools"
+  in
+  check string "transition reason" "failure:run_error"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "speech act requests help" "request_help"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface is operator-visible board post" "board_post"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "active desire recovers route"
+    (Some "recover_tool_route") state.active_desire;
+  check (option string) "intention surfaces blocker"
+    (Some "surface_required_tool_blocker") state.current_intention;
+  check (option string) "need names route recovery"
+    (Some "operator_guidance_or_tool_capable_route") state.need;
+  check bool "blocker keeps contract detail" true
+    (match state.blocker with
+    | Some blocker -> contains_substring blocker "require_tool_use"
     | None -> false)
 
 let test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context
@@ -6694,6 +6721,7 @@ let test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_conte
   let state, _ =
     KSM.derive_failure_state ~meta:minimal_meta ~observation:base_observation
       ~previous_state ~is_auto_recoverable:false
+      ~sdk_error:None
       ~reason:"local config error"
   in
   check (option string) "active desire still carries on ordinary failure"
@@ -7447,6 +7475,8 @@ let () =
             test_social_model_previous_state_of_meta_falls_back_for_unknown_model;
           test_case "bdi failure rewrites stale claim retry loop" `Quick
             test_social_model_bdi_failure_state_rewrites_claim_retry_loop;
+          test_case "bdi required-tool failure requests help" `Quick
+            test_social_model_required_tool_failure_requests_help;
           test_case "bdi failure keeps ordinary carry state" `Quick
             test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context;
           test_case "magentic ledger stalled state carries until delta" `Quick

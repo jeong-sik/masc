@@ -161,6 +161,6 @@ let extract_accountability_claim (result : Keeper_agent_run.run_result) =
 
 let apply_to_result = Keeper_social_model_registry.apply_to_result
 let derive_failure_state ~meta ~observation ~previous_state
-    ~is_auto_recoverable ~reason =
+    ~is_auto_recoverable ~sdk_error ~reason =
   Keeper_social_model_registry.derive_failure_state ~meta ~observation
-    ~previous_state ~is_auto_recoverable ~reason
+    ~previous_state ~is_auto_recoverable ~sdk_error ~reason

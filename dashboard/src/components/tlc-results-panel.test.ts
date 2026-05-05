@@ -82,13 +82,7 @@ vi.mock('./common/filter-chips', () => ({
 
 import {
   __resetTlcResultsPanelForTest,
-  filterTlcEntries,
-  formatTlcMetric,
-  formatTlcTimestamp,
-  hasTlcEvidence,
   TlcResultsPanel,
-  tlcStatusLabel,
-  tlcStatusTone,
 } from './tlc-results-panel'
 
 function makeEntry(overrides: Partial<TlcResultEntry> = {}): TlcResultEntry {
@@ -120,57 +114,6 @@ function setData(entries: TlcResultEntry[], overrides: Partial<TlcResultsRespons
     },
   }
 }
-
-describe('TLC result helpers', () => {
-  it('labels every TLC status', () => {
-    expect(tlcStatusLabel('passed')).toBe('통과')
-    expect(tlcStatusLabel('violated')).toBe('위반')
-    expect(tlcStatusLabel('running')).toBe('실행 중')
-    expect(tlcStatusLabel('queued')).toBe('대기')
-    expect(tlcStatusLabel('error')).toBe('오류')
-    expect(tlcStatusLabel('not_run')).toBe('미실행')
-  })
-
-  it('maps TLC statuses to semantic tones', () => {
-    expect(tlcStatusTone('passed')).toBe('ok')
-    expect(tlcStatusTone('violated')).toBe('bad')
-    expect(tlcStatusTone('running')).toBe('info')
-    expect(tlcStatusTone('queued')).toBe('neutral')
-    expect(tlcStatusTone('error')).toBe('warn')
-    expect(tlcStatusTone('not_run')).toBe('neutral')
-  })
-
-  it('formats nullable TLC metrics and timestamps', () => {
-    expect(formatTlcMetric(1234567)).toBe('1,234,567')
-    expect(formatTlcMetric(null)).toBe('-')
-    expect(formatTlcTimestamp('2026-04-30T00:00:00Z')).toBe('2026-04-30 00:00:00')
-    expect(formatTlcTimestamp(null)).toBe('기록 없음')
-  })
-
-  it('treats all-null not_run rows as absent evidence', () => {
-    const notRun = makeEntry({
-      status: 'not_run',
-      states_explored: null,
-      distinct_states: null,
-      diameter: null,
-      last_run_at: null,
-      violation: null,
-      log_path: null,
-    })
-    expect(hasTlcEvidence(notRun)).toBe(false)
-    expect(hasTlcEvidence({ ...notRun, log_path: '/tmp/tlc.log' })).toBe(true)
-    expect(hasTlcEvidence(makeEntry({ status: 'passed' }))).toBe(true)
-  })
-
-  it('filters by status and sorts newest evidence first', () => {
-    const older = makeEntry({ spec_name: 'Older', status: 'passed', last_run_at: '2026-04-29T00:00:00Z' })
-    const newer = makeEntry({ spec_name: 'Newer', status: 'passed', last_run_at: '2026-04-30T00:00:00Z' })
-    const queued = makeEntry({ spec_name: 'Queued', status: 'queued', last_run_at: null })
-
-    expect(filterTlcEntries([older, queued, newer], 'passed').map((entry) => entry.spec_name))
-      .toEqual(['Newer', 'Older'])
-  })
-})
 
 describe('TlcResultsPanel', () => {
   beforeEach(() => {

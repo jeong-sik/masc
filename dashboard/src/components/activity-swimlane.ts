@@ -31,7 +31,7 @@ interface SwimlaneTimelineItem {
   style: string
 }
 
-export function truncateLabel(value: string, max = 20): string {
+function truncateLabel(value: string, max = 20): string {
   return value.length > max ? `${value.slice(0, max - 2)}..` : value
 }
 
@@ -85,7 +85,7 @@ const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
 }
 const SPAN_DEFAULT = { bg: 'var(--color-fg-muted)', text: 'var(--panel-dark)' } as const
 
-export function spanStyle(kind: string) {
+function spanStyle(kind: string) {
   return SPAN_STYLES[kind] ?? SPAN_DEFAULT
 }
 

@@ -37,6 +37,13 @@ val dispatch :
     {2 Karma}
     - [GET /api/v1/karma] — full karma table sorted descending by
       score.
+    - [GET /api/v1/board/karma/ledger] — attributed karma ledger.
+      Each record carries [recipient], [voter], [target_kind],
+      [target_id], [delta], [ts], and [ts_iso].  Query params:
+      [agent] (filter by recipient, case-sensitive),
+      [limit] (clamped to [1..5000], default 500).  Response also
+      includes a [scoring_rule] field ([\"up=+1,down=0\"]) and a
+      [totals] summary identical to [GET /api/v1/karma].
 
     {2 Static assets}
     - [GET /static/css/middleware.css] — CSS asset (text/css).

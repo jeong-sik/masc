@@ -584,6 +584,7 @@
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
+        test_board_karma_ledger
 
         test_task_dispatch
         test_drift_guard_core
@@ -782,6 +783,7 @@
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
+        test_board_karma_ledger
 
         test_task_dispatch
         test_drift_guard_core

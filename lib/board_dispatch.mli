@@ -235,6 +235,29 @@ val list_reactions :
 
 (** {1 Karma} *)
 
+val karma_score_for_direction : Board.vote_direction -> int
+(** Scoring contract re-export: [Up] → [+1], [Down] → [0].
+    See {!Board.karma_score_for_direction}. *)
+
+val get_karma_ledger :
+  ?agent:string ->
+  ?limit:int ->
+  unit ->
+  Board.karma_event list
+(** Return attributed karma events from the active backend.
+
+    Events are drawn from the in-memory vote log via
+    {!Board.build_karma_ledger} and are sorted ascending by [ts]
+    (oldest first).
+
+    @param agent  When provided, filters to events where
+                  [karma_event.recipient = agent] (case-sensitive).
+    @param limit  Caps the result list (applied after filtering).
+                  Default: unlimited.
+
+    The rebuild contract: summing [delta] over the unfiltered
+    result must equal [get_all_karma ()] for every recipient. *)
+
 val get_all_karma : unit -> (string * int) list
 
 val get_agent_karma : agent_name:string -> int

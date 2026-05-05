@@ -210,6 +210,28 @@ type flusher_msg =
   | Flush
   | Sweep
 
+(** {1 Karma Ledger Contract} *)
+
+(** A single attributed karma event.  One event is generated per upvote
+    received by an agent.  Downvotes do not generate karma events
+    (scoring rule: [Up] = +1, [Down] = 0). *)
+type karma_event = {
+  recipient : string;
+  (** Agent who earned the karma — author of the upvoted post or comment. *)
+  voter : string;
+  (** Agent who cast the upvote. *)
+  target_kind : string;
+  (** Content kind: ["post"] or ["comment"]. *)
+  target_id : string;
+  (** Identifier of the upvoted post or comment. *)
+  delta : int;
+  (** Karma delta.  Always [+1] per upvote under the current scoring
+      contract.  Stored explicitly so future rule changes are backward
+      compatible — older events keep their original delta value. *)
+  ts : float;
+  (** Unix timestamp at which the upvote was cast (seconds since epoch). *)
+}
+
 type store = {
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;

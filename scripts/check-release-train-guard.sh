@@ -47,7 +47,7 @@ version_from_stream() {
 }
 
 version_from_ref() {
-  git show "$1:dune-project" 2>/dev/null | version_from_stream
+  git show "$1:dune-project" 2>/dev/null | version_from_stream || true
 }
 
 major_from_version() {

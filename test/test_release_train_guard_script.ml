@@ -199,6 +199,27 @@ let test_suffixed_release_tag_uses_tagged_package_version () =
         (contains_substring stdout
            "Release train guard OK: base=0.2.0 head=0.2.0 latest_tag=0.2.0"))
 
+let test_legacy_tag_without_dune_project_falls_back_to_tag_version () =
+  with_temp_dir "release-train-legacy-tag" (fun dir ->
+      init_repo_with_release_tags dir;
+      let script = install_script_under_test dir in
+      ignore
+        (run_shell_ok ~cwd:dir
+           "git checkout --orphan legacy-no-dune && git rm -qf dune-project && git commit --allow-empty -q -m legacy-no-dune && git tag v0.3.0 && git checkout main");
+      ignore
+        (commit_on_branch ~dir ~branch:"version-reset" ~version:"0.3.0"
+           ~message:"reset active line");
+      let cmd =
+        Printf.sprintf "/bin/bash %s --base version-reset --head version-reset"
+          (quote script)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir cmd in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "falls back to raw tag version" true
+        (contains_substring stdout
+           "Release train guard OK: base=0.3.0 head=0.3.0 latest_tag=0.3.0"))
+
 let () =
   run "release_train_guard_script"
     [
@@ -214,5 +235,7 @@ let () =
             test_pending_bootstrap_series_blocks_next_train_until_tagged;
           test_case "suffixed release tag uses tagged package version" `Quick
             test_suffixed_release_tag_uses_tagged_package_version;
+          test_case "legacy tag without dune-project falls back" `Quick
+            test_legacy_tag_without_dune_project_falls_back_to_tag_version;
         ] );
     ]

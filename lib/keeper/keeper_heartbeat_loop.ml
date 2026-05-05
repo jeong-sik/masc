@@ -895,7 +895,7 @@ let cycle_continues_after_wake
 ;;
 
 let run_smart_heartbeat_gate
-      ~(base_path : string)
+      ~(config : Coord.config)
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
@@ -927,10 +927,29 @@ let run_smart_heartbeat_gate
     then smart_hb_decision
     else (
       let queue =
-        Keeper_registry.event_queue_snapshot ~base_path meta_current.name
+        Keeper_registry.event_queue_snapshot
+          ~base_path:config.base_path meta_current.name
       in
       if Keeper_event_queue.is_empty queue
-      then smart_hb_decision
+      then (
+        let allowed_tool_names =
+          Keeper_tool_policy.keeper_allowed_tool_names meta_current
+        in
+        if
+          Keeper_world_observation.durable_signal_present
+            ~allowed_tool_names:(Some allowed_tool_names)
+            ~pending_board_events:None
+            ~config
+            ~meta:meta_current
+        then (
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_event_queue_override
+            ~labels:[ ("keeper", meta_current.name) ]
+            ();
+          Log.Keeper.info
+            "smart heartbeat: durable signal present - cycle resumed before stale watchdog";
+          Heartbeat_smart.Emit)
+        else smart_hb_decision)
       else (
         Prometheus.inc_counter
           Prometheus.metric_keeper_event_queue_override
@@ -1177,7 +1196,7 @@ let run_heartbeat_loop
           ~base_path:ctx.config.base_path meta_current.name meta_current;
       if
         run_smart_heartbeat_gate
-          ~base_path:ctx.config.base_path
+          ~config:ctx.config
           ~clock:ctx.clock
           ~stop
           ~wakeup

@@ -409,6 +409,45 @@ let test_observe_splits_absolute_and_claimable_backlog () =
       check int "absolute todo backlog" 2 obs.unclaimed_task_count;
       check int "matched claimable backlog" 1 obs.claimable_task_count)
 
+let test_durable_signal_present_sees_claimable_backlog_for_smart_hb_gate () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.add_task config ~title:"Open task" ~priority:1
+           ~description:"");
+      let meta = { minimal_meta with work_discovery_enabled = Some false } in
+      let present =
+        WO.durable_signal_present
+          ~allowed_tool_names:(Some [ "keeper_task_claim" ])
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check bool "claimable backlog forces smart heartbeat emit" true present)
+
+let test_durable_signal_present_filters_unclaimable_backlog_for_smart_hb_gate () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.add_task config ~title:"Bash task" ~priority:1
+           ~description:""
+           ~contract:(contract_requiring_tools [ "keeper_bash" ]));
+      let meta = { minimal_meta with work_discovery_enabled = Some false } in
+      let present =
+        WO.durable_signal_present
+          ~allowed_tool_names:(Some [ "keeper_task_claim" ])
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check bool "unclaimable backlog stays idle" false present)
+
 let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -6891,6 +6930,10 @@ let () =
             test_board_signal_stimulus_becomes_pending_board_event;
           test_case "splits absolute and claimable backlog" `Quick
             test_observe_splits_absolute_and_claimable_backlog;
+          test_case "durable signal sees claimable backlog" `Quick
+            test_durable_signal_present_sees_claimable_backlog_for_smart_hb_gate;
+          test_case "durable signal filters unclaimable backlog" `Quick
+            test_durable_signal_present_filters_unclaimable_backlog_for_smart_hb_gate;
           test_case "default keepers ignore unmatched non-mention board events" `Quick
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "room-signal keepers keep unmatched non-mention board events" `Quick

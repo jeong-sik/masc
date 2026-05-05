@@ -80,7 +80,7 @@ Expected key facts:
 - The manifest covers all 12 prompt-supplied source documents.
 - The source documents disagree on the aggregate audit total: 206 vs 214.
 - The source documents claim 206 findings for the current catalog total, but
-  only 18 finding IDs are itemized in the checked artifacts.
+  only 19 finding IDs are itemized in the checked artifacts.
 - `consistency_findings: 1 open=1` preserves the unresolved 206-vs-214
   aggregate mismatch as a separate gate.
 - `source_artifacts` is `INCOMPLETE` while the logical
@@ -131,13 +131,17 @@ python3 scripts/orient_goal_loop_logs.py \
 
 Expected key fact: this can pass locally when the 12 prompt-supplied source
 files exist under `<GOAL_LOOP_SOURCE_ROOT>`. The source-artifact summary should show
-`source_artifacts_resolved=12`, `source_itemized_finding_ids_total=18`,
-`catalog_itemized_finding_ids_total=18`, zero source/catalog ID mismatch,
+`source_artifacts_resolved=12`, `source_itemized_finding_ids_total=19`,
+`catalog_itemized_finding_ids_total=19`, zero source/catalog ID mismatch,
 `source_aggregate_claim_status=COMPLETE`, and
 `source_aggregate_claim_sources_verified=5`. With the checked catalog's
 digest metadata, it should also show `source_identity_status=COMPLETE` and
-`source_identity_checks_verified=12`. `--require-complete-catalog` can still
-fail because the row-level 206 corpus is incomplete.
+`source_identity_checks_verified=12`. The non-blocking
+`source_structured_item_ids_total` and
+`source_structured_item_ids_uncataloged` fields expose broader structured IDs
+that need separate triage instead of silently expanding the strict GOAL LOOP
+audit catalog. `--require-complete-catalog` can still fail because the
+row-level 206 corpus is incomplete.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:

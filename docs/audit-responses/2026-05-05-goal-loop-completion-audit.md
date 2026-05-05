@@ -69,7 +69,7 @@
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json --format text`
   checked at 2026-05-05T14:54:50Z, confidence High: the external 206-audit
-  claim catalog is `INCOMPLETE`, with 18 itemized findings, 188 missing
+  claim catalog is `INCOMPLETE`, with 19 itemized findings, 187 missing
   itemized rows, and all 12 prompt-supplied source documents covered by the
   manifest.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
@@ -89,11 +89,13 @@
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
   prompt_corpus/GOAL_LOOP --require-source-artifacts` checked at
-  2026-05-06T06:03:00+09:00, confidence High: validates the current local
+  2026-05-06T06:36:35+09:00, confidence High: validates the current local
   external source artifacts without committing those documents to the public
-  repository, with 12 resolved source artifacts, 18 source-itemized audit IDs,
-  18 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, and 5/5
-  aggregate claim source checks verified from resolved documents.
+  repository, with 12 resolved source artifacts, 19 source-itemized audit IDs,
+  19 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, 5/5
+  aggregate claim source checks verified from resolved documents, and a
+  non-blocking structured-source-ID surface of 91 total IDs with 72 not in the
+  strict GOAL LOOP audit catalog.
 - [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and `wc -l
   <GOAL_LOOP_SOURCE_ROOT>/*.md` checked at 2026-05-06T06:23:00+09:00,
   confidence High: the catalog records SHA-256 and line-count identity for all
@@ -103,7 +105,7 @@
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
   prompt_corpus/GOAL_LOOP --require-source-artifacts --format text` checked at
-  2026-05-06T06:26:20+09:00, confidence High: reports
+  2026-05-06T06:36:35+09:00, confidence High: reports
   `aggregate_claim_sources: COMPLETE verified=5 missing=0` and
   `source_identity: COMPLETE verified=12 failed=0`, proving the catalog's 206,
   214, and 36-keeper aggregate claims are present in the resolved source
@@ -117,7 +119,7 @@
   consistency finding remains open.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
-  18 unique audit IDs, but the underlying prompt source artifacts are not yet
+  19 unique audit IDs, but the underlying prompt source artifacts are not yet
   replayable from the repository because `--require-source-artifacts` fails.
 
 ## Current Completion State
@@ -130,7 +132,7 @@
 | Keeper TOML unknown-key visibility | **PARTIAL** | #13138 surfaces unknown keys in health; strict schema rejection is not yet enforced. |
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
 | Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; post-ACT live runtime verification is still pending. |
-| Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 18 of the claimed 206 findings. |
+| Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
 | Full Verify pipeline | **FAIL BY DESIGN** | `verify.fail.json` intentionally keeps the replay red until post-ACT live runtime checks pass. |
 
 ## Section-by-Section Audit
@@ -152,11 +154,11 @@ fallback, unknown TOML keys, all-zero metrics, linear warmup.
 **Status**: **PARTIAL**.
 
 The fixture pins concrete startup evidence for NF-1, NF-2, NF-3, NF-4, and
-NF-6. The external claim catalog itemizes 18 finding IDs from the supplied
+NF-6. The external claim catalog itemizes 19 finding IDs from the supplied
 documents and records all 12 prompt-supplied source paths. It also records the
 aggregate-count mismatch: some documents claim a 206-finding audit basis while
 `INTEGRATED_IMPROVEMENT_DESIGN.md` claims 214 findings and 36 related findings.
-It does not yet prove either aggregate from live production state; 188 rows
+It does not yet prove either aggregate from live production state; 187 rows
 remain missing from the 206-itemized corpus, the 214 claim has no row-level
 corpus, and several prompt claims remain evidence-absent in the fixture
 (`NF-5`, `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
@@ -241,12 +243,13 @@ claims are now machine-visible. The full set is still not encoded: current
 catalog replay reports 12/12 source documents named by the manifest, no checked
 source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
 external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
-`--audit-source-strip-prefix`, 18 source-itemized IDs matching the 18
+`--audit-source-strip-prefix`, 19 source-itemized IDs matching the 19
 catalog-itemized findings, 5/5 aggregate claim source checks verified from
 resolved documents, 12/12 source identity checks verified against checked
-SHA-256 and line-count metadata, 188 missing 206-itemized rows, one open
+SHA-256 and line-count metadata, 91 broader structured source IDs with 72 not
+in the strict audit catalog, 187 missing 206-itemized rows, one open
 consistency finding for the 206-vs-214 count mismatch that fails
-`--require-consistency-resolved`, and 8 itemized rows that are not evaluable
+`--require-consistency-resolved`, and 9 itemized rows that are not evaluable
 from the startup log patterns.
 
 ### 4. DECIDE
@@ -364,8 +367,8 @@ No convergence claim is valid yet. The only safe current statement is:
 
 1. Attach or check in the full row-level audit corpus. The current
    `audit-corpus.external-claim.json` records all 12 prompt source paths,
-   three aggregate claims, one 206-vs-214 consistency finding, and 18 itemized
-   findings, but `--require-complete-catalog` still fails with 188 missing rows
+   three aggregate claims, one 206-vs-214 consistency finding, and 19 itemized
+   findings, but `--require-complete-catalog` still fails with 187 missing rows
    against the 206 claim. The aggregate claims are now source-verified at 5/5,
    so the remaining gap is row-level completeness and consistency, not whether
    the aggregate numbers appear in the supplied documents.

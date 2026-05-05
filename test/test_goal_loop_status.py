@@ -135,8 +135,8 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "audit_catalog": {
                     "status": "INCOMPLETE",
                     "expected_findings_total": 206,
-                    "itemized_findings_total": 18,
-                    "missing_itemized_findings": 188,
+                    "itemized_findings_total": 19,
+                    "missing_itemized_findings": 187,
                     "source_documents_status": "COMPLETE",
                     "source_documents_covered": 12,
                     "source_documents_expected": 12,
@@ -150,9 +150,11 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "line_ref_errors": 0,
                         "source_itemized_id_status": "INCOMPLETE",
                         "source_itemized_finding_ids_total": 0,
-                        "catalog_itemized_finding_ids_total": 18,
+                        "catalog_itemized_finding_ids_total": 19,
                         "source_ids_missing_from_catalog": 0,
-                        "catalog_ids_missing_from_source": 18,
+                        "catalog_ids_missing_from_source": 19,
+                        "source_structured_item_ids_total": 0,
+                        "source_structured_item_ids_uncataloged": 0,
                         "source_aggregate_claim_status": "INCOMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 5,
@@ -171,15 +173,17 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.phases["orient"].status, "warning")
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
         self.assertEqual(audit_catalog["source_documents_covered"], 12)
-        self.assertEqual(audit_catalog["missing_itemized_findings"], 188)
+        self.assertEqual(audit_catalog["missing_itemized_findings"], 187)
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
         self.assertEqual(audit_catalog["consistency_findings_open"], 1)
         self.assertEqual(audit_catalog["source_artifacts_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_artifacts_missing"], 12)
         self.assertEqual(audit_catalog["source_itemized_id_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
-        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 18)
-        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 18)
+        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 19)
+        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 19)
+        self.assertEqual(audit_catalog["source_structured_item_ids_total"], 0)
+        self.assertEqual(audit_catalog["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_missing"], 5)
@@ -225,6 +229,8 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_itemized_finding_ids_total": 18,
                         "source_ids_missing_from_catalog": 0,
                         "catalog_ids_missing_from_source": 0,
+                        "source_structured_item_ids_total": 18,
+                        "source_structured_item_ids_uncataloged": 0,
                         "source_aggregate_claim_status": "COMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 0,

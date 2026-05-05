@@ -218,8 +218,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         assert report.audit_catalog is not None
         self.assertEqual(report.audit_catalog["status"], "INCOMPLETE")
         self.assertEqual(report.audit_catalog["expected_findings_total"], 206)
-        self.assertEqual(report.audit_catalog["itemized_findings_total"], 18)
-        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 188)
+        self.assertEqual(report.audit_catalog["itemized_findings_total"], 19)
+        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 187)
         self.assertEqual(report.audit_catalog["source_documents_expected"], 12)
         self.assertEqual(report.audit_catalog["source_documents_covered"], 12)
         self.assertEqual(report.audit_catalog["source_documents_status"], "COMPLETE")
@@ -232,8 +232,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             report.audit_catalog["consistency_findings"][0]["finding_id"],
             "CONSISTENCY-1",
         )
-        self.assertEqual(report.summary["findings_total"], 18)
-        self.assertEqual(report.summary["not_evaluated"], 8)
+        self.assertEqual(report.summary["findings_total"], 19)
+        self.assertEqual(report.summary["not_evaluated"], 9)
         self.assertEqual(by_id["NF-2"].status, "EVIDENCE_PRESENT")
         self.assertEqual(by_id["CD-8"].status, "NOT_EVALUATED")
         self.assertEqual(by_id["CD-8"].decision_id, "D-P1-1")
@@ -274,8 +274,10 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_missing"], 12)
         self.assertEqual(source_artifacts["source_itemized_id_status"], "INCOMPLETE")
         self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 0)
-        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
-        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 18)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 19)
+        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 19)
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 0)
+        self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(
             source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
         )
@@ -390,10 +392,12 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_artifacts_missing"], 0)
         self.assertEqual(source_artifacts["line_ref_errors"], 0)
         self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
-        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 18)
-        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 19)
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 19)
         self.assertEqual(source_artifacts["source_ids_missing_from_catalog"], 0)
         self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 19)
+        self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(source_artifacts["source_aggregate_claim_status"], "COMPLETE")
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 5)
@@ -437,6 +441,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_identity_status"], "COMPLETE")
         self.assertEqual(source_artifacts["source_identity_checks_verified"], 1)
         self.assertEqual(source_artifacts["source_identity_checks_failed"], 0)
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 1)
+        self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
 
     def test_orient_catalog_detects_source_identity_mismatch(self) -> None:
         catalog = {
@@ -502,6 +508,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         source_artifacts = report.audit_catalog["source_artifacts"]
         self.assertEqual(source_artifacts["status"], "INCOMPLETE")
         self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_structured_item_ids_total"], 19)
+        self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(
             source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
         )
@@ -675,7 +683,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"source_artifacts_resolved": 12', result.stdout)
-        self.assertIn('"source_itemized_finding_ids_total": 18', result.stdout)
+        self.assertIn('"source_itemized_finding_ids_total": 19', result.stdout)
+        self.assertIn('"source_structured_item_ids_total": 19', result.stdout)
         self.assertIn('"source_aggregate_claim_status": "COMPLETE"', result.stdout)
         self.assertIn('"source_aggregate_claim_sources_verified": 5', result.stdout)
 

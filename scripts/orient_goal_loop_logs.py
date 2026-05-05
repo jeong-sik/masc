@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Any, TextIO
 
 
-AUDIT_FINDING_ID_RE = re.compile(r"\b(?:R-FATAL|CD|CE|CF|NF)-[0-9]+\b")
+AUDIT_FINDING_ID_RE = re.compile(r"\b(?:R-FATAL|CC|CD|CE|CF|NF)-[0-9]+\b")
+SOURCE_STRUCTURED_ITEM_ID_RE = re.compile(
+    r"\b(?:R-FATAL|CC|CD|CE|CF|NF|NEW|P-[A-Z]+)-[0-9]+\b|\b[SF][0-9]{2}\b"
+)
 SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
@@ -436,6 +439,7 @@ def source_artifact_summary(
     line_ref_errors: list[dict[str, Any]] = []
     resolved = 0
     source_finding_ids: set[str] = set()
+    source_structured_item_ids: set[str] = set()
     catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
     resolved_contents: dict[str, str] = {}
     source_identity_errors: list[dict[str, Any]] = []
@@ -477,6 +481,7 @@ def source_artifact_summary(
         content = content_bytes.decode("utf-8")
         resolved_contents[path_text] = content
         source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
+        source_structured_item_ids.update(SOURCE_STRUCTURED_ITEM_ID_RE.findall(content))
         source_expectation = source_expectations.get(path_text)
         if source_expectation is not None and has_source_identity_expectation(
             source_expectation
@@ -527,6 +532,9 @@ def source_artifact_summary(
 
     source_ids_missing_from_catalog = sorted(source_finding_ids - catalog_finding_ids)
     catalog_ids_missing_from_source = sorted(catalog_finding_ids - source_finding_ids)
+    source_structured_ids_uncataloged = sorted(
+        source_structured_item_ids - catalog_finding_ids
+    )
     source_itemized_id_status = (
         "COMPLETE"
         if not source_ids_missing_from_catalog and not catalog_ids_missing_from_source
@@ -574,6 +582,10 @@ def source_artifact_summary(
         "catalog_itemized_finding_ids_total": len(catalog_finding_ids),
         "source_ids_missing_from_catalog": len(source_ids_missing_from_catalog),
         "catalog_ids_missing_from_source": len(catalog_ids_missing_from_source),
+        "source_structured_item_ids_total": len(source_structured_item_ids),
+        "source_structured_item_ids_uncataloged": len(
+            source_structured_ids_uncataloged
+        ),
         **aggregate_claims,
         "source_identity_status": source_identity_status,
         "source_identity_checks_total": source_identity_checks_total,
@@ -585,6 +597,9 @@ def source_artifact_summary(
         "line_ref_error_samples": line_ref_errors[:10],
         "source_ids_missing_from_catalog_samples": source_ids_missing_from_catalog[:10],
         "catalog_ids_missing_from_source_samples": catalog_ids_missing_from_source[:10],
+        "source_structured_item_ids_uncataloged_samples": (
+            source_structured_ids_uncataloged[:20]
+        ),
     }
 
 
@@ -783,6 +798,11 @@ def report_to_text(report: OrientReport) -> str:
                 f"{source_artifacts['source_identity_status']} "
                 f"verified={source_artifacts['source_identity_checks_verified']} "
                 f"failed={source_artifacts['source_identity_checks_failed']}"
+            )
+            lines.append(
+                "structured_source_ids: "
+                f"total={source_artifacts['source_structured_item_ids_total']} "
+                f"uncataloged={source_artifacts['source_structured_item_ids_uncataloged']}"
             )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:

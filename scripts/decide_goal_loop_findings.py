@@ -38,6 +38,8 @@ class DecisionReport:
     owner: str
     estimated_hours: int
     score: float
+    act_status: str
+    act_artifacts: list[str]
 
 
 @dataclass
@@ -46,6 +48,8 @@ class DecideReport:
     evidence_present: int
     decisions_total: int
     p0_count: int
+    act_linked_count: int
+    act_missing_count: int
     decisions: list[DecisionReport]
 
 
@@ -136,6 +140,27 @@ def load_json_handle(handle: TextIO) -> dict[str, Any]:
     return data
 
 
+def load_act_map_input(path: str) -> dict[str, list[str]]:
+    with Path(path).open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("expected ACT map JSON object")
+    return normalize_act_map(data)
+
+
+def normalize_act_map(raw: dict[str, Any]) -> dict[str, list[str]]:
+    act_map: dict[str, list[str]] = {}
+    for decision_id, value in raw.items():
+        if not isinstance(decision_id, str):
+            continue
+        if isinstance(value, str):
+            act_map[decision_id] = [value]
+            continue
+        if isinstance(value, list):
+            act_map[decision_id] = [item for item in value if isinstance(item, str)]
+    return act_map
+
+
 def priority_score(spec: DecisionSpec) -> float:
     return float(spec.impact * spec.urgency) / float(max(spec.difficulty, 1))
 
@@ -156,7 +181,23 @@ def present_finding_ids(orient: dict[str, Any]) -> set[str]:
     return present
 
 
-def decide_orient(orient: dict[str, Any]) -> DecideReport:
+def act_status_for(
+    decision_id: str,
+    act_map: dict[str, list[str]] | None,
+) -> tuple[str, list[str]]:
+    if act_map is None:
+        return "ACT_UNMAPPED", []
+    artifacts = act_map.get(decision_id, [])
+    if artifacts:
+        return "ACT_LINKED", artifacts
+    return "ACT_MISSING", []
+
+
+def decide_orient(
+    orient: dict[str, Any],
+    *,
+    act_map: dict[str, list[str]] | None = None,
+) -> DecideReport:
     present = present_finding_ids(orient)
     decisions: list[DecisionReport] = []
     for spec in DECISIONS:
@@ -165,6 +206,7 @@ def decide_orient(orient: dict[str, Any]) -> DecideReport:
         ]
         if not matched:
             continue
+        act_status, act_artifacts = act_status_for(spec.decision_id, act_map)
         decisions.append(
             DecisionReport(
                 decision_id=spec.decision_id,
@@ -174,6 +216,8 @@ def decide_orient(orient: dict[str, Any]) -> DecideReport:
                 owner=spec.owner,
                 estimated_hours=spec.estimated_hours,
                 score=round(priority_score(spec), 2),
+                act_status=act_status,
+                act_artifacts=act_artifacts,
             )
         )
 
@@ -193,6 +237,12 @@ def decide_orient(orient: dict[str, Any]) -> DecideReport:
         evidence_present=len(present),
         decisions_total=len(decisions),
         p0_count=sum(1 for decision in decisions if decision.priority == "P0"),
+        act_linked_count=sum(
+            1 for decision in decisions if decision.act_status == "ACT_LINKED"
+        ),
+        act_missing_count=sum(
+            1 for decision in decisions if decision.act_status == "ACT_MISSING"
+        ),
         decisions=decisions,
     )
 
@@ -207,13 +257,21 @@ def report_to_text(report: DecideReport) -> str:
         f"evidence_present: {report.evidence_present}/{report.source_findings_total}",
         f"decisions_total: {report.decisions_total}",
         f"p0_count: {report.p0_count}",
+        f"act_linked_count: {report.act_linked_count}",
+        f"act_missing_count: {report.act_missing_count}",
     ]
     for decision in report.decisions:
+        act_suffix = (
+            f", act={','.join(decision.act_artifacts)}"
+            if decision.act_artifacts
+            else ""
+        )
         lines.append(
             f"- {decision.decision_id} {decision.priority} score={decision.score}: "
             f"{decision.action} "
             f"(owner={decision.owner}, findings={','.join(decision.matched_findings)}, "
-            f"eta={decision.estimated_hours}h)"
+            f"eta={decision.estimated_hours}h, act_status={decision.act_status}"
+            f"{act_suffix})"
         )
     return "\n".join(lines)
 
@@ -225,6 +283,8 @@ def should_fail(report: DecideReport, mode: str) -> bool:
         return report.decisions_total > 0
     if mode == "p0":
         return report.p0_count > 0
+    if mode == "missing-act":
+        return report.act_missing_count > 0
     raise ValueError(f"unknown fail mode: {mode}")
 
 
@@ -244,16 +304,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--fail-on",
-        choices=("none", "any", "p0"),
+        choices=("none", "any", "p0", "missing-act"),
         default="none",
         help="Exit non-zero when decisions match this condition.",
+    )
+    parser.add_argument(
+        "--act-map",
+        help=(
+            "JSON object mapping decision IDs to ACT artifact refs. "
+            "When provided, unmapped decisions are reported as ACT_MISSING."
+        ),
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    report = decide_orient(load_json_input(args.orient_json))
+    act_map = load_act_map_input(args.act_map) if args.act_map else None
+    report = decide_orient(load_json_input(args.orient_json), act_map=act_map)
     if args.format == "json":
         print(report_to_json(report))
     else:

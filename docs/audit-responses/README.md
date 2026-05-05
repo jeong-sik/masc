@@ -51,3 +51,7 @@ false positive를 다시 내지 않게 하는 audit memory 역할을 합니다.
 - `2026-05-05-dashboard-heuristic.md` — deep-review CI의 dashboard / heuristic_metrics
   / admission_queue / resilience / cancellation / local_runtime_pool / bounded /
   llm_metric_bridge / lockfree_atomic 9개 영역 24개 클레임 매트릭스.
+- `2026-05-05-integrated-improvement-design.md` — INTEGRATED_IMPROVEMENT_DESIGN.md
+  의 4-phase × 18 action item (16→36 keeper 확장 통합 재설계) 매트릭스. 정량
+  클레임 70%가 stale 또는 active 트랙과 중복; 진짜 design idea(생성 CLI/API,
+  N+1 batch, 3-Tier disclosure, env unification)는 RFC-0029~0032 후보로 분리.

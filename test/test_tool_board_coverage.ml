@@ -40,11 +40,16 @@ let dispatch name args =
 let make_args pairs = `Assoc pairs
 
 let parse_create_response_json body =
-  match String.index_opt body '\n' with
-  | Some idx ->
-      Yojson.Safe.from_string
-        (String.sub body (idx + 1) (String.length body - idx - 1))
-  | None -> Yojson.Safe.from_string body
+  let trimmed = String.trim body in
+  if String.length trimmed > 0 && Char.equal trimmed.[0] '{' then
+    Yojson.Safe.from_string trimmed
+  else
+    match String.index_opt body '\n' with
+    | Some idx ->
+        Yojson.Safe.from_string
+          (String.sub body (idx + 1) (String.length body - idx - 1))
+    | None ->
+        Alcotest.failf "expected JSON payload in create response: %s" body
 
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
   match
@@ -421,6 +426,41 @@ let test_post_create_judgment_roundtrip () =
   Alcotest.(check string) "judgment summary kept in meta" summary
     Yojson.Safe.Util.(json |> member "meta" |> member "judgment" |> member "summary" |> to_string)
 
+let test_post_create_sources_footer_and_meta () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [
+           ("content", `String "External claim: prompt contracts need evidence.");
+           ("author", `String "tester");
+           ( "sources",
+             `List
+               [
+                 `Assoc
+                   [
+                     ("url", `String "https://example.com/docs");
+                     ("quote", `String "evidence beats assertion");
+                   ];
+               ] );
+         ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let json = parse_create_response_json body in
+  let content = Yojson.Safe.Util.(json |> member "content" |> to_string) in
+  Alcotest.(check bool) "sources footer appended" true
+    (contains_substring content "## Sources");
+  Alcotest.(check bool) "source url rendered" true
+    (contains_substring content "<https://example.com/docs>");
+  Alcotest.(check string) "source url persisted" "https://example.com/docs"
+    Yojson.Safe.Util.(
+      json |> member "meta" |> member "sources" |> index 0 |> member "url"
+      |> to_string);
+  Alcotest.(check bool) "external source flag" true
+    Yojson.Safe.Util.(json |> member "meta" |> member "has_external_sources" |> to_bool)
+
 let test_keeper_board_post_preserves_meta_reason () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -676,11 +716,9 @@ let test_dispatch_delete_success () =
   let _ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "to be deleted"); ("author", `String "tester")]) in
   let post_id =
-    try
-      parse_create_response_json body
-      |> Yojson.Safe.Util.member "id"
-      |> Yojson.Safe.Util.to_string
-    with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ body)
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
   in
   let ok_del, msg_del = dispatch "masc_board_delete"
     (make_args [("post_id", `String post_id)]) in
@@ -715,13 +753,10 @@ let test_post_get_success () =
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "Get me"); ("author", `String "tester")]) in
   Alcotest.(check bool) "create ok" true ok;
-  (* Response is "✅ Post created:\n{json}" — extract JSON after first newline *)
   let post_id =
-    try
-      parse_create_response_json body
-      |> Yojson.Safe.Util.member "id"
-      |> Yojson.Safe.Util.to_string
-    with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ body)
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
   let ok2, body2 = dispatch "masc_board_get"
@@ -923,6 +958,8 @@ let () =
             test_post_create_structured_payload;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
+          Alcotest.test_case "create sources footer and meta" `Quick
+            test_post_create_sources_footer_and_meta;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick
             test_keeper_board_post_preserves_meta_reason;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick

@@ -1701,6 +1701,20 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions server-managed heartbeat" true
     (contains_substring sys "Heartbeat is server-managed")
 
+let test_prompt_includes_research_evidence_contract () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta
+      ~observation:base_observation ()
+  in
+  check bool "mentions research evidence" true
+    (contains_substring sys "Research evidence");
+  check bool "mentions web search" true
+    (contains_substring sys "masc_web_search");
+  check bool "mentions uncited marker" true
+    (contains_substring sys "[uncited]");
+  check bool "mentions board sources metadata" true
+    (contains_substring sys "sources` array")
+
 let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
   check bool "sandbox paths documented" true
@@ -7206,6 +7220,8 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "includes operational tool guidance" `Quick
             test_prompt_includes_operational_tool_guidance;
+          test_case "includes research evidence contract" `Quick
+            test_prompt_includes_research_evidence_contract;
           test_case "distinguishes sandbox and worktree" `Quick
             test_capabilities_prompt_distinguishes_sandbox_and_worktree;
           test_case "world prompt distinguishes sandbox and worktree" `Quick

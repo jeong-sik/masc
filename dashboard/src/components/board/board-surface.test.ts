@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import { fireEvent, render, screen } from '@testing-library/preact'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
 import { route } from '../../router'
@@ -125,6 +125,13 @@ describe('contentCategory', () => {
 
 // ── Board component rendering tests ───────────────────────────────
 describe('BoardSurface Component', () => {
+  // PR #13152 review: vi.stubGlobal('fetch') in beforeEach without a matching
+  // unstub leaks the mocked fetch into later tests in the same worker.  Add
+  // an explicit afterEach that restores all stubbed globals.
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(

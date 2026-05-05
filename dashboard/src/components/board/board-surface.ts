@@ -280,13 +280,34 @@ function HearthFilterBar() {
   const hearths = boardHearths.value
   const active = boardHearthFilter.value
   const activeInList = active !== '' && hearths.some(hearth => hearth.name === active)
-  if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) return null
 
   const chipClass = (selected: boolean) => `px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer ${
     selected
       ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] border-[var(--accent-20)]'
       : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
   }`
+
+  // PR #13152 review (P2): when initial refreshBoardHearths() fails the
+  // list ends up empty + not loading, and the original early-return hid
+  // the entire bar — including the refresh button — leaving users with no
+  // in-UI retry path.  Render a minimal bar (refresh button only) in that
+  // state so the manual retry stays reachable.
+  if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) {
+    return html`
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-2xs text-[var(--color-fg-muted)]" aria-hidden="true">hearth 목록을 불러오지 못했습니다</span>
+        <button
+          type="button"
+          class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+          aria-label="hearth 목록 새로고침"
+          disabled=${boardHearthsLoading.value}
+          onClick=${() => { void refreshBoardHearths() }}
+        >
+          <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+        </button>
+      </div>
+    `
+  }
 
   return html`
     <div class="flex items-center gap-1.5 flex-wrap">

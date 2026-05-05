@@ -739,6 +739,47 @@ preset = "delivery"
         (Some "toml")
         updated.tool_preset_source
 
+let test_toml_integer_per_provider_timeout_updates_runtime () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "timeout-int-toml-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "docker"
+goal = "test"
+per_provider_timeout = 45
+|};
+  let config = Coord.default_config room_dir in
+  let initial_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-timeout-int-toml");
+            ("per_provider_timeout_s", `Float 12.5);
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  seed_persisted_meta config initial_meta;
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check
+        (option (float 0.0001))
+        "integer TOML timeout updates runtime"
+        (Some 45.0)
+        updated.Keeper_types.per_provider_timeout_s
+
 let test_toml_invalid_per_provider_timeout_clears_stale_runtime () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
@@ -1255,6 +1296,10 @@ let () =
             "persona defaults can be overlaid by keeper TOML"
             `Quick
             test_persona_overlay_resync;
+          test_case
+            "integer TOML per_provider_timeout updates runtime JSON"
+            `Quick
+            test_toml_integer_per_provider_timeout_updates_runtime;
           test_case
             "invalid TOML per_provider_timeout clears stale runtime JSON"
             `Quick

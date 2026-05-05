@@ -404,6 +404,34 @@ let test_goal_attainment_projects_percent_target () =
   check int "done task count" 3
     (attainment |> member "task_done_count" |> to_int)
 
+let test_goal_attainment_projects_camel_case_percent_metric () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Camel percent metric goal"
+        ~metric:"successRate" ~target_value:"75" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Done task 1";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 2";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 3";
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Open task"
+       ~priority:3 ~description:"remaining work");
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "camel percent basis" "metric_target_percent"
+    (attainment |> member "basis" |> to_string);
+  check string "camel percent state" "attained"
+    (attainment |> member "state" |> to_string);
+  check (float 0.001) "camel percent target" 75.0
+    (attainment |> member "target_numeric" |> to_float)
+
 let test_goal_attainment_does_not_fake_unparseable_target () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -431,6 +459,32 @@ let test_goal_attainment_does_not_fake_unparseable_target () =
   check int "evidence task retained" 1
     (attainment |> member "task_done_count" |> to_int)
 
+let test_goal_attainment_rejects_non_finite_target () =
+  with_room @@ fun config ->
+  let huge_decimal = String.make 400 '9' in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Non-finite target goal"
+        ~metric:"completion_pct" ~target_value:huge_decimal ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Evidence task";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "non-finite target stays unmeasured" "unmeasured"
+    (attainment |> member "state" |> to_string);
+  check string "non-finite target is unparseable" "unparseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check bool "non-finite target numeric omitted" true
+    (attainment |> member "target_numeric" = `Null);
+  check bool "non-finite target pct omitted" true
+    (attainment |> member "attainment_pct" = `Null)
+
 let test_goal_attainment_parses_grouped_count_target () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -455,7 +509,11 @@ let test_goal_attainment_parses_grouped_count_target () =
     (attainment |> member "target_numeric" |> to_float);
   check int "grouped target pct" 0
     (attainment |> member "attainment_pct" |> to_int);
-  check string "grouped target not attained" "not_started"
+  (* Post-#13131 follow-up: 1 of 1,000 rounds to 0% but observed_value
+     is > 0, so the state disambiguates to "in_progress" — the previous
+     "not_started" was misleading because the goal already had real
+     progress. *)
+  check string "grouped target in progress" "in_progress"
     (attainment |> member "state" |> to_string)
 
 let test_goal_attainment_parses_range_target_start () =
@@ -511,6 +569,63 @@ let test_goal_attainment_rejects_substring_pr_metric () =
   check (float 0.001) "unsupported target retained" 5.0
     (attainment |> member "target_numeric" |> to_float);
   check bool "unsupported metric has no pct" true
+    (attainment |> member "attainment_pct" = `Null)
+
+(* Post-#13131 follow-up: free-form camelCase metrics like
+   [successRate] / [completionPct] must still infer Percent unit.
+   The token-based [metric_implies_percent] would have regressed
+   them when [metric_word_tokens] flattened camelCase to a single
+   token; the camelCase-aware tokenizer keeps the inference. *)
+let test_goal_attainment_camel_case_percent_metric_is_percent () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Camel-case percent metric"
+        ~metric:"successRate" ~target_value:"80" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Completed evidence";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "camelCase metric inferred as percent target"
+    "metric_target_percent"
+    (attainment |> member "basis" |> to_string);
+  check string "camelCase metric unit is percent" "percent"
+    (attainment |> member "unit" |> to_string)
+
+(* Post-#13131 follow-up: [float_of_string_opt] accepts [nan]/[inf]
+   tokens; without the [Float.is_finite] guard the resulting non-
+   finite numeric crashed [pct_of_float] via [int_of_float (floor
+   nan)].  Pin the projection at unparseable / unmeasured for the
+   "nan" target rather than relying on tests not to crash. *)
+let test_goal_attainment_rejects_non_finite_target () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Non-finite target goal"
+        ~metric:"completion_pct" ~target_value:"nan" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Some task";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "non-finite target stays unmeasured" "unmeasured"
+    (attainment |> member "state" |> to_string);
+  check string "non-finite target parse status" "unparseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check bool "non-finite target has no numeric value" true
+    (attainment |> member "target_numeric" = `Null);
+  check bool "non-finite target has no pct" true
     (attainment |> member "attainment_pct" = `Null)
 
 let test_blocked_phase_projects_blocked_health () =
@@ -769,14 +884,22 @@ let () =
             test_title_marker_links_legacy_task;
           test_case "goal attainment projects percent targets" `Quick
             test_goal_attainment_projects_percent_target;
+          test_case "goal attainment projects camel-case percent metrics" `Quick
+            test_goal_attainment_projects_camel_case_percent_metric;
           test_case "goal attainment does not fake unparseable targets" `Quick
             test_goal_attainment_does_not_fake_unparseable_target;
+          test_case "goal attainment rejects non-finite targets" `Quick
+            test_goal_attainment_rejects_non_finite_target;
           test_case "goal attainment parses grouped count targets" `Quick
             test_goal_attainment_parses_grouped_count_target;
           test_case "goal attainment parses range target start" `Quick
             test_goal_attainment_parses_range_target_start;
           test_case "goal attainment rejects substring pr metrics" `Quick
             test_goal_attainment_rejects_substring_pr_metric;
+          test_case "goal attainment handles camelCase percent metric"
+            `Quick test_goal_attainment_camel_case_percent_metric_is_percent;
+          test_case "goal attainment rejects non-finite target" `Quick
+            test_goal_attainment_rejects_non_finite_target;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
           test_case

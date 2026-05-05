@@ -276,21 +276,36 @@ let attainment_unit_to_string = function
 let contains_ci haystack needle =
   String_util.contains_substring_ci haystack needle
 
+(* Token-split that also respects camelCase boundaries.  An uppercase
+   letter that immediately follows a lowercase letter starts a new
+   token (so "successRate" → ["success"; "rate"]) — this keeps the
+   percent-inference accurate for free-form camelCase metric names
+   while still rejecting substring false positives like "iterate"
+   matching "rate".  Consecutive uppercase letters stay in the current
+   token to avoid mangling abbreviations. *)
 let metric_word_tokens raw =
   let tokens = ref [] in
   let current = Buffer.create 16 in
+  let prev_was_lower = ref false in
   let flush () =
     if Buffer.length current > 0 then (
       tokens := Buffer.contents current :: !tokens;
-      Buffer.clear current)
+      Buffer.clear current);
+    prev_was_lower := false
   in
   String.iter
     (fun ch ->
       match ch with
       | 'A' .. 'Z' ->
-          Buffer.add_char current (Char.lowercase_ascii ch)
-      | 'a' .. 'z' | '0' .. '9' ->
-          Buffer.add_char current ch
+          if !prev_was_lower then flush ();
+          Buffer.add_char current (Char.lowercase_ascii ch);
+          prev_was_lower := false
+      | 'a' .. 'z' ->
+          Buffer.add_char current ch;
+          prev_was_lower := true
+      | '0' .. '9' ->
+          Buffer.add_char current ch;
+          prev_was_lower := false
       | _ ->
           flush ())
     raw;

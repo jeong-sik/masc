@@ -576,8 +576,8 @@ let json_string_null_member name fields =
   | _ -> None
 
 let board_signal_kind_of_string = function
-  | "post_created" -> Some Board_dispatch.Board_post_created
-  | "comment_added" -> Some Board_dispatch.Board_comment_added
+  | "post_created" | "post" -> Some Board_dispatch.Board_post_created
+  | "comment_added" | "comment" -> Some Board_dispatch.Board_comment_added
   | _ -> None
 
 let board_signal_of_stimulus_payload payload =

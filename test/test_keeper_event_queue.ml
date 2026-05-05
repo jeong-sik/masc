@@ -12,6 +12,18 @@ let () =
      Alcotest.fail (Printf.sprintf "expected Board_signal, got %s"
        (match other with Bootstrap -> "Bootstrap" | Unsupported s -> "Unsupported("^s^")" | Board_signal -> "Board_signal")));
 
+  let live_comment_payload =
+    {|{"source":"board_signal","kind":"comment","post_id":"p2","author":"alice","title":"Long board event","content":"this mirrors the long live payload that used to miss the prefix check","hearth":null,"wake_reason":"scope_message"}|}
+  in
+  let live_comment_stim =
+    { post_id = "p2"; urgency = Normal; arrived_at = 0.0; payload = live_comment_payload }
+  in
+  (match classify live_comment_stim with
+   | Board_signal -> ()
+   | other ->
+     Alcotest.fail (Printf.sprintf "expected live comment Board_signal, got %s"
+       (match other with Bootstrap -> "Bootstrap" | Unsupported s -> "Unsupported("^s^")" | Board_signal -> "Board_signal")));
+
   (* --- classify: bootstrap --- *)
   let bootstrap_stim = {
     post_id = "bootstrap"; urgency = Normal; arrived_at = 0.0;

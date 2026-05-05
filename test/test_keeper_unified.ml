@@ -390,6 +390,65 @@ let test_board_signal_stimulus_becomes_pending_board_event () =
             (WO.should_run_keeper_cycle ~meta:minimal_meta
                { base_observation with pending_board_events = [ event ] }))
 
+let test_legacy_board_comment_stimulus_becomes_pending_board_event () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let post =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author:"alice"
+            ~title:"Need test-keeper"
+            ~content:"@test-keeper please react from the queued stimulus"
+            ~post_kind:Masc_mcp.Board.Human_post ()
+        with
+        | Ok post -> post
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      let post_id = Masc_mcp.Board.Post_id.to_string post.id in
+      let payload =
+        `Assoc
+          [
+            ("source", `String "board_signal");
+            ("kind", `String "comment");
+            ("post_id", `String post_id);
+            ("author", `String "bob");
+            ("title", `String "Need test-keeper");
+            ("content", `String "comment payload from live board signal");
+            ("hearth", `Null);
+            ("wake_reason", `String "scope_message");
+          ]
+        |> Yojson.Safe.to_string
+      in
+      let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+        {
+          post_id;
+          urgency = Masc_mcp.Keeper_event_queue.Normal;
+          arrived_at = Time_compat.now ();
+          payload;
+        }
+      in
+      match
+        WO.pending_board_event_of_stimulus
+          ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta stimulus
+      with
+      | None -> fail "legacy board comment stimulus was not converted"
+      | Some event ->
+          check string "post id" post_id event.post_id;
+          check string "latest external author" "bob"
+            (Option.value ~default:"" event.latest_external_author);
+          check int "new external comment" 1 event.new_external_since;
+          check bool "schedules turn" true
+            (WO.should_run_keeper_cycle ~meta:minimal_meta
+               { base_observation with pending_board_events = [ event ] }))
+
 let test_observe_splits_absolute_and_claimable_backlog () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -6930,6 +6989,8 @@ let () =
             test_observe_uses_precollected_board_events;
           test_case "queued board stimulus becomes board event" `Quick
             test_board_signal_stimulus_becomes_pending_board_event;
+          test_case "legacy queued board comment becomes board event" `Quick
+            test_legacy_board_comment_stimulus_becomes_pending_board_event;
           test_case "splits absolute and claimable backlog" `Quick
             test_observe_splits_absolute_and_claimable_backlog;
           test_case "durable signal sees claimable backlog" `Quick

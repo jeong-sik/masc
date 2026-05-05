@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
+FIXTURE_DIR = REPO_ROOT / "test" / "fixtures" / "goal_loop"
 
 spec = importlib.util.spec_from_file_location("decide_goal_loop_findings", SCRIPT_PATH)
 assert spec is not None
@@ -66,9 +67,7 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
             act_map={},
         )
 
-        self.assertTrue(
-            decide_goal_loop_findings.should_fail(report, "missing-act")
-        )
+        self.assertTrue(decide_goal_loop_findings.should_fail(report, "missing-act"))
 
     def test_cli_accepts_act_map_and_reports_missing_count(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -108,6 +107,30 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('"act_linked_count": 1', result.stdout)
         self.assertIn('"act_missing_count": 1', result.stdout)
+
+    def test_startup_fixture_keeps_unlinked_emergency_action_visible(self) -> None:
+        orient = json.loads((FIXTURE_DIR / "orient.startup.json").read_text())
+        act_map = decide_goal_loop_findings.load_act_map_input(
+            str(FIXTURE_DIR / "act-map.startup.json")
+        )
+
+        report = decide_goal_loop_findings.decide_orient(
+            orient,
+            act_map=act_map,
+        )
+        by_id = {decision.decision_id: decision for decision in report.decisions}
+
+        self.assertEqual(report.decisions_total, 5)
+        self.assertEqual(report.act_linked_count, 4)
+        self.assertEqual(report.act_missing_count, 1)
+        self.assertEqual(
+            by_id["D-EMERGENCY-1"].act_status,
+            "ACT_MISSING",
+        )
+        self.assertEqual(
+            by_id["D-P1-1"].act_artifacts,
+            ["PR#13123 alive-stuck recovery"],
+        )
 
 
 if __name__ == "__main__":

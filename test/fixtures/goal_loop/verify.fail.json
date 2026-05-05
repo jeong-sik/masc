@@ -1,0 +1,15 @@
+{
+  "failing_findings": [
+    {
+      "finding_id": "NF-2",
+      "reason": "D-EMERGENCY-1 still has no linked ACT artifact"
+    }
+  ],
+  "status": "FAIL",
+  "violations": [
+    {
+      "decision_id": "D-EMERGENCY-1",
+      "kind": "act_missing"
+    }
+  ]
+}

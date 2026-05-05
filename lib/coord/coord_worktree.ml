@@ -1336,11 +1336,15 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
       match find_matching_clone repos_dir with
       | Some root -> Ok root
       | None ->
+        (* #13302 P2-1 follow-up: typed variant replaces the previous
+           [IoError "Worktree ... not found under ..."] string-formatted
+           error.  #13304 demoted the WARN by matching that prefix in
+           [coord_task.cleanup_worktree_for_transition]; the typed
+           variant here lets the caller pattern-match safely so a future
+           message-format change does not silently regress the demotion. *)
         Error
-          (System (System_error.IoError
-             (Printf.sprintf
-                "Worktree %s not found under sandbox repo clones in %s"
-                worktree_name repos_dir)))
+          (System (System_error.WorktreeNotFound
+             { worktree = worktree_name; searched_in = repos_dir }))
     in
     match resolve_existing_worktree_root () with
     | Error e -> Error e

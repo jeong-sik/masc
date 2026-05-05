@@ -28,13 +28,48 @@ interface ApiStatus {
   readonly paused?: boolean
 }
 
+/** One entry from GET /api/dashboard/worktree-status SSE stream. */
+export interface WorktreeEntry {
+  readonly worktree_path: string
+  readonly branch: string
+  readonly changed_count: number
+  readonly staged_count: number
+  readonly head_sha: string
+  readonly pr_number: number | null
+  readonly pr_state: string | null
+  readonly keeper_attached: boolean
+}
+
 function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
   if (status === 'active' || status === 'busy') return 'active'
   if (status === 'listening') return 'idle'
   return 'idle'
 }
 
-function agentsToPresence(agents: ReadonlyArray<ApiAgent>, status: ApiStatus): KeeperPresenceSnapshot {
+/**
+ * Derive the short workspace label for a keeper chip from the worktree entries.
+ * Matches by branch prefix: a MASC worktree branch is "<agentName>/<taskId>".
+ * Returns the task-id segment (after the first "/") as the label.
+ * Falls back to the agent name itself when no worktree is found.
+ */
+export function workspaceLabelForAgent(
+  agentName: string,
+  worktrees: ReadonlyArray<WorktreeEntry>,
+): string {
+  const prefix = agentName + '/'
+  const match = worktrees.find(wt => wt.branch.startsWith(prefix))
+  if (match) {
+    const taskPart = match.branch.slice(prefix.length)
+    return taskPart || agentName
+  }
+  return agentName
+}
+
+function agentsToPresence(
+  agents: ReadonlyArray<ApiAgent>,
+  status: ApiStatus,
+  worktrees: ReadonlyArray<WorktreeEntry>,
+): KeeperPresenceSnapshot {
   const now = Date.now()
   return {
     runtime_id: status.cluster ?? 'local',
@@ -43,7 +78,7 @@ function agentsToPresence(agents: ReadonlyArray<ApiAgent>, status: ApiStatus): K
     connected: agents.length > 0,
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
-      workspace_label: agent.name,
+      workspace_label: workspaceLabelForAgent(agent.name, worktrees),
       branch: status.project ?? 'main',
       role: agent.model ?? 'agent',
       status: mapAgentStatus(agent.status),
@@ -52,18 +87,56 @@ function agentsToPresence(agents: ReadonlyArray<ApiAgent>, status: ApiStatus): K
   }
 }
 
+/** Parse SSE text/event-stream body into an array of WorktreeEntry objects. */
+export function parseWorktreeSSE(body: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = []
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) continue
+    const json = trimmed.slice('data:'.length).trim()
+    if (!json || json === '{}') continue
+    try {
+      const obj = JSON.parse(json) as unknown
+      if (
+        typeof obj === 'object' &&
+        obj !== null &&
+        'worktree_path' in obj &&
+        'branch' in obj
+      ) {
+        entries.push(obj as WorktreeEntry)
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return entries
+}
+
+/** Fetch worktree status from the SSE endpoint. Returns [] on failure. */
+async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
+  try {
+    const res = await fetch('/api/dashboard/worktree-status')
+    if (!res.ok) return []
+    const body = await res.text()
+    return parseWorktreeSSE(body)
+  } catch {
+    return []
+  }
+}
+
 async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
   try {
-    const [agentsRes, statusRes] = await Promise.all([
+    const [agentsRes, statusRes, worktrees] = await Promise.all([
       fetch('/api/v1/agents?limit=20'),
       fetch('/api/v1/status'),
+      fetchWorktreeEntries(),
     ])
     if (!agentsRes.ok || !statusRes.ok) return FALLBACK_PRESENCE
     const agentsData = await agentsRes.json()
     const statusData = await statusRes.json()
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
     if (agents.length === 0) return FALLBACK_PRESENCE
-    return agentsToPresence(agents, statusData as ApiStatus)
+    return agentsToPresence(agents, statusData as ApiStatus, worktrees)
   } catch {
     return FALLBACK_PRESENCE
   }
@@ -145,3 +218,4 @@ function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
     </li>
   `
 }
+

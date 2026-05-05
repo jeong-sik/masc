@@ -223,11 +223,11 @@ masc_groups = ["essential", "coding"]
 # Step 9 (bloodflow restoration plan): the research preset is granted
 # delivery-oriented capabilities so analyst/scholar/verifier-tier keepers
 # can do real work -- git clone, PR view/diff, PR create -- instead
-# of only sharing opinions on the board.  Keep raw filesystem edit out
-# of research; code edits should flow through the structured coding tools
-# and the risk-tiered approval gate in [keeper_routine_allowlist.ml].
+# of only sharing opinions on the board.  Filesystem writes and code edits
+# still flow through the risk-tiered approval gate in
+# [keeper_routine_allowlist.ml].
 [presets.research]
-groups = ["base", "filesystem", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "coordination", "coding"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.

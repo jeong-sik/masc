@@ -26,7 +26,7 @@ interface PaginationProps {
   testId?: string
 }
 
-export interface CursorPaginationProps {
+interface CursorPaginationProps {
   cursor?: string
   hasPrevious?: boolean
   hasNext?: boolean

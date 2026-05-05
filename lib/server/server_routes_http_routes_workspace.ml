@@ -130,8 +130,44 @@ let max_tree_node_limit = 2000
 
 let tree_node_limit_of_query = function
   | Some raw -> (
-      try max 1 (min max_tree_node_limit (int_of_string raw))
-      with _ -> default_tree_node_limit)
+      match int_of_string_opt raw with
+      | Some n -> max 1 (min max_tree_node_limit n)
+      | None ->
+          (* Issue #13191 follow-up: a request like
+             [?limit=99999999999999999999] makes [int_of_string] raise
+             on overflow, which previously fell back to
+             [default_tree_node_limit] (750) instead of clamping to
+             [max_tree_node_limit] (2000).  Clients asking for a "very
+             large" limit therefore unexpectedly got fewer nodes than
+             a smaller-but-valid request would.  When the raw value is
+             purely numeric (with an optional sign / underscores /
+             leading zeros), treat the parse failure as overflow and
+             clamp to the documented maximum.  Non-numeric junk still
+             falls back to the default. *)
+          let classify_overflow s =
+            let len = String.length s in
+            if len = 0 then `Junk
+            else
+              let is_negative = s.[0] = '-' in
+              let start =
+                if s.[0] = '-' || s.[0] = '+' then 1 else 0
+              in
+              if start >= len then `Junk
+              else
+                let ok = ref true in
+                for i = start to len - 1 do
+                  let c = s.[i] in
+                  if not ((c >= '0' && c <= '9') || c = '_') then
+                    ok := false
+                done;
+                if !ok then
+                  if is_negative then `NegativeOverflow else `PositiveOverflow
+                else `Junk
+          in
+          (match classify_overflow raw with
+           | `PositiveOverflow -> max_tree_node_limit
+           | `NegativeOverflow -> 1
+           | `Junk -> default_tree_node_limit))
   | None -> default_tree_node_limit
 
 let safe_path base requested =

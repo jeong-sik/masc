@@ -167,12 +167,101 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["source_documents_covered"], 12)
         self.assertEqual(audit_catalog["missing_itemized_findings"], 188)
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 1)
         self.assertEqual(audit_catalog["source_artifacts_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_artifacts_missing"], 12)
         self.assertEqual(audit_catalog["source_itemized_id_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
         self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 18)
         self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 18)
+
+    def test_closed_catalog_consistency_findings_do_not_warn(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "expected_findings_total": 18,
+                    "itemized_findings_total": 18,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "aggregate_claims": [],
+                    "consistency_findings": [
+                        {"finding_id": "CONSISTENCY-1", "status": "RESOLVED"}
+                    ],
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                        "source_artifacts_total": 12,
+                        "source_artifacts_resolved": 12,
+                        "source_artifacts_missing": 0,
+                        "line_ref_errors": 0,
+                        "source_itemized_id_status": "COMPLETE",
+                        "source_itemized_finding_ids_total": 18,
+                        "catalog_itemized_finding_ids_total": 18,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 0,
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "ok")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 0)
+
+    def test_missing_catalog_source_artifacts_keeps_goal_warning(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "expected_findings_total": 18,
+                    "itemized_findings_total": 18,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "aggregate_claims": [],
+                    "consistency_findings": [],
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        self.assertEqual(report.phases["orient"].status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["source_artifacts_status"], "NOT_CHECKED")
 
     def test_next_action_prefers_missing_act_over_linked_decision(self) -> None:
         report = goal_loop_status.build_status_report(

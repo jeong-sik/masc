@@ -62,6 +62,15 @@ def status_max(statuses: list[str]) -> str:
     return max(statuses, key=lambda item: STATUS_RANK.get(item, 0))
 
 
+def consistency_finding_is_open(finding: Any) -> bool:
+    if not isinstance(finding, dict):
+        return False
+    status = finding.get("status")
+    if not isinstance(status, str):
+        return True
+    return status.upper() not in {"CLOSED", "COMPLETE", "DONE", "RESOLVED"}
+
+
 def pattern_count(observe: dict[str, Any] | None, name: str) -> int:
     if observe is None:
         return 0
@@ -144,6 +153,11 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
         consistency_findings = (
             consistency_raw if isinstance(consistency_raw, list) else []
         )
+        open_consistency_findings = [
+            finding
+            for finding in consistency_findings
+            if consistency_finding_is_open(finding)
+        ]
         source_artifacts_raw = audit_catalog.get("source_artifacts")
         source_artifacts = (
             source_artifacts_raw if isinstance(source_artifacts_raw, dict) else None
@@ -162,6 +176,7 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             if isinstance(audit_catalog.get("aggregate_claims"), list)
             else 0,
             "consistency_findings_total": len(consistency_findings),
+            "consistency_findings_open": len(open_consistency_findings),
         }
         if source_artifacts is not None:
             audit_catalog_summary["source_artifacts_status"] = source_artifacts.get(
@@ -196,11 +211,13 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             audit_catalog_summary["catalog_ids_missing_from_source"] = (
                 source_artifacts.get("catalog_ids_missing_from_source")
             )
+        else:
+            audit_catalog_summary["source_artifacts_status"] = "NOT_CHECKED"
         audit_catalog_warning = (
             audit_catalog_summary["status"] != "COMPLETE"
             or audit_catalog_summary["source_documents_status"] != "COMPLETE"
-            or audit_catalog_summary["consistency_findings_total"] > 0
-            or audit_catalog_summary.get("source_artifacts_status") == "INCOMPLETE"
+            or audit_catalog_summary["consistency_findings_open"] > 0
+            or audit_catalog_summary.get("source_artifacts_status") != "COMPLETE"
         )
     status = (
         "critical"

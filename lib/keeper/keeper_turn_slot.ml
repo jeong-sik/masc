@@ -154,12 +154,36 @@ let format_slot_holders ?(limit = 5) holders =
     "[" ^ String.concat ", " items ^ "]"
 ;;
 
+(** [snapshot_all_holders ~now] reads every pool inside ONE
+    [holder_mutex] critical section and returns the three lists in
+    the same instant.  Calling [turn_slot_holders] / [autonomous_slot_holders]
+    / [reactive_slot_holders] back-to-back from the summary builder
+    would release and re-take the mutex three times — an interleaved
+    [record_holder] / [drop_holder] could then leave the summary
+    reporting contradictory states (e.g. empty turn_holders next to
+    [turn_available=0]).  This helper closes that race. *)
+let snapshot_all_holders ~now =
+  with_holder_lock (fun () ->
+    Hashtbl.fold
+      (fun (label, name) ts (turn, auto, reactive) ->
+        let held = now -. ts in
+        match label with
+        | "turn" -> ((name, held) :: turn, auto, reactive)
+        | "autonomous" -> (turn, (name, held) :: auto, reactive)
+        | "reactive" -> (turn, auto, (name, held) :: reactive)
+        | _ -> (turn, auto, reactive))
+      holder_table ([], [], []))
+  |> fun (t, a, r) ->
+  let by_held = List.sort (fun (_, x) (_, y) -> compare y x) in
+  (by_held t, by_held a, by_held r)
+
 let slot_holders_summary ?(limit = 5) ~now () =
+  let turn, autonomous, reactive = snapshot_all_holders ~now in
   Printf.sprintf
     "turn_holders=%s autonomous_holders=%s reactive_holders=%s"
-    (format_slot_holders ~limit (turn_slot_holders ~now))
-    (format_slot_holders ~limit (autonomous_slot_holders ~now))
-    (format_slot_holders ~limit (reactive_slot_holders ~now))
+    (format_slot_holders ~limit turn)
+    (format_slot_holders ~limit autonomous)
+    (format_slot_holders ~limit reactive)
 ;;
 
 type autonomous_waiter =

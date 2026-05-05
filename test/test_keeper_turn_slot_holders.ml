@@ -91,6 +91,39 @@ let test_holders_released_after_slot_returned () =
   if List.mem "diag-release" names then
     failwith "diag-release still in reactive holders after release"
 
+(* PR #13099 review: pin that [slot_holders_summary] reflects the holder
+   currently inside [with_keeper_turn_slot_for_test], so a regression where
+   the WARN/last_blocker wiring drops the holder snapshot is caught
+   directly (not just at the formatter level). *)
+let test_slot_holders_summary_reflects_active_holder () =
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name:"diag-summary"
+      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      (fun ~semaphore_wait_ms:_ ->
+        let summary = KK.slot_holders_summary ~now:(Time_compat.now ()) () in
+        let mentions s sub =
+          let ls = String.length s in
+          let lsub = String.length sub in
+          let rec loop i =
+            if i + lsub > ls then false
+            else if String.sub s i lsub = sub then true
+            else loop (i + 1)
+          in
+          loop 0
+        in
+        if not (mentions summary "diag-summary") then
+          failwith
+            (Printf.sprintf
+              "expected slot_holders_summary to mention 'diag-summary'; got %S"
+              summary);
+        ())
+  in
+  match result with
+  | Ok () -> ()
+  | Error (`Semaphore_wait_timeout _) ->
+      failwith "unexpected semaphore wait timeout in test"
+
 let () =
   let cases =
     [
@@ -104,6 +137,8 @@ let () =
         test_autonomous_slot_holders_records_during_acquire;
       "holders dropped after with_keeper_turn_slot exits",
         test_holders_released_after_slot_returned;
+      "slot_holders_summary mentions the active holder",
+        test_slot_holders_summary_reflects_active_holder;
     ]
   in
   List.iter

@@ -149,7 +149,7 @@ let read_json_local_result path =
   Safe_ops.read_json_file_safe path
 
 let json_to_pretty_utf8 json =
-  json |> Inference_utils.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
 
 let write_json_local path json =
   mkdir_p (Filename.dirname path);

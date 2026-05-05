@@ -82,7 +82,12 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
          | None -> fail "expected actor");
       check string "tag repaired on write"
         ("bad" ^ replacement ^ "tag")
-        (List.hd event.tags);
+        (match event.tags with
+         | _ :: tag :: _ -> tag
+         | tags ->
+             fail
+               (Printf.sprintf "expected second tag, got %d"
+                  (List.length tags)));
       check string "payload repaired on write"
         ("bad" ^ replacement ^ "payload")
         (event.payload |> member "content" |> to_string);

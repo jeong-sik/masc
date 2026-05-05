@@ -50,6 +50,15 @@ val persistence_utf8_repair_log_entry_limit_for_tests : unit -> int
 val persistence_utf8_repair_log_key_count_for_tests : unit -> int
 (** Current UTF-8 repair warning rate-limit table size. Test-only. *)
 
+val sanitize_text_utf8 : string -> string
+(** Replace invalid UTF-8 bytes with U+FFFD and replace disallowed ASCII
+    control characters with spaces (except LF/CR/TAB), without recording a
+    read-path persistence repair. *)
+
+val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
+(** Recursively scrub every JSON string node through {!sanitize_text_utf8}.
+    Intended for writer-side sanitization before persistence or broadcast. *)
+
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)
 

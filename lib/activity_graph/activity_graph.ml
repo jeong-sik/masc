@@ -49,20 +49,20 @@ let append_line path line =
 
 let sanitize_entity_ref (value : entity_ref) =
   {
-    kind = Inference_utils.sanitize_text_utf8 value.kind;
-    id = Inference_utils.sanitize_text_utf8 value.id;
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
+    id = Safe_ops.sanitize_text_utf8 value.id;
   }
 
 let sanitize_event (value : event) =
   {
     value with
-    ts_iso = Inference_utils.sanitize_text_utf8 value.ts_iso;
-    room_id = Inference_utils.sanitize_text_utf8 value.room_id;
-    kind = Inference_utils.sanitize_text_utf8 value.kind;
+    ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
+    room_id = Safe_ops.sanitize_text_utf8 value.room_id;
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
     actor = Option.map sanitize_entity_ref value.actor;
     subject = Option.map sanitize_entity_ref value.subject;
-    payload = Inference_utils.sanitize_json_utf8 value.payload;
-    tags = List.map Inference_utils.sanitize_text_utf8 value.tags;
+    payload = Safe_ops.sanitize_json_utf8 value.payload;
+    tags = List.map Safe_ops.sanitize_text_utf8 value.tags;
   }
 
 let format_sse_event (value : event) =

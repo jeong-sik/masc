@@ -1,0 +1,49 @@
+name: Fundamental Check
+
+# Regression guards derived from the 2026-05-05 reality check
+# (docs/audit/2026-05-05-fundamental-roadmap-reality-check.md) on
+# fundamental_roadmap.md. Each job protects ground that PR #12986,
+# #12990, and the 10-week re-scoped plan
+# (~/me/planning/claude-plans/joyful-tumbling-dragon.md) already
+# cleared, so the codebase does not silently regress.
+#
+# Dashboard `tsc --noEmit` typecheck is intentionally NOT duplicated
+# here — ci.yml's `dashboard` job already runs it (see ci.yml:834).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  no-roadmap-stale-hardcoding:
+    name: Hardcoded model prefix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-roadmap-stale-hardcoding.sh
+
+  no-fabricated-telemetry:
+    name: Math.random in components
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-fabricated-telemetry.sh
+
+  godfile-size-regression:
+    name: Godfile size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run lint
+        env:
+          BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
+        run: bash scripts/lint/godfile-size-regression.sh

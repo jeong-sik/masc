@@ -773,10 +773,23 @@ let build_keeper_snapshot
    Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
    through [Log.warn]-style sites that format duration with [%.0f],
    which would render the 0.25s budget as "0s" and confuse operators
-   reading "command timed out after 0s".  1.0s keeps the per-row
-   ceiling tight enough that 50 keepers render in <60s while
-   producing a self-explanatory diagnostic when Docker is genuinely
-   slow.  See PR #13113 review. *)
+   reading "command timed out after 0s".  1.0s produces a
+   self-explanatory diagnostic when Docker is genuinely slow.
+
+   Worst-case budget bookkeeping (PR #13113 review):
+   [Keeper_sandbox_runtime.list_containers] internally runs TWO
+   sequential Docker commands (`docker ps` then `docker inspect`),
+   each gated by [~timeout_sec].  The per-row worst case is
+   therefore [2 * timeout_sec], not [timeout_sec].  At 1.0s × 2
+   commands × 50 keepers the screen budget is ~100s in the
+   worst case where every Docker call stalls — well above the
+   typical 15s client deadline, but bounded.  In the common case
+   Docker responds in tens of ms and the screen returns in <1s.
+   Operators who need a tighter overall budget should either
+   reduce keeper count surfaced here, or wait for the upstream
+   "single overall probe budget" follow-up (RFC TBD) that would
+   short-circuit further probes once a wall-clock deadline is hit.
+*)
 let sandbox_live_probe_timeout_sec = 1.0
 
 let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =

@@ -71,6 +71,17 @@ let write_violations_file (store : Agent_sdk.Proof_store.config) ~run_id
   let path = Filename.concat dir "mode_violations.json" in
   Yojson.Safe.to_file path violations
 
+let write_effects_file (store : Agent_sdk.Proof_store.config) ~run_id
+    (effects : Yojson.Safe.t) =
+  let dir = Filename.concat
+    (Filename.concat
+       (Filename.concat store.root "proofs")
+       run_id)
+    "evidence" in
+  mkdirp dir;
+  let path = Filename.concat dir "effects.json" in
+  Yojson.Safe.to_file path effects
+
 let make_violation ~tool_name ~violation_kind ~effective_mode : Yojson.Safe.t =
   `Assoc [
     ("ts", `Float 1000.0);
@@ -82,6 +93,22 @@ let make_violation ~tool_name ~violation_kind ~effective_mode : Yojson.Safe.t =
 
 let make_ref ~run_id =
   Printf.sprintf "proof-store://%s/evidence/mode_violations.json" run_id
+
+let make_effects_ref ~run_id =
+  Printf.sprintf "proof-store://%s/evidence/effects.json" run_id
+
+let make_effect ?source_path ?source_line () : Yojson.Safe.t =
+  let opt name f = function
+    | Some value -> [ name, f value ]
+    | None -> []
+  in
+  `Assoc
+    ([ "tool_use_id", `String "tool-1"
+     ; "tool_name", `String "fs_edit"
+     ; "decision_source", `String "mode_enforcer"
+     ]
+     @ opt "source_path" (fun path -> `String path) source_path
+     @ opt "source_line" (fun line -> `Int line) source_line)
 
 (* ================================================================ *)
 (* Tests                                                             *)
@@ -357,7 +384,8 @@ let test_tripwire_below_threshold () =
   let (store, _tmp) = setup_store () in
   let run_id = "tw-below-001" in
   let ref_ = Printf.sprintf "proof-store://%s/evidence/mode_violations.json" run_id in
-  let proof = make_proof ~run_id ~raw_evidence_refs:[ref_] () in
+  let effects_ref = make_effects_ref ~run_id in
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ref_; effects_ref] () in
   let dir = Filename.concat (Filename.concat store.root "proofs")
     (Filename.concat run_id "evidence") in
   ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
@@ -367,10 +395,64 @@ let test_tripwire_below_threshold () =
   Yojson.Safe.to_file
     (Filename.concat dir "mode_violations.json")
     (`List [v; v]);
+  write_effects_file store ~run_id
+    (`List [ make_effect ~source_path:"lib/mode_enforcer.ml" ~source_line:410 () ]);
   match CFP.project_single_run ~store ~tripwire_threshold:5 proof with
   | None -> Alcotest.fail "expected Some"
   | Some fp ->
     Alcotest.(check int) "no tripwires" 0 (List.length fp.review_tripwires)
+
+let test_missing_effect_source_path_emits_gap () =
+  let store, _dir = setup_store () in
+  let run_id = "source-gap-001" in
+  let ref_ = make_ref ~run_id in
+  let violations =
+    `List
+      [ make_violation
+          ~tool_name:"fs_edit"
+          ~violation_kind:"mutating_in_diagnose"
+          ~effective_mode:"diagnose"
+      ]
+  in
+  write_violations_file store ~run_id violations;
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ ref_ ] () in
+  match CFP.project_single_run ~store proof with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check (list string)) "source path tripwire"
+      [ "source_path_evidence:mode_enforcer" ]
+      fp.review_tripwires;
+    let gap = List.hd fp.evidence_gap_groups in
+    Alcotest.(check string) "gap artifact" "evidence/effects.json" gap.artifact;
+    Alcotest.(check string) "gap impact" "blocks_verdict" gap.impact
+
+let test_effect_source_path_satisfies_gap () =
+  let store, _dir = setup_store () in
+  let run_id = "source-ok-001" in
+  let ref_ = make_ref ~run_id in
+  let effects_ref = make_effects_ref ~run_id in
+  let violations =
+    `List
+      [ make_violation
+          ~tool_name:"fs_edit"
+          ~violation_kind:"mutating_in_diagnose"
+          ~effective_mode:"diagnose"
+      ]
+  in
+  write_violations_file store ~run_id violations;
+  write_effects_file store ~run_id
+    (`List [ make_effect ~source_path:"lib/mode_enforcer.ml" ~source_line:410 () ]);
+  let proof = make_proof ~run_id ~raw_evidence_refs:[ ref_; effects_ref ] () in
+  match CFP.project_single_run ~store proof with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check bool) "no source path gap" false
+      (List.exists
+         (fun (gap : CFP.evidence_gap_group) ->
+            String.equal gap.artifact "evidence/effects.json")
+         fp.evidence_gap_groups);
+    Alcotest.(check bool) "no source path tripwire" false
+      (List.mem "source_path_evidence:mode_enforcer" fp.review_tripwires)
 
 let test_path_traversal_rejected () =
   let store : Agent_sdk.Proof_store.config = { root = "/tmp/test-store" } in
@@ -489,6 +571,38 @@ let test_project_window_tripwire_cross_run () =
       (List.length fp.review_tripwires > 0);
     Alcotest.(check int) "10 total" 10 fp.blocked_attempt_count
 
+let test_project_window_missing_effect_source_path_emits_gap () =
+  let store, _dir = setup_store () in
+  let proofs =
+    List.init 2 (fun i ->
+      let run_id = Printf.sprintf "cr-source-gap-%d" i in
+      let ref_ = make_ref ~run_id in
+      let violations =
+        `List
+          [ make_violation
+              ~tool_name:"fs_edit"
+              ~violation_kind:"mutating_in_diagnose"
+              ~effective_mode:"diagnose"
+          ]
+      in
+      write_violations_file store ~run_id violations;
+      make_proof_for_cross_run
+        ~run_id
+        ~raw_evidence_refs:[ ref_ ]
+        ~ended_at:(1000.0 +. Float.of_int i)
+        ())
+  in
+  match CFP.project_window ~store ~window:(CFP.Last_n_runs 2) proofs with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check bool) "source path tripwire" true
+      (List.mem "source_path_evidence:mode_enforcer" fp.review_tripwires);
+    Alcotest.(check bool) "source path gap" true
+      (List.exists
+         (fun (gap : CFP.evidence_gap_group) ->
+            String.equal gap.artifact "evidence/effects.json")
+         fp.evidence_gap_groups)
+
 let test_project_window_empty () =
   let store, _dir = setup_store () in
   match CFP.project_window ~store ~window:(CFP.Last_n_runs 3) [] with
@@ -550,6 +664,10 @@ let () =
          test_tripwire_fires;
        Alcotest.test_case "tripwire below threshold" `Quick
          test_tripwire_below_threshold;
+       Alcotest.test_case "missing effect source path emits gap" `Quick
+         test_missing_effect_source_path_emits_gap;
+       Alcotest.test_case "effect source path satisfies gap" `Quick
+         test_effect_source_path_satisfies_gap;
        Alcotest.test_case "path traversal rejected" `Quick
          test_path_traversal_rejected;
      ]);
@@ -560,6 +678,8 @@ let () =
          test_project_window_last_n_runs;
        Alcotest.test_case "cross-run tripwire" `Quick
          test_project_window_tripwire_cross_run;
+       Alcotest.test_case "cross-run missing effect source path emits gap" `Quick
+         test_project_window_missing_effect_source_path_emits_gap;
        Alcotest.test_case "empty proofs" `Quick
          test_project_window_empty;
        Alcotest.test_case "basis hash deterministic" `Quick

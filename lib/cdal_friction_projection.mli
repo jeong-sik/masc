@@ -3,7 +3,9 @@
     Groups blocked attempts from mode_violations.json by (tool_name,
     violation_kind, effective_mode).  Uses only v1 fields; v2 fields
     (effect_class, required_min_mode, violated_rule_id, trace_id, turn)
-    are treated as unavailable.
+    are treated as unavailable. When blocked attempts exist, the projection
+    also checks [evidence/effects.json] for Mode_enforcer source-path evidence
+    and emits a blocking completeness gap if that call-site evidence is absent.
 
     @since CDAL Phase 1A *)
 
@@ -48,7 +50,9 @@ type friction_projection = {
     exceeds [tripwire_threshold] (default 3). A blocking
     [evidence/review_warning.json] gap also emits a
     [review_requirement:submit_for_verification] tripwire so downstream
-    coordinators can route through their verification FSM.
+    coordinators can route through their verification FSM. A run with
+    [mode_violations.json] but no populated [evidence/effects.json] source path
+    emits [source_path_evidence:mode_enforcer].
 
     Returns [None] when no violations and no completeness gaps exist. *)
 val project_single_run :
@@ -77,7 +81,8 @@ type run_window =
     Projects friction across a set of runs. For [Single_run],
     delegates to [project_single_run] using the first proof.
     For cross-run windows, aggregates violations across multiple
-    manifests.
+    manifests and carries the same [evidence/effects.json] source-path gap
+    when any blocked run lacks Mode_enforcer call-site evidence.
 
     @since CDAL Phase 3 *)
 val project_window :

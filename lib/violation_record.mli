@@ -21,17 +21,6 @@ type t = Agent_sdk.Mode_enforcer.violation = {
   violation_kind : violation_kind;
 }
 
-(** A violation enriched with source-path evidence from the Mode_enforcer
-    boundary.  [evidence.source_path] and [evidence.source_line] are
-    populated when the violation payload is produced so the call-site
-    backtrace survives any subsequent handler discontinuation.
-
-    @since SafeAuto source-path boundary *)
-type enriched = {
-  base : t;
-  evidence : Effect_evidence.t;
-}
-
 (** Parse a single violation from JSON.
     Delegates to [Agent_sdk.Mode_enforcer.violation_of_yojson].
 
@@ -46,32 +35,6 @@ val of_json : Yojson.Safe.t -> (t, string) result
     Each element is parsed via {!of_json}. If any entry fails strict parsing,
     the whole function returns [Error]. *)
 val of_json_list : Yojson.Safe.t -> (t list, string) result
-
-(** Parse a single violation enriched with [Effect_evidence] from JSON.
-    The base fields follow the same strict rules as {!of_json}; the
-    [source_path]/[source_line] fields are optional — missing fields
-    produce [Effect_evidence.empty].
-
-    @since SafeAuto source-path boundary *)
-val of_json_enriched : Yojson.Safe.t -> (enriched, string) result
-
-(** Parse an array of enriched violations from JSON.
-
-    Each element is parsed via {!of_json_enriched}. If any entry fails,
-    the whole function returns [Error].
-
-    @since SafeAuto source-path boundary *)
-val of_json_list_enriched : Yojson.Safe.t -> (enriched list, string) result
-
-(** [check_source_path_present ev] returns [Ok ()] when
-    [ev.evidence.source_path] is [Some _] and
-    [Error msg] when it is [None].
-
-    Use this as a regression guard to ensure source-path propagation is
-    wired end-to-end at the Mode_enforcer boundary.
-
-    @since SafeAuto source-path boundary *)
-val check_source_path_present : enriched -> (unit, string) result
 
 (** The minimum execution mode that would have prevented this violation.
     - [Mutating_in_diagnose] -> [Draft]

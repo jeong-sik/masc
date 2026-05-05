@@ -1,12 +1,12 @@
-(** Effect_evidence — Source-path evidence at the Mode_enforcer boundary.
+(** Effect_evidence -- Source-path evidence at the Mode_enforcer boundary.
 
     Captures [source_path] and [source_line] from the call site where a
-    mode-enforcement effect payload is produced.  These fields are attached
-    to each violation record before any continuation is discontinued, so the
-    backtrace survives the handler boundary intact.
+    mode-enforcement effect payload is produced. OAS writes these rows to
+    [evidence/effects.json]; [mode_violations.json] remains the older grouped
+    summary surface.
 
     Both fields are optional for backward compatibility with existing
-    [mode_violations.json] artifacts that pre-date this evidence layer.
+    proof artifacts that pre-date this evidence layer.
 
     @since SafeAuto source-path boundary *)
 
@@ -26,6 +26,20 @@ val is_populated : t -> bool
     [source_path] nor [source_line] is present.  Unknown fields are
     ignored. *)
 val of_json : Yojson.Safe.t -> t
+
+(** Parse [evidence/effects.json], returning [Error] when the artifact is not
+    a JSON array. Individual rows are lenient because source-path evidence is
+    enrichment on top of OAS' effect schema. *)
+val of_json_list : Yojson.Safe.t -> (t list, string) result
+
+(** [any_source_path_present events] is true when at least one effects row
+    carries a [source_path]. *)
+val any_source_path_present : t list -> bool
+
+(** [check_any_source_path_present events] fails when the effects artifact
+    contains no [source_path]. Use this at proof-consumption boundaries that
+    must not silently lose Mode_enforcer call-site evidence. *)
+val check_any_source_path_present : t list -> (unit, string) result
 
 (** Serialize evidence to a JSON assoc list (sorted keys).
     Omits fields that are [None]. *)

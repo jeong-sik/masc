@@ -1,32 +1,30 @@
-(** test_effect_evidence_source_path — Regression guard for SafeAuto
+(** test_effect_evidence_source_path -- Regression guard for SafeAuto
     source-path propagation at the Mode_enforcer boundary.
 
     Done criteria (issue: SafeAuto source-path discontinuation boundary):
-    - Fails when source_path is absent from a violation payload.
+    - Fails when source_path is absent from the OAS effects artifact.
     - Succeeds when source_path (and optionally source_line) is present.
     - Validates that [Effect_evidence.of_json] is backward compatible with
-      legacy violation records that pre-date the evidence layer. *)
+      legacy effect records that pre-date the evidence layer. *)
 
 module EE = Masc_mcp.Effect_evidence
-module VR = Masc_mcp.Violation_record
 
 (* ================================================================ *)
 (* Helpers                                                           *)
 (* ================================================================ *)
 
-let base_violation_json
-    ?(tool_name = "fs_edit")
-    ?(violation_kind = "mutating_in_diagnose")
-    ?(effective_mode = "diagnose")
-    ?(extra = [])
-    () : Yojson.Safe.t =
-  `Assoc ([
-    ("ts", `Float 1000.0);
-    ("tool_name", `String tool_name);
-    ("input_summary", `String "truncated");
-    ("effective_mode", `String effective_mode);
-    ("violation_kind", `String violation_kind);
-  ] @ extra)
+let effect_json ?source_path ?source_line () : Yojson.Safe.t =
+  let opt name f = function
+    | Some value -> [ name, f value ]
+    | None -> []
+  in
+  `Assoc
+    ([ "tool_use_id", `String "tool-1"
+     ; "tool_name", `String "fs_edit"
+     ; "decision_source", `String "mode_enforcer"
+     ]
+     @ opt "source_path" (fun path -> `String path) source_path
+     @ opt "source_line" (fun line -> `Int line) source_line)
 
 (* ================================================================ *)
 (* Effect_evidence unit tests                                        *)
@@ -85,83 +83,53 @@ let test_to_json_fields_populated () =
     ["source_line"; "source_path"] keys
 
 (* ================================================================ *)
-(* Violation_record enriched type tests                             *)
+(* Effects artifact tests                                           *)
 (* ================================================================ *)
 
-(** Parsing a violation without source_path/source_line gives empty evidence. *)
-let test_of_json_enriched_legacy_record () =
-  let json = base_violation_json () in
-  match VR.of_json_enriched json with
+(** Parsing effects.json gives source-path evidence when any row has it. *)
+let test_of_json_list_effects_artifact () =
+  let e1 =
+    effect_json
+      ~source_path:"lib/mode_enforcer.ml"
+      ~source_line:410
+      ()
+  in
+  let e2 = effect_json () in
+  match EE.of_json_list (`List [ e1; e2 ]) with
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
-  | Ok ev ->
-    Alcotest.(check string) "tool_name" "fs_edit" ev.base.tool_name;
-    Alcotest.(check bool) "evidence not populated" false
-      (EE.is_populated ev.evidence)
+  | Ok events ->
+    Alcotest.(check int) "2 records" 2 (List.length events);
+    Alcotest.(check bool) "any source_path" true
+      (EE.any_source_path_present events)
 
-(** Parsing a violation with source_path gives populated evidence. *)
-let test_of_json_enriched_with_source_path () =
-  let json = base_violation_json
-    ~extra:[("source_path", `String "lib/exec/exec_gate.ml");
-            ("source_line", `Int 42)] () in
-  match VR.of_json_enriched json with
-  | Error e -> Alcotest.fail ("parse failed: " ^ e)
-  | Ok ev ->
-    Alcotest.(check bool) "evidence populated" true
-      (EE.is_populated ev.evidence);
-    Alcotest.(check (option string)) "source_path"
-      (Some "lib/exec/exec_gate.ml") ev.evidence.source_path;
-    Alcotest.(check (option int)) "source_line"
-      (Some 42) ev.evidence.source_line
+(** [of_json_list] on non-array returns Error. *)
+let test_of_json_list_non_array () =
+  match EE.of_json_list (`Assoc []) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error for non-array input"
 
-(** [check_source_path_present] returns [Ok ()] when source_path is present. *)
-let test_check_source_path_present_ok () =
-  let json = base_violation_json
-    ~extra:[("source_path", `String "lib/mode_enforcer_boundary.ml")] () in
-  match VR.of_json_enriched json with
+(** [check_any_source_path_present] returns [Ok ()] when source_path is present. *)
+let test_check_any_source_path_present_ok () =
+  match EE.of_json_list
+          (`List [ effect_json ~source_path:"lib/mode_enforcer.ml" () ])
+  with
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
-  | Ok ev ->
-    (match VR.check_source_path_present ev with
+  | Ok events ->
+    (match EE.check_any_source_path_present events with
      | Ok () -> ()
      | Error msg -> Alcotest.fail ("expected Ok, got Error: " ^ msg))
 
-(** REGRESSION: [check_source_path_present] returns [Error] when source_path
-    is absent.  This is the core regression guard for the SafeAuto
-    source-path discontinuation boundary.  The test fails if any code path
-    produces a violation payload without a source_path, because that means
-    the backtrace is lost at the handler boundary. *)
-let test_check_source_path_present_fails_when_absent () =
-  let json = base_violation_json () in   (* no source_path field *)
-  match VR.of_json_enriched json with
+(** REGRESSION: effects evidence without source_path must be visible as
+    missing boundary evidence instead of silently passing. *)
+let test_check_any_source_path_present_fails_when_absent () =
+  match EE.of_json_list (`List [ effect_json (); effect_json () ]) with
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
-  | Ok ev ->
-    (match VR.check_source_path_present ev with
-     | Error _ -> ()  (* expected: source_path absent => Error *)
+  | Ok events ->
+    (match EE.check_any_source_path_present events with
+     | Error _ -> ()
      | Ok () ->
        Alcotest.fail
-         "check_source_path_present returned Ok for a record without \
-          source_path — source-path propagation at the Mode_enforcer \
-          boundary is broken")
-
-(** [of_json_list_enriched] parses an array correctly. *)
-let test_of_json_list_enriched () =
-  let v1 = base_violation_json
-    ~tool_name:"write"
-    ~extra:[("source_path", `String "lib/write_tool.ml"); ("source_line", `Int 10)] () in
-  let v2 = base_violation_json ~tool_name:"read" () in
-  match VR.of_json_list_enriched (`List [v1; v2]) with
-  | Error e -> Alcotest.fail ("parse failed: " ^ e)
-  | Ok evs ->
-    Alcotest.(check int) "2 records" 2 (List.length evs);
-    let e1 = List.nth evs 0 in
-    let e2 = List.nth evs 1 in
-    Alcotest.(check bool) "e1 populated" true (EE.is_populated e1.evidence);
-    Alcotest.(check bool) "e2 not populated" false (EE.is_populated e2.evidence)
-
-(** [of_json_list_enriched] on non-array returns Error. *)
-let test_of_json_list_enriched_non_array () =
-  match VR.of_json_list_enriched (`Assoc []) with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected Error for non-array input"
+         "check_any_source_path_present returned Ok for effects without source_path")
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -187,19 +155,15 @@ let () =
           Alcotest.test_case "to_json_fields populated" `Quick
             test_to_json_fields_populated;
         ] );
-      ( "violation_record_enriched",
+      ( "effects_artifact",
         [
-          Alcotest.test_case "of_json_enriched legacy record (no source_path)" `Quick
-            test_of_json_enriched_legacy_record;
-          Alcotest.test_case "of_json_enriched with source_path" `Quick
-            test_of_json_enriched_with_source_path;
-          Alcotest.test_case "check_source_path_present Ok" `Quick
-            test_check_source_path_present_ok;
-          Alcotest.test_case "check_source_path_present fails when absent (regression guard)" `Quick
-            test_check_source_path_present_fails_when_absent;
-          Alcotest.test_case "of_json_list_enriched array" `Quick
-            test_of_json_list_enriched;
-          Alcotest.test_case "of_json_list_enriched non-array error" `Quick
-            test_of_json_list_enriched_non_array;
+          Alcotest.test_case "of_json_list effects artifact" `Quick
+            test_of_json_list_effects_artifact;
+          Alcotest.test_case "of_json_list non-array error" `Quick
+            test_of_json_list_non_array;
+          Alcotest.test_case "check_any_source_path_present Ok" `Quick
+            test_check_any_source_path_present_ok;
+          Alcotest.test_case "check_any_source_path_present fails when absent" `Quick
+            test_check_any_source_path_present_fails_when_absent;
         ] );
     ]

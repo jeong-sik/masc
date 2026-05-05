@@ -1089,11 +1089,21 @@ let handle_keeper_sandbox_status ctx args : tool_result =
   let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
   match String.trim (get_string args "name" "") with
   | "" ->
+      let configured_names = configured_keeper_names ctx.config in
+      let candidate_names = keeper_sandbox_status_fleet_names ctx in
       let resolved =
-        keeper_sandbox_status_fleet_names ctx
+        candidate_names
         |> List.filter_map (fun name ->
              match read_meta ctx.config name with
              | Ok (Some meta) -> Some meta
+             | Ok None when List.mem name configured_names -> (
+                 match load_or_materialize_boot_meta ctx name with
+                 | Ok { meta; _ } -> Some meta
+                 | Error msg ->
+                     Log.Keeper.warn
+                       "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
+                       name msg;
+                     None)
              | Ok None | Error _ -> None)
       in
       let seen = Hashtbl.create 16 in
@@ -1119,9 +1129,11 @@ let handle_keeper_sandbox_status ctx args : tool_result =
           None
       in
       let render_item (meta : keeper_meta) =
+        let preflight_override =
+          if meta.sandbox_profile = Docker then cached_preflight else None
+        in
         Keeper_sandbox_control.live_status_json
-          ~include_preflight
-          ~preflight_override:cached_preflight
+          ~include_preflight ?preflight_override
           ~config:ctx.config ~meta ~timeout_sec ~verbose ()
       in
       let items = List.map render_item unique_metas in

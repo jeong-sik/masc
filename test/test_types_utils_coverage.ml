@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Comprehensive coverage tests for Types, Coord_utils, and Coord_eio modules *)
 
 (* Initialize RNG for crypto operations *)

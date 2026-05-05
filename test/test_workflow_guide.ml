@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Tests for Workflow_guide — Golden Path encoding and next_steps. *)
 
 (* Use canonical prefix due to OCaml 5.x -H flag interaction *)

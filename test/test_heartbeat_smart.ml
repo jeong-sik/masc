@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** Unit tests for [Heartbeat_smart].
 
     Pure functions: [make_config] clamping, [effective_interval] idle

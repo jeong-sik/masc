@@ -1,3 +1,5 @@
+module Types = Masc_domain
+
 (** #10314 — pin the accountability ledger emit-skip counter.
 
     Pre-fix [is_keeper_agent_name] silently dropped any

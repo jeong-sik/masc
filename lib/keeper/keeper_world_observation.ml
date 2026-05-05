@@ -246,6 +246,37 @@ let backlog_updated_since_last_scheduled_autonomous
     | Some updated_at -> updated_at > last_ts
     | None -> false
 
+let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
+  String.equal goal.Goal_store.title
+    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
+
+let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
+  goal_ids <> []
+  && List.for_all
+       (fun goal_id ->
+         match Goal_store.get_goal config ~goal_id with
+         | Some goal -> goal_title_matches_keeper_purpose ~meta goal
+         | None -> false)
+       goal_ids
+
+let active_goal_ids_have_claim_pool_task config goal_ids =
+  Coord.get_tasks_safe config
+  |> List.exists (fun task ->
+       Coord_task_schedule.task_is_claim_pool_candidate task
+       && Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task)
+
+let claim_goal_scope_filter ~(config : Coord.config) ~(meta : keeper_meta) =
+  match meta.active_goal_ids with
+  | [] -> fun (_task : Masc_domain.task) -> true
+  | goal_ids ->
+      let scoped_filter task =
+        Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
+      in
+      if active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+         && not (active_goal_ids_have_claim_pool_task config goal_ids)
+      then fun (_task : Masc_domain.task) -> true
+      else scoped_filter
+
 (** Read room backlog counts. *)
 let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
     ~(meta : keeper_meta) :
@@ -258,6 +289,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
+    let claim_scope_filter = claim_goal_scope_filter ~config ~meta in
     let required_tools_allowed required_tools =
       match allowed_tool_names with
       | Some names ->
@@ -271,6 +303,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
         (List.filter
            (fun task ->
              Coord_task_schedule.task_is_claim_pool_candidate task
+             && claim_scope_filter task
              && required_tools_allowed
                   (Coord_task_schedule.task_required_tools task))
            unclaimed_tasks)

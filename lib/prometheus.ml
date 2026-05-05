@@ -959,6 +959,8 @@ let metric_cascade_server_error_skip_total =
    participants are listed in the WARN log. *)
 let metric_cascade_fallback_cycle_detected_total =
   "masc_cascade_fallback_cycle_detected_total"
+let metric_provider_health_probe_skipped =
+  "masc_provider_health_probe_skipped_total"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
 let metric_keeper_passive_loop_detected_total =
@@ -1028,6 +1030,8 @@ let metric_auth_credential_token_duplicate =
    bounded repair scope. *)
 let metric_auth_credential_token_rotated =
   "masc_auth_credential_token_rotated_total"
+let metric_config_credential_archived_starvation =
+  "masc_config_credential_archived_starvation_total"
 
 (* #9786 runtime complement: every [find_credential_by_token]
    lookup that hits N>=2 matches fires this counter.  The
@@ -1079,6 +1083,12 @@ let metric_empty_tool_universe_observed =
    [metric_silent_auth_token_resolve_error] for auth/name drift diagnosis. *)
 let metric_coord_join_normalize_outcome =
   "masc_coord_join_normalize_outcome_total"
+let metric_config_unknown_keys_ignored =
+  "masc_config_unknown_keys_ignored_total"
+let metric_governance_judge_unparseable =
+  "masc_governance_judge_unparseable_total"
+let metric_governance_lenient_json_fallback_hit =
+  "masc_governance_lenient_json_fallback_hit_total"
 
 
 
@@ -1581,6 +1591,12 @@ let init () =
      a provider stall propagates through both cascades silently for \
      600s+ without escaping.  Labeled by [cascade] (cycle entry point)."
     Counter;
+  add metric_provider_health_probe_skipped
+    "Total bootstrap/runtime-catalog provider health probes intentionally \
+     skipped as advisory. Labels: provider_name, profile_name. Any non-zero \
+     value means provider liveness was not actually probed at catalog \
+     validation time."
+    Counter;
   add metric_keeper_passive_loop_detected_total
     "#12799 Total passive-loop detections: keeper issued only read-only tool \
      calls for N consecutive turns. Labeled by keeper."
@@ -1926,6 +1942,10 @@ let init () =
      group (labels: token_hash_prefix, scope). Any positive value means \
      boot-time prevention repaired ambiguous credential state."
     Counter;
+  add metric_config_credential_archived_starvation
+    "Total bare-form keeper credential files archived because they are dead \
+     after PR-3b1 starvation. Labels: keeper_name."
+    Counter;
   add metric_telemetry_coverage_gap
     "Total telemetry coverage gaps recorded before append to the durable \
      coverage-gap store. Labels: source, producer, dashboard_surface, \
@@ -1977,6 +1997,19 @@ let init () =
      Non-ok outcomes reject masc_join at the fail-closed identity gate; pair \
      with masc_silent_auth_token_resolve_error_total for auth/name drift \
      diagnosis."
+    Counter;
+  add metric_config_unknown_keys_ignored
+    "Total unknown config keys ignored after warning. Labels: file_path. \
+     The counter increments by the number of unknown keys in a newly-observed \
+     keeper TOML warning set."
+    Counter;
+  add metric_governance_judge_unparseable
+    "Total governance/operator judge responses that remained unparseable \
+     after deterministic JSON recovery. Labels: judge."
+    Counter;
+  add metric_governance_lenient_json_fallback_hit
+    "Total Lenient_json fallback hits for governance/operator judge output. \
+     Labels: judge."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

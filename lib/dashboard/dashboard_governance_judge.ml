@@ -538,7 +538,9 @@ let compute_judgments
             (* #9774: surface a preview of the raw text so the next
                diagnostic pass can see what shape the LLM is producing
                without having to enable raw provider logging. *)
-            let msg = Judge_diagnostics.format_lenient_fallback ~judge_label:"Governance" raw in
+            let msg =
+              Judge_diagnostics.record_lenient_fallback ~judge_label:"Governance" raw
+            in
             Log.Governance.warn "%s" msg;
             Error msg
         | _ ->

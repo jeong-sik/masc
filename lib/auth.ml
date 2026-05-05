@@ -921,7 +921,13 @@ let archive_credential_file config ~agent_name ~reason =
       Sys.rename src dest;
       Log.Auth.warn
         "archived credential %s -> %s (reason: %s)"
-        src dest reason
+        src dest reason;
+      if String.equal reason "bare-form keeper credential is dead after PR-3b1 starvation"
+      then
+        Prometheus.inc_counter
+          Prometheus.metric_config_credential_archived_starvation
+          ~labels:[("keeper_name", agent_name)]
+          ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

@@ -9,15 +9,6 @@
 open Keeper_types
 open Keeper_alerting
 
-(* Config defaults when no policy_config is loaded. *)
-let default_clone_timeout_sec = 120.0
-let default_push_timeout_sec = 60.0
-let default_pr_create_timeout_sec = 30.0
-let default_gh_cache_ttl_sec = 120.0
-let default_gh_cache_fetch_page_size = 100
-let default_gh_cache_fetch_timeout_sec = 10.0
-let default_gh_cache_max_alternatives = 20
-let default_gh_cache_max_output_bytes = 8192
 open Keeper_tool_registry
 
 (* -- E6: .masc/ write protection whitelist ----------------------------- *)
@@ -96,6 +87,16 @@ let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
     default
   | Some cfg -> f cfg
 
+let require_policy_config ~accessor =
+  match !policy_config with
+  | Some cfg -> cfg
+  | None ->
+    observe_unloaded_policy_config ~accessor;
+    invalid_arg
+      (Printf.sprintf
+         "tool_policy.%s requires init_policy_config; config/tool_policy.toml is not loaded"
+         accessor)
+
 let reset_policy_config_for_test () =
   policy_config := None;
   Stdlib.Mutex.lock policy_config_unloaded_mutex;
@@ -147,50 +148,42 @@ let git_clone_denied_repos () : string list option =
     (fun cfg -> Some (Keeper_tool_policy_config.git_clone_denied_repos cfg))
 
 let clone_depth () : int =
-  with_policy_config_or ~accessor:"clone_depth" ~default:0
-    Keeper_tool_policy_config.clone_depth
+  require_policy_config ~accessor:"clone_depth"
+  |> Keeper_tool_policy_config.clone_depth
 
 let clone_timeout_sec () : float =
-  with_policy_config_or ~accessor:"clone_timeout_sec"
-    ~default:default_clone_timeout_sec
-    Keeper_tool_policy_config.clone_timeout_sec
+  require_policy_config ~accessor:"clone_timeout_sec"
+  |> Keeper_tool_policy_config.clone_timeout_sec
 
 let push_timeout_sec () : float =
-  with_policy_config_or ~accessor:"push_timeout_sec"
-    ~default:default_push_timeout_sec
-    Keeper_tool_policy_config.push_timeout_sec
+  require_policy_config ~accessor:"push_timeout_sec"
+  |> Keeper_tool_policy_config.push_timeout_sec
 
 let pr_create_timeout_sec () : float =
-  with_policy_config_or ~accessor:"pr_create_timeout_sec"
-    ~default:default_pr_create_timeout_sec
-    Keeper_tool_policy_config.pr_create_timeout_sec
+  require_policy_config ~accessor:"pr_create_timeout_sec"
+  |> Keeper_tool_policy_config.pr_create_timeout_sec
 
 (* ── GH cache config accessors (config-driven) ─────────────── *)
 
 let gh_cache_ttl_sec () : float =
-  with_policy_config_or ~accessor:"gh_cache_ttl_sec"
-    ~default:default_gh_cache_ttl_sec
-    Keeper_tool_policy_config.gh_cache_ttl_sec
+  require_policy_config ~accessor:"gh_cache_ttl_sec"
+  |> Keeper_tool_policy_config.gh_cache_ttl_sec
 
 let gh_cache_fetch_page_size () : int =
-  with_policy_config_or ~accessor:"gh_cache_fetch_page_size"
-    ~default:default_gh_cache_fetch_page_size
-    Keeper_tool_policy_config.gh_cache_fetch_page_size
+  require_policy_config ~accessor:"gh_cache_fetch_page_size"
+  |> Keeper_tool_policy_config.gh_cache_fetch_page_size
 
 let gh_cache_fetch_timeout_sec () : float =
-  with_policy_config_or ~accessor:"gh_cache_fetch_timeout_sec"
-    ~default:default_gh_cache_fetch_timeout_sec
-    Keeper_tool_policy_config.gh_cache_fetch_timeout_sec
+  require_policy_config ~accessor:"gh_cache_fetch_timeout_sec"
+  |> Keeper_tool_policy_config.gh_cache_fetch_timeout_sec
 
 let gh_cache_max_alternatives () : int =
-  with_policy_config_or ~accessor:"gh_cache_max_alternatives"
-    ~default:default_gh_cache_max_alternatives
-    Keeper_tool_policy_config.gh_cache_max_alternatives
+  require_policy_config ~accessor:"gh_cache_max_alternatives"
+  |> Keeper_tool_policy_config.gh_cache_max_alternatives
 
 let gh_cache_max_output_bytes () : int =
-  with_policy_config_or ~accessor:"gh_cache_max_output_bytes"
-    ~default:default_gh_cache_max_output_bytes
-    Keeper_tool_policy_config.gh_cache_max_output_bytes
+  require_policy_config ~accessor:"gh_cache_max_output_bytes"
+  |> Keeper_tool_policy_config.gh_cache_max_output_bytes
 
 (* ── Preset subsumption (config-driven) ──────────────────────── *)
 

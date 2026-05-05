@@ -19,7 +19,8 @@ type t = {
 (** The empty evidence record: both fields are [None]. *)
 val empty : t
 
-(** [is_populated ev] returns [true] when [ev.source_path] is [Some _]. *)
+(** [is_populated ev] returns [true] when [ev.source_path] is non-empty
+    after trimming whitespace. *)
 val is_populated : t -> bool
 
 (** Parse evidence from a JSON object.  Returns [empty] when neither
@@ -33,7 +34,7 @@ val of_json : Yojson.Safe.t -> t
 val of_json_list : Yojson.Safe.t -> (t list, string) result
 
 (** [any_source_path_present events] is true when at least one effects row
-    carries a [source_path]. *)
+    carries a non-empty [source_path]. *)
 val any_source_path_present : t list -> bool
 
 (** [check_any_source_path_present events] fails when the effects artifact

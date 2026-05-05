@@ -9,14 +9,22 @@ type t = {
 
 let empty = { source_path = None; source_line = None }
 
-let is_populated (ev : t) = ev.source_path <> None
+let source_path_is_populated = function
+  | Some path -> String.trim path <> ""
+  | None -> false
+
+let normalize_source_path = function
+  | "" -> None
+  | path -> Some path
+
+let is_populated (ev : t) = source_path_is_populated ev.source_path
 
 let of_json (json : Yojson.Safe.t) : t =
   let open Yojson.Safe.Util in
   try
     let source_path =
       match json |> member "source_path" with
-      | `String s -> Some s
+      | `String s -> normalize_source_path (String.trim s)
       | _ -> None
     in
     let source_line =

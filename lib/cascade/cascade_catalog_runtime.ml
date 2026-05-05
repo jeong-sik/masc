@@ -925,6 +925,112 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
               normalized)
        else Ok providers)
 
+type secondary_resolution = {
+  providers : Llm_provider.Provider_config.t list;
+  secondary_resolver :
+    int -> Llm_provider.Provider_config.t ->
+    Llm_provider.Provider_config.t option;
+}
+
+let provider_filter_allows_single ~provider_filter ~label provider =
+  match provider_filter with
+  | None | Some [] -> true
+  | Some _ ->
+      match
+        Cascade_config.apply_provider_filter_strict
+          ~provider_filter ~label [ provider ]
+      with
+      | Ok [ _ ] -> true
+      | Ok _ | Error _ -> false
+
+let parse_secondary_from_entry ~api_key_env_overrides
+    (entry : Cascade_config_loader.weighted_entry) =
+  match entry.secondary with
+  | None -> None
+  | Some secondary ->
+      let secondary_entry : Cascade_config_loader.weighted_entry =
+        {
+          model = secondary;
+          weight = 1;
+          supports_tool_choice = entry.secondary_supports_tool_choice;
+          secondary = None;
+          secondary_supports_tool_choice = None;
+        }
+      in
+      Cascade_config.parse_weighted_entry
+        ~api_key_env_overrides secondary_entry
+
+let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
+    ?provider_filter ~cascade_name () =
+  match lookup_active_profile ?sw ?net ?clock cascade_name with
+  | Error _ as e -> e
+  | Ok (_snapshot, normalized, profile) ->
+      let ordered_entries =
+        Cascade_config.order_weighted_entries
+          ~rotation_scope:normalized
+          profile.weighted_entries
+      in
+      let parsed_pairs =
+        ordered_entries
+        |> List.filter_map
+             (fun (entry : Cascade_config_loader.weighted_entry) ->
+                match
+                  Cascade_config.parse_weighted_entry
+                    ~api_key_env_overrides:profile.api_key_env_overrides
+                    entry
+                with
+                | None -> None
+                | Some primary ->
+                    Some
+                      ( primary,
+                        parse_secondary_from_entry
+                          ~api_key_env_overrides:
+                            profile.api_key_env_overrides
+                          entry ))
+      in
+      let primaries = List.map fst parsed_pairs in
+      (match
+         Cascade_config.apply_provider_filter_strict
+           ~provider_filter ~label:normalized primaries
+       with
+       | Error rejection ->
+           Error (Cascade_config.provider_filter_rejection_to_string rejection)
+       | Ok _filtered_primaries ->
+           let provider_filter_allows =
+             provider_filter_allows_single ~provider_filter ~label:normalized
+           in
+           let filtered_pairs =
+             parsed_pairs
+             |> List.filter (fun (primary, _) ->
+                    provider_filter_allows primary)
+             |> List.map (fun (primary, secondary) ->
+                    let secondary =
+                      match secondary with
+                      | Some cfg when provider_filter_allows cfg -> Some cfg
+                      | _ -> None
+                    in
+                    (primary, secondary))
+           in
+           let providers = List.map fst filtered_pairs in
+           if providers = [] then
+             Error
+               (Printf.sprintf
+                  "cascade %s resolved to no callable providers"
+                  normalized)
+           else
+             let slots = Array.of_list filtered_pairs in
+             let secondary_resolver provider_index primary =
+               if provider_index < 0 || provider_index >= Array.length slots then
+                 None
+               else
+                 let indexed_primary, secondary = slots.(provider_index) in
+                 if candidate_key_of_cfg indexed_primary
+                    = candidate_key_of_cfg primary
+                 then secondary
+                 else None
+             in
+             Ok { providers; secondary_resolver })
+
 (** RFC-0027 PR-9b dual-track resolution. The [primary] argument is one
     of the providers returned by {!resolve_named_providers}; we walk the
     cascade's parsed weighted entries and, for the entry whose parsed
@@ -950,7 +1056,7 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
     ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
   | Error _ -> None
-  | Ok (_snapshot, normalized, profile) ->
+  | Ok (_snapshot, _normalized, profile) ->
       let same_kind_model
           (cfg : Llm_provider.Provider_config.t) =
         cfg.kind = primary.kind
@@ -990,17 +1096,12 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
                       (Option.get entry.secondary))
              | _ -> None)
       in
-      (* Expand provider:auto entries before matching. The [primary] we
-         received from {!resolve_named_providers} carries a concrete
-         [model_id] post-expansion (e.g. ["claude-code-sonnet-4"]),
-         whereas the raw weighted entries may still hold ["auto"]. We
-         use the same rotation scope as the live resolver so that
-         expansion order matches what the caller observed. *)
-      let expanded =
-        Cascade_config.expand_weighted_auto_entries
-          ~rotation_scope:normalized
-          profile.weighted_entries
-      in
+      (* Expand provider:auto entries without a rotation scope: this legacy
+         lookup may be called after live provider resolution, so it must not
+         consume round-robin state just to answer a secondary lookup. New
+         execution paths use [resolve_named_providers_strict_with_secondary_resolver]
+         to precompute secondaries from the same ordered snapshot. *)
+      let expanded = expand_weighted_entries profile.weighted_entries in
       List.find_map try_entry expanded
 
 let resolve_inference_params ?sw ?net ?clock ~name () =

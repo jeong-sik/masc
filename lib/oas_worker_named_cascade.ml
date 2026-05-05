@@ -250,12 +250,14 @@ let attempt_secondary_swap
     ~keeper_name ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support
     ~(secondary_resolver :
+        int ->
         Llm_provider.Provider_config.t ->
         Llm_provider.Provider_config.t option)
+    ~(provider_index : int)
     (primary, primary_reason)
   : (Llm_provider.Provider_config.t,
      Llm_provider.Provider_config.t * filter_rejection_reason) Either.t =
-  match secondary_resolver primary with
+  match secondary_resolver provider_index primary with
   | None -> Either.Right (primary, primary_reason)
   | Some secondary -> (
       match
@@ -291,78 +293,38 @@ let filter_candidate_providers_for_tool_support
   if not require_tool_choice_support && not require_tool_support then
     provider_cfgs
   else
-    let initial_kept, initial_rejected =
-      List.partition_map
-        (fun provider_cfg ->
+    let kept_rev, rejected_rev, _ =
+      List.fold_left
+        (fun (kept, rejected, provider_index) provider_cfg ->
            match
              classify_filter_rejection
                ~keeper_name ?runtime_mcp_policy ~tools
                ~require_tool_choice_support ~require_tool_support
                provider_cfg
            with
-           | None -> Either.Left provider_cfg
-           | Some reason -> Either.Right (provider_cfg, reason))
+           | None -> (provider_cfg :: kept, rejected, provider_index + 1)
+           | Some reason ->
+               let swap =
+                 match secondary_resolver with
+                 | None -> Either.Right (provider_cfg, reason)
+                 | Some resolver ->
+                     attempt_secondary_swap
+                       ~keeper_name ?runtime_mcp_policy ~tools
+                       ~require_tool_choice_support ~require_tool_support
+                       ~secondary_resolver:resolver
+                       ~provider_index
+                       (provider_cfg, reason)
+               in
+               (match swap with
+                | Either.Left secondary ->
+                    (secondary :: kept, rejected, provider_index + 1)
+                | Either.Right rejected_provider ->
+                    (kept, rejected_provider :: rejected, provider_index + 1)))
+        ([], [], 0)
         provider_cfgs
     in
-    let kept, rejected =
-      match secondary_resolver with
-      | None -> initial_kept, initial_rejected
-      | Some resolver ->
-          (* #13097 review (codex P1, copilot): preserve original cascade
-             priority slots when a primary is swapped to its secondary.
-             The earlier ([initial_kept @ swapped_in], …) implementation
-             appended every secondary after every kept provider, which
-             changed runtime ordering whenever a rejected primary came
-             before a kept one — failover then routed to lower-priority
-             providers ahead of the configured fallback.
-
-             We re-walk [provider_cfgs] in original order: kept primaries
-             stay in place, rejected primaries that produce a successful
-             secondary occupy the same slot as their primary (replaced),
-             and entries whose secondary is also rejected fall into
-             [rejected]. The result is a single pass that keeps slot
-             ordering stable. *)
-          let swap_outcomes =
-            List.map
-              (attempt_secondary_swap
-                 ~keeper_name ?runtime_mcp_policy ~tools
-                 ~require_tool_choice_support ~require_tool_support
-                 ~secondary_resolver:resolver)
-              initial_rejected
-          in
-          let still_rejected =
-            List.filter_map
-              (function
-                | Either.Left _ -> None
-                | Either.Right pair -> Some pair)
-              swap_outcomes
-          in
-          (* Build a lookup from rejected primary's identity (physical
-             pointer is stable here since [initial_rejected] holds the
-             same [Provider_config.t] values we just received) to its
-             swap outcome, so a single pass over [provider_cfgs] can
-             splice secondaries back into their primary's slot. *)
-          let outcome_for_primary =
-            List.combine initial_rejected swap_outcomes
-          in
-          let kept_in_order =
-            List.filter_map
-              (fun cfg ->
-                if List.exists (fun k -> k == cfg) initial_kept then
-                  Some cfg
-                else
-                  match
-                    List.find_opt
-                      (fun ((rejected_cfg, _), _) -> rejected_cfg == cfg)
-                      outcome_for_primary
-                  with
-                  | Some (_, Either.Left secondary) -> Some secondary
-                  | Some (_, Either.Right _) -> None
-                  | None -> None)
-              provider_cfgs
-          in
-          (kept_in_order, still_rejected)
-    in
+    let kept = List.rev kept_rev in
+    let rejected = List.rev rejected_rev in
     if kept = [] && provider_cfgs <> [] then begin
       let signature = signature_of_rejected_providers rejected in
       (* Forward each rejection to the Prometheus capability_drop counter so
@@ -441,7 +403,7 @@ let resolve_tool_capable_provider_across_cascades
              with
              | Error _ -> None
              | Ok providers ->
-                 let secondary_resolver primary =
+                 let secondary_resolver _provider_index primary =
                    Cascade_catalog_runtime
                    .resolve_secondary_provider_for_primary
                      ~sw ~net ~cascade_name ~primary ()

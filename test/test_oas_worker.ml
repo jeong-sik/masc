@@ -2161,6 +2161,71 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
     [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
+let test_filter_candidate_providers_for_tool_support_secondary_preserves_priority_slot
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~secondary_resolver:
+        (fun provider_index provider_cfg ->
+           if provider_index = 0
+              && provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+           then Some (make_claude_code_provider_cfg ())
+           else None)
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+  in
+  Alcotest.(check (list string))
+    "secondary replaces rejected primary in its original priority slot"
+    [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
+    (List.map Provider_tool_support.provider_debug_label filtered)
+
+let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_index
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~secondary_resolver:
+        (fun provider_index provider_cfg ->
+           if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli then
+             Some
+               (make_claude_code_provider_cfg
+                  ~model_id:(Printf.sprintf "fallback-%d" provider_index)
+                  ())
+           else None)
+      ~label:"tool_use_strict"
+      [
+        make_codex_cli_provider_cfg ~model_id:"same-primary" ();
+        make_codex_cli_provider_cfg ~model_id:"same-primary" ();
+      ]
+  in
+  Alcotest.(check (list string))
+    "duplicate primary slots get their own secondary"
+    [ "claude_code:fallback-0"; "claude_code:fallback-1" ]
+    (List.map Provider_tool_support.provider_debug_label filtered)
+
 (* #10681: filter rejection diagnostics. When [filter_*] empties the
    cascade, the WARN log now lists each rejected provider with its
    classification — these tests pin the classifier to its 3-stage
@@ -4136,6 +4201,14 @@ let () =
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick
         test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools;
+      Alcotest.test_case
+        "provider-normalized secondary preserves primary priority slot"
+        `Quick
+        test_filter_candidate_providers_for_tool_support_secondary_preserves_priority_slot;
+      Alcotest.test_case
+        "provider-normalized secondary resolver receives candidate index"
+        `Quick
+        test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_index;
       Alcotest.test_case
         "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
         `Quick test_classify_filter_rejection_codex_keeper_bound_actor;

@@ -106,7 +106,8 @@ val filter_candidate_providers_for_tool_support :
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
   ?secondary_resolver:
-    (Llm_provider.Provider_config.t ->
+    (int ->
+     Llm_provider.Provider_config.t ->
      Llm_provider.Provider_config.t option) ->
   label:string ->
   Llm_provider.Provider_config.t list ->
@@ -119,7 +120,8 @@ val filter_candidate_providers_for_tool_support :
     set, each rejected primary is offered to the resolver; if it returns
     a [Some secondary] candidate that itself passes the tool-use gate,
     the secondary replaces the primary in the kept list. The function
-    is invoked at most once per rejected primary, after the initial
+    is invoked at most once per rejected primary, with the primary's
+    zero-based position in the original candidate list, after the initial
     classification, so it does not affect the hot path when no entries
     have a [secondary] declaration. *)
 

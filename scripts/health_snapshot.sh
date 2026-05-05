@@ -249,8 +249,10 @@ fi
 
 mli_open_base="$(extract_json_top_int "$base_policy_json" "mli_open_base")"
 ml_base_stdlib_shadow="$(extract_json_top_int "$base_policy_json" "ml_base_stdlib_shadow")"
+bin_ml_base_stdlib_shadow="$(extract_json_top_int "$base_policy_json" "bin_ml_base_stdlib_shadow")"
 baseline_mli_open_base="$(extract_json_field "$base_policy_json" baseline mli_open_base)"
 baseline_ml_base_stdlib_shadow="$(extract_json_field "$base_policy_json" baseline ml_base_stdlib_shadow)"
+baseline_bin_ml_base_stdlib_shadow="$(extract_json_field "$base_policy_json" baseline bin_ml_base_stdlib_shadow)"
 rm -f "$base_policy_json"
 
 lib_failwith="$(count_pattern lib 'failwith')"
@@ -328,6 +330,7 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
   [ "$lib_obj_magic" -gt "$baseline_lib_obj_magic" ] && regressions+=("lib_obj_magic ${baseline_lib_obj_magic}->${lib_obj_magic}")
   [ "$mli_open_base" -gt "$baseline_mli_open_base" ] && regressions+=("mli_open_base ${baseline_mli_open_base}->${mli_open_base}")
   [ "$ml_base_stdlib_shadow" -gt "$baseline_ml_base_stdlib_shadow" ] && regressions+=("ml_base_stdlib_shadow ${baseline_ml_base_stdlib_shadow}->${ml_base_stdlib_shadow}")
+  [ "$bin_ml_base_stdlib_shadow" -gt "$baseline_bin_ml_base_stdlib_shadow" ] && regressions+=("bin_ml_base_stdlib_shadow ${baseline_bin_ml_base_stdlib_shadow}->${bin_ml_base_stdlib_shadow}")
 
   if [ "${#regressions[@]}" -eq 0 ]; then
     ratchet_status="pass"
@@ -369,7 +372,7 @@ echo "Baseline: ${baseline_label}"
 echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti_fake_suspect} fake=${anti_fake_fake} total=${anti_fake_total}"
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
-echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow}"
+echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow} bin_ml_base_stdlib_shadow=${bin_ml_base_stdlib_shadow}"
 echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500} examples=${examples_ml_over_500}"
 echo "ML line cap changed: ${ml_line_cap_changed_status} (${ml_line_cap_changed_message})"
 echo "ML line cap ratchet: ${ml_line_cap_status} (${ml_line_cap_message})"
@@ -409,7 +412,8 @@ json_payload="$(cat <<EOF
     "test_ml_over_500": ${test_ml_over_500},
     "examples_ml_over_500": ${examples_ml_over_500},
     "mli_open_base": ${mli_open_base},
-    "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow}
+    "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow},
+    "bin_ml_base_stdlib_shadow": ${bin_ml_base_stdlib_shadow}
   },
   "ml_line_cap": {
     "status": "${ml_line_cap_status}",
@@ -428,7 +432,8 @@ json_payload="$(cat <<EOF
       "lib_option_get": ${baseline_lib_option_get},
       "lib_obj_magic": ${baseline_lib_obj_magic},
       "mli_open_base": ${baseline_mli_open_base},
-      "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow}
+      "ml_base_stdlib_shadow": ${baseline_ml_base_stdlib_shadow},
+      "bin_ml_base_stdlib_shadow": ${baseline_bin_ml_base_stdlib_shadow}
     }
   },
   "ratchet": {
@@ -471,7 +476,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| examples | $examples_ml_over_500 | n/a |"
     echo ""
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
-    echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\`"
+    echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\` bin_ml_base_stdlib_shadow=\`$bin_ml_base_stdlib_shadow\`"
     echo "- ML line cap changed: \`$ml_line_cap_changed_status\` ($ml_line_cap_changed_message)"
     echo "- ML line cap ratchet: \`$ml_line_cap_status\` ($ml_line_cap_message)"
     echo "- Ratchet: \`$ratchet_status\` ($ratchet_message)"

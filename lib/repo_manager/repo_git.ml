@@ -62,7 +62,7 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
   let status, stdout, stderr =
     Masc_exec.Exec_gate.run_argv_with_status_split
       ~actor:"repo-manager/git" ~raw_source ~summary:"repo manager git"
-      ~timeout_sec:300.0 ~env:envp argv
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_manager_git ()) ~env:envp argv
   in
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)

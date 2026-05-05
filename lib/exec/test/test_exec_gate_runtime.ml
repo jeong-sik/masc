@@ -31,7 +31,7 @@ let test_enforced_strict_safe_blocks () =
         ~actor:"unknown/strict"
         ~raw_source:"pwd"
         ~summary:"strict pwd"
-        ~timeout_sec:5.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
         [ "pwd" ]
     in
     assert (status = Unix.WEXITED 126);
@@ -45,7 +45,7 @@ let test_parallel_records_shadow_and_executes () =
           ~actor:"unknown/strict"
           ~raw_source:"pwd"
           ~summary:"strict pwd"
-          ~timeout_sec:5.0
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
           [ "pwd" ]
       in
       assert (String.trim out <> "");
@@ -63,7 +63,7 @@ let test_enforced_internal_audited_allows () =
         ~actor:"coord/git"
         ~raw_source:"git --version"
         ~summary:"coord git version"
-        ~timeout_sec:5.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
         [ "git"; "--version" ]
     in
     assert (status = Unix.WEXITED 0);
@@ -76,7 +76,7 @@ let test_enforced_internal_stdin_allows () =
         ~actor:"system/task_sandbox"
         ~raw_source:"cat"
         ~summary:"stdin cat"
-        ~timeout_sec:5.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
         ~stdin_content:"hello\n"
         [ "cat" ]
     in

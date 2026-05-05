@@ -141,11 +141,11 @@ val all_strategy_tla_symbols : string list
 
 val classify_string : string -> error_mode
 (** Best-effort classification of a free-form exception or error
-    string. Returns [TransientError] for known retryable phrases
-    (timeout, rate limit, connection reset, temporary),
-    [ResourceExhausted] with unknown measurement for resource phrases, and
-    [PermanentError { fallback_strategy = HumanHandoff _ }]
-    otherwise. *)
+    string. Returns [ResourceExhausted] with unknown measurement for
+    resource phrases, including hard-quota/resource wording that may also
+    mention rate limits. Otherwise returns [TransientError] for known
+    retryable phrases (timeout, rate limit, connection reset, temporary),
+    and [PermanentError { fallback_strategy = HumanHandoff _ }] otherwise. *)
 
 (** {1 Default strategy selection} *)
 

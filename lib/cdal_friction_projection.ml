@@ -40,12 +40,19 @@ type friction_projection = {
 (* ================================================================ *)
 
 let mode_violations_suffix = "evidence/mode_violations.json"
+let effects_suffix = "evidence/effects.json"
 let review_warning_suffix = "evidence/review_warning.json"
 
 (** Find the first raw_evidence_ref that ends with mode_violations.json. *)
 let find_violations_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
   List.find_opt
     (fun ref_ -> String.ends_with ~suffix:mode_violations_suffix ref_)
+    proof.raw_evidence_refs
+
+(** Find the first raw_evidence_ref that ends with effects.json. *)
+let find_effects_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
+  List.find_opt
+    (fun ref_ -> String.ends_with ~suffix:effects_suffix ref_)
     proof.raw_evidence_refs
 
 (** Convert a Violation_record.t to its v1 grouping key. *)
@@ -136,6 +143,33 @@ let review_tripwires_of_gaps (gaps : Cdal_types.completeness_gap list)
   if has_review_gap then [ "review_requirement:submit_for_verification" ]
   else []
 
+let source_path_gap : Cdal_types.completeness_gap =
+  { artifact = effects_suffix
+  ; reason =
+      "mode_violations.json exists, but effects.json has no source_path evidence"
+  ; impact = Cdal_types.Blocks_verdict
+  }
+
+let source_path_tripwire = "source_path_evidence:mode_enforcer"
+
+let effects_have_source_path ~(store : Agent_sdk.Proof_store.config)
+    (proof : Agent_sdk.Cdal_proof.t) : bool =
+  match find_effects_ref proof with
+  | None -> false
+  | Some ref_ ->
+    match Proof_artifact_reader.read_json store ref_ with
+    | Error _ -> false
+    | Ok json ->
+      match Effect_evidence.of_json_list json with
+      | Error _ -> false
+      | Ok events -> Effect_evidence.any_source_path_present events
+
+let source_path_gaps_for_run ~(store : Agent_sdk.Proof_store.config)
+    ~(blocked_attempt_count : int) (proof : Agent_sdk.Cdal_proof.t)
+    : Cdal_types.completeness_gap list =
+  if blocked_attempt_count = 0 || effects_have_source_path ~store proof then []
+  else [ source_path_gap ]
+
 (* ================================================================ *)
 (* Public API                                                        *)
 (* ================================================================ *)
@@ -161,11 +195,16 @@ let project_single_run
             (fun acc (grp : blocked_attempt_group) -> acc + grp.count) 0 g in
           (g, c)
   in
-  let gap_groups = compute_gap_groups completeness_gaps in
+  let source_path_gaps =
+    source_path_gaps_for_run ~store ~blocked_attempt_count proof
+  in
+  let all_gaps = completeness_gaps @ source_path_gaps in
+  let gap_groups = compute_gap_groups all_gaps in
   let review_tripwires =
     List.sort_uniq String.compare
       (compute_tripwires ~threshold:tripwire_threshold groups
-       @ review_tripwires_of_gaps completeness_gaps)
+       @ review_tripwires_of_gaps all_gaps
+       @ (if source_path_gaps = [] then [] else [ source_path_tripwire ]))
   in
   if blocked_attempt_count = 0 && gap_groups = [] then None
   else
@@ -281,18 +320,33 @@ let project_window
   | _, [] ->
     None
   | _, _ ->
-    let all_groups = List.map (fun proof ->
+    let per_run = List.map (fun proof ->
       let groups, _ = project_single_run_groups ~store proof in
-      groups
+      let count =
+        List.fold_left
+          (fun acc (g : blocked_attempt_group) -> acc + g.count)
+          0
+          groups
+      in
+      (proof, groups, count)
     ) proofs in
+    let all_groups = List.map (fun (_, groups, _) -> groups) per_run in
     let merged = merge_groups all_groups in
     let blocked_attempt_count =
       List.fold_left (fun acc (g : blocked_attempt_group) -> acc + g.count) 0 merged in
-    let gap_groups = compute_gap_groups completeness_gaps in
+    let source_path_gaps =
+      List.concat_map
+        (fun (proof, _, blocked_attempt_count) ->
+           source_path_gaps_for_run ~store ~blocked_attempt_count proof)
+        per_run
+    in
+    let all_gaps = completeness_gaps @ source_path_gaps in
+    let gap_groups = compute_gap_groups all_gaps in
     let review_tripwires =
       List.sort_uniq String.compare
         (compute_tripwires ~threshold:tripwire_threshold merged
-         @ review_tripwires_of_gaps completeness_gaps)
+         @ review_tripwires_of_gaps all_gaps
+         @ (if source_path_gaps = [] then [] else [ source_path_tripwire ]))
     in
     if blocked_attempt_count = 0 && gap_groups = [] then None
     else

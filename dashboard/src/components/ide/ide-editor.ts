@@ -16,6 +16,7 @@ import {
   languageExt,
   blameExtensions,
   pushOwnership,
+  internalDocumentSync,
 } from './ide-editor-extensions'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 
@@ -52,6 +53,11 @@ export function IdeEditor({
   ownershipStore,
   diffRows,
 }: IdeEditorProps) {
+  const [, forceRender] = useState(0)
+
+  useEffect(() => documentStore.subscribe(() => forceRender(tick => tick + 1)), [documentStore])
+  useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
+
   const document = documentStore.document()
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
@@ -135,12 +141,13 @@ function CodeMirrorEditor({
     let destroyed = false
 
     async function mount() {
-      const lang = await languageExt(document.file_path)
+      const mountDocument = documentStore.document()
+      const lang = await languageExt(mountDocument.file_path)
       if (destroyed) return
 
       const blameExts = showBlame ? blameExtensions() : []
       const state = EditorState.create({
-        doc: document.content,
+        doc: documentStore.document().content,
         extensions: [
           readOnlyExt(),
           themeExt(),
@@ -169,20 +176,21 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, showBlame])
+  }, [document.file_path, documentStore, showBlame])
 
-  // Push document updates
+  // Push document updates. The first file response can arrive before
+  // the CM6 instance is ready or before this component subscribes, so
+  // always sync the current store snapshot when the effect starts.
   useEffect(() => {
-    const view = editorRef.current
-    if (!view || !ready) return
+    const sync = () => {
+      const view = editorRef.current
+      if (!view || !ready) return
+      syncEditorDocument(view, documentStore.document().content)
+    }
 
-    const currentDoc = view.state.doc.toString()
-    if (currentDoc === document.content) return
-
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: document.content },
-    })
-  }, [document.content, ready])
+    sync()
+    return documentStore.subscribe(sync)
+  }, [documentStore, ready])
 
   // Push ownership updates
   useEffect(() => {
@@ -202,6 +210,16 @@ function CodeMirrorEditor({
       <div ref=${containerRef} style=${{ overflow: 'auto', minHeight: 0 }} />
     </div>
   `
+}
+
+function syncEditorDocument(view: EditorView, content: string): void {
+  const currentDoc = view.state.doc.toString()
+  if (currentDoc === content) return
+
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: content },
+    annotations: internalDocumentSync.of(true),
+  })
 }
 
 // ── Blame timeline header ─────────────────────────────────────────

@@ -1,12 +1,16 @@
 import { EditorView, GutterMarker, gutter } from '@codemirror/view'
-import { EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
+import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
 import type { LineOwnership } from './keeper-line-ownership-store'
 
 // ── Read-only lock ────────────────────────────────────────────────
 // Prevents all user input. CM6 6.x uses EditorState.changeFilter.
 
+export const internalDocumentSync = Annotation.define<boolean>()
+
 export function readOnlyExt(): Extension {
-  return EditorState.changeFilter.of(() => false)
+  return EditorState.changeFilter.of(transaction =>
+    transaction.annotation(internalDocumentSync) === true,
+  )
 }
 
 // ── Theme from design-system CSS variables ────────────────────────

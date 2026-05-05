@@ -635,6 +635,20 @@ let transition_task_r
                  | Ok msg ->
                    Log.RoomTask.info
                      "%s worktree auto-cleanup: %s" reason_label msg
+                 | Error (System (System_error.IoError msg))
+                   when (let lc = String.lowercase_ascii msg in
+                         String.length lc >= 9
+                         && (let sub = String.sub lc 0 9 in
+                             sub = "worktree ")) ->
+                   (* P2-1: "Worktree … not found" means the task had a
+                      worktree record (worktree = Some _) but the directory
+                      was never physically created on this host — typical for
+                      Docker-isolated keepers whose sandbox lives inside the
+                      container.  This is expected; demote to INFO so routine
+                      best-effort cleanup no longer fires false-alarm WARNs. *)
+                   Log.RoomTask.info
+                     "%s worktree auto-cleanup: %s (worktree absent, skipped)"
+                     reason_label msg
                  | Error e ->
                    Log.RoomTask.warn
                      "%s worktree auto-cleanup failed \

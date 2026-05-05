@@ -323,11 +323,26 @@ let dashboard_actor_for_request ~base_path request =
              silently from the MCP-side dispatch in
              [mcp_server_eio_execute.ml:silent_auth_token_error_kind]. *)
           let err_kind = Auth_error_kind.to_string (Auth_error_kind.classify err) in
+          (* P3-5: token_mismatch means the dashboard's bearer token does not
+             match any credential on file.  This is a structural auth-path
+             defect: the dashboard is presenting a stale token from a previous
+             startup or a browser session whose credential was rotated.  Add a
+             one-time remediation hint to guide operators toward the fix:
+             clearing the stored dashboard token causes ensure_dashboard_dev_token
+             to mint a fresh one on the next page load. *)
+          let extra_hint =
+            if String.equal err_kind "token_mismatch" then
+              " Remediation: clear the browser's stored dashboard token \
+               (localStorage masc_dashboard_token) or delete \
+               .masc/auth/dashboard.token so a fresh token is minted on \
+               the next dashboard load."
+            else ""
+          in
           Log.Auth.warn
             "[silent:dashboard_actor_fallback] outcome=error \
              token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s — falling \
-             back to request actor hint"
-            token_hash_prefix err_kind hint err_str;
+             back to request actor hint.%s"
+            token_hash_prefix err_kind hint err_str extra_hint;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
             ~labels:[ ("outcome", "error"); ("err_kind", err_kind) ]

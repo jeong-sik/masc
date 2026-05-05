@@ -26,7 +26,10 @@
     "codex_cli:gpt-5.3-codex-spark",
     "gemini_cli:auto",
     "kimi_cli:kimi-for-coding",
-    { "model": "glm-coding:auto", "supports_tool_choice": true },
+    {
+      "model": "glm-coding:auto",
+      "supports_tool_choice": true
+    },
     "claude_code:auto"
   ],
   "big_three_temperature": 0.2,
@@ -35,7 +38,8 @@
   "big_three_fallback_cascade": "keeper_diverse",
   "_comment_keeper_diverse": "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure.",
   "keeper_diverse_models": [
-    "claude_code:claude-sonnet-4-6", "gemini_cli:gemini-2.5-flash",
+    "claude_code:claude-sonnet-4-6",
+    "gemini_cli:gemini-2.5-flash",
     "codex_cli:gpt-5.3-codex-spark"
   ],
   "keeper_diverse_temperature": 0.3,
@@ -43,8 +47,11 @@
   "keeper_diverse_keeper_assignable": true,
   "_comment_tool_rerank": "System-only short-output profile for rerank/scoring calls.",
   "tool_rerank_models": [
-    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto",
-    "kimi_cli:kimi-for-coding", "glm-coding:auto", "claude_code:auto"
+    "codex_cli:gpt-5.3-codex-spark",
+    "gemini_cli:auto",
+    "kimi_cli:kimi-for-coding",
+    "glm-coding:auto",
+    "claude_code:auto"
   ],
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
@@ -56,7 +63,9 @@
   "tier_small_keeper_assignable": false,
   "tier_small_fallback_cascade": "tier_medium",
   "_comment_tier_medium": "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion.",
-  "tier_medium_models": [ "glm-coding:glm-4.7-flashx" ],
+  "tier_medium_models": [
+    "glm-coding:glm-4.7-flashx"
+  ],
   "tier_medium_temperature": 0.2,
   "tier_medium_max_tokens": 4096,
   "tier_medium_keeper_assignable": false,
@@ -64,21 +73,40 @@
   "_comment___safe_lane": "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable.",
   "__safe_lane_models": [
     "claude_code:auto",
-    { "model": "glm-coding:auto", "supports_tool_choice": true },
+    {
+      "model": "glm-coding:auto",
+      "supports_tool_choice": true
+    },
     "kimi_cli:kimi-for-coding"
   ],
   "__safe_lane_temperature": 0.2,
   "__safe_lane_max_tokens": 16384,
   "__safe_lane_keeper_assignable": false,
   "__safe_lane_required_capability_profile": "tool_strict",
+  "_comment_local_recovery": "P1-2 fix: alias entry for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable; delegates to big_three.",
+  "local_recovery_models": [
+    "codex_cli:gpt-5.3-codex-spark",
+    "gemini_cli:auto",
+    "claude_code:auto"
+  ],
+  "local_recovery_temperature": 0.2,
+  "local_recovery_max_tokens": 16384,
+  "local_recovery_keeper_assignable": false,
+  "local_recovery_fallback_cascade": "big_three",
   "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
   "tier_fast_models": [
     "claude_code:claude-haiku-4-5-20251001",
     "codex_cli:gpt-5.3-codex-spark",
     "gemini_cli:gemini-3-flash-preview",
     "gemini_cli:gemini-3.1-flash-lite-preview",
-    { "model": "glm-coding:glm-5-turbo", "supports_tool_choice": true },
-    { "model": "glm-coding:glm-4.7-flashx", "supports_tool_choice": true }
+    {
+      "model": "glm-coding:glm-5-turbo",
+      "supports_tool_choice": true
+    },
+    {
+      "model": "glm-coding:glm-4.7-flashx",
+      "supports_tool_choice": true
+    }
   ],
   "tier_fast_temperature": 0.2,
   "tier_fast_max_tokens": 8192,

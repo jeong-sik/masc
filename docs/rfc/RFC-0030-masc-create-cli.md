@@ -147,7 +147,7 @@ masc create keeper \
   --persona <persona-name | --inline persona-flags...> \
   --tier <...> \
   [--no-credential]   # for testing / staging
-  [--no-cascade-route] # for keepers that route via tier only
+  [--cascade-route]   # opt-in; default off — most keepers route via tier
   [--dry-run]
 ```
 

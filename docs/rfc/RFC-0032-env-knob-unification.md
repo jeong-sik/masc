@@ -104,11 +104,15 @@ owner_module's read is the canonical lookup.
 ```
 val Env_catalog.load : unit -> catalog
 val Env_catalog.lookup : catalog -> string -> knob option
-val Env_catalog.validate_value : knob -> string -> Result.t
+val Env_catalog.validate_value : knob -> string -> (string, error) result
 ```
 
-Loaded once at startup, immutable. The existing `Env_config_core`
-module gains a thin wrapper:
+Loaded once at startup, immutable. `validate_value` is the
+**catalog-load-time** check: it rejects malformed TOML default
+literals (e.g. a `default="abc"` on a `type=int` knob). It does not
+gate runtime env reads.
+
+The existing `Env_config_core` module gains a thin runtime wrapper:
 
 ```
 val Env_config_core.get_int_typed
@@ -118,10 +122,13 @@ val Env_config_core.get_string_typed
   : catalog:catalog -> name:string -> string option
 ```
 
-`get_int_typed` reads the env, validates against the catalog's
-`type=int min=N max=M`, and returns the value (or the default on
-miss). All `Sys.getenv_opt "MASC_..."` reach-arounds in `lib/`
-migrate to this surface.
+`get_int_typed` reads the env. **Runtime out-of-range policy: clamp
+to the nearest bound and emit one Warn-level log entry per process
+per knob.** Operator safety beats hard-fail for a misconfigured env
+in production. `validate_value` (catalog-time) and `get_int_typed`
+(runtime) thus apply min/max with **different policies on purpose**;
+§5 covers both. All `Sys.getenv_opt "MASC_..."` reach-arounds in
+`lib/` migrate to this surface.
 
 ### 4.3 Drift gate
 
@@ -129,13 +136,29 @@ CI step (extending the existing `cascade-drift-gate` and
 `env-knob-catalog-drift-gate` from `.github/workflows/ci.yml`):
 
 ```bash
-# .github/workflows/ci.yml additions:
+# .github/workflows/ci.yml additions (the existing fundamental-check
+# job already installs jq + ripgrep + python3; we extract catalog
+# knobs with a small Python tomllib reader rather than yq, since
+# Ubuntu's yq parses YAML by default and the catalog is TOML):
 - name: env-knob-catalog-completeness
   run: |
-    rg -oN '\bMASC_[A-Z][A-Z0-9_]+\b' lib/ | sort -u > /tmp/code_knobs.txt
-    yq -r '.knob | keys[]' config/env-knobs.toml | sort -u > /tmp/catalog_knobs.txt
+    rg -oNI --no-filename '\bMASC_[A-Z][A-Z0-9_]+\b' lib/ \
+      | sort -u > /tmp/code_knobs.txt
+    python3 -c '
+    import tomllib, sys
+    with open("config/env-knobs.toml", "rb") as f:
+        data = tomllib.load(f)
+    for k in sorted(data.get("knob", {}).keys()):
+        print(k)
+    ' | sort -u > /tmp/catalog_knobs.txt
     diff /tmp/code_knobs.txt /tmp/catalog_knobs.txt
 ```
+
+Notes on the rg invocation: `--no-filename` (`-N` already implies it
+when stdout is a pipe in some rg versions, but explicit is safer
+across rg versions); `-I` keeps it from descending into binary files
+that some workspaces pull into `lib/` via build artifacts; `-o`
+prints only the matched knob name so each line is a clean knob token.
 
 Drift = non-zero diff. The CI step fails with a list of missing
 catalog entries (or extra catalog entries with no code reference).

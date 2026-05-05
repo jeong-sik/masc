@@ -188,15 +188,15 @@ warned us about half-cancelled scanners. The fiber group must propagate
 
 ## 7. Migration
 
-- PR-A (this RFC, doc only) ships first.
-- PR-B (histogram instrument) ships second; runs for one week minimum
-  to populate buckets. Acceptance gate: at least one site shows p95 >
-  1s in production telemetry. If no site exceeds the threshold,
-  PR-C is **dropped** as YAGNI.
-- PR-C (fiber-batched fan-out) ships per fan-out site, one site per
-  PR (four total). Each site PR includes a regression test that the
-  output JSON is byte-identical to the pre-fan-out version on a fixed
-  fixture.
+- PR-A (this RFC + the histogram instrumentation described in §4.1)
+  ships first as a single PR. Runs for one week minimum to populate
+  buckets. Acceptance gate: at least one site shows p95 > 1s in
+  production telemetry. If no site exceeds the threshold, PR-B is
+  **dropped** as YAGNI.
+- PR-B (fiber-batched fan-out, §4.2 + §4.3) ships per fan-out site,
+  one site per PR (four total). Each site PR includes a regression
+  test that the output JSON is byte-identical to the pre-fan-out
+  version on a fixed fixture.
 
 No data migration. No keeper restart. The fan-out change is internal
 to the dashboard request handler.
@@ -205,7 +205,7 @@ to the dashboard request handler.
 
 - **Should `max_fibers` be tied to keeper count or sub-op count?**
   Current proposal: `keeper_count × sub_op_count` with override. If
-  PR-B telemetry shows scheduler thrash at high keeper counts, switch
+  PR-A telemetry shows scheduler thrash at high keeper counts, switch
   to `min(keeper_count, M)` with `M=64`. Re-open after evidence.
 - **Should we fail-fast on first sub-op error or join all?**
   Current proposal: fail-fast (matches today's sequential model). The

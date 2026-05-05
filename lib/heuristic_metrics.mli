@@ -46,7 +46,9 @@ type coverage_report = {
 }
 
 val record : event -> unit
-(** Append a metric event.  Thread-safe.  No-op if storage is not initialized. *)
+(** Append a metric event.  Thread-safe.  If storage is not initialized yet,
+    the event is buffered in memory and a warning is emitted once; a later
+    {!init} flushes the pending buffer to the resolved store. *)
 
 val init : base_path:string -> unit
 (** Initialize the JSONL store under [base_path/.masc/heuristic_metrics.jsonl].

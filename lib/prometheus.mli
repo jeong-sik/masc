@@ -358,6 +358,23 @@ val metric_telemetry_coverage_gap : string
     alertable pair to the durable
     [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
 
+val metric_coord_telemetry_drop : string
+(** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
+    [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
+    pair because dispatch happened outside an Eio scheduler. Labels:
+    [event_family] (one of [agent_lifecycle] / [task_transition] /
+    [accountability]) and [event_kind] (the variant). For
+    [agent_lifecycle], [event_kind] is one of [join] / [rejoin] /
+    [leave] (3 values). For both [task_transition] and
+    [accountability], [event_kind] uses the 8
+    [Masc_domain.task_action_to_string] values: [claim] / [start] /
+    [done] / [cancel] / [release] / [submit_for_verification] /
+    [approve] / [reject]. Cardinality bound: 19 series (3 + 8 + 8).
+    Non-zero rate means a production path is firing the lifecycle
+    outside an Eio fiber and the corresponding audit/telemetry rows
+    are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
+    durable-ledger attrition. *)
+
 val metric_oas_bridge_timeout : string
 (** #10094: labelled [caller, timeout_s] so operators can
     distinguish fantasy 60s budgets from intentional 120/180s

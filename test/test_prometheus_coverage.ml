@@ -274,7 +274,8 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_timeout_policy_overshoot;
   check_registered Prometheus.metric_auth_credential_token_duplicate;
   check_registered Prometheus.metric_auth_credential_token_rotated;
-  check_registered Prometheus.metric_telemetry_coverage_gap
+  check_registered Prometheus.metric_telemetry_coverage_gap;
+  check_registered Prometheus.metric_coord_telemetry_drop
 
 let test_distributed_lock_metric_registered () =
   let text = Prometheus.to_prometheus_text () in

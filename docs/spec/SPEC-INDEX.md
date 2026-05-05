@@ -10,8 +10,8 @@ code_refs:
 
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
-> Last Updated: 2026-05-01
-> Snapshot baseline: `dune-project` version `0.19.3`
+> Last Updated: 2026-05-05
+> Snapshot baseline: `dune-project` version `0.19.8`
 
 MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Historical compatibility lane과 internal orchestration reference는 migration context로만 남긴다.
 

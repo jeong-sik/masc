@@ -567,7 +567,7 @@ let test_waitpid_status_nointr_reaps_after_signal () =
       | 0 ->
           (try Unix.close pipe_write with Unix.Unix_error _ -> ());
           let buf = Bytes.create 1 in
-          let _ = Unix.read pipe_read 0 buf 0 1 in
+          let _ = Unix.read pipe_read buf 0 1 in
           (try Unix.close pipe_read with Unix.Unix_error _ -> ());
           (try Unix.kill parent Sys.sigusr1
            with Unix.Unix_error _ -> ());

@@ -28,6 +28,11 @@ val sha256_prefix : string -> string
     without redaction concerns yet long enough (48 bits) to make
     accidental collisions astronomically unlikely.  RFC-0019 §3.2 P1. *)
 
+val waitpid_status_nointr_for_test : int -> Unix.process_status
+(** Test hook for the credential subprocess reaper.  Production callers
+    use the internal helper through [verify_state], [f1_gate_check], and
+    [provision_via_with_token]. *)
+
 val compute_token_sha256_prefix : gh_config_dir:string -> string option
 (** [compute_token_sha256_prefix ~gh_config_dir] reads the
     [oauth_token:] line from [<gh_config_dir>/hosts.yml] and returns

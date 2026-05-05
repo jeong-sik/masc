@@ -95,6 +95,30 @@ let test_observe_emits_kill_counter_no_raise () =
        | L.Failed (L.Provider_error _) -> ()
        | _ -> Alcotest.fail "expected Failed Provider_error")
 
+let test_observe_parse_failure_is_wire_error () =
+  let cascade = "observe_parse_failure_cascade" in
+  let provider = "observe_parse_failure_provider" in
+  let obs =
+    mk_observer ~mode:Cfg.Observe ~cascade ~provider ~started_at:0.0 ()
+  in
+  let wrapped = Obs.wrap_on_event obs None in
+  match wrapped with
+  | None -> Alcotest.fail "Observe should return Some wrapper"
+  | Some f ->
+      let before =
+        kill_value "observe" "provider_error" cascade provider
+      in
+      f (Agent_sdk.Types.SSEParseFailed { raw = "{not json"; reason = "json" });
+      let after =
+        kill_value "observe" "provider_error" cascade provider
+      in
+      Alcotest.(check (float 1e-6))
+        "SSE parse failure emits provider_error kill counter"
+        (before +. 1.0) after;
+      (match Obs.current_state_for_test obs with
+       | L.Failed (L.Provider_error _) -> ()
+       | _ -> Alcotest.fail "expected Failed Provider_error")
+
 let test_observe_done_completes () =
   let cascade = "observe_done_cascade" in
   let provider = "observe_done_provider" in
@@ -209,6 +233,8 @@ let () =
         [
           Alcotest.test_case "wire_error emits kill counter, no raise"
             `Quick test_observe_emits_kill_counter_no_raise;
+          Alcotest.test_case "parse failure is wire_error" `Quick
+            test_observe_parse_failure_is_wire_error;
           Alcotest.test_case "Done completes to Success" `Quick
             test_observe_done_completes;
           Alcotest.test_case "finalize emits outcome and is idempotent"

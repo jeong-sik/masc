@@ -538,6 +538,53 @@ let test_relabel_no_file () =
       Credential_materializer.relabel_hosts_yml
         ~gh_config_dir:dir ~identity_label:"x")
 
+let test_waitpid_status_nointr_reaps_after_signal () =
+  (* #13102 follow-up — replace fixed-sleep racing with deterministic
+     pipe synchronisation:
+
+     - Install the SIGUSR1 handler BEFORE fork so the parent's
+       reception slot is ready the moment the child is able to send;
+       the prior post-fork install left a window where a fast child
+       could trigger the default action.
+     - Use a pipe pair as a "parent has entered waitpid" handshake:
+       the parent writes 1 byte immediately before calling
+       [waitpid_status_nointr_for_test], the child blocks on read
+       until that byte arrives, then sends SIGUSR1 and exits.  This
+       removes all sleep-based timing assumptions.
+     - The child uses [Unix._exit] so it does not re-run parent
+       at_exit hooks (alcotest cleanup, PG connection teardown, …)
+       inside the forked process. *)
+  let pipe_read, pipe_write = Unix.pipe () in
+  let previous = Sys.signal Sys.sigusr1 (Sys.Signal_handle (fun _ -> ())) in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.set_signal Sys.sigusr1 previous;
+      (try Unix.close pipe_read with Unix.Unix_error _ -> ());
+      (try Unix.close pipe_write with Unix.Unix_error _ -> ()))
+    (fun () ->
+      let parent = Unix.getpid () in
+      match Unix.fork () with
+      | 0 ->
+          (try Unix.close pipe_write with Unix.Unix_error _ -> ());
+          let buf = Bytes.create 1 in
+          let _ = Unix.read pipe_read buf 0 1 in
+          (try Unix.close pipe_read with Unix.Unix_error _ -> ());
+          (try Unix.kill parent Sys.sigusr1
+           with Unix.Unix_error _ -> ());
+          Unix._exit 0
+      | pid ->
+          (try Unix.close pipe_read with Unix.Unix_error _ -> ());
+          let _ = Unix.write pipe_write (Bytes.of_string "\x01") 0 1 in
+          (try Unix.close pipe_write with Unix.Unix_error _ -> ());
+          (match Credential_materializer.waitpid_status_nointr_for_test pid with
+           | Unix.WEXITED 0 -> ()
+           | Unix.WEXITED n ->
+               Alcotest.failf "child exited with %d" n
+           | Unix.WSIGNALED n ->
+               Alcotest.failf "child signalled with %d" n
+           | Unix.WSTOPPED n ->
+               Alcotest.failf "child stopped with %d" n))
+
 let () =
   Alcotest.run "credential_materializer"
     [
@@ -562,6 +609,11 @@ let () =
         [
           Alcotest.test_case "add invokes ensure and roundtrips" `Quick
             test_credential_store_add_invokes_ensure;
+        ] );
+      ( "process reaping",
+        [
+          Alcotest.test_case "waitpid retries after signal interruption"
+            `Quick test_waitpid_status_nointr_reaps_after_signal;
         ] );
       ( "provisioner",
         [

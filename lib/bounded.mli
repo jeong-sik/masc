@@ -162,13 +162,17 @@ val calc_backoff_delay : retry_config -> int -> int
     [jitter_range = capped * jitter_factor]. *)
 
 val is_retryable_error : string -> bool
-(** [is_retryable_error msg] is [true] when [msg] matches any of
-    the 14 hoisted patterns: [timeout], [timed out],
-    [connection refused], [connection reset], [network],
-    [ECONNREFUSED], [ETIMEDOUT], [rate limit], [429], [503], [502],
-    [504], [overloaded], [temporarily unavailable].  Case-insensitive
-    via pre-compiled DFAs (rebuilding 14 [Re.t] per call would be
-    wasted on the hot retry path). *)
+(** [is_retryable_error msg] is [true] when [msg] describes a
+    transient local retry condition and [false] for hard-quota /
+    capacity-exhaustion text.  The transient detector matches the 14
+    hoisted patterns [timeout], [timed out], [connection refused],
+    [connection reset], [network], [ECONNREFUSED], [ETIMEDOUT],
+    [rate limit], [429], [503], [502], [504], [overloaded],
+    [temporarily unavailable] via pre-compiled case-insensitive
+    DFAs.  Hard quota/capacity exhaustion short-circuits to [false]
+    even when the message also contains [429], because same-agent
+    retry cannot repair an exhausted account; cascade/keeper
+    classifiers own cross-provider fallback and cooldown. *)
 
 val check_goal : Yojson.Safe.t -> goal -> bool
 (** [check_goal result goal] resolves [goal.path] under [result]

@@ -757,6 +757,26 @@ let test_docker_config_storage_contracts () =
     (file_contains_pattern "Dockerfile"
        {|chown -R appuser:appgroup /app/.masc|})
 
+let test_tool_failure_classification_contracts () =
+  check bool "tool failure classification uses typed class" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       "type tool_failure_class =");
+  check bool "workflow rejection class exists" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       "| Workflow_rejection");
+  check bool "policy rejection class exists" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       "| Policy_rejection");
+  check bool "runtime failure class exists" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       "| Runtime_failure");
+  check bool "log details expose failure class" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       {|"failure_class"|});
+  check bool "call path classifies once before log emit" true
+    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+       "let failure_class = classify_tool_failure_class error_detail")
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1467,6 +1487,8 @@ let () =
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick
              test_docker_config_storage_contracts;
+           test_case "tool failure classification contracts" `Quick
+             test_tool_failure_classification_contracts;
            test_case "dashboard warm hydration contracts" `Quick
              test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

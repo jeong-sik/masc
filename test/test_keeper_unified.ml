@@ -5350,12 +5350,11 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 
-(* Regression: GitHub #12675 — per-attempt retry budget.
-   When is_retry=true, the budget resolution must provide a fresh
-   minimum execution budget even when wall-clock remaining is very
-   small (simulating a retry after a long first-attempt timeout).
-   Without the fix, near-zero remaining_turn_budget_s caused the
-   retry OAS call to time out before the model began processing. *)
+(* Regression: GitHub #12675 / RFC #12887 — per-attempt retry budget cap.
+   When is_retry=true, the budget resolution must refuse the retry if the
+   time spent in the current turn exceeds the adaptive per-attempt budget.
+   This prevents a retry loop from holding the outer slot for the entire
+   turn timeout (600s). *)
 let test_per_attempt_retry_budget_with_near_zero_remaining () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
@@ -5365,15 +5364,8 @@ let test_per_attempt_retry_budget_with_near_zero_remaining () =
       ~max_turns:4
       ~remaining_turn_budget_s:3.0
   with
-  | None -> fail "is_retry=true must provide budget even with tiny remaining"
-  | Some budget ->
-      check bool "effective >= min_oas_timeout_budget_sec" true
-        (budget.effective_timeout_sec >= 15.0);
-      check string "source indicates per-attempt retry"
-        "ok"
-        (if String.equal budget.source "adaptive_per_attempt_retry"
-            || String.equal budget.source "override_per_attempt_retry"
-         then "ok" else budget.source)
+  | None -> () (* expected: retry is aborted to release the slot cleanly *)
+  | Some _ -> fail "is_retry=true must refuse budget when outer turn time spent exceeds per-attempt cap"
 
 let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
   match
@@ -5438,13 +5430,9 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
       ~remaining_turn_budget_s:3.0
       (oas_timeout_budget_error ())
   with
-  | UT.Degraded_retry_allowed retry ->
-      check string "retry cascade" KC.local_recovery_cascade_name
-        retry.next_cascade;
-      check string "fallback reason" "oas_timeout_budget"
-        retry.fallback_reason
-  | UT.Degraded_retry_budget_exhausted _ ->
-      fail "degraded retry should be allowed even with tiny remaining"
+  | UT.Degraded_retry_budget_exhausted _ -> ()
+  | UT.Degraded_retry_allowed _ ->
+      fail "expected retry aborted due to per-attempt cap exceeded"
   | UT.No_degraded_retry -> fail "expected degraded retry"
 
 let test_pure_local_labels_detection () =

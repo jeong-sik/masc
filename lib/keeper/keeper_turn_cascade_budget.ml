@@ -156,22 +156,17 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
       ~estimated_input_tokens ~max_turns
   in
   if is_retry then begin
-    (* Per-attempt budget for cascade retries: each retry gets a fresh
-       execution budget rather than inheriting the wall-clock deficit
-       from previous attempts.  The wall-clock remaining is a hard cap
-       only when it still exceeds the minimum execution budget.
+    let time_spent_in_turn = runtime.turn_timeout_sec.value -. remaining_turn_budget_s in
+    let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
 
-       Without this, cascade retries after a 60s timeout arrive with
-       near-zero remaining and the OAS call times out before the model
-       even begins processing (TurnBudgetExhausted with turns_used=1).
-
-       Hard gate: if the outer turn wall-clock is already exhausted the
-       OAS call would be cancelled immediately — return None so callers
-       see a clean budget failure rather than a noisy retry/rotation. *)
-    if remaining_turn_budget_s <= 0.0 then None
+    (* Guard: cascade rotation cannot consume more than 1x per-attempt budget
+       per slot acquisition. If we've already spent more than the adaptive timeout
+       budget in this turn, do not allow further retries. This prevents a retry
+       loop from hogging the slot for the entire outer turn budget when inner
+       OAS attempts timeout early. *)
+    if remaining_turn_budget_s <= 0.0 || usable_retry_budget < min_oas_timeout_budget_sec then None
     else begin
-      let effective_timeout_sec =
-        Float.min adaptive_timeout_sec (Float.max min_oas_timeout_budget_sec remaining_turn_budget_s)
+      let effective_timeout_sec = usable_retry_budget
       in
       let source =
         match runtime.oas_timeout_override_sec.value with

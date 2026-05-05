@@ -6,8 +6,9 @@
     out-bound hook channels (keeper board signals + board SSE
     events).
 
-    Internal state and helpers ([backend_state] / [flusher_started]
-    Atomics, [start_flusher_actor], [ensure_flusher_actor],
+    Internal state and helpers ([backend_state] Atomic carrying the
+    flusher-started flag inside the [Active] variant since Tier D D-7,
+    [start_flusher_actor], [ensure_flusher_actor],
     [keeper_board_signal_hook] / [board_sse_hook] Atomics,
     [emit_keeper_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],

@@ -1,6 +1,29 @@
 # Changelog
 
 
+## [0.19.8] - 2026-05-05
+
+### Added
+- Keeper admission router shadow-mode + lazy init (PR-E-1.6 + 1.7).
+- X-Workspace-Source response header for keeper-aware workspace routes.
+- env_config get_ratio for [0, 1]-bounded float env vars.
+- Thompson Sampling connected to agent_reputation scoring and tool_agent fitness.
+- Prometheus counter for keeper policy drift detection.
+- CI nightly health workflow on main with auto-issue creation.
+- Dashboard briefing unit tests (json_helpers, gaps, sections, compactors).
+
+### Fixed
+- Unblock main build (thompson_confidence + Feature_flag_registry import).
+- Pass [admission.*] sub-tables through to JSON unchanged in cascade config.
+- Log.warn before Result.to_option silent error discard.
+- Register KeeperAdmissionLiveness.tla as known unchecked spec.
+- Restore literal hex in composite FSM classDef (dashboard regression).
+- Sync version truth across doc files.
+
+### Changed
+- Remove fabricated telemetry placeholders from dashboard.
+- Drop 4 dead symbols + 2 unused imports from dashboard.
+
 ## [0.19.7] - 2026-05-05
 
 ### Added

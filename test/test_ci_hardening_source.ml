@@ -736,9 +736,18 @@ let test_board_flusher_start_retry_contracts () =
   check bool "board flusher CAS contention yields before retry" true
     (file_contains_pattern "lib/board_dispatch.ml"
        "Eio.Fiber.yield ()");
+  check bool "board flusher CAS contention uses exponential backoff" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "flusher_start_backoff_delay_s");
+  check bool "board flusher CAS backoff is bounded" true
+    (file_contains_pattern "lib/board_dispatch.ml"
+       "flusher_start_backoff_cap_s");
   check bool "board flusher retry decrements attempts" true
     (file_contains_pattern "lib/board_dispatch.ml"
        "loop (attempts_left - 1)");
+  check bool "board flusher retry has injected contention coverage" true
+    (file_contains_pattern "test/test_board_dispatch.ml"
+       "force_flusher_start_cas_conflicts_for_test 2");
   check bool "board flusher exhausted retry is operator visible" true
     (file_contains_pattern "lib/board_dispatch.ml"
        "Board flusher actor startup CAS contention exhausted")

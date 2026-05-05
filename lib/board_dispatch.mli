@@ -109,6 +109,16 @@ val init_jsonl : unit -> unit
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)
 
+val force_flusher_start_cas_conflicts_for_test : int -> unit
+(** Force the next [n] flusher-start CAS attempts to lose. Test-only. *)
+
+val flusher_started_for_test : unit -> bool
+(** [true] iff the active backend has marked its flusher daemon as started.
+    Test-only. *)
+
+val flusher_start_backoff_delay_for_test : attempt:int -> float
+(** Exponential backoff delay used after a flusher-start CAS loss. Test-only. *)
+
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)
 

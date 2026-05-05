@@ -527,6 +527,40 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Switch.fail sw Exit)
   with Exit -> ()
 
+let test_flusher_start_retries_forced_cas_conflicts () =
+  try
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let clock = Eio.Stdenv.clock env in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+        ignore (fresh_test_base_path ());
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ();
+        Board_dispatch.force_flusher_start_cas_conflicts_for_test 2;
+        Board_dispatch.init_jsonl ();
+        Alcotest.(check bool)
+          "flusher starts after forced CAS contention" true
+          (Board_dispatch.flusher_started_for_test ());
+        Eio.Switch.fail sw Exit)
+  with Exit -> ()
+
+let test_flusher_start_backoff_delay_doubles_and_caps () =
+  Alcotest.(check (float 0.0001))
+    "attempt 0 delay" 0.001
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:0);
+  Alcotest.(check (float 0.0001))
+    "attempt 1 delay doubles" 0.002
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:1);
+  Alcotest.(check (float 0.0001))
+    "large attempt caps" 0.02
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:10)
+
 (** {1 Reaction Operations} *)
 
 let test_reaction_toggle_and_summary () =
@@ -830,6 +864,10 @@ let () =
         (with_eio test_current_vote_lookup);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
+      Alcotest.test_case "flusher start retries forced CAS conflicts" `Quick
+        test_flusher_start_retries_forced_cas_conflicts;
+      Alcotest.test_case "flusher start backoff doubles and caps" `Quick
+        test_flusher_start_backoff_delay_doubles_and_caps;
     ];
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick

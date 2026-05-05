@@ -750,6 +750,9 @@ export interface Keeper {
     | 'turn_timeout'
     | 'completion_contract_violation'
     | 'cascade_exhausted'
+    | 'no_tool_capable_provider'
+    | 'fiber_unresolved'
+    | 'stale_turn_timeout'
     | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null

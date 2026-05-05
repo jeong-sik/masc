@@ -905,6 +905,36 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(report.status, "PASS")
 
+    def test_verify_cli_emits_post_act_evidence_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "orient.json"
+            path.write_text(json.dumps({"findings": []}), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFY_SCRIPT_PATH),
+                    str(path),
+                    "--post-act-verify",
+                    "--evidence-kind",
+                    "live_runtime_logs",
+                    "--evidence-source",
+                    "/tmp/goal-loop-post-act.log",
+                    "--checked-at",
+                    "2026-05-06T00:00:00Z",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["post_act_verify"])
+        self.assertEqual(payload["evidence_kind"], "live_runtime_logs")
+        self.assertEqual(payload["evidence_source"], "/tmp/goal-loop-post-act.log")
+        self.assertEqual(payload["checked_at"], "2026-05-06T00:00:00Z")
+
     def test_log_contract_fails_on_forbidden_pattern(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             path = Path(raw_dir) / "server.log"

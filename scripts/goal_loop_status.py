@@ -56,6 +56,13 @@ def as_int(value: Any, default: int = 0) -> int:
     return value if isinstance(value, int) else default
 
 
+def as_nonempty_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
 def status_max(statuses: list[str]) -> str:
     if not statuses:
         return "unknown"
@@ -394,15 +401,24 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
             if isinstance(kind, str)
         }
     )
+    post_act_verify = verify.get("post_act_verify")
+    summary: dict[str, Any] = {
+        "verify_status": verify_status,
+        "failing_findings": failing_count,
+        "violations": violation_count,
+        "violation_kinds": violation_kinds,
+        "post_act_verify": post_act_verify
+        if isinstance(post_act_verify, bool)
+        else False,
+    }
+    for key in ("evidence_kind", "evidence_source", "checked_at"):
+        value = as_nonempty_str(verify.get(key))
+        if value is not None:
+            summary[key] = value
     status = "ok" if verify_status == "PASS" else "critical"
     return PhaseStatus(
         status=status,
-        summary={
-            "verify_status": verify_status,
-            "failing_findings": failing_count,
-            "violations": violation_count,
-            "violation_kinds": violation_kinds,
-        },
+        summary=summary,
     )
 
 

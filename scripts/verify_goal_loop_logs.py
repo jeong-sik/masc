@@ -32,6 +32,10 @@ class VerificationReport:
     policy: str
     checked_findings: int
     failing_findings: list[VerificationFinding]
+    post_act_verify: bool = False
+    evidence_kind: str | None = None
+    evidence_source: str | None = None
+    checked_at: str | None = None
 
 
 @dataclass
@@ -83,7 +87,15 @@ def finding_fails(finding: dict[str, Any], policy: str) -> bool:
     raise ValueError(f"unknown policy: {policy}")
 
 
-def verify_orient(orient: dict[str, Any], *, policy: str) -> VerificationReport:
+def verify_orient(
+    orient: dict[str, Any],
+    *,
+    policy: str,
+    post_act_verify: bool = False,
+    evidence_kind: str | None = None,
+    evidence_source: str | None = None,
+    checked_at: str | None = None,
+) -> VerificationReport:
     findings_raw = orient.get("findings", [])
     findings = findings_raw if isinstance(findings_raw, list) else []
     failing: list[VerificationFinding] = []
@@ -109,6 +121,10 @@ def verify_orient(orient: dict[str, Any], *, policy: str) -> VerificationReport:
         policy=policy,
         checked_findings=len(findings),
         failing_findings=failing,
+        post_act_verify=post_act_verify,
+        evidence_kind=evidence_kind,
+        evidence_source=evidence_source,
+        checked_at=checked_at,
     )
 
 
@@ -220,7 +236,14 @@ def report_to_text(report: VerificationReport) -> str:
         f"policy: {report.policy}",
         f"checked_findings: {report.checked_findings}",
         f"failing_findings: {len(report.failing_findings)}",
+        f"post_act_verify: {str(report.post_act_verify).lower()}",
     ]
+    if report.evidence_kind:
+        lines.append(f"evidence_kind: {report.evidence_kind}")
+    if report.evidence_source:
+        lines.append(f"evidence_source: {report.evidence_source}")
+    if report.checked_at:
+        lines.append(f"checked_at: {report.checked_at}")
     for finding in report.failing_findings:
         lines.append(
             f"- {finding.finding_id} {finding.title}: "
@@ -242,9 +265,7 @@ def log_contract_report_to_text(report: LogContractReport) -> str:
         f"violations: {len(report.violations)}",
     ]
     for violation in report.violations:
-        lines.append(
-            f"- {violation.kind} {violation.pattern}: count={violation.count}"
-        )
+        lines.append(f"- {violation.kind} {violation.pattern}: count={violation.count}")
         for sample in violation.samples:
             lines.append(f"  {sample.path}:{sample.line}: {sample.text}")
     return "\n".join(lines)
@@ -300,6 +321,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="json",
         help="Output format (default: json).",
     )
+    parser.add_argument(
+        "--post-act-verify",
+        action="store_true",
+        help="Mark this report as evidence collected after the relevant ACT artifacts.",
+    )
+    parser.add_argument(
+        "--evidence-kind",
+        help="Post-ACT evidence kind, for example live_runtime_logs.",
+    )
+    parser.add_argument(
+        "--evidence-source",
+        help="Concrete post-ACT source path, URL, run id, or endpoint.",
+    )
+    parser.add_argument(
+        "--checked-at",
+        help="Timestamp for when the post-ACT evidence was collected.",
+    )
     return parser.parse_args(argv)
 
 
@@ -321,7 +359,14 @@ def main(argv: list[str] | None = None) -> int:
             print(log_contract_report_to_text(report))
         return 0 if report.status == "PASS" else 1
 
-    report = verify_orient(load_json_input(args.orient_json), policy=args.policy)
+    report = verify_orient(
+        load_json_input(args.orient_json),
+        policy=args.policy,
+        post_act_verify=args.post_act_verify,
+        evidence_kind=args.evidence_kind,
+        evidence_source=args.evidence_source,
+        checked_at=args.checked_at,
+    )
     if args.format == "json":
         print(report_to_json(report))
     else:

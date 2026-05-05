@@ -79,6 +79,10 @@ def complete_status() -> dict[str, object]:
                     "verify_status": "PASS",
                     "violations": 0,
                     "violation_kinds": [],
+                    "post_act_verify": True,
+                    "evidence_kind": "live_runtime_logs",
+                    "evidence_source": "/tmp/goal-loop-post-act.log",
+                    "checked_at": "2026-05-06T00:00:00Z",
                 }
             },
         }
@@ -215,6 +219,43 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
 
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("aggregate_consistency_resolved", audit.blockers)
+
+    def test_completion_audit_rejects_generic_verify_pass_without_post_act_metadata(
+        self,
+    ) -> None:
+        status = complete_status()
+        verify_summary = status["phases"]["verify"]["summary"]
+        for key in (
+            "post_act_verify",
+            "evidence_kind",
+            "evidence_source",
+            "checked_at",
+        ):
+            verify_summary.pop(key)
+
+        audit = goal_loop_completion_audit.build_completion_audit(status)
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("post_act_verify_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        self.assertFalse(by_id["post_act_verify_complete"].evidence["post_act_verify"])
+
+    def test_completion_audit_rejects_fixture_verify_as_post_act_evidence(
+        self,
+    ) -> None:
+        status = complete_status()
+        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary["evidence_kind"] = "fixture"
+
+        audit = goal_loop_completion_audit.build_completion_audit(status)
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("post_act_verify_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        self.assertEqual(
+            by_id["post_act_verify_complete"].evidence["evidence_kind"],
+            "fixture",
+        )
 
     def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
         triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))

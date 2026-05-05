@@ -128,13 +128,21 @@
 - [근거] `python3 scripts/goal_loop_completion_audit.py
   /tmp/goal-loop-status-audit.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T07:14:00+09:00,
+  --require-complete --format text` checked at 2026-05-06T07:26:55+09:00,
   confidence High: exits non-zero with explicit blockers
   `strict_row_level_catalog_complete` and `post_act_verify_complete`, while
   preserving PASS evidence for source
   manifest coverage, source artifact validation, source identity, aggregate
   claim source verification, aggregate reconciliation, strict source/catalog ID
   sync, and broader structured-ID ownership triage.
+- [근거] `ruff check scripts/verify_goal_loop_logs.py
+  scripts/goal_loop_status.py scripts/goal_loop_completion_audit.py
+  test/test_observe_goal_loop_logs.py test/test_goal_loop_status.py
+  test/test_goal_loop_completion_audit.py` and the three focused Python test
+  files checked at 2026-05-06T07:26:55+09:00, confidence High: the closeout
+  gate now rejects a generic Verify `PASS` unless the status snapshot carries
+  `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
+  `evidence_source`, and `checked_at` metadata.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   19 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -322,12 +330,17 @@ log verification, metric verification, and Orient re-check.
 - Deterministic fixture replay.
 - Regression tests for Decide/status/ACT-map validation.
 - `verify.fail.json` that keeps the loop red.
+- Verify reports can carry post-ACT evidence metadata, and
+  `goal_loop_completion_audit.py` requires that metadata before accepting a
+  Verify `PASS` as closeout evidence.
 
 **Status**: **FAIL BY DESIGN**.
 
 This is correct current behavior. A PASS would be unsafe because the fixture
 still contains `NF-2` startup evidence and no post-ACT live Verify artifact has
-re-collected runtime logs.
+re-collected runtime logs with `post_act_verify=true`, accepted
+live-runtime `evidence_kind`, concrete `evidence_source`, and `checked_at`
+metadata.
 
 ### 7. GOAL LOOP Dashboard
 
@@ -342,6 +355,9 @@ system health, next action, and counts.
 - Verify status now preserves violation kinds, including
   `post_act_verify_pending`, so the missing live post-ACT runtime replay is
   visible in aggregate status output.
+- Verify status also preserves optional post-ACT evidence metadata so the
+  completion audit can distinguish a real post-ACT replay from a synthetic
+  green status file.
 - When `goal_loop_status.py` receives catalog-enriched Orient JSON, it carries
   the audit catalog summary into `phases.orient.summary.audit_catalog` and
   keeps Orient at least `warning` while the catalog is incomplete or has open
@@ -402,9 +418,12 @@ No convergence claim is valid yet. The only safe current statement is:
    still needs a stable non-user-local artifact distribution policy.
 3. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
-4. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
+4. Re-collect post-ACT Verify evidence from live logs or runtime endpoints and
+   emit it with `--post-act-verify`, accepted live-runtime `--evidence-kind`, concrete
+   `--evidence-source`, and `--checked-at`.
+5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
-5. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule
@@ -421,3 +440,5 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
 - The aggregate reconciliation stops passing with
   `--require-consistency-resolved`.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.
+- The latest Verify `PASS` lacks `post_act_verify=true`, an accepted
+  live-runtime `evidence_kind`, a concrete `evidence_source`, or `checked_at`.

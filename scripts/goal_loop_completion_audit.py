@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any, TextIO
 
 
+POST_ACT_EVIDENCE_KINDS = {
+    "live_runtime_http",
+    "live_runtime_logs",
+    "live_runtime_status",
+}
+
+
 @dataclass(frozen=True)
 class CompletionCriterion:
     criterion_id: str
@@ -64,6 +71,13 @@ def nested_dict(value: Any, *keys: str) -> dict[str, Any]:
 
 def as_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
+
+
+def as_nonempty_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
 
 
 def criterion(
@@ -333,11 +347,23 @@ def build_completion_audit(
         "verify_status": verify_summary.get("verify_status"),
         "violations": verify_summary.get("violations"),
         "violation_kinds": violation_kinds,
+        "post_act_verify": verify_summary.get("post_act_verify")
+        if isinstance(verify_summary.get("post_act_verify"), bool)
+        else False,
+        "evidence_kind": as_nonempty_str(verify_summary.get("evidence_kind")),
+        "evidence_source": as_nonempty_str(verify_summary.get("evidence_source")),
+        "checked_at": as_nonempty_str(verify_summary.get("checked_at")),
+        "accepted_evidence_kinds": sorted(POST_ACT_EVIDENCE_KINDS),
     }
+    evidence_kind_valid = verify_evidence["evidence_kind"] in POST_ACT_EVIDENCE_KINDS
     verify_passed = (
         verify_evidence["verify_status"] == "PASS"
         and as_int(verify_evidence["violations"]) == 0
         and "post_act_verify_pending" not in violation_kinds
+        and verify_evidence["post_act_verify"] is True
+        and evidence_kind_valid
+        and verify_evidence["evidence_source"] is not None
+        and verify_evidence["checked_at"] is not None
     )
 
     criteria = [
@@ -393,7 +419,7 @@ def build_completion_audit(
         criterion(
             "post_act_verify_complete",
             verify_passed,
-            "Post-ACT Verify is passing with no pending verification violation.",
+            "Post-ACT Verify is passing with explicit post-ACT evidence metadata.",
             verify_evidence,
         ),
     ]

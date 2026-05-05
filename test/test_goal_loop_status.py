@@ -115,7 +115,45 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.overall_status, "ok")
         self.assertEqual(report.phases["act"].status, "ok")
         self.assertEqual(report.phases["verify"].summary["violation_kinds"], [])
+        self.assertFalse(report.phases["verify"].summary["post_act_verify"])
         self.assertIsNone(report.next_action)
+
+    def test_verify_summary_preserves_post_act_evidence_metadata(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 0,
+                },
+                "findings": [],
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={
+                "status": "PASS",
+                "failing_findings": [],
+                "post_act_verify": True,
+                "evidence_kind": "live_runtime_http",
+                "evidence_source": "http://127.0.0.1:8931/health",
+                "checked_at": "2026-05-06T00:00:00Z",
+            },
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        summary = report.phases["verify"].summary
+        self.assertTrue(summary["post_act_verify"])
+        self.assertEqual(summary["evidence_kind"], "live_runtime_http")
+        self.assertEqual(
+            summary["evidence_source"],
+            "http://127.0.0.1:8931/health",
+        )
+        self.assertEqual(summary["checked_at"], "2026-05-06T00:00:00Z")
 
     def test_orient_audit_catalog_gap_keeps_goal_warning(self) -> None:
         report = goal_loop_status.build_status_report(

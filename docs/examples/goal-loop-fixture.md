@@ -33,6 +33,9 @@ Expected key facts:
 - `phases.verify.summary.violation_kinds` includes
   `post_act_verify_pending`, making the live-runtime proof gap machine-visible
   in aggregate status output.
+- A generic Verify `PASS` is not closeout evidence. Completion requires
+  `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
+  `evidence_source`, and `checked_at` metadata from the post-ACT collection.
 
 Use the JSON status form when another tool needs to consume the replay:
 
@@ -175,6 +178,22 @@ Use the status JSON as input to the closeout gate before marking the Goal
 complete:
 
 ```bash
+python3 scripts/verify_goal_loop_logs.py \
+  /tmp/goal-loop-orient-post-act.json \
+  --post-act-verify \
+  --evidence-kind live_runtime_logs \
+  --evidence-source <POST_ACT_LOG_OR_ENDPOINT> \
+  --checked-at <ISO8601_TIMESTAMP> \
+  > /tmp/goal-loop-verify-post-act.json
+
+python3 scripts/goal_loop_status.py \
+  --observe-json test/fixtures/goal_loop/observe.startup.json \
+  --orient-json /tmp/goal-loop-orient-audit.json \
+  --decide-json /tmp/goal-loop-decide.json \
+  --verify-json /tmp/goal-loop-verify-post-act.json \
+  --loop-iteration "#fixture" \
+  > /tmp/goal-loop-status-audit.json
+
 python3 scripts/goal_loop_completion_audit.py \
   /tmp/goal-loop-status-audit.json \
   --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
@@ -184,7 +203,8 @@ python3 scripts/goal_loop_completion_audit.py \
 
 Expected key fact: this exits non-zero until every completion criterion passes.
 With the current fixture and external source manifest it reports `BLOCKED`
-because the strict row-level catalog is incomplete, the aggregate mismatch is
-open, and post-ACT Verify is still pending. The broader structured-ID criterion
-passes only when the triage manifest covers every uncataloged family and
-expected occurrence count.
+because the strict row-level catalog is incomplete and post-ACT Verify is still
+pending. The aggregate mismatch is resolved only while
+`aggregate_reconciliations: COMPLETE verified=1 failed=0` remains true. The
+broader structured-ID criterion passes only when the triage manifest covers
+every uncataloged family and expected occurrence count.

@@ -596,7 +596,7 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
   }
 }
 
-export async function unbindConnector(connectorId: string, channelId: string) {
+async function unbindConnector(connectorId: string, channelId: string) {
   const channel = channelId.trim()
   if (!channel) return
 

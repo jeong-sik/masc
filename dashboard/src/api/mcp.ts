@@ -314,7 +314,7 @@ function parseMcpListResponse(raw: string): McpListResponse {
   return parseMcpJsonText(payload) as McpListResponse
 }
 
-export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
+async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
   await ensureSession()
   const text = await mcpPost({
     jsonrpc: '2.0',

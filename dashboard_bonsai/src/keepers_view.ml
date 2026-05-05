@@ -58,10 +58,31 @@ let view_hero (rows : Keepers_directory.row list) =
     ()
 ;;
 
-let view_hud_strip ~(rows : Keepers_directory.row list) =
+let short_reason reason =
+  if String.length reason <= 96
+  then reason
+  else String.sub reason ~pos:0 ~len:96 ^ "..."
+;;
+
+let fetch_tone (status : Keepers_types.fetch_status) : Hud.v_class =
+  match status with
+  | Keepers_types.Fetch_pending -> `Neutral
+  | Keepers_types.Fetch_fresh -> `Ok
+  | Keepers_types.Fetch_stale { consecutive_failures; _ } ->
+    if consecutive_failures >= 3 then `Bad else `Warn
+;;
+
+let view_hud_strip
+      ~(keepers : Keepers_types.response)
+      ~(rows : Keepers_directory.row list) =
   let counts = Keepers_directory.counts rows in
   Hud.strip ~label:"Fleet KPIs"
-    [ Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" counts.total) ()
+    [ Hud.cell
+        ~v_class:(fetch_tone keepers.fetch_status)
+        ~k:"Feed"
+        ~v:(Keepers_types.fetch_status_label keepers.fetch_status)
+        ()
+    ; Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" counts.total) ()
     ; Hud.cell ~v_class:(if counts.active > 0 then `Ok else `Neutral)
         ~k:"Active"
         ~v:(Printf.sprintf "%02d" counts.active) ()
@@ -88,6 +109,18 @@ let render
   =
   let rows = Keepers_directory.build_rows ~keepers in
   let has_fleet = not (List.is_empty keepers.keepers) in
+  let quiet_text =
+    match keepers.fetch_status with
+    | Keepers_types.Fetch_pending ->
+      "keepers summary fetch is pending — directory snapshot만 먼저 올라와 있습니다."
+    | Keepers_types.Fetch_fresh ->
+      "keepers summary endpoint is quiet — directory snapshot만 먼저 올라와 있습니다."
+    | Keepers_types.Fetch_stale { reason; consecutive_failures } ->
+      Printf.sprintf
+        "keepers summary is stale (%dx) — %s"
+        consecutive_failures
+        (short_reason reason)
+  in
   let page_sections =
     [ Sec.view ~title:"directory" ~sub:"summary"
         ~right:(Printf.sprintf "%d keepers" (List.length rows))
@@ -117,9 +150,7 @@ let render
         [ Node.div
             ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "No live keepers" ]
             [ Node.span ~attrs:[ Attr.create "lang" "ko" ]
-                [ Node.text
-                    "keepers summary endpoint is quiet — directory snapshot만 먼저 올라와 있습니다."
-                ]
+                [ Node.text quiet_text ]
             ]
         ]
   in
@@ -128,7 +159,7 @@ let render
     ~aside:(Keepers_directory.aside ~rows ~selected_name)
     ~active:Keepers
     [ view_hero rows
-    ; view_hud_strip ~rows
+    ; view_hud_strip ~keepers ~rows
     ; Node.div ~attrs:[] page_sections
     ]
 ;;

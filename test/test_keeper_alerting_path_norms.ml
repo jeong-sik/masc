@@ -2,13 +2,19 @@
     allowed-norms boundary checks + rejection formatter.
 
     Audit P2 follow-up — extends #12847's coverage from 4 small
-    helpers to the security-boundary functions:
+    helpers to the {b pure} security-boundary classifiers:
 
-    - [is_within_root_norm] (line 62)
-    - [is_within_allowed_norms] (line 149)
-    - [playground_root_of_allowed] (line 186)
-    - [raw_looks_like_playground_subdir] (line 200)
-    - [format_path_rejection] (line 206)
+    - [is_within_allowed_norms]
+    - [playground_root_of_allowed]
+    - [raw_looks_like_playground_subdir]
+    - [format_path_rejection]
+
+    [is_within_root_norm] is intentionally NOT covered here:
+    it normalizes its [path] argument via [Fs_compat.realpath]
+    which has filesystem semantics (especially with [/tmp] being
+    a symlink to [/private/tmp] on macOS), and platform-portable
+    coverage requires creating real fixture directories.  That
+    belongs in an integration test, not this pure-function suite.
 
     These are the LLM-facing boundary classifiers; a regression
     here either leaks host paths into LLM context (audit Tier A3
@@ -21,41 +27,8 @@ module KAP = Keeper_alerting_path
 let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
-let check_string label expected actual =
-  Alcotest.(check string) label expected actual
-
 let check_string_opt label expected actual =
   Alcotest.(check (option string)) label expected actual
-
-(* ── is_within_root_norm ─────────────────────────────────────── *)
-(* Note: the impl normalises [path] via Fs_compat.realpath before
-   the prefix check, so absolute paths that don't actually exist
-   will not match.  Use roots that exist (e.g. /tmp) for these
-   tests. *)
-
-let test_within_root_exact_match () =
-  let root = Filename.get_temp_dir_name () in
-  check_bool "exact match → within" true
-    (KAP.is_within_root_norm ~root_norm:root root)
-
-let test_within_root_subdir_match () =
-  let root = Filename.get_temp_dir_name () in
-  let sub = Filename.concat root "x" in
-  check_bool "subdir → within" true
-    (KAP.is_within_root_norm ~root_norm:root sub)
-
-let test_within_root_sibling_no_match () =
-  (* root_norm = "/tmp/aa", path = "/tmp/aa-sneaky" — sibling
-     directory, must NOT match.  This is the prefix-confusion
-     scenario from audit §1.2. *)
-  check_bool "sibling with shared byte prefix → not within" false
-    (KAP.is_within_root_norm
-       ~root_norm:"/tmp/aa" "/tmp/aa-sneaky")
-
-let test_within_root_outside_no_match () =
-  let root = Filename.get_temp_dir_name () in
-  check_bool "outside root → not within" false
-    (KAP.is_within_root_norm ~root_norm:root "/etc/passwd")
 
 (* ── is_within_allowed_norms ─────────────────────────────────── *)
 (* This helper does NOT normalise its [target_norm] argument; it
@@ -140,10 +113,13 @@ let test_raw_looks_empty_rejected () =
     (KAP.raw_looks_like_playground_subdir "")
 
 let test_raw_looks_repos_typo_rejected () =
-  (* "repository/" is not a playground subdir even though it
-     shares the byte prefix "repos" — the check uses
-     prefix:"repos/" so the trailing '/' is required. *)
-  check_bool "'repository/' prefix mismatch (no trailing /)"
+  (* "repository/foo" shares the byte prefix "repos" with the
+     writable shape "repos/..." but the [starts_with] check uses
+     the literal prefix "repos/" — "repository/foo" does NOT
+     start with "repos/" (the byte at position 5 is 'i', not
+     '/'), so the sibling-typo case is correctly rejected. *)
+  check_bool
+    "'repository/foo' does not start with 'repos/' (sibling typo)"
     false
     (KAP.raw_looks_like_playground_subdir "repository/foo")
 
@@ -227,17 +203,6 @@ let test_format_rejection_does_not_leak_allowed_norms () =
 let () =
   Alcotest.run "Keeper_alerting_path_norms"
     [
-      ( "is_within_root_norm",
-        [
-          Alcotest.test_case "exact match" `Quick
-            test_within_root_exact_match;
-          Alcotest.test_case "subdir match" `Quick
-            test_within_root_subdir_match;
-          Alcotest.test_case "sibling shared-prefix rejected"
-            `Quick test_within_root_sibling_no_match;
-          Alcotest.test_case "outside root rejected" `Quick
-            test_within_root_outside_no_match;
-        ] );
       ( "is_within_allowed_norms",
         [
           Alcotest.test_case "exact match" `Quick
@@ -274,7 +239,7 @@ let () =
             test_raw_looks_other_rejected;
           Alcotest.test_case "empty rejected" `Quick
             test_raw_looks_empty_rejected;
-          Alcotest.test_case "repository/ rejected (no trailing /)"
+          Alcotest.test_case "'repository/foo' sibling typo rejected"
             `Quick test_raw_looks_repos_typo_rejected;
         ] );
       ( "format_path_rejection",
@@ -296,5 +261,3 @@ let () =
             `Quick test_format_rejection_does_not_leak_allowed_norms;
         ] );
     ]
-[@@@warning "-32-27"]
-let _ = check_string  (* silence unused-helper warning *)

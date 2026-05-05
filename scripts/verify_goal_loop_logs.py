@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Iterable, TextIO
 
 
 @dataclass
@@ -31,6 +32,31 @@ class VerificationReport:
     policy: str
     checked_findings: int
     failing_findings: list[VerificationFinding]
+
+
+@dataclass
+class LogMatchSample:
+    path: str
+    line: int
+    text: str
+
+
+@dataclass
+class LogContractViolation:
+    pattern: str
+    kind: str
+    count: int
+    samples: list[LogMatchSample]
+
+
+@dataclass
+class LogContractReport:
+    status: str
+    checked_files: list[str]
+    total_lines: int
+    required_patterns: int
+    forbidden_patterns: int
+    violations: list[LogContractViolation]
 
 
 def load_json_input(path: str) -> dict[str, Any]:
@@ -86,7 +112,105 @@ def verify_orient(orient: dict[str, Any], *, policy: str) -> VerificationReport:
     )
 
 
-def report_to_json(report: VerificationReport) -> str:
+def iter_log_lines(paths: list[str]) -> Iterable[tuple[str, int, str]]:
+    if not paths:
+        yield from iter_log_handle("<stdin>", sys.stdin)
+        return
+
+    for raw_path in paths:
+        if raw_path == "-":
+            yield from iter_log_handle("<stdin>", sys.stdin)
+            continue
+        path = Path(raw_path)
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            yield from iter_log_handle(str(path), handle)
+
+
+def iter_log_handle(path: str, handle: TextIO) -> Iterable[tuple[str, int, str]]:
+    for line_no, line in enumerate(handle, start=1):
+        yield path, line_no, line.rstrip("\n")
+
+
+def verify_log_contract(
+    paths: list[str],
+    *,
+    must_contain: list[str],
+    must_not_contain: list[str],
+    max_samples: int,
+) -> LogContractReport:
+    required = [(pattern, re.compile(pattern)) for pattern in must_contain]
+    forbidden = [(pattern, re.compile(pattern)) for pattern in must_not_contain]
+    required_counts = {pattern: 0 for pattern, _ in required}
+    forbidden_counts = {pattern: 0 for pattern, _ in forbidden}
+    required_samples: dict[str, list[LogMatchSample]] = {
+        pattern: [] for pattern, _ in required
+    }
+    forbidden_samples: dict[str, list[LogMatchSample]] = {
+        pattern: [] for pattern, _ in forbidden
+    }
+    checked_files: list[str] = []
+    checked_files_seen: set[str] = set()
+    total_lines = 0
+
+    for path, line_no, line in iter_log_lines(paths):
+        total_lines += 1
+        if path not in checked_files_seen:
+            checked_files.append(path)
+            checked_files_seen.add(path)
+        for pattern, regex in required:
+            if not regex.search(line):
+                continue
+            required_counts[pattern] += 1
+            if len(required_samples[pattern]) < max_samples:
+                required_samples[pattern].append(
+                    LogMatchSample(path=path, line=line_no, text=line)
+                )
+        for pattern, regex in forbidden:
+            if not regex.search(line):
+                continue
+            forbidden_counts[pattern] += 1
+            if len(forbidden_samples[pattern]) < max_samples:
+                forbidden_samples[pattern].append(
+                    LogMatchSample(path=path, line=line_no, text=line)
+                )
+
+    violations: list[LogContractViolation] = []
+    for pattern in must_not_contain:
+        count = forbidden_counts[pattern]
+        if count == 0:
+            continue
+        violations.append(
+            LogContractViolation(
+                pattern=pattern,
+                kind="forbidden_present",
+                count=count,
+                samples=forbidden_samples[pattern],
+            )
+        )
+    for pattern in must_contain:
+        count = required_counts[pattern]
+        if count > 0:
+            continue
+        violations.append(
+            LogContractViolation(
+                pattern=pattern,
+                kind="required_missing",
+                count=0,
+                samples=[],
+            )
+        )
+
+    return LogContractReport(
+        status="PASS" if not violations else "FAIL",
+        checked_files=checked_files,
+        total_lines=total_lines,
+        required_patterns=len(required),
+        forbidden_patterns=len(forbidden),
+        violations=violations,
+    )
+
+
+def report_to_json(report: VerificationReport | LogContractReport) -> str:
     return json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True)
 
 
@@ -105,6 +229,27 @@ def report_to_text(report: VerificationReport) -> str:
     return "\n".join(lines)
 
 
+def log_contract_report_to_text(report: LogContractReport) -> str:
+    lines = [
+        f"GOAL LOOP Log Contract Verify: {report.status}",
+        (
+            "checked_files: "
+            f"{', '.join(report.checked_files) if report.checked_files else '<stdin>'}"
+        ),
+        f"total_lines: {report.total_lines}",
+        f"required_patterns: {report.required_patterns}",
+        f"forbidden_patterns: {report.forbidden_patterns}",
+        f"violations: {len(report.violations)}",
+    ]
+    for violation in report.violations:
+        lines.append(
+            f"- {violation.kind} {violation.pattern}: count={violation.count}"
+        )
+        for sample in violation.samples:
+            lines.append(f"  {sample.path}:{sample.line}: {sample.text}")
+    return "\n".join(lines)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -120,6 +265,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Verification policy: fail on critical evidence or any evidence.",
     )
     parser.add_argument(
+        "--mode",
+        choices=("orient", "log-contract"),
+        default="orient",
+        help="Verify Orient JSON findings or raw log contract gates.",
+    )
+    parser.add_argument(
+        "--log",
+        action="append",
+        default=[],
+        help="Raw log path for --mode log-contract. Repeat for multiple files.",
+    )
+    parser.add_argument(
+        "--must-contain",
+        action="append",
+        default=[],
+        help="Regex that must appear at least once in --mode log-contract.",
+    )
+    parser.add_argument(
+        "--must-not-contain",
+        action="append",
+        default=[],
+        help="Regex that must be absent in --mode log-contract.",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=3,
+        help="Maximum sample lines per log-contract violation.",
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "text"),
         default="json",
@@ -130,6 +305,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.mode == "log-contract":
+        paths = list(args.log)
+        if not paths and args.orient_json != "-":
+            paths.append(args.orient_json)
+        report = verify_log_contract(
+            paths,
+            must_contain=list(args.must_contain),
+            must_not_contain=list(args.must_not_contain),
+            max_samples=args.max_samples,
+        )
+        if args.format == "json":
+            print(report_to_json(report))
+        else:
+            print(log_contract_report_to_text(report))
+        return 0 if report.status == "PASS" else 1
+
     report = verify_orient(load_json_input(args.orient_json), policy=args.policy)
     if args.format == "json":
         print(report_to_json(report))

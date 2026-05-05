@@ -1,4 +1,7 @@
 (* Recovery — Cycle 23 / Tier B6.
+   Classification surface only; strategy execution (Retry/Fallback/Handoff/
+   Abort) is intentionally deferred — see resilience_runtime.mli §Deferred
+   and docs/audit-responses/2026-05-05-dashboard-heuristic.md §4.
    See recovery.mli for the design rationale. *)
 
 type error_mode =

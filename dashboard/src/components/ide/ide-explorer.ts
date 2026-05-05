@@ -39,10 +39,17 @@ export function IdeExplorer({
     return dispose
   }, [store])
 
+  const [filter, setFilter] = useState('')
+
   // useMemo over `tick` so the visibleNodes call re-runs when the
   // store's expansion state changes; tick reference is intentional.
   const visible = useMemo(() => store.visibleNodes(), [store, tick])
-  const fileCount = visible.filter(n => n.diff !== null).length
+  const filtered = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    if (needle === '') return visible
+    return visible.filter(n => n.label.toLowerCase().includes(needle))
+  }, [visible, filter])
+  const fileCount = filtered.filter(n => n.diff !== null).length
 
   return html`
     <div
@@ -73,12 +80,29 @@ export function IdeExplorer({
         <span>${fileCount} FILES</span>
       </header>
       ${SourceHint(source)}
+      <input
+        type="search"
+        role="searchbox"
+        aria-label="파일 트리 필터"
+        placeholder="파일 이름 필터"
+        value=${filter}
+        onInput=${(e: Event) => setFilter((e.target as HTMLInputElement).value)}
+        style=${{
+          font: 'var(--type-body)',
+          fontSize: 'var(--fs-11)',
+          color: 'var(--color-fg-primary)',
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--color-border-default)',
+          borderRadius: 'var(--r-1)',
+          padding: 'var(--sp-1) var(--sp-2)',
+        }}
+      />
       <ul
         role="tree"
         aria-label="File tree"
         style=${{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}
       >
-        ${visible.map(node => TreeRow(node, store.isExpanded(node.path), () => {
+        ${filtered.map(node => TreeRow(node, store.isExpanded(node.path), () => {
           if (node.hasChildren) store.toggle(node.path)
           else activeIdeFile.value = node.path
         }))}

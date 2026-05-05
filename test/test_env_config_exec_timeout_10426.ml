@@ -35,6 +35,8 @@ let cases =
     E.Turn_sandbox, 2.0;
     E.Turn_up, 15.0;
     E.Git_meta, 10.0;
+    E.Autoresearch_git_meta, 10.0;
+    E.Autoresearch_git_mutation, 30.0;
     E.Shell_probe, 2.0;
   ]
 
@@ -118,6 +120,9 @@ let test_env_var_name_shape () =
   check string "Pr_review env var name"
     "MASC_EXEC_TIMEOUT_PR_REVIEW_SEC"
     (E.per_caller_env_var ~caller:E.Pr_review);
+  check string "Autoresearch git mutation env var name"
+    "MASC_EXEC_TIMEOUT_AUTORESEARCH_GIT_MUTATION_SEC"
+    (E.per_caller_env_var ~caller:E.Autoresearch_git_mutation);
   check string "Unknown env var name lowercases"
     "MASC_EXEC_TIMEOUT_FUTURE_X_SEC"
     (E.per_caller_env_var ~caller:(E.Unknown "future-x"))

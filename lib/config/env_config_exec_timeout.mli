@@ -31,6 +31,14 @@ type caller =
           that should complete in <1s; however, some sites invoke
           [git remote] over network-origin remotes where DNS and TLS
           add latency, so 10s provides a reasonable ceiling. *)
+  | Autoresearch_git_meta
+      (** Autoresearch local git metadata commands. Default 10.0s,
+          preserving the previous inline budget for rev-parse/tag
+          metadata reads inside the experiment loop. *)
+  | Autoresearch_git_mutation
+      (** Autoresearch local git mutation commands. Default 30.0s,
+          preserving the previous inline budget for add/commit/reset/
+          worktree cleanup inside managed experiment loops. *)
   | Shell_probe
       (** PATH availability probes (e.g. [command -v <name>]).
           Default 2.0s — pure OS lookup; longer timeouts mask

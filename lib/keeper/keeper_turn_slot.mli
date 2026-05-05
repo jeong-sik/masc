@@ -27,6 +27,20 @@ val turn_semaphore_value_for_test : unit -> int
 val autonomous_turn_semaphore_value_for_test : unit -> int
 val reactive_turn_semaphore_value_for_test : unit -> int
 
+(** Diagnostic: keepers currently holding a slot in each pool, paired
+    with how long (in seconds, relative to [now]) they have held it.
+    Sorted by descending hold time so the longest-holding peer is first
+    — that is typically the actual fleet blocker when [turn_available=0]
+    starves the rest. Pure read; no mutation.
+
+    [~now] MUST come from {!Time_compat.now}, the same clock source
+    used to record [acquired_at] inside this module. Mixing
+    [Unix.gettimeofday ()] or any other clock can produce nonsense
+    hold-time values (negative, or off by the clock skew). *)
+val turn_slot_holders : now:float -> (string * float) list
+val autonomous_slot_holders : now:float -> (string * float) list
+val reactive_slot_holders : now:float -> (string * float) list
+
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit
@@ -56,6 +70,8 @@ val reset_autonomous_completion_for_test : unit -> unit
     per keeper. Promoted to [Keeper_fiber_crash] at this limit. *)
 val oas_timeout_budget_strike_limit : int
 
+val bump_budget_exhaustion_seeded :
+  keeper_name:string -> prior_strikes:int -> int
 val bump_budget_exhaustion : keeper_name:string -> int
 val reset_budget_exhaustion : keeper_name:string -> unit
 val peek_budget_exhaustion_for_test : keeper_name:string -> int

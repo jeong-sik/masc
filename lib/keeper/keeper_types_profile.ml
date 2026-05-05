@@ -1115,6 +1115,113 @@ let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
         path
         (String.concat ", " unknown)
 
+let merge_string_list ~base overlay =
+  match overlay with [] -> base | xs -> xs
+
+let merge_keeper_profile_defaults
+    ~agent_name
+    ~(base : keeper_profile_defaults)
+    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  ignore agent_name;
+  let prefer overlay_value base_value =
+    match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  let per_provider_timeout_state, per_provider_timeout =
+    match overlay.per_provider_timeout_state with
+    | Per_provider_timeout_unset ->
+        base.per_provider_timeout_state, base.per_provider_timeout
+    | Per_provider_timeout_invalid ->
+        Per_provider_timeout_invalid, None
+    | Per_provider_timeout_set ->
+        Per_provider_timeout_set, overlay.per_provider_timeout
+  in
+  {
+    id = prefer overlay.id base.id;
+    manifest_path = prefer overlay.manifest_path base.manifest_path;
+    persona_name = prefer overlay.persona_name base.persona_name;
+    goal = prefer overlay.goal base.goal;
+    short_goal = prefer overlay.short_goal base.short_goal;
+    mid_goal = prefer overlay.mid_goal base.mid_goal;
+    long_goal = prefer overlay.long_goal base.long_goal;
+    will = prefer overlay.will base.will;
+    needs = prefer overlay.needs base.needs;
+    desires = prefer overlay.desires base.desires;
+    instructions = prefer overlay.instructions base.instructions;
+    policy_voice_enabled =
+      prefer overlay.policy_voice_enabled base.policy_voice_enabled;
+    autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
+    mention_targets =
+      merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
+    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
+    proactive_cooldown_sec =
+      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
+    room_signal_prompt_enabled =
+      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
+    shards = prefer overlay.shards base.shards;
+    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
+    sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
+    sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
+    network_mode = prefer overlay.network_mode base.network_mode;
+    shared_memory_scope =
+      prefer overlay.shared_memory_scope base.shared_memory_scope;
+    github_identity = prefer overlay.github_identity base.github_identity;
+    git_identity_mode =
+      prefer overlay.git_identity_mode base.git_identity_mode;
+    tool_preset = prefer overlay.tool_preset base.tool_preset;
+    tool_preset_source =
+      (match overlay.tool_preset_source with
+       | Some _ as source -> source
+       | None ->
+         match overlay.tool_preset with
+       | Some _ -> Some "toml"
+       | None ->
+           match base.tool_preset with
+           | Some _ -> Some "persona"
+           | None -> None);
+    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
+    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
+    work_discovery_enabled =
+      prefer overlay.work_discovery_enabled base.work_discovery_enabled;
+    work_discovery_sources =
+      prefer overlay.work_discovery_sources base.work_discovery_sources;
+    work_discovery_interval_sec =
+      prefer overlay.work_discovery_interval_sec base.work_discovery_interval_sec;
+    work_discovery_guidance =
+      prefer overlay.work_discovery_guidance base.work_discovery_guidance;
+    telemetry_feedback_enabled =
+      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      prefer overlay.telemetry_feedback_window_hours
+        base.telemetry_feedback_window_hours;
+    per_provider_timeout_state;
+    per_provider_timeout;
+    always_approve = prefer overlay.always_approve base.always_approve;
+    social_model = prefer overlay.social_model base.social_model;
+    cascade_name = prefer overlay.cascade_name base.cascade_name;
+    models = prefer overlay.models base.models;
+    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
+    max_turns_per_call_scheduled_autonomous =
+      prefer overlay.max_turns_per_call_scheduled_autonomous
+        base.max_turns_per_call_scheduled_autonomous;
+    (* oas_env merges key-by-key: overlay wins per key, base keys that
+       overlay doesn't mention survive.  Preserves the natural intent
+       that a persona sets base defaults and keeper TOML layers its
+       own toggles on top. *)
+    oas_env =
+      (let overlay_keys = List.map fst overlay.oas_env in
+       let surviving_base =
+         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
+       in
+       surviving_base @ overlay.oas_env);
+    unknown_toml_keys =
+      merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
+  }
+
+(* Derived transport guards for combinations that are otherwise easy to
+   misconfigure. *)
+
 let load_keeper_toml (path : string)
     : (string * keeper_profile_defaults, string) result =
   match Safe_ops.read_file_safe path with
@@ -1126,7 +1233,24 @@ let load_keeper_toml (path : string)
       match profile_defaults_of_toml doc with
       | Error e -> Error (Printf.sprintf "%s: %s" path e)
       | Ok defaults ->
+        let defaults =
+          match Keeper_toml_loader.toml_string_opt doc "keeper.base" with
+          | Some base_file ->
+              let base_path = Filename.concat (Filename.dirname path) base_file in
+              (match Safe_ops.read_file_safe base_path with
+               | Ok base_content ->
+                   (match Keeper_toml_loader.parse_toml base_content with
+                    | Ok base_doc ->
+                        (match profile_defaults_of_toml base_doc with
+                         | Ok base_defaults ->
+                             merge_keeper_profile_defaults ~agent_name:"base" ~base:base_defaults ~overlay:defaults
+                         | Error _ -> defaults)
+                    | Error _ -> defaults)
+               | Error _ -> defaults)
+          | None -> defaults
+        in
         let unknown_toml_keys = detect_unknown_keeper_toml_keys doc in
+        let unknown_toml_keys = List.filter (fun k -> k <> "keeper.base") unknown_toml_keys in
         warn_unknown_keeper_toml_keys ~path doc;
         let defaults = { defaults with unknown_toml_keys } in
         let name =
@@ -1316,112 +1440,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
-let merge_string_list ~base overlay =
-  match overlay with [] -> base | xs -> xs
 
-let merge_keeper_profile_defaults
-    ~agent_name
-    ~(base : keeper_profile_defaults)
-    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
-  ignore agent_name;
-  let prefer overlay_value base_value =
-    match overlay_value with Some _ -> overlay_value | None -> base_value
-  in
-  let per_provider_timeout_state, per_provider_timeout =
-    match overlay.per_provider_timeout_state with
-    | Per_provider_timeout_unset ->
-        base.per_provider_timeout_state, base.per_provider_timeout
-    | Per_provider_timeout_invalid ->
-        Per_provider_timeout_invalid, None
-    | Per_provider_timeout_set ->
-        Per_provider_timeout_set, overlay.per_provider_timeout
-  in
-  {
-    id = prefer overlay.id base.id;
-    manifest_path = prefer overlay.manifest_path base.manifest_path;
-    persona_name = prefer overlay.persona_name base.persona_name;
-    goal = prefer overlay.goal base.goal;
-    short_goal = prefer overlay.short_goal base.short_goal;
-    mid_goal = prefer overlay.mid_goal base.mid_goal;
-    long_goal = prefer overlay.long_goal base.long_goal;
-    will = prefer overlay.will base.will;
-    needs = prefer overlay.needs base.needs;
-    desires = prefer overlay.desires base.desires;
-    instructions = prefer overlay.instructions base.instructions;
-    policy_voice_enabled =
-      prefer overlay.policy_voice_enabled base.policy_voice_enabled;
-    autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
-    mention_targets =
-      merge_string_list ~base:base.mention_targets overlay.mention_targets;
-    proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
-    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
-    proactive_cooldown_sec =
-      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
-    room_signal_prompt_enabled =
-      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
-    shards = prefer overlay.shards base.shards;
-    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
-    sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
-    sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
-    network_mode = prefer overlay.network_mode base.network_mode;
-    shared_memory_scope =
-      prefer overlay.shared_memory_scope base.shared_memory_scope;
-    github_identity = prefer overlay.github_identity base.github_identity;
-    git_identity_mode =
-      prefer overlay.git_identity_mode base.git_identity_mode;
-    tool_preset = prefer overlay.tool_preset base.tool_preset;
-    tool_preset_source =
-      (match overlay.tool_preset_source with
-       | Some _ as source -> source
-       | None ->
-         match overlay.tool_preset with
-       | Some _ -> Some "toml"
-       | None ->
-           match base.tool_preset with
-           | Some _ -> Some "persona"
-           | None -> None);
-    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
-    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
-    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
-    work_discovery_enabled =
-      prefer overlay.work_discovery_enabled base.work_discovery_enabled;
-    work_discovery_sources =
-      prefer overlay.work_discovery_sources base.work_discovery_sources;
-    work_discovery_interval_sec =
-      prefer overlay.work_discovery_interval_sec base.work_discovery_interval_sec;
-    work_discovery_guidance =
-      prefer overlay.work_discovery_guidance base.work_discovery_guidance;
-    telemetry_feedback_enabled =
-      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
-    telemetry_feedback_window_hours =
-      prefer overlay.telemetry_feedback_window_hours
-        base.telemetry_feedback_window_hours;
-    per_provider_timeout_state;
-    per_provider_timeout;
-    always_approve = prefer overlay.always_approve base.always_approve;
-    social_model = prefer overlay.social_model base.social_model;
-    cascade_name = prefer overlay.cascade_name base.cascade_name;
-    models = prefer overlay.models base.models;
-    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
-    max_turns_per_call_scheduled_autonomous =
-      prefer overlay.max_turns_per_call_scheduled_autonomous
-        base.max_turns_per_call_scheduled_autonomous;
-    (* oas_env merges key-by-key: overlay wins per key, base keys that
-       overlay doesn't mention survive.  Preserves the natural intent
-       that a persona sets base defaults and keeper TOML layers its
-       own toggles on top. *)
-    oas_env =
-      (let overlay_keys = List.map fst overlay.oas_env in
-       let surviving_base =
-         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
-       in
-       surviving_base @ overlay.oas_env);
-    unknown_toml_keys =
-      merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
-  }
-
-(* Derived transport guards for combinations that are otherwise easy to
-   misconfigure. *)
 let oas_env_truthy value =
   match String.lowercase_ascii (String.trim value) with
   | "1" | "true" | "yes" | "on" -> true

@@ -39,6 +39,13 @@ let all_pr_review_events = [ Comment; Approve; Request_changes ]
 let valid_pr_review_event_strings =
   List.map pr_review_event_to_string all_pr_review_events
 
+let pr_review_mutation_preset_ok = function
+  | Some (Research | Delivery | Coding | Full) -> true
+  | _ -> false
+
+let pr_review_mutation_preset_reason tool_name =
+  Printf.sprintf "%s requires research, delivery, coding, or full preset" tool_name
+
 (* Both "pr_number" and "number" are accepted for schema-drift compat. *)
 let pr_number_of_args args =
   let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
@@ -143,18 +150,17 @@ let handle_keeper_pr_review_comment
         (Printf.sprintf "event must be one of [%s]; got %S"
            (String.concat ", " valid_pr_review_event_strings) event_raw)
   | Some event ->
-    (* Check preset: requires delivery/coding/full for mutations *)
     let preset_ok =
-      match Keeper_types.tool_access_preset meta.tool_access with
-      | Some (Delivery | Coding | Full) -> true
-      | _ -> false
+      pr_review_mutation_preset_ok
+        (Keeper_types.tool_access_preset meta.tool_access)
     in
     if not preset_ok then
       Yojson.Safe.to_string
         (`Assoc
           [ "ok", `Bool false
           ; "error", `String "preset_insufficient"
-          ; "reason", `String "keeper_pr_review_comment requires delivery, coding, or full preset"
+          ; "reason", `String
+              (pr_review_mutation_preset_reason "keeper_pr_review_comment")
           ])
     else
       let root = Keeper_alerting_path.project_root_of_config config in
@@ -198,16 +204,16 @@ let handle_keeper_pr_review_reply
     error_json "body is required."
   else
     let preset_ok =
-      match Keeper_types.tool_access_preset meta.tool_access with
-      | Some (Delivery | Coding | Full) -> true
-      | _ -> false
+      pr_review_mutation_preset_ok
+        (Keeper_types.tool_access_preset meta.tool_access)
     in
     if not preset_ok then
       Yojson.Safe.to_string
         (`Assoc
           [ "ok", `Bool false
           ; "error", `String "preset_insufficient"
-          ; "reason", `String "keeper_pr_review_reply requires delivery, coding, or full preset"
+          ; "reason", `String
+              (pr_review_mutation_preset_reason "keeper_pr_review_reply")
           ])
     else
       let root = Keeper_alerting_path.project_root_of_config config in

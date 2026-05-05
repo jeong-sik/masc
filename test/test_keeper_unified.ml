@@ -2053,7 +2053,7 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
 let sample_ctx_composition ?(system_prompt = "You are a keeper.")
     ?(dynamic_context = "")
     ?(user_message = "Check the board.")
-    ?(actual_input_tokens = 0)
+    ?(actual_input_tokens : int option = None)
     () =
   KAR.build_ctx_composition_metrics
     ~system_prompt
@@ -2094,7 +2094,10 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     response_text = text;
     model_used = model;
     prompt_metrics = sample_prompt_metrics ();
-    ctx_composition = sample_ctx_composition ~actual_input_tokens:input_tok ();
+    ctx_composition =
+      sample_ctx_composition
+        ~actual_input_tokens:(if input_tok > 0 then Some input_tok else None)
+        ();
     cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;

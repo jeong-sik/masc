@@ -126,6 +126,29 @@ val metric_keeper_provider_block_duration_sec : string
     in cooldown each time a cooldown is applied or extended.
     Labels: [provider]. *)
 
+val metric_board_persist_lock_acquire_sec : string
+(** #10569 diagnostic: time spent waiting to acquire the board
+    persist mutex.  High values point to writer-side contention:
+    if N concurrent fibers serialize through this lock and any one
+    holds it for K seconds during disk I/O, the (N-1)-th waiter
+    sees ~(N-1)*K acquisition latency.
+
+    Used together with [metric_board_persist_lock_held_sec] to
+    distinguish queueing (acquire high, held low) from syscall stall
+    (acquire low, held high).  Recorded once per [with_persist_lock]
+    entry. *)
+
+val metric_board_persist_lock_held_sec : string
+(** #10569 diagnostic: time spent inside the board persist lock,
+    measured from acquisition to release.  Captures the actual disk
+    I/O latency (append + rotate / atomic save) per persist call.
+
+    Combined with [metric_board_persist_lock_acquire_sec] this
+    gives operators the data to choose between (a) raising the
+    per-board tool timeout, (b) introducing a write queue / batch,
+    or (c) leaving the path synchronous when held time is already
+    sub-second. *)
+
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
     surfaced so operators can alert on queue pressure without log

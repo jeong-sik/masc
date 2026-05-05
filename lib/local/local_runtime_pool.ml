@@ -3,11 +3,6 @@ open Yojson.Safe.Util
 
 open Result.Syntax
 
-(** Exponential moving average weights for latency smoothing.
-    ema_decay + ema_alpha = 1.0. Higher decay = more weight to history. *)
-let ema_decay = 0.8
-let ema_alpha = 0.2
-
 type runtime = {
   id : string;
   base_url : string;
@@ -39,18 +34,6 @@ type runtime_snapshot = {
   total_success : int;
   total_failure : int;
   port : int option;
-}
-
-type lease = {
-  runtime_id : string;
-}
-
-type assignment = {
-  runtime_id : string;
-  base_url : string;
-  model_name : string;
-  max_concurrency : int;
-  lease : lease;
 }
 
 type pool_state = {
@@ -413,18 +396,6 @@ let record_measured_ceiling value =
     in
     pool := { state with measured_ceiling = new_ceiling })
 
-let model_name_for_runtime (runtime : runtime) requested_model =
-  match trim_opt requested_model with
-  | Some model -> Ok model
-  | None -> (
-      match runtime.model with
-      | Some model -> Ok model
-      | None ->
-          Error
-            (sprintf
-               "no explicit model provided for local runtime %s; set spawn_model or runtime.model"
-               runtime.id))
-
 let preference_matches (runtime : runtime) preferred_pool =
   match trim_opt preferred_pool with
   | None -> true
@@ -520,121 +491,9 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
                 (sprintf "no local runtime configured for model %s" requested)
           | None -> Error "no local runtimes configured")
 
-(* acquire: ensure_loaded may yield (Log.LocalWorker.debug inside debug_log).
-   After that, reading !pool and swapping pool := are yield-free. *)
-let acquire ?preferred_pool ~model_name () =
-  ensure_loaded ();
-  with_pool_lock (fun () ->
-    let state : pool_state = !pool in
-    let* runtime =
-      select_runtime_from state.runtimes ?preferred_pool ?model_name ()
-    in
-    let* model_name = model_name_for_runtime runtime model_name in
-    let updated =
-      {
-        runtime with
-        active_slots = runtime.active_slots + 1;
-        queue_depth = max 0 (runtime.active_slots + 1 - runtime.max_concurrency);
-        total_started = runtime.total_started + 1;
-      }
-    in
-    let new_runtimes : runtime list =
-      List.map
-        (fun (r : runtime) ->
-          if String.equal r.id runtime.id then updated else r)
-        (state.runtimes : runtime list)
-    in
-    pool := { state with runtimes = new_runtimes };
-    Ok
-      {
-        runtime_id = runtime.id;
-        base_url = runtime.base_url;
-        model_name;
-        max_concurrency = runtime.max_concurrency;
-        lease = { runtime_id = runtime.id };
-      })
-
-(* release: ensure_loaded may yield. After that, ref read+swap is yield-free.
-   debug_log (may yield) is placed AFTER the ref swap. *)
-let release (lease : lease) ~success ?error ?latency_ms () =
-  ensure_loaded ();
-  let release_summary =
-    with_pool_lock (fun () ->
-      let state : pool_state = !pool in
-      match
-        List.find_opt
-          (fun (runtime : runtime) -> String.equal runtime.id lease.runtime_id)
-          state.runtimes
-      with
-      | None -> None
-      | Some runtime ->
-          let before_failure_streak = runtime.failure_streak in
-          let active_slots = max 0 (runtime.active_slots - 1) in
-          let latency_ema_ms =
-            match latency_ms with
-            | Some latency ->
-                let latency = float_of_int (max 0 latency) in
-                Some
-                  (match runtime.latency_ema_ms with
-                   | None -> latency
-                   | Some previous -> (previous *. ema_decay) +. (latency *. ema_alpha))
-            | None -> runtime.latency_ema_ms
-          in
-          let failure_streak, cooldown_until, last_error, total_success,
-              total_failure =
-            if success then
-              (0, None, None, runtime.total_success + 1, runtime.total_failure)
-            else
-              let streak = runtime.failure_streak + 1 in
-              let cooldown =
-                if streak >= 3 then Some (wall_now () +. cooldown_seconds ())
-                else runtime.cooldown_until
-              in
-              ( streak,
-                cooldown,
-                trim_opt error,
-                runtime.total_success,
-                runtime.total_failure + 1 )
-          in
-          let queue_depth = max 0 (active_slots - runtime.max_concurrency) in
-          let updated =
-            {
-              runtime with
-              active_slots;
-              queue_depth;
-              latency_ema_ms;
-              failure_streak;
-              cooldown_until;
-              last_error;
-              total_success;
-              total_failure;
-            }
-          in
-          let new_runtimes : runtime list =
-            List.map
-              (fun (r : runtime) ->
-                if String.equal r.id runtime.id then updated else r)
-              (state.runtimes : runtime list)
-          in
-          pool := { state with runtimes = new_runtimes };
-          Some (runtime.id, before_failure_streak, updated))
-  in
-  match release_summary with
-  | None -> ()
-  | Some (runtime_id, before_failure_streak, updated) ->
-      debug_log
-        "release runtime=%s success=%b before_streak=%d after_streak=%d cooldown=%s total_success=%d total_failure=%d error=%s"
-        runtime_id success before_failure_streak updated.failure_streak
-        (match updated.cooldown_until with
-         | Some value -> Printf.sprintf "%.3f" value
-         | None -> "null")
-        updated.total_success updated.total_failure
-        (Option.value ~default:"" (trim_opt error))
-
-(** Return a parseable model label (e.g. "llama:qwen3.5") for an assignment.
-    Delegates to [Provider_adapter.make_local_label] for SSOT. *)
-let model_label_of_assignment (assignment : assignment) : string =
-  Provider_adapter.make_local_label assignment.model_name
+(* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
+   zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
+   §7.1. If leasing semantics return, design at the OAS cascade layer per RFC-0026. *)
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc

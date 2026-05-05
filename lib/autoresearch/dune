@@ -17,6 +17,7 @@
    fs_compat
    masc_log
    masc_core
+   masc_mcp.config
    masc_process
    masc_mcp.masc_exec
    agent_sdk

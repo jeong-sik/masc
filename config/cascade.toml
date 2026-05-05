@@ -60,7 +60,13 @@ max_tokens = 200
 keeper_assignable = false
 
 [tier_small]
-comment = "4B-class local models for simple tasks (classification, format, short summary). Operator opt-in: uncomment models when Ollama is running locally."
+# Operator opt-in slot for 4B-class local models. Empty by default — every
+# route that points at "tier_small" falls through to tier_medium via
+# fallback_cascade until at least one model is uncommented below (and
+# Ollama is running locally). Keeping the profile here documents the
+# intended fallback chain rather than removing it; we'd otherwise need
+# to either rewrite every "tier_small" route or silently ignore them.
+comment = "Operator opt-in slot for 4B-class local models. Empty by default; routes fall through to tier_medium."
 # models = [
 #   "ollama:llama3.2:3b",
 #   "ollama:phi-3-mini",

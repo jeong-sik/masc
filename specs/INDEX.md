@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-05T00:47:46Z (HEAD: 2d84ae0990)
+Generated: 2026-05-05T04:03:30Z (HEAD: a2df61c549)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 87 |
-| Manual specs | 87 |
+| Total .tla files | 88 |
+| Manual specs | 88 |
 | TTrace (auto-generated) | 0 |
-| Directories | 17 |
-| Total .cfg files | 175 |
-| Buggy .cfg (bug-model pair) | 85 |
+| Directories | 18 |
+| Total .cfg files | 177 |
+| Buggy .cfg (bug-model pair) | 86 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -93,6 +93,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | b516abec0c37 |
 | SessionRegistryGhost.tla | SessionRegistryGhost | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistencyInvariant} buggy={inv:TypeOK, inv:ConsistencyInvariant} | f07b092d3709 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 5d3029adffa6 |
+
+### specs/cascade (1 specs)
+
+| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
+|------|--------|------|-----|-------|-------------------------|---------------|
+| CascadeAttemptLiveness.tla | CascadeAttemptLiveness | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:KillIsJustified} | d889a3616009 |
 
 ### specs/checkpoint-trim (1 specs)
 

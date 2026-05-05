@@ -24,7 +24,17 @@ let is_in_git_repo workdir =
 let exec_gate_raw_source argv =
   String.concat " " (List.map Filename.quote argv)
 
-let run_git_with_status ?(timeout_sec = 30.0) ~workdir argv =
+let git_meta_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec
+    ~caller:Env_config_exec_timeout.Autoresearch_git_meta
+    ()
+
+let git_mutation_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec
+    ~caller:Env_config_exec_timeout.Autoresearch_git_mutation
+    ()
+
+let run_git_with_status ?(timeout_sec = git_mutation_timeout_sec ()) ~workdir argv =
   let full_argv = "git" :: "-C" :: workdir :: argv in
   let raw_source = exec_gate_raw_source full_argv in
   Masc_exec.Exec_gate.run_argv_with_status
@@ -34,7 +44,7 @@ let run_git_with_status ?(timeout_sec = 30.0) ~workdir argv =
     ~timeout_sec
     full_argv
 
-let run_capture_lines ~workdir ?(timeout_sec = 30.0) argv =
+let run_capture_lines ~workdir ?(timeout_sec = git_mutation_timeout_sec ()) argv =
   let status, raw_output = run_git_with_status ~timeout_sec ~workdir argv in
   let lines =
     if String.length raw_output = 0 then []
@@ -48,7 +58,10 @@ let git_head_short ~workdir =
   if not (is_in_git_repo workdir) then None
   else
   let status, raw_output =
-    run_git_with_status ~timeout_sec:10.0 ~workdir [ "rev-parse"; "--short"; "HEAD" ]
+    run_git_with_status
+      ~timeout_sec:(git_meta_timeout_sec ())
+      ~workdir
+      [ "rev-parse"; "--short"; "HEAD" ]
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -64,12 +77,15 @@ let git_commit ~workdir ~message
     Result.error "not inside a git repository"
   else
   let add_status, add_output =
-    run_git_with_status ~timeout_sec:30.0 ~workdir [ "add"; "--update" ]
+    run_git_with_status
+      ~timeout_sec:(git_mutation_timeout_sec ())
+      ~workdir
+      [ "add"; "--update" ]
   in
   match add_status with
   | Unix.WEXITED 0 -> (
     let check_status, _check_output =
-      run_git_with_status ~timeout_sec:30.0 ~workdir
+      run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
         [ "diff"; "--cached"; "--quiet" ]
     in
     match check_status with
@@ -78,12 +94,17 @@ let git_commit ~workdir ~message
     Result.ok None
     | Unix.WEXITED 1 ->
     let status, raw_output =
-      run_git_with_status ~timeout_sec:30.0 ~workdir [ "commit"; "-m"; message ]
+      run_git_with_status
+        ~timeout_sec:(git_mutation_timeout_sec ())
+        ~workdir
+        [ "commit"; "-m"; message ]
     in
     (match status with
      | Unix.WEXITED 0 ->
        let hash_status, hash_output =
-         run_git_with_status ~timeout_sec:10.0 ~workdir
+         run_git_with_status
+           ~timeout_sec:(git_meta_timeout_sec ())
+           ~workdir
            [ "rev-parse"; "--short"; "HEAD" ]
        in
        (match hash_status with
@@ -109,7 +130,7 @@ let git_restore_head ~workdir =
   else
   (try
     let (status, _output) =
-      run_git_with_status ~timeout_sec:30.0 ~workdir
+      run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
         [ "restore"; "--source=HEAD"; "--worktree"; "--"; "." ]
     in
     match status with
@@ -123,7 +144,7 @@ let git_reset_last ~workdir =
   else
   (try
     let (status, _output) =
-      run_git_with_status ~timeout_sec:30.0 ~workdir
+      run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
         [ "reset"; "--soft"; "HEAD~1" ]
     in
     match status with
@@ -150,7 +171,7 @@ let git_tag_best ~workdir ~cycle ~score =
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
   (try
      let (_status, _output) =
-       run_git_with_status ~timeout_sec:10.0 ~workdir
+       run_git_with_status ~timeout_sec:(git_meta_timeout_sec ()) ~workdir
          [ "tag"; "-f"; tag ]
      in
      ()

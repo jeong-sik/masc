@@ -652,6 +652,65 @@ goal = "test"
    | Error _ -> ());
   Sys.remove tmp
 
+let test_load_keeper_toml_inherits_base_defaults () =
+  let tmp_dir = Filename.temp_file "keeper_base_toml" "" in
+  Sys.remove tmp_dir;
+  Unix.mkdir tmp_dir 0o755;
+  let base_path = Filename.concat tmp_dir "base.toml" in
+  let child_path = Filename.concat tmp_dir "sangsu.toml" in
+  let write_file path content =
+    let oc = open_out path in
+    output_string oc content;
+    close_out oc
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists child_path then Sys.remove child_path;
+      if Sys.file_exists base_path then Sys.remove base_path;
+      if Sys.file_exists tmp_dir then Unix.rmdir tmp_dir)
+    (fun () ->
+      write_file base_path {|
+[keeper]
+cascade_name = "big_three"
+sandbox_profile = "docker"
+network_mode = "inherit"
+work_discovery_enabled = true
+github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"
+|};
+      write_file child_path {|
+[keeper]
+base = "base.toml"
+persona_name = "sangsu"
+work_discovery_sources = ["unclaimed_tasks"]
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+|};
+      match KTP.load_keeper_toml child_path with
+      | Error e -> fail e
+      | Ok (name, defaults) ->
+          check string "name from filename" "sangsu" name;
+          check (option string) "base cascade" (Some "big_three")
+            defaults.cascade_name;
+          check (option string) "base sandbox" (Some "docker")
+            (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+          check (option string) "base network" (Some "inherit")
+            (Option.map KTP.network_mode_to_string defaults.network_mode);
+          check (option bool) "base work discovery" (Some true)
+            defaults.work_discovery_enabled;
+          check (option string) "base github identity"
+            (Some "anyang-keepers") defaults.github_identity;
+          check (option string) "base git identity mode"
+            (Some "github_identity") defaults.git_identity_mode;
+          check (option string) "child preset wins" (Some "coding")
+            defaults.tool_preset;
+          check (option string) "child preset source" (Some "toml")
+            defaults.tool_preset_source;
+          check (option (list string)) "child work discovery sources"
+            (Some [ "unclaimed_tasks" ]) defaults.work_discovery_sources)
+
 (* ================================================================ *)
 (* Discovery tests                                                   *)
 (* ================================================================ *)
@@ -1835,6 +1894,8 @@ let () =
           test_case "load from file" `Quick test_load_from_file;
           test_case "name from filename" `Quick test_load_name_from_filename;
           test_case "invalid name" `Quick test_load_invalid_name;
+          test_case "inherits base defaults" `Quick
+            test_load_keeper_toml_inherits_base_defaults;
         ] );
       ( "discovery",
         [

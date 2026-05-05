@@ -1,4 +1,9 @@
 (* Resilience keeper_bridge — Cycle 23 / Tier A6.
+   Wires Recovery classifier into the keeper post-turn lifecycle for
+   classification + audit-envelope emission only; strategy execution
+   (Retry/Fallback/Handoff/Abort) is intentionally deferred — see
+   resilience_runtime.mli §Deferred and
+   docs/audit-responses/2026-05-05-dashboard-heuristic.md §4.
    See keeper_bridge.mli for design rationale. *)
 
 (* ── Pure helpers ─────────────────────────────────────────────── *)

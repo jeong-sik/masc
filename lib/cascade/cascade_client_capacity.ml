@@ -205,7 +205,17 @@ let () =
       (fun (url, max_concurrent) -> register ~url ~max_concurrent)
       (parse_capacity_env s)
 
-(* ── Heuristic auto-registration for ollama-like URLs ───────────── *)
+(* ── Heuristic auto-registration for ollama-like URLs ─────────────
+
+   Auto-registration runs whenever a candidate set arrives without an
+   explicit MASC_CLIENT_CAPACITY entry. The pattern check delegates to
+   [Masc_network_defaults] so the URL→provider mapping stays in one
+   place; we used to make these decisions here and elsewhere with
+   ad-hoc substring checks, so the audit (audit_derived_state #9, Kimi
+   3-7) flagged it as a hidden heuristic. Operators who want to pin
+   capacity should use MASC_CLIENT_CAPACITY (parsed above); when this
+   path fires we log it at info level so the auto-decision is visible
+   in the operations log. *)
 
 let looks_like_ollama = Masc_network_defaults.is_ollama_url
 
@@ -215,28 +225,44 @@ let auto_register_for_candidates ~base_urls =
   let max_concurrent = ollama_default_max () in
   List.iter
     (fun url ->
-       if looks_like_ollama url && not (is_registered url) then
-         register ~url ~max_concurrent)
+       if looks_like_ollama url && not (is_registered url) then begin
+         Log.Misc.info
+           "auto-registering ollama-like url=%S with max_concurrent=%d \
+            (override via MASC_CLIENT_CAPACITY)" url max_concurrent;
+         register ~url ~max_concurrent
+       end)
     base_urls
 
 let auto_register_ollama_with_override ~base_urls ~max_concurrent =
   List.iter
     (fun url ->
-       if looks_like_ollama url && not (is_registered url) then
-         register ~url ~max_concurrent)
+       if looks_like_ollama url && not (is_registered url) then begin
+         Log.Misc.info
+           "auto-registering ollama-like url=%S with override max_concurrent=%d"
+           url max_concurrent;
+         register ~url ~max_concurrent
+       end)
     base_urls
 
 let auto_register_cli_for_candidates ~capacity_keys =
   let max_concurrent = cli_default_max () in
   List.iter
     (fun key ->
-       if looks_like_cli_sentinel key && not (is_registered key) then
-         register ~url:key ~max_concurrent)
+       if looks_like_cli_sentinel key && not (is_registered key) then begin
+         Log.Misc.info
+           "auto-registering cli sentinel key=%S with max_concurrent=%d \
+            (override via MASC_CLIENT_CAPACITY)" key max_concurrent;
+         register ~url:key ~max_concurrent
+       end)
     capacity_keys
 
 let auto_register_cli_with_override ~capacity_keys ~max_concurrent =
   List.iter
     (fun key ->
-       if looks_like_cli_sentinel key && not (is_registered key) then
-         register ~url:key ~max_concurrent)
+       if looks_like_cli_sentinel key && not (is_registered key) then begin
+         Log.Misc.info
+           "auto-registering cli sentinel key=%S with override max_concurrent=%d"
+           key max_concurrent;
+         register ~url:key ~max_concurrent
+       end)
     capacity_keys

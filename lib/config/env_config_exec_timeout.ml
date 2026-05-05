@@ -28,7 +28,9 @@ type caller =
   | Status_detail             (** keeper_status_detail health probes (5/10s) *)
   | Turn_sandbox              (** keeper_turn_sandbox_runtime (2/5s) *)
   | Turn_up                   (** keeper_turn_up_create / _update sandbox (15s) *)
-  | Git_meta                  (** local git metadata (rev-parse, remote get-url) (5s) *)
+  | Git_meta                  (** local git metadata (rev-parse, remote get-url) (10s) *)
+  | Autoresearch_git_meta     (** autoresearch local git metadata reads (10s) *)
+  | Autoresearch_git_mutation (** autoresearch local git mutations (30s) *)
   | Shell_probe               (** PATH probes via [command -v] (2s) *)
   | Unknown of string
 
@@ -52,6 +54,8 @@ let caller_key = function
   | Turn_sandbox -> "turn_sandbox"
   | Turn_up -> "turn_up"
   | Git_meta -> "git_meta"
+  | Autoresearch_git_meta -> "autoresearch_git_meta"
+  | Autoresearch_git_mutation -> "autoresearch_git_mutation"
   | Shell_probe -> "shell_probe"
   | Unknown caller -> caller
 
@@ -73,6 +77,8 @@ let known_callers () =
     Turn_sandbox;
     Turn_up;
     Git_meta;
+    Autoresearch_git_meta;
+    Autoresearch_git_mutation;
     Shell_probe;
   ]
 
@@ -93,7 +99,8 @@ let known_default_sec = function
   | Pr_review_post -> Some 30.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
-  | Git_meta -> Some 10.0
+  | Git_meta | Autoresearch_git_meta -> Some 10.0
+  | Autoresearch_git_mutation -> Some 30.0
   | Unknown _ -> None
 
 let upper_case s =

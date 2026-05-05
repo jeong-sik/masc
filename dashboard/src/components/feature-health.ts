@@ -67,7 +67,7 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
 ]
 
 // Pure filter helpers — exported for isolated testing.
-export function featureMatchesSearch(
+function featureMatchesSearch(
   item: Pick<FeatureHealthItem, 'env_name' | 'description'>,
   query: string,
 ): boolean {
@@ -79,7 +79,7 @@ export function featureMatchesSearch(
   )
 }
 
-export function featureMatchesStatus(
+function featureMatchesStatus(
   item: Pick<FeatureHealthItem, 'status'>,
   status: StatusFilter,
 ): boolean {
@@ -87,7 +87,7 @@ export function featureMatchesStatus(
   return item.status === status
 }
 
-export function filterFeatures<
+function filterFeatures<
   T extends Pick<FeatureHealthItem, 'env_name' | 'description' | 'status'>,
 >(features: T[], query: string, status: StatusFilter): T[] {
   const q = query.trim().toLowerCase()
@@ -121,7 +121,7 @@ export function statusLabel(status: FeatureStatus): string {
 
 type FeatureHealthTone = Extract<StatusChipTone, 'ok' | 'warn' | 'neutral' | 'bad'>
 
-export function statusChipTone(status: FeatureStatus): FeatureHealthTone {
+function statusChipTone(status: FeatureStatus): FeatureHealthTone {
   switch (status) {
     case 'healthy':
       return 'ok'

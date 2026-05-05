@@ -70,19 +70,103 @@ let utf8_repaired_reads = ref 0
 let utf8_repaired_bytes = ref 0
 let utf8_repair_path_samples = ref []
 let utf8_repair_path_sample_limit = 8
+let utf8_repair_log_restate_sec = 60.0
+let utf8_repair_log_entry_limit = 1024
+(* Reviewer #13206: idle entries that have not been seen for this long
+   are dropped on the next insert.  Bounds memory growth even when the
+   distinct-(surface,path) count never reaches [entry_limit] but the
+   workload churns through new keys faster than restate emissions. *)
+let utf8_repair_log_idle_eviction_sec = 3600.0
+
+type utf8_repair_log_entry =
+  { last_emit : float
+  ; last_seen : float
+  ; suppressed : int
+  }
+
+let utf8_repair_log_seen : (string, utf8_repair_log_entry) Hashtbl.t =
+  Hashtbl.create 16
+
+let utf8_repair_log_key ~surface ~path = surface ^ "\x00" ^ path
+
+let prune_utf8_repair_log_seen_if_needed ~now =
+  (* Sweep first: drop any entry whose [last_seen] is older than
+     [idle_eviction_sec], or whose [last_seen] is in the future
+     relative to [now] (a wall clock that jumped backwards via NTP /
+     VM suspend would otherwise leave entries that look "young"
+     forever and never restate).  Then, if still at or above the
+     hard cap, evict the single oldest entry. *)
+  let to_drop =
+    Hashtbl.fold
+      (fun key entry acc ->
+        let elapsed = now -. entry.last_seen in
+        if elapsed >= utf8_repair_log_idle_eviction_sec || elapsed < 0.0
+        then key :: acc
+        else acc)
+      utf8_repair_log_seen []
+  in
+  List.iter (fun k -> Hashtbl.remove utf8_repair_log_seen k) to_drop;
+  if Hashtbl.length utf8_repair_log_seen >= utf8_repair_log_entry_limit then
+    let oldest =
+      Hashtbl.fold
+        (fun key entry acc ->
+          match acc with
+          | None -> Some (key, entry.last_seen)
+          | Some (_, oldest_seen) when entry.last_seen < oldest_seen ->
+              Some (key, entry.last_seen)
+          | Some _ -> acc)
+        utf8_repair_log_seen None
+    in
+    match oldest with
+    | Some (key, _) -> Hashtbl.remove utf8_repair_log_seen key
+    | None -> ()
 
 let record_utf8_repair ~surface ~path ~invalid_bytes =
   let surface = if String.trim surface = "" then "persistence" else surface in
   let path = match path with Some p when String.trim p <> "" -> p | _ -> "(unknown)" in
-  Stdlib.Mutex.protect utf8_repair_mu (fun () ->
+  let log_decision =
+    Stdlib.Mutex.protect utf8_repair_mu (fun () ->
       incr utf8_repaired_reads;
       utf8_repaired_bytes := !utf8_repaired_bytes + invalid_bytes;
       if not (List.mem path !utf8_repair_path_samples) then
         utf8_repair_path_samples :=
           (path :: !utf8_repair_path_samples)
-          |> List.filteri (fun i _ -> i < utf8_repair_path_sample_limit));
-  Log.Misc.warn "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d"
-    surface path invalid_bytes
+          |> List.filteri (fun i _ -> i < utf8_repair_path_sample_limit);
+      let key = utf8_repair_log_key ~surface ~path in
+      let now = Time_compat.now () in
+      match Hashtbl.find_opt utf8_repair_log_seen key with
+      | None ->
+          prune_utf8_repair_log_seen_if_needed ~now;
+          Hashtbl.replace utf8_repair_log_seen key
+            { last_emit = now; last_seen = now; suppressed = 0 };
+          Some 0
+      | Some entry
+        when (let elapsed = now -. entry.last_emit in
+              elapsed >= utf8_repair_log_restate_sec || elapsed < 0.0) ->
+          (* Reviewer #13206: Time_compat.now resolves to Eio.Time.now
+             or Unix.gettimeofday — both wall clocks that can step
+             backwards (NTP / VM suspend) or forward by a large jump.
+             A negative [elapsed] would otherwise suppress the next
+             warning until the clock catches back up to the recorded
+             [last_emit].  Treat backwards motion as a forced restate
+             so the rate limiter recovers within one record call. *)
+          Hashtbl.replace utf8_repair_log_seen key
+            { last_emit = now; last_seen = now; suppressed = 0 };
+          Some entry.suppressed
+      | Some entry ->
+          Hashtbl.replace utf8_repair_log_seen key
+            { entry with last_seen = now; suppressed = entry.suppressed + 1 };
+          None)
+  in
+  match log_decision with
+  | None -> ()
+  | Some 0 ->
+      Log.Misc.warn "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d"
+        surface path invalid_bytes
+  | Some suppressed_repeats ->
+      Log.Misc.warn
+        "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d suppressed_repeats=%d"
+        surface path invalid_bytes suppressed_repeats
 
 let persistence_utf8_repair_stats () =
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->
@@ -91,11 +175,19 @@ let persistence_utf8_repair_stats () =
       ; path_samples = List.rev !utf8_repair_path_samples
       })
 
+let persistence_utf8_repair_log_entry_limit_for_tests () =
+  utf8_repair_log_entry_limit
+
+let persistence_utf8_repair_log_key_count_for_tests () =
+  Stdlib.Mutex.protect utf8_repair_mu (fun () ->
+      Hashtbl.length utf8_repair_log_seen)
+
 let reset_persistence_utf8_repair_stats_for_tests () =
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->
       utf8_repaired_reads := 0;
       utf8_repaired_bytes := 0;
-      utf8_repair_path_samples := [])
+      utf8_repair_path_samples := [];
+      Hashtbl.clear utf8_repair_log_seen)
 
 let count_invalid_utf8_bytes s =
   let len = String.length s in

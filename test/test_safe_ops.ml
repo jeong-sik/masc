@@ -54,6 +54,47 @@ let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
   let stats = persistence_utf8_repair_stats () in
   check int "repair was observed" 1 stats.repaired_reads
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal prefix (String.sub value 0 prefix_len)
+
+let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let baseline = latest_log_seq () in
+  ignore (parse_json_safe ~context:"utf8-repeat" "{\"msg\":\"a\xff\"}");
+  ignore (parse_json_safe ~context:"utf8-repeat" "{\"msg\":\"b\xff\"}");
+  let logs =
+    Log.Ring.recent ~limit:20 ~module_filter:"Misc" ~since_seq:baseline ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+           has_prefix ~prefix:"[json] persistence UTF-8 repaired path=utf8-repeat"
+             entry.message)
+  in
+  let stats = persistence_utf8_repair_stats () in
+  check int "both repairs counted" 2 stats.repaired_reads;
+  check int "duplicate repair warning suppressed" 1 (List.length logs)
+
+let test_utf8_repair_log_rate_limit_table_is_bounded () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let limit = persistence_utf8_repair_log_entry_limit_for_tests () in
+  for i = 1 to limit + 32 do
+    ignore
+      (repair_utf8_text ~surface:"bounded"
+         ~path:(Printf.sprintf "path-%04d" i)
+         "\xff")
+  done;
+  let stats = persistence_utf8_repair_stats () in
+  check int "all repairs counted" (limit + 32) stats.repaired_reads;
+  check bool "rate-limit keys stay bounded" true
+    (persistence_utf8_repair_log_key_count_for_tests () <= limit)
+
 let test_read_file_safe_not_found () =
   let open Safe_ops in
   let result = read_file_safe "/nonexistent/path/file.txt" in
@@ -399,6 +440,10 @@ let () =
         test_parse_json_safe_repairs_invalid_utf8_inside_string;
       test_case "malformed json still rejected after utf8 repair" `Quick
         test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair;
+      test_case "rate limits repeated utf8 repair logs" `Quick
+        test_parse_json_safe_rate_limits_repeated_utf8_repair_logs;
+      test_case "bounds utf8 repair log rate-limit table" `Quick
+        test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;
     ];
     "read_file_safe", [

@@ -104,8 +104,8 @@ terminal tab 본문:
 
 ```
 [01:42:18] cmd  $ git fetch --all
-[01:42:18] out  fetching origin (5 refs)
-[01:42:25] err    ✗ cascade.fanout.cycle_detection    (timeout)
+[01:42:18] stdout  fetching origin (5 refs)
+[01:42:25] stderr    ✗ cascade.fanout.cycle_detection    (timeout)
 ```
 
 ANSI sequences → CSS class via `parseAnsi()` (existing helper). 자동 스크롤 (latest line 보임), reduced-motion 시 jump.

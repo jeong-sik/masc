@@ -49,7 +49,7 @@ export interface ReplayOverlayStore {
 ### 3.2 REST endpoint
 
 ```
-GET /api/dashboard/audit-replay?since_ms=<ts>&until_ms=<ts>&pr=<number>
+GET /api/dashboard/audit-replay?since_ms=<ts>&until_ms=<ts>&pr_number=<number>
 ```
 
 response (chunked):

@@ -77,7 +77,7 @@ response: `{ "hits": CascadeHit[] }`
 
 `.masc/cascade_audit/*.jsonl` 을 server-side 로 인덱스. 각 entry 가 이미 `commit_sha` 와 `turn_id` 를 가짐. file_path 는 turn 의 tool_call (write/edit) 에서 추출. line_range 는 commit diff hunk 와 join.
 
-1단계는 `line_start = 0, line_end = -1` (whole-file) 로 단순 wire — diff hunk join 은 2단계.
+1단계는 명시적 file-level hit 으로 wire 한다: `line_range` 를 `null` 로 두고, diff hunk join 이 가능한 2단계부터 1-indexed inclusive `{ line_start, line_end }` 를 채운다.
 
 ### 4.2 2단계: line-level
 

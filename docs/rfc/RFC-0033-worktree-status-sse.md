@@ -33,7 +33,7 @@ GET /api/dashboard/worktree-status
 Accept: text/event-stream
 ```
 
-이벤트 형식 (newline-delimited JSON, SSE `data:` 프리픽스):
+이벤트 형식: 각 SSE event 는 blank line 으로 종료하며, JSON payload 는 `data:` 라인에 싣는다. 기본 구현은 event 하나당 single-line JSON object 하나를 보낸다.
 
 ```json
 {

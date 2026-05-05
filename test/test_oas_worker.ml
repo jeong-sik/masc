@@ -4310,6 +4310,100 @@ let test_enrich_idle_detail_picks_last_tool () =
   Alcotest.(check string) "exact string with last tool" expected result
 
 (* ================================================================ *)
+(* P0: Circuit-breaker fallback at run_named boundary               *)
+(* ================================================================ *)
+
+(** P0 regression: when the first provider in a two-provider cascade has
+    3 consecutive failures (OPEN / cooldown), [run_named] must skip it
+    without spending a request, then attempt the second (healthy) provider
+    and succeed.
+
+    Invariants pinned by this test:
+    1. First provider remains OPEN and receives zero HTTP requests.
+    2. Second provider is attempted and returns the expected response.
+    3. The health tracker records success for the fallback provider.
+
+    Implementation note: the primary provider's URL is deliberately set to
+    an unreachable endpoint (127.0.0.1:1).  Because the circuit breaker check
+    happens *before* [try_provider] is called, no connection attempt is ever
+    made to that address.  If the circuit-breaker logic were removed or
+    broken, [try_provider] would attempt port 1, get a connection-refused
+    error, and the cascade would fail — surfacing the regression immediately. *)
+let test_run_named_circuit_breaker_skips_open_provider () =
+  let primary_key = "cb_open_primary" in
+  let fallback_key = "cb_healthy_fallback" in
+  (* 1. Seed the global health tracker: 3 consecutive failures → OPEN. *)
+  Cascade_health_tracker.(
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ());
+  Alcotest.(check bool) "pre-condition: primary is in cooldown after 3 failures"
+    true
+    (Cascade_health_tracker.is_in_cooldown
+       Cascade_health_tracker.global ~provider_key:primary_key);
+  try
+    Eio.Switch.run @@ fun sw ->
+    (* 2. Start a mock HTTP server for the fallback provider only. *)
+    let fallback_port =
+      match find_free_port () with Some p -> p | None -> Alcotest.skip ()
+    in
+    let fallback_url =
+      try
+        start_multi_mock ~sw ~net:(require_test_net ()) ~port:fallback_port
+          [ openai_text_response "fallback succeeded" ]
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    (* 3. Configure the cascade: primary (OPEN, unreachable) → fallback
+          (healthy mock).  Use the model-id strings as the health-tracker
+          provider keys so the circuit-breaker lookup matches exactly. *)
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{"cb_probe_models":["custom:%s@http://127.0.0.1:1","custom:%s@%s"]}|}
+         primary_key fallback_key fallback_url)
+    @@ fun () ->
+    (* 4. Run the named cascade. *)
+    (match
+       Oas_worker_named.run_named
+         ~cascade_name:"cb_probe"
+         ~goal:"circuit breaker test"
+         ~system_prompt:"system"
+         ~sw
+         ~net:(require_test_net ())
+         ()
+     with
+     | Ok result ->
+         (* 5. Fallback provider returned the expected response. *)
+         Alcotest.(check string) "fallback provider response"
+           "fallback succeeded"
+           (response_text result.response);
+         (* 6. Primary provider is still OPEN — no request reset its streak. *)
+         Alcotest.(check bool)
+           "primary remains OPEN (zero requests spent on open provider)"
+           true
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:primary_key);
+         (* 7. Fallback provider has a recorded success in the tracker. *)
+         Alcotest.(check bool) "fallback is not in cooldown after success"
+           false
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:fallback_key);
+         let rate =
+           Cascade_health_tracker.success_rate
+             Cascade_health_tracker.global ~provider_key:fallback_key
+         in
+         Alcotest.(check bool) "fallback success_rate > 0 after run_named"
+           true (rate > 0.0);
+         Eio.Switch.fail sw Exit
+     | Error err ->
+         Alcotest.failf
+           "expected fallback provider to succeed, got: %s"
+           (Agent_sdk.Error.to_string err))
+  with Exit -> ()
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -4669,5 +4763,11 @@ let () =
         test_enrich_idle_detail_non_idle_error;
       Alcotest.test_case "last tool name wins over earlier ones" `Quick
         test_enrich_idle_detail_picks_last_tool;
+    ];
+    "cascade_circuit_breaker_fallback", [
+      Alcotest.test_case
+        "P0: open provider is skipped and fallback succeeds at run_named boundary"
+        `Quick
+        test_run_named_circuit_breaker_skips_open_provider;
     ];
   ]

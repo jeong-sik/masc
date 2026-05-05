@@ -23,6 +23,9 @@ specs/keeper-state-machine/KeeperOutcomesConservation.tla
 specs/keeper-state-machine/KeeperReconcileLiveness.tla
 specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla
 specs/keeper-state-machine/KeeperWorkPipeline.tla
+# KeeperAdmissionLiveness: cfg-backed spec for admission liveness invariant;
+# wiring into tla-check.sh requires TLC module deps not yet available.
+specs/keeper-state-machine/KeeperAdmissionLiveness.tla
 specs/server-state/ServerState.tla
 specs/social-state-cap/SocialStateCap.tla
 EOF

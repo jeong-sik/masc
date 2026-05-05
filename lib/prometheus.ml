@@ -240,13 +240,20 @@ let metric_keeper_contract_violations =
 
 (** #12838: keepers detected as alive-but-stuck — non-Dead, non-paused,
     keepalive_running, but [proactive_rt.last_ts] has been frozen while
-    autonomous turns kept advancing.  Detection-only signal: no transition
-    or restart is triggered.  Per-keeper dedup window
+    autonomous turns kept advancing.  Per-keeper dedup window
     ([alive_but_stuck_dedup_ttl_sec]) bounds emission rate so a single
     stuck keeper does not flood the counter on every 30s sweep.
     Labels: keeper. *)
 let metric_keeper_alive_but_stuck =
   "masc_keeper_alive_but_stuck_total"
+
+(** #12838 follow-up: supervisor recovery requests emitted after an
+    alive-but-stuck detection.  Each increment means the supervisor set
+    [failure_reason] + [fiber_stop]/[fiber_wakeup] so the existing sweep
+    path can force a crash/restart instead of leaving the keeper at
+    detection-only.  Labels: keeper. *)
+let metric_keeper_alive_but_stuck_recovery_requests =
+  "masc_keeper_alive_but_stuck_recovery_requests_total"
 
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
@@ -1605,6 +1612,11 @@ let init () =
   add metric_keeper_liveness_recovery_outcomes
     "#12801 Total Liveness Recovery Supervisor outcomes. Labeled by keeper \
      and outcome=started|not_running|meta_missing|meta_read_failed|meta_write_failed."
+    Counter;
+  add metric_keeper_alive_but_stuck_recovery_requests
+    "#12838 Total alive-but-stuck recovery requests. Each increment means \
+     the supervisor requested a supervised keeper restart by setting \
+     failure_reason plus fiber_stop/fiber_wakeup. Labeled by keeper."
     Counter;
   add metric_cascade_server_error_skip_total
     "#12797 Total cascade label-ranking skips triggered by recent server \

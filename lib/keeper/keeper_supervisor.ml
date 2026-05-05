@@ -1599,9 +1599,11 @@ let liveness_recovery_scan (ctx : _ context) =
    their [current_task_id] references an orphaned [AwaitingVerification]
    task.
 
-   This detector emits a Prometheus counter only.  No transition,
-   no restart, no board post.  Operator visibility first; action
-   is a follow-up (see issue #12838 "Proposed first PR").
+   This detector emits a Prometheus counter and requests a supervised
+   restart through the same [failure_reason + fiber_stop] path as the
+   stale watchdog.  The next sweep can then force unresolved
+   watchdog-stopped entries into the normal crash/restart pipeline
+   instead of leaving the keeper at detection-only.
    ────────────────────────────────────────────────────────────────── *)
 
 (** Pure detection: is this keeper alive-but-stuck at [now]?
@@ -1622,7 +1624,7 @@ let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
     (entry : Keeper_registry.registry_entry) : float option =
   let meta = entry.meta in
   if meta.paused then None
-  else if entry.phase = Keeper_state_machine.Dead then None
+  else if entry.phase <> Keeper_state_machine.Running then None
   else if meta.runtime.autonomous_turn_count <= 0 then
     (* Brand-new keeper: not stuck, just hasn't started. *)
     None
@@ -1662,6 +1664,66 @@ let alive_but_stuck_reset_for_test () =
   Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
     Hashtbl.clear alive_but_stuck_last_alert)
 
+let request_alive_but_stuck_recovery ~base_path ~elapsed
+    (entry : Keeper_registry.registry_entry) =
+  let kill_class =
+    Keeper_registry.Idle_turn { stall_seconds = elapsed }
+  in
+  (* PR #13106 review: must NOT route through
+     [stale_watchdog_failure_reason], which preserves prior reasons
+     like [Turn_consecutive_failures] / [Exception] / etc.  Those
+     reasons are not in the [watchdog_stop_pending] restart set
+     ([Stale_turn_timeout | Stale_termination_storm |
+     Oas_timeout_budget_loop]), so preserving them would set
+     [fiber_stop = true] and then the supervisor's next sweep would
+     skip [force_unresolved_watchdog_crash] — the fiber goes dormant
+     instead of being restarted, defeating the entire recovery.
+
+     Force the watchdog cohort to [Stale_turn_timeout kill_class] so
+     [watchdog_stop_pending] / [record_loop_exit] both treat this as
+     a watchdog stop.  The prior reason is captured in the log line
+     for postmortem.
+
+     Idempotent: if the keeper is already in a watchdog cohort
+     ([Stale_turn_timeout] / [Stale_termination_storm] /
+     [Oas_timeout_budget_loop]), preserve it so we don't churn the
+     [stall_seconds] field on every poll. *)
+  let prior_str =
+    Option.map Keeper_registry.failure_reason_to_string
+      entry.last_failure_reason
+    |> Option.value ~default:"none"
+  in
+  let reason =
+    match entry.last_failure_reason with
+    | Some
+        ( Keeper_registry.Stale_turn_timeout _
+        | Keeper_registry.Stale_termination_storm _
+        | Keeper_registry.Oas_timeout_budget_loop _ ) as kept ->
+        kept
+    | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)
+  in
+  Keeper_registry.set_failure_reason ~base_path entry.name reason;
+  (* tla-lint: allow-mutation: fiber signal — alive-but-stuck recovery asks
+     the heartbeat fiber to exit and wakes it if it is in interruptible sleep.
+     The next supervisor sweep will route this through the existing
+     force_unresolved_watchdog_crash path if the fiber does not resolve on
+     its own. *)
+  Atomic.set entry.fiber_stop true;
+  Atomic.set entry.fiber_wakeup true;
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+    ~labels:[("keeper", entry.name)]
+    ();
+  Log.Keeper.error
+    "%s: alive-but-stuck recovery requested (elapsed=%.0fs, prior_reason=%s, \
+     failure_reason=%s)"
+    entry.name elapsed prior_str
+    (Option.map Keeper_registry.failure_reason_to_string reason
+     |> Option.value ~default:"unknown")
+
+let request_alive_but_stuck_recovery_for_test =
+  request_alive_but_stuck_recovery
+
 let alive_but_stuck_scan (ctx : _ context) =
   if not Env_config.KeeperSupervisor.alive_but_stuck_enabled then ()
   else begin
@@ -1696,7 +1758,8 @@ let alive_but_stuck_scan (ctx : _ context) =
                (float_of_int entry.meta.proactive.cooldown_sec
                 *. float_of_int stall_multiplier))
             entry.meta.runtime.autonomous_turn_count
-            entry.meta.runtime.proactive_rt.count_total
+            entry.meta.runtime.proactive_rt.count_total;
+          request_alive_but_stuck_recovery ~base_path ~elapsed entry
         end
     ) entries
   end

@@ -1304,6 +1304,30 @@ let () =
                 ~started_at:0.0
             in
             check (option (float 0.1)) "Dead → None" None (detect entry));
+        test_case "Crashed phase -> None (handled by supervisor crash path)" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-crashed"
+                ~paused:false
+                ~phase:KSM.Crashed
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "Crashed -> None" None (detect entry));
+        test_case "Restarting phase -> None (handled by supervisor restart path)" `Quick
+          (fun () ->
+            let entry = make_test_entry
+                ~name:"abs-restarting"
+                ~paused:false
+                ~phase:KSM.Restarting
+                ~autonomous_turn_count:50
+                ~last_proactive_ts:0.0
+                ~cooldown_sec:60
+                ~started_at:0.0
+            in
+            check (option (float 0.1)) "Restarting -> None" None (detect entry));
         test_case "brand-new keeper (autonomous_turn_count=0) → None" `Quick
           (fun () ->
             let entry = make_test_entry
@@ -1386,5 +1410,105 @@ let () =
           in
           check (option (float 0.1)) "below per-keeper threshold → None"
             None (detect entry));
+        test_case "recovery request sets stale reason and stop flags" `Quick
+          (fun () ->
+            Reg.clear ();
+            let name = "abs-request-recovery" in
+            let entry = Reg.register ~base_path:bp name (make_meta name) in
+            let before =
+              Masc_mcp.Prometheus.metric_value_or_zero
+                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                ~labels:[("keeper", name)]
+                ()
+            in
+            Sup.request_alive_but_stuck_recovery_for_test
+              ~base_path:bp ~elapsed:99_000.0 entry;
+            check bool "fiber_stop set" true (Atomic.get entry.Reg.fiber_stop);
+            check bool "fiber_wakeup set" true (Atomic.get entry.Reg.fiber_wakeup);
+            (match Reg.get ~base_path:bp name with
+             | None -> fail "expected registry entry"
+             | Some updated ->
+               check string "failure reason cohort"
+                 "stale_turn_timeout"
+                 (Reg.failure_reason_cohort_key updated.Reg.last_failure_reason));
+            let after =
+              Masc_mcp.Prometheus.metric_value_or_zero
+                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                ~labels:[("keeper", name)]
+                ()
+            in
+            check (float 0.0001) "recovery request metric +1"
+              (before +. 1.0) after);
+        (* PR #13106 review (copilot): the previous test only covers
+           [last_failure_reason = None].  The riskier branch is the
+           one where a non-watchdog reason already exists — without
+           the fix, the helper's earlier call to
+           [stale_watchdog_failure_reason] preserved
+           [Turn_consecutive_failures] / [Exception] / etc., and
+           [watchdog_stop_pending] only restarts on
+           [Stale_turn_timeout | Stale_termination_storm |
+           Oas_timeout_budget_loop].  Recovery would set
+           [fiber_stop=true] but the supervisor would never convert
+           it into a crash/restart.  Pin the post-recovery cohort to
+           [stale_turn_timeout] so this regression is caught. *)
+        test_case
+          "recovery overrides non-watchdog failure_reason \
+           (Turn_consecutive_failures) so supervisor restart fires"
+          `Quick
+          (fun () ->
+            Reg.clear ();
+            let name = "abs-request-recovery-nonwatchdog" in
+            let entry =
+              Reg.register ~base_path:bp name (make_meta name)
+            in
+            (* Pre-existing non-watchdog reason → without fix, helper
+               would preserve this and the supervisor would never
+               restart. *)
+            Reg.set_failure_reason ~base_path:bp name
+              (Some (Reg.Turn_consecutive_failures 5));
+            Sup.request_alive_but_stuck_recovery_for_test
+              ~base_path:bp ~elapsed:42_000.0 entry;
+            check bool "fiber_stop set" true
+              (Atomic.get entry.Reg.fiber_stop);
+            (match Reg.get ~base_path:bp name with
+             | None -> fail "expected registry entry"
+             | Some updated ->
+               check string
+                 "non-watchdog reason overridden to stale_turn_timeout \
+                  cohort (else supervisor would not restart)"
+                 "stale_turn_timeout"
+                 (Reg.failure_reason_cohort_key
+                    updated.Reg.last_failure_reason)));
+        (* Idempotent recovery: pre-existing watchdog cohort is
+           preserved (don't churn [stall_seconds] on every poll). *)
+        test_case
+          "recovery preserves existing Stale_turn_timeout cohort"
+          `Quick
+          (fun () ->
+            Reg.clear ();
+            let name = "abs-request-recovery-idempotent" in
+            let entry =
+              Reg.register ~base_path:bp name (make_meta name)
+            in
+            let original_kill =
+              Reg.Idle_turn { stall_seconds = 7_777.0 }
+            in
+            Reg.set_failure_reason ~base_path:bp name
+              (Some (Reg.Stale_turn_timeout original_kill));
+            Sup.request_alive_but_stuck_recovery_for_test
+              ~base_path:bp ~elapsed:99_999.0 entry;
+            (match Reg.get ~base_path:bp name with
+             | None -> fail "expected registry entry"
+             | Some updated ->
+               (match updated.Reg.last_failure_reason with
+                | Some (Reg.Stale_turn_timeout
+                          (Reg.Idle_turn { stall_seconds })) ->
+                  check (float 0.0001)
+                    "preserved original stall_seconds, did not churn"
+                    7_777.0 stall_seconds
+                | _ ->
+                  fail
+                    "expected Stale_turn_timeout (Idle_turn ...) to be \
+                     preserved unchanged")));
       ]);
   ]

@@ -268,6 +268,68 @@ let normalize_path_for_prefix_check path =
     String.sub p 0 (String.length p - 1)
   else p
 
+let relative_under ~root path =
+  let root_norm = normalize_path_for_prefix_check root in
+  let path_norm = normalize_path_for_prefix_check path in
+  if String.equal path_norm root_norm then Some ""
+  else
+    let prefix = root_norm ^ "/" in
+    if String.starts_with ~prefix path_norm then
+      Some
+        (String.sub path_norm (String.length prefix)
+           (String.length path_norm - String.length prefix))
+    else None
+
+let path_segments rel =
+  String.split_on_char '/' rel
+  |> List.filter (fun segment -> not (String.equal segment ""))
+
+type playground_path =
+  | Playground_internal
+  | Playground_repos_root
+  | Playground_repo of string
+
+let playground_path_of_path ~base_path ~path =
+  let playground_root =
+    Filename.concat (Filename.concat base_path ".masc") "playground"
+  in
+  match relative_under ~root:playground_root path with
+  | None -> None
+  | Some rel -> (
+      match path_segments rel with
+      | "docker" :: _keeper :: "repos" :: repo_id :: _
+      | _keeper :: "repos" :: repo_id :: _ ->
+          Some (Playground_repo repo_id)
+      | "docker" :: _keeper :: ["repos"]
+      | _keeper :: ["repos"] ->
+          Some Playground_repos_root
+      | _ -> Some Playground_internal)
+
+let basename_of_path path =
+  normalize_path_for_prefix_check path |> Filename.basename
+
+let resolve_repository_id_segment ~base_path segment =
+  match Repo_store.load_all ~base_path with
+  | Error msg ->
+      Log.Misc.warn
+        "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
+         failed for segment %s (error: %s)"
+        segment msg;
+      segment
+  | Ok repos -> (
+      match
+        List.find_opt
+          (fun (repo : repository) ->
+            String.equal repo.id segment
+            || String.equal repo.name segment
+            || String.equal
+                 (basename_of_path (Repo_store.local_path ~base_path repo))
+                 segment)
+          repos
+      with
+      | Some repo -> repo.id
+      | None -> segment)
+
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)
 let path_under_repo ~base_path repo path =
@@ -281,6 +343,11 @@ let path_under_repo ~base_path repo path =
     registered repository whose [local_path] contains [path], or [None]
     if the path is not under any registered repository. *)
 let repository_id_of_path ~base_path ~path =
+  match playground_path_of_path ~base_path ~path with
+  | Some Playground_internal | Some Playground_repos_root -> None
+  | Some (Playground_repo repo_id) ->
+      Some (resolve_repository_id_segment ~base_path repo_id)
+  | None -> (
   match Repo_store.load_all ~base_path with
   | Error msg ->
       Log.Misc.warn
@@ -293,7 +360,7 @@ let repository_id_of_path ~base_path ~path =
         List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos
       with
       | Some repo -> Some repo.id
-      | None -> None)
+      | None -> None))
 
 (** [validate_path_access ~keeper_id ~base_path ~path] checks whether
     [keeper_id] is allowed to access the repository that contains [path].

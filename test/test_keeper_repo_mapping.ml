@@ -50,6 +50,14 @@ let with_empty_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" || Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755
+  end
+
 let write_mapping ?credential_id base_path keeper_id repo_ids =
   let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
   let entries =
@@ -200,6 +208,100 @@ let test_validate_path_access_no_repo () =
       match Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1" ~base_path ~path with
       | Ok () -> ()
       | Error e -> Alcotest.fail ("expected Ok for no-repo path, got: " ^ e))
+
+let test_validate_path_access_playground_repos_root_ignores_base_repo () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc-mcp") with
+          name = "masc-mcp";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "nick0cave" [ "masc-mcp" ];
+      let path =
+        Filename.concat base_path ".masc/playground/docker/nick0cave/repos"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected playground repos root to bypass base repo mapping, got: "
+             ^ e))
+
+let test_validate_path_access_playground_repo_uses_registered_name () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "repo-masc") with
+          name = "masc-mcp";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "nick0cave" [ "repo-masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/nick0cave/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected playground repo path to resolve by registered name, got: "
+             ^ e))
+
+let test_validate_path_access_playground_unknown_repo_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc-mcp") with
+          name = "masc-mcp";
+          local_path = masc_path;
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "nick0cave" [ "masc-mcp" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/nick0cave/repos/unknown/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"nick0cave"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected unknown playground repo to be denied"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions not allowed" true (contains_substring msg "not allowed"))
 
 let test_apply_mapping_explicit () =
   with_temp_base_path (fun base_path ->
@@ -484,6 +586,12 @@ let () =
           Alcotest.test_case "allowed" `Quick test_validate_path_access_allowed;
           Alcotest.test_case "denied" `Quick test_validate_path_access_denied;
           Alcotest.test_case "no repo" `Quick test_validate_path_access_no_repo;
+          Alcotest.test_case "playground repos root ignores base repo" `Quick
+            test_validate_path_access_playground_repos_root_ignores_base_repo;
+          Alcotest.test_case "playground repo resolves registered name" `Quick
+            test_validate_path_access_playground_repo_uses_registered_name;
+          Alcotest.test_case "playground unknown repo denied" `Quick
+            test_validate_path_access_playground_unknown_repo_denied;
         ] );
       ( "apply_mapping",
         [

@@ -108,6 +108,38 @@ let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
   check (option string) "runtime override preserved"
     (Some "/tmp/test-config-root") actual
 
+let test_sanitize_inherited_test_base_path_opt_drops_captured_home_path () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_base_path_opt
+      ~running_under_test_executable:true ~allow_inherited:false
+      ~initial:(Some "/Users/dancer/me")
+      ~current:(Some "/Users/dancer/me")
+      ~home:(Some "/Users/dancer/me")
+  in
+  check (option string) "same captured MASC_BASE_PATH ignored" None actual
+
+let test_sanitize_inherited_test_base_path_opt_keeps_sibling_prefix_path () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_base_path_opt
+      ~running_under_test_executable:true ~allow_inherited:false
+      ~initial:(Some "/Users/dancer/me2")
+      ~current:(Some "/Users/dancer/me2")
+      ~home:(Some "/Users/dancer/me")
+  in
+  check (option string) "sibling path preserved"
+    (Some "/Users/dancer/me2") actual
+
+let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_base_path_opt
+      ~running_under_test_executable:true ~allow_inherited:false
+      ~initial:(Some "/tmp/test-oas-worker-base")
+      ~current:(Some "/tmp/test-oas-worker-base")
+      ~home:(Some "/Users/dancer/me")
+  in
+  check (option string) "process temp base preserved"
+    (Some "/tmp/test-oas-worker-base") actual
+
 let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   let actual =
     Lib.Config_dir_resolver.sanitize_inherited_test_env_opt
@@ -387,6 +419,12 @@ let () =
             test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value;
           test_case "keeps runtime override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_runtime_override;
+          test_case "drops captured parent-shell base path by default" `Quick
+            test_sanitize_inherited_test_base_path_opt_drops_captured_home_path;
+          test_case "keeps sibling prefix base path" `Quick
+            test_sanitize_inherited_test_base_path_opt_keeps_sibling_prefix_path;
+          test_case "keeps process temp base path" `Quick
+            test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path;
           test_case "opt-in preserves config-path override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in;
           test_case "canonicalizes explicit base path" `Quick

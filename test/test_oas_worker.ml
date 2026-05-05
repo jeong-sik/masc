@@ -63,6 +63,29 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let test_process_base_path = ref None
+
+let configure_direct_test_environment () =
+  (* The named-cascade liveness observer defaults to streaming mode. These
+     tests use simple non-streaming OpenAI-compatible mocks, so keep liveness
+     covered by its dedicated test executable and run this suite on the
+     baseline request path. *)
+  Unix.putenv "MASC_CASCADE_ATTEMPT_LIVENESS" "off";
+  Cascade_attempt_liveness_config.reset_cache_for_test ();
+  (* Keep any async cleanup or background observer in this test process away
+     from the operator's live HOME-backed MASC root. Individual tests can still
+     install narrower fixtures with [with_temp_masc_config]. *)
+  let base = temp_dir "test_oas_worker_base" in
+  let config_dir = Filename.concat base ".masc/config" in
+  mkdir_p config_dir;
+  Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Config_dir_resolver.reset ();
+  Cascade_catalog_runtime.reset_cache_for_tests ();
+  test_process_base_path := Some base;
+  at_exit (fun () -> Option.iter cleanup_dir !test_process_base_path)
+
 let _parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error e -> failwith ("invalid json: " ^ e)
@@ -634,16 +657,21 @@ let test_cascade_metrics_evicts_lowest_call_key () =
 let test_cascade_audit_persists_observation () =
   let base = temp_dir "test_cascade_audit" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
       cleanup_dir base)
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base;
+      Unix.putenv "MASC_BASE_PATH_INPUT" base;
       let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
         {
           cascade_name =
@@ -4555,6 +4583,7 @@ let test_run_named_circuit_breaker_skips_open_provider () =
 (* ================================================================ *)
 
 let () =
+  configure_direct_test_environment ();
   Eio_main.run @@ fun env ->
   test_net := Some env#net;
   test_proc_mgr := Some (Eio.Stdenv.process_mgr env);

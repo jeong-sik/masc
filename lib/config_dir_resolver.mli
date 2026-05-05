@@ -95,6 +95,7 @@ val config_signature_exists : string -> bool
     under a test executable and [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE] is unset. *)
 
 val current_env_config_dir_opt : unit -> string option
+val current_env_base_path_opt : unit -> string option
 val current_env_personas_dir_opt : unit -> string option
 val current_env_home_opt : unit -> string option
 
@@ -106,6 +107,17 @@ val sanitize_inherited_test_env_opt :
   allow_inherited:bool ->
   initial:string option ->
   current:string option ->
+  string option
+
+(** Base-path-specific test env sanitization. Same captured test values are
+    stripped only when they resolve under the process HOME; temp roots supplied
+    at process start stay usable. *)
+val sanitize_inherited_test_base_path_opt :
+  running_under_test_executable:bool ->
+  allow_inherited:bool ->
+  initial:string option ->
+  current:string option ->
+  home:string option ->
   string option
 
 val path_from_executable : cwd:string -> string -> string option

@@ -297,6 +297,14 @@ type pr_review_action_metric_event = {
 }
 (** Parsed PR-review action telemetry derived from keeper tool I/O. *)
 
+type pr_work_action_metric_event = {
+  work_action : string;
+  work_source : string;
+  command : string option;
+  success : bool;
+}
+(** Parsed PR create/push/commit/add telemetry derived from keeper tool I/O. *)
+
 (** {1 Hook factory} *)
 
 val make_hooks :
@@ -332,4 +340,11 @@ module For_testing : sig
     output_text:string ->
     transport_success:bool ->
     pr_review_action_metric_event option
+
+  val pr_work_action_metric_events_of_tool_io :
+    tool_name:string ->
+    input:Yojson.Safe.t ->
+    output_text:string ->
+    transport_success:bool ->
+    pr_work_action_metric_event list
 end

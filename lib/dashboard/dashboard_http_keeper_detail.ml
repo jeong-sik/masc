@@ -47,6 +47,12 @@ type metrics_acc = {
   ma_pr_review_approve_action_count : int;
   ma_pr_review_request_changes_action_count : int;
   ma_pr_review_reply_action_count : int;
+  ma_pr_work_action_attempt_count : int;
+  ma_pr_work_action_success_count : int;
+  ma_pr_git_add_action_count : int;
+  ma_pr_git_commit_action_count : int;
+  ma_pr_git_push_action_count : int;
+  ma_pr_create_action_count : int;
   ma_proactive_previews_rev : string list;
   ma_last_handoff : Yojson.Safe.t option;
   ma_last_compaction : Yojson.Safe.t option;
@@ -96,6 +102,12 @@ let init_acc = {
   ma_pr_review_approve_action_count = 0;
   ma_pr_review_request_changes_action_count = 0;
   ma_pr_review_reply_action_count = 0;
+  ma_pr_work_action_attempt_count = 0;
+  ma_pr_work_action_success_count = 0;
+  ma_pr_git_add_action_count = 0;
+  ma_pr_git_commit_action_count = 0;
+  ma_pr_git_push_action_count = 0;
+  ma_pr_create_action_count = 0;
   ma_proactive_previews_rev = [];
   ma_last_handoff = None;
   ma_last_compaction = None;
@@ -225,6 +237,14 @@ let compute_metrics_window
         in
         let pr_review_action_success_now =
           Safe_ops.json_bool ~default:false "pr_review_action_success" j
+        in
+        let pr_work_action_now =
+          Safe_ops.json_string_opt "pr_work_action" j
+          |> Option.map (fun value -> value |> String.trim |> String.uppercase_ascii)
+          |> function Some value when value <> "" -> Some value | _ -> None
+        in
+        let pr_work_action_success_now =
+          Safe_ops.json_bool ~default:false "pr_work_action_success" j
         in
         let memory_is_weather = match memory_expected_topic with Some "weather" -> true | _ -> false in
         let work_kind =
@@ -445,6 +465,51 @@ let compute_metrics_window
                    | _ -> acc)
           else acc
         in
+        let acc =
+          if (is_interaction || is_tool_event)
+             && metric_event = "keeper_pr_work_action"
+          then
+            match pr_work_action_now with
+            | None -> acc
+            | Some action ->
+                let acc =
+                  { acc with
+                    ma_pr_work_action_attempt_count =
+                      acc.ma_pr_work_action_attempt_count + 1;
+                  }
+                in
+                if not pr_work_action_success_now then acc
+                else
+                  let acc =
+                    { acc with
+                      ma_pr_work_action_success_count =
+                        acc.ma_pr_work_action_success_count + 1;
+                    }
+                  in
+                  (match action with
+                   | "GIT_ADD" ->
+                       { acc with
+                         ma_pr_git_add_action_count =
+                           acc.ma_pr_git_add_action_count + 1;
+                       }
+                   | "GIT_COMMIT" ->
+                       { acc with
+                         ma_pr_git_commit_action_count =
+                           acc.ma_pr_git_commit_action_count + 1;
+                       }
+                   | "GIT_PUSH" ->
+                       { acc with
+                         ma_pr_git_push_action_count =
+                           acc.ma_pr_git_push_action_count + 1;
+                       }
+                   | "PR_CREATE" ->
+                       { acc with
+                         ma_pr_create_action_count =
+                           acc.ma_pr_create_action_count + 1;
+                       }
+                   | _ -> acc)
+          else acc
+        in
         let acc = if is_heartbeat then { acc with ma_heartbeat_points = acc.ma_heartbeat_points + 1 } else acc in
 
         let output_item =
@@ -492,6 +557,8 @@ let compute_metrics_window
               ("metric_event", `String metric_event);
               ("pr_review_action", Json_util.string_opt_to_json pr_review_action_now);
               ("pr_review_action_success", `Bool pr_review_action_success_now);
+              ("pr_work_action", Json_util.string_opt_to_json pr_work_action_now);
+              ("pr_work_action_success", `Bool pr_work_action_success_now);
               ("tool_call_count", `Int tool_call_count_now);
               ("tools_used", `List (List.map (fun s -> `String s) tools_used));
               ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
@@ -666,6 +733,11 @@ let compute_metrics_window
   let pr_work_tool_call_count =
     pr_review_tool_call_count + pr_work_git_tool_call_count
   in
+  let pr_review_action_signal_count = acc.ma_pr_review_action_success_count in
+  let pr_work_total_signal_count =
+    pr_work_tool_call_count + pr_review_action_signal_count
+    + acc.ma_pr_work_action_success_count
+  in
   let top_memory_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" memory_kind_counts_window
   in
@@ -782,8 +854,15 @@ let compute_metrics_window
     ("pr_review_approve_action_count", `Int acc.ma_pr_review_approve_action_count);
     ("pr_review_request_changes_action_count", `Int acc.ma_pr_review_request_changes_action_count);
     ("pr_review_reply_action_count", `Int acc.ma_pr_review_reply_action_count);
+    ("pr_work_action_attempt_count", `Int acc.ma_pr_work_action_attempt_count);
+    ("pr_work_action_success_count", `Int acc.ma_pr_work_action_success_count);
+    ("pr_git_add_action_count", `Int acc.ma_pr_git_add_action_count);
+    ("pr_git_commit_action_count", `Int acc.ma_pr_git_commit_action_count);
+    ("pr_git_push_action_count", `Int acc.ma_pr_git_push_action_count);
+    ("pr_create_action_count", `Int acc.ma_pr_create_action_count);
     ("pr_work_git_tool_call_count", `Int pr_work_git_tool_call_count);
     ("pr_work_tool_call_count", `Int pr_work_tool_call_count);
+    ("pr_work_signal_count", `Int pr_work_total_signal_count);
     ("observed_pr_review_tool_calls", `Bool (pr_review_tool_call_count > 0));
     ( "observed_pr_mutation_tool_calls",
       `Bool (pr_review_mutation_tool_call_count > 0) );
@@ -800,6 +879,16 @@ let compute_metrics_window
     ("observed_pr_approve_work", `Bool (acc.ma_pr_review_approve_action_count > 0));
     ("observed_pr_request_changes_work", `Bool (acc.ma_pr_review_request_changes_action_count > 0));
     ("observed_pr_reply_work", `Bool (acc.ma_pr_review_reply_action_count > 0));
+    ("observed_pr_create_work", `Bool (acc.ma_pr_create_action_count > 0));
+    ("observed_pr_push_work", `Bool (acc.ma_pr_git_push_action_count > 0));
+    ("observed_pr_commit_work", `Bool (acc.ma_pr_git_commit_action_count > 0));
+    ( "observed_git_work",
+      `Bool
+        (pr_work_git_tool_call_count > 0
+         || acc.ma_pr_git_add_action_count > 0
+         || acc.ma_pr_git_commit_action_count > 0
+         || acc.ma_pr_git_push_action_count > 0) );
+    ("observed_pr_work", `Bool (pr_work_total_signal_count > 0));
     ("memory_checks", `Int acc.ma_memory_checks);
     ("memory_passed", `Int acc.ma_memory_passed);
     ("memory_failed", `Int memory_failed);

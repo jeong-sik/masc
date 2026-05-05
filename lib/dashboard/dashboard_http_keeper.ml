@@ -605,11 +605,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
             ) metrics_lines
           in
-	          let last_metrics =
-	            match List.rev parsed_metrics with
-	            | latest :: _ -> Some latest
-	            | [] -> None
-	          in
+          let last_metrics =
+            List.find_opt metrics_row_has_context_snapshot
+              (List.rev parsed_metrics)
+          in
 	          let (last_skill_primary, last_skill_secondary, last_skill_reason) =
 	            let open Yojson.Safe.Util in
 	            let rec find_latest = function

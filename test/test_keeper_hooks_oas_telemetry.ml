@@ -645,6 +645,58 @@ let test_pr_review_action_metric_extracts_reply () =
   check (option int) "reply pr" (Some 9) event.pr_number;
   check (option int) "comment id" (Some 1234) event.comment_id
 
+let pr_work_events ~tool_name ~input ~output_text =
+  Hooks.For_testing.pr_work_action_metric_events_of_tool_io
+    ~tool_name ~input ~output_text ~transport_success:true
+
+let work_actions events = List.map (fun e -> e.Hooks.work_action) events
+
+let test_pr_work_action_metric_extracts_masc_code_git_push () =
+  let events =
+    pr_work_events
+      ~tool_name:"masc_code_git"
+      ~input:(`Assoc [ ("action", `String "push") ])
+      ~output_text:{|{"status":"ok","action":"push"}|}
+  in
+  check (list string) "actions" [ "GIT_PUSH" ] (work_actions events);
+  let event =
+    match events with
+    | [ event ] -> event
+    | _ -> failf "expected one git push event"
+  in
+  check string "source" "masc_code_git" event.work_source;
+  check bool "success" true event.success
+
+let test_pr_work_action_metric_extracts_gh_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [ ("op", `String "gh");
+            ("cmd", `String "pr create --draft --title t") ])
+      ~output_text:{|{"ok":true,"op":"gh","command":"gh pr create --draft"}|}
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events)
+
+let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [ ( "cmd",
+              `String "git add lib/foo.ml && git commit -m x && git push origin feat/x" );
+          ])
+      ~output_text:{|{"ok":false,"cmd":"git push origin feat/x"}|}
+  in
+  check (list string) "git action sequence"
+    [ "GIT_ADD"; "GIT_COMMIT"; "GIT_PUSH" ]
+    (work_actions events);
+  check bool "failure propagated to every action" true
+    (List.for_all (fun e -> not e.Hooks.success) events)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -702,5 +754,13 @@ let () =
             test_pr_review_action_metric_marks_structured_failure
         ; test_case "extracts reply action" `Quick
             test_pr_review_action_metric_extracts_reply
+        ] )
+    ; ( "pr_work_action",
+        [ test_case "extracts masc_code_git push" `Quick
+            test_pr_work_action_metric_extracts_masc_code_git_push
+        ; test_case "extracts keeper_shell gh pr create" `Quick
+            test_pr_work_action_metric_extracts_gh_pr_create
+        ; test_case "extracts bash git sequence and failure" `Quick
+            test_pr_work_action_metric_extracts_bash_git_sequence_failure
         ] )
     ]

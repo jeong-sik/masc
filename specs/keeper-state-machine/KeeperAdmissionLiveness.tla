@@ -36,7 +36,8 @@ CONSTANTS
     Candidates,      \* [Keepers -> Seq(Providers)]: ordered candidate list per keeper
     Capacity,        \* [Providers -> Nat]: max in_flight per provider
     InitialTokens,   \* [Providers -> Nat]: starting token count
-    Weight           \* [Keepers -> Nat]: WFQ weight per keeper, default 1
+    Weight,          \* [Keepers -> Nat]: WFQ weight per keeper, default 1
+    MaxTurns         \* Nat: per-keeper turn count bound, for state space bound
 
 \* Default constant bindings for the bundled .cfg files.
 \* TLC config files cannot express nested record / function literals on
@@ -49,6 +50,7 @@ DefaultCandidates == [k \in DefaultKeepers |->
 DefaultCapacity == [p \in DefaultProviders |-> 1]
 DefaultInitialTokens == [p \in DefaultProviders |-> 1]
 DefaultWeight == [k \in DefaultKeepers |-> 1]
+DefaultMaxTurns == 3
 
 ASSUME
     /\ Keepers # {}
@@ -64,9 +66,10 @@ VARIABLES
     in_flight,       \* [Providers -> Nat]: active dispatches
     wfq_queue,       \* Seq(Keepers): overflow queue, FIFO with deficit-weighted wake
     wfq_deficit,     \* [Keepers -> Nat]: deficit counter for WFQ fairness
-    last_dispatch    \* [Keepers -> Providers \cup {"None"}]: provider used last turn
+    last_dispatch,   \* [Keepers -> Providers \cup {"None"}]: provider used last turn
+    turn_count       \* [Keepers -> Nat]: number of StartTurn occurrences, bounded by MaxTurns
 
-vars == <<keeper_state, token_bucket, in_flight, wfq_queue, wfq_deficit, last_dispatch>>
+vars == <<keeper_state, token_bucket, in_flight, wfq_queue, wfq_deficit, last_dispatch, turn_count>>
 
 \* Helpers ───────────────────────────────────────────────────────────
 
@@ -98,6 +101,7 @@ Init ==
     /\ wfq_queue = <<>>
     /\ wfq_deficit = [k \in Keepers |-> 0]
     /\ last_dispatch = [k \in Keepers |-> "None"]
+    /\ turn_count = [k \in Keepers |-> 0]
 
 \* Actions ─────────────────────────────────────────────────────────
 
@@ -105,7 +109,9 @@ Init ==
 \* immediately attempts admission on the next step (TryDispatch).
 StartTurn(k) ==
     /\ keeper_state[k] = "Idle"
+    /\ turn_count[k] < MaxTurns
     /\ keeper_state' = [keeper_state EXCEPT ![k] = "Waiting"]
+    /\ turn_count' = [turn_count EXCEPT ![k] = @ + 1]
     /\ UNCHANGED <<token_bucket, in_flight, wfq_queue, wfq_deficit, last_dispatch>>
 
 \* A2 — TryDispatch — for keeper k in Waiting, walk Candidates[k] in order.
@@ -120,7 +126,7 @@ TryDispatch(k, p) ==
     /\ token_bucket' = [token_bucket EXCEPT ![p] = @ - 1]
     /\ in_flight' = [in_flight EXCEPT ![p] = @ + 1]
     /\ last_dispatch' = [last_dispatch EXCEPT ![k] = p]
-    /\ UNCHANGED <<wfq_queue, wfq_deficit>>
+    /\ UNCHANGED <<wfq_queue, wfq_deficit, turn_count>>
 
 \* A3 — EnqueueOverflow — keeper k is Waiting and NO candidate has a free
 \* token.  Append to wfq_queue.  No mutation of token state.
@@ -129,14 +135,14 @@ EnqueueOverflow(k) ==
     /\ ~AnyCandidateFree(k)
     /\ ~QueueContains(k)
     /\ wfq_queue' = Append(wfq_queue, k)
-    /\ UNCHANGED <<keeper_state, token_bucket, in_flight, wfq_deficit, last_dispatch>>
+    /\ UNCHANGED <<keeper_state, token_bucket, in_flight, wfq_deficit, last_dispatch, turn_count>>
 
 \* A4 — RefillToken(p) — provider p replenishes one token.  Modeled as a
 \* discrete event; production refills at refill_rate_per_sec.
 RefillToken(p) ==
     /\ token_bucket[p] < Capacity[p]
     /\ token_bucket' = [token_bucket EXCEPT ![p] = @ + 1]
-    /\ UNCHANGED <<keeper_state, in_flight, wfq_queue, wfq_deficit, last_dispatch>>
+    /\ UNCHANGED <<keeper_state, in_flight, wfq_queue, wfq_deficit, last_dispatch, turn_count>>
 
 \* A5 — WakeFromQueue — head of wfq_queue gets a wake-up attempt when
 \* a token becomes available.  Choose the queue head (FIFO) for now;
@@ -147,14 +153,14 @@ WakeFromQueue ==
         /\ AnyCandidateFree(k)
         /\ wfq_queue' = Tail(wfq_queue)
         /\ wfq_deficit' = [wfq_deficit EXCEPT ![k] = @ + Weight[k]]
-        /\ UNCHANGED <<keeper_state, token_bucket, in_flight, last_dispatch>>
+        /\ UNCHANGED <<keeper_state, token_bucket, in_flight, last_dispatch, turn_count>>
 
 \* A6 — StartWork(k) — Dispatched keeper begins LLM call.  Models the
 \* transition into the in-attempt layer (RFC-0022 territory).
 StartWork(k) ==
     /\ keeper_state[k] = "Dispatched"
     /\ keeper_state' = [keeper_state EXCEPT ![k] = "Working"]
-    /\ UNCHANGED <<token_bucket, in_flight, wfq_queue, wfq_deficit, last_dispatch>>
+    /\ UNCHANGED <<token_bucket, in_flight, wfq_queue, wfq_deficit, last_dispatch, turn_count>>
 
 \* A7 — CompleteWork(k) — keeper k finishes work, returns to Idle, and
 \* releases its provider's slot.  Token is NOT refunded — capacity is
@@ -165,7 +171,7 @@ CompleteWork(k) ==
     /\ last_dispatch[k] # "None"
     /\ keeper_state' = [keeper_state EXCEPT ![k] = "Idle"]
     /\ in_flight' = [in_flight EXCEPT ![last_dispatch[k]] = @ - 1]
-    /\ UNCHANGED <<token_bucket, wfq_queue, wfq_deficit, last_dispatch>>
+    /\ UNCHANGED <<token_bucket, wfq_queue, wfq_deficit, last_dispatch, turn_count>>
 
 \* Next step ─────────────────────────────────────────────────────────
 
@@ -185,6 +191,17 @@ Spec == Init /\ [][Next]_vars
 \* I3 — RateRespect: in_flight per provider never exceeds capacity.
 RateRespect ==
     \A p \in Providers : in_flight[p] <= Capacity[p]
+
+\* WaitingMustEnqueueOrDispatch — leads-to property (NOT step-level
+\* invariant).  A Waiting keeper with no free candidate may transiently
+\* exist outside the queue (one step is needed to enqueue), but it
+\* must eventually either be enqueued, see a free candidate appear, or
+\* reach Dispatched.  BugAction_GreedyKeeper violates this by allowing
+\* the keeper to remain Waiting + ~AnyCandidateFree + ~Queue forever.
+WaitingMustEnqueueOrDispatch ==
+    \A k \in Keepers :
+        (keeper_state[k] = "Waiting" /\ ~AnyCandidateFree(k) /\ ~QueueContains(k))
+            ~> (QueueContains(k) \/ AnyCandidateFree(k) \/ keeper_state[k] = "Dispatched")
 
 \* TokensInRange — bucket count never goes negative or exceeds capacity.
 TokensInRange ==
@@ -248,15 +265,20 @@ Fairness ==
 
 LiveSpec == Spec /\ Fairness
 
-\* I1 — every keeper is eventually dispatched infinitely often.
+\* I1 — every keeper that enters Waiting eventually leaves Waiting via
+\* Dispatched.  Weakened from "infinitely often Dispatched" to a leads-to
+\* statement so that finite-MaxTurns models terminate cleanly: a keeper
+\* that has exhausted MaxTurns stays Idle forever, but never strands in
+\* Waiting.  This is the practical liveness guarantee operators care
+\* about — no silent stall — and it is exactly what RFC-0026 §3.1
+\* paraphrases as "eventually-progresses(k)".
 LivenessInvariant ==
-    \A k \in Keepers : []<>(keeper_state[k] = "Dispatched")
-
-\* Bounded-wait approximation: a Waiting keeper does not stay Waiting
-\* forever (eventually transitions to Dispatched).
-BoundedWait ==
     \A k \in Keepers :
         (keeper_state[k] = "Waiting") ~> (keeper_state[k] = "Dispatched")
+
+\* Same predicate, kept as separate name for cfg clarity; future
+\* refinements may diverge (e.g. BoundedWait may add a deadline).
+BoundedWait == LivenessInvariant
 
 \* Bug actions (mutation testing for the spec) ─────────────────────
 \*
@@ -307,7 +329,7 @@ BugAction_LeakedToken(p) ==
     \* capacity in production.  In the model this is detected via the
     \* TokenInflightConservation invariant below.
     /\ in_flight' = [in_flight EXCEPT ![p] = @ - 1]
-    /\ UNCHANGED <<keeper_state, token_bucket, wfq_queue, wfq_deficit, last_dispatch>>
+    /\ UNCHANGED <<keeper_state, token_bucket, wfq_queue, wfq_deficit, last_dispatch, turn_count>>
 
 \* Conservation invariant —
 \* Total work in flight + queued + completed equals total turns started.
@@ -337,7 +359,16 @@ NextBuggyLeak ==
     \/ Next
     \/ \E p \in Providers : BugAction_LeakedToken(p)
 
-SpecBuggyGreedy == Init /\ [][NextBuggyGreedy]_vars /\ Fairness
+\* SpecBuggyGreedy strips ALL fairness assumptions.  This is the
+\* maximum-strength mutation: no scheduler guarantee that any progress
+\* action ever fires when enabled.  Combined with BugAction_GreedyKeeper
+\* (silent UNCHANGED in the Waiting + ~AnyCandidateFree + ~Queue state),
+\* the spec admits behaviours where a keeper enters Waiting and never
+\* leaves — exactly the operator-observed symptom (#12910 root pattern,
+\* `feedback_keeper_starvation_capacity_vs_turn_duration_mismatch`).
+\* Under this spec, LivenessInvariant and WaitingMustEnqueueOrDispatch
+\* must be violated by TLC.
+SpecBuggyGreedy == Init /\ [][NextBuggyGreedy]_vars
 SpecBuggyLeak   == Init /\ [][NextBuggyLeak]_vars   /\ Fairness
 
 \* Notes for follow-up iterations ──────────────────────────────────

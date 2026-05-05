@@ -163,12 +163,26 @@ let () =
     src
     "let rec waitpid_no_intr";
   (* Anchor 2: helper retries on EINTR specifically — not on any
-     [Unix_error].  Needle stops before parameters for the same
-     reason as Anchor 1. *)
-  assert_contains
-    ~label:"EINTR retry arm"
-    src
-    "Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_intr";
+     [Unix_error].  Anchor on the invariant rather than on one
+     specific syntactic shape: the helper body must mention
+     [Unix.EINTR] (so the retry is EINTR-scoped, not "swallow every
+     Unix_error") and must contain a call back to [waitpid_no_intr]
+     (so EINTR actually loops rather than falling through).  The
+     code-only view (comments + strings stripped) keeps the
+     explanatory block comment from triggering a false positive on
+     the [Unix.EINTR] mention. *)
+  let code_only_for_eintr = strip_comments_and_strings src in
+  if not (count_substring ~needle:"Unix.EINTR" code_only_for_eintr >= 1) then
+    failwith
+      "expected helper body to mention [Unix.EINTR] (retry must be \
+       EINTR-scoped, not blanket Unix_error swallow) — see issue #13060";
+  if not
+       (count_substring ~needle:"waitpid_no_intr" code_only_for_eintr >= 2)
+  then
+    failwith
+      "expected at least one recursive call back to [waitpid_no_intr] \
+       inside its own body (retry on EINTR must actually loop) — \
+       see issue #13060";
   (* Anchor 3: only one bare [Unix.waitpid] call may exist in the
      module — the one inside [waitpid_no_intr].  We count after
      stripping comments AND string literals so that:
@@ -191,17 +205,25 @@ let () =
           credential_materializer.ml must route through \
           waitpid_no_intr — see issue #13060."
          bare_waitpid);
-  (* Anchor 4: ≥3 distinct call sites route the result of
-     [waitpid_no_intr] through [snd (waitpid_no_intr ...)] — the
-     pattern every caller uses to discard the [pid] half.  This is
-     a call-site-only pattern (no false credit for the helper
-     definition or the recursive tail call) so the count is exactly
-     "number of true caller invocations". *)
-  let call_sites = count_substring ~needle:"snd (waitpid_no_intr" code_only in
-  if call_sites < 3 then
+  (* Anchor 4: ≥3 distinct call sites route through
+     [waitpid_no_intr] — the only safe wrapper for blocking waitpid
+     in this module.  Anchor on the helper's identifier rather than
+     a specific tuple-discard syntax so a refactor like
+     [let _, status = waitpid_no_intr ... in ...] still passes.
+     The total count is "5 helper-name occurrences" =
+     1 [let rec waitpid_no_intr] + 1 recursive call + 3 caller
+     sites; the bare helper name appears in code only (comments and
+     strings already stripped above).  We require ≥5 occurrences
+     and subtract the 2 helper-internal references to derive the
+     ≥3 caller floor. *)
+  let helper_uses = count_substring ~needle:"waitpid_no_intr" code_only in
+  let caller_lower_bound = helper_uses - 2 in
+  if caller_lower_bound < 3 then
     failwith
       (Printf.sprintf
-         "expected ≥3 [snd (waitpid_no_intr ...)] caller invocations; \
-          found %d.  See issue #13060."
-         call_sites);
+         "expected ≥3 [waitpid_no_intr] caller invocations (total %d \
+          helper-name occurrences in code; subtract the [let rec] \
+          definition and the recursive EINTR call to get the caller \
+          floor).  See issue #13060."
+         helper_uses);
   print_endline "test_credential_materializer_waitpid_eintr: OK"

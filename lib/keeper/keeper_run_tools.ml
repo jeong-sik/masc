@@ -976,6 +976,7 @@ let prepare_agent_setup
   let meta_ref = ref acc.meta in
   let base_hooks =
     Keeper_hooks_oas.make_hooks
+      ~config
       ~meta_ref
       ~generation
       ?max_cost_usd

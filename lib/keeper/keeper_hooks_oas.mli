@@ -289,9 +289,18 @@ val recent_tool_streak_count :
   ?within_sec:float -> tool_name:string -> Yojson.Safe.t list -> int
 (** Count consecutive recent calls of [tool_name] in trajectory events. *)
 
+type pr_review_action_metric_event = {
+  action : string;
+  pr_number : int option;
+  comment_id : int option;
+  success : bool;
+}
+(** Parsed PR-review action telemetry derived from keeper tool I/O. *)
+
 (** {1 Hook factory} *)
 
 val make_hooks :
+  config:Coord.config ->
   meta_ref:Keeper_types.keeper_meta ref ->
   generation:int ->
   ?max_cost_usd:float ->
@@ -315,3 +324,12 @@ val hook_introspection_json :
   ?max_cost_usd:float -> ?destructive_check:bool -> unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
     diagnostics surface. *)
+
+module For_testing : sig
+  val pr_review_action_metric_event_of_tool_io :
+    tool_name:string ->
+    input:Yojson.Safe.t ->
+    output_text:string ->
+    transport_success:bool ->
+    pr_review_action_metric_event option
+end

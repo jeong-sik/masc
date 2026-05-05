@@ -578,10 +578,21 @@ export interface MetricsWindow {
   pr_review_tool_call_count?: number
   pr_work_git_tool_call_count?: number
   pr_work_tool_call_count?: number
+  pr_review_action_attempt_count?: number
+  pr_review_action_success_count?: number
+  pr_review_comment_action_count?: number
+  pr_review_approve_action_count?: number
+  pr_review_request_changes_action_count?: number
+  pr_review_reply_action_count?: number
   observed_pr_review_tool_calls?: boolean
   observed_pr_mutation_tool_calls?: boolean
   observed_git_tool_calls?: boolean
   observed_pr_work_tool_calls?: boolean
+  observed_pr_review_work?: boolean
+  observed_pr_mutation_work?: boolean
+  observed_pr_approve_work?: boolean
+  observed_pr_request_changes_work?: boolean
+  observed_pr_reply_work?: boolean
 
   // -- Memory --
   memory_checks?: number

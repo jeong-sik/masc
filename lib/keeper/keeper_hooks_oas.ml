@@ -947,7 +947,146 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   in
   loop 0 (List.rev entries)
 
+type pr_review_action_metric_event = {
+  action : string;
+  pr_number : int option;
+  comment_id : int option;
+  success : bool;
+}
+
+let normalize_pr_review_action raw =
+  let trimmed = String.trim raw |> String.uppercase_ascii in
+  match trimmed with
+  | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
+  | _ -> None
+
+let json_int_opt key json = Safe_ops.json_int_opt key json
+
+let first_some a b =
+  match a with
+  | Some _ -> a
+  | None -> b
+
+let output_json_opt output_text =
+  match
+    Safe_ops.parse_json_safe
+      ~context:"Keeper_hooks_oas.pr_review_action_metric.output"
+      output_text
+  with
+  | Ok json -> Some json
+  | Error _ -> None
+
+let pr_review_action_metric_event_of_tool_io
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool) =
+  match tool_name with
+  | "keeper_pr_review_comment" ->
+      let output_json = output_json_opt output_text in
+      let action =
+        match output_json with
+        | Some json -> Safe_ops.json_string_opt "event" json
+        | None -> None
+      in
+      let action =
+        match action with
+        | Some value -> Some value
+        | None -> Safe_ops.json_string_opt "event" input
+      in
+      let success =
+        match output_json with
+        | Some json -> Safe_ops.json_bool ~default:transport_success "ok" json
+        | None -> transport_success
+      in
+      Option.map
+        (fun action ->
+             {
+               action;
+               pr_number =
+                 first_some
+                   (first_some
+                      (match output_json with
+                       | Some json -> json_int_opt "pr_number" json
+                       | None -> None)
+                      (json_int_opt "pr_number" input))
+                   (json_int_opt "number" input);
+               comment_id = None;
+               success;
+             })
+        (Option.bind action normalize_pr_review_action)
+  | "keeper_pr_review_reply" ->
+      let output_json = output_json_opt output_text in
+      let success =
+        match output_json with
+        | Some json -> Safe_ops.json_bool ~default:transport_success "ok" json
+        | None -> transport_success
+      in
+      Some
+        {
+          action = "REPLY";
+          pr_number =
+            first_some
+              (first_some
+                 (match output_json with
+                  | Some json -> json_int_opt "pr_number" json
+                  | None -> None)
+                 (json_int_opt "pr_number" input))
+              (json_int_opt "number" input);
+          comment_id =
+            first_some
+              (match output_json with
+               | Some json -> json_int_opt "comment_id" json
+               | None -> None)
+              (json_int_opt "comment_id" input);
+          success;
+        }
+  | _ -> None
+
+let append_pr_review_action_metric
+    ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta)
+    ~(generation : int)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(transport_success : bool)
+    ~(duration_ms : float)
+    () =
+  match
+    pr_review_action_metric_event_of_tool_io
+      ~tool_name ~input ~output_text ~transport_success
+  with
+  | None -> ()
+  | Some event ->
+      let now = Time_compat.now () in
+      let store = Keeper_types.keeper_metrics_store config meta.name in
+      let snapshot =
+        `Assoc
+          [
+            ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
+            ("ts_unix", `Float now);
+            ("channel", `String "tool_event");
+            ("metric_event", `String "keeper_pr_review_action");
+            ("name", `String meta.name);
+            ("agent_name", `String meta.agent_name);
+            ( "trace_id",
+              `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+            ("generation", `Int generation);
+            ("tool_name", `String tool_name);
+            ("pr_review_action", `String event.action);
+            ("pr_review_action_success", `Bool event.success);
+            ("tool_call_count", `Int 0);
+            ("tools_used", `List []);
+            ("pr_number", Json_util.int_opt_to_json event.pr_number);
+            ("comment_id", Json_util.int_opt_to_json event.comment_id);
+            ("duration_ms", `Float duration_ms);
+          ]
+      in
+      Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
+
 let make_hooks
+    ~(config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
@@ -1318,6 +1457,31 @@ let make_hooks
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
+        (try
+           append_pr_review_action_metric
+             ~config
+             ~meta:(!meta_ref)
+             ~generation
+             ~tool_name
+             ~input
+             ~output_text
+             ~transport_success:(outcome = "ok")
+             ~duration_ms
+             ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:
+                 [
+                   ("keeper", (!meta_ref).name);
+                   ("callback", "pr_review_action_metrics_append");
+                 ]
+               ();
+             Log.Keeper.warn
+               "keeper:%s tool=%s pr_review_action metric append failed: %s"
+               (!meta_ref).name tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -1474,6 +1638,11 @@ let make_hooks
      guard_chain only; non_gate_hooks has it None, so Hooks.compose
      keeps guard_chain's pre_tool_use verbatim. *)
   Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
+
+module For_testing = struct
+  let pr_review_action_metric_event_of_tool_io =
+    pr_review_action_metric_event_of_tool_io
+end
 
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,

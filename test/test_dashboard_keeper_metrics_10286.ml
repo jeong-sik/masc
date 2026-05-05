@@ -12,6 +12,18 @@ let metric ?(channel = "turn") tools =
       ("tool_call_count", `Int (List.length tools));
     ]
 
+let pr_review_action ?(success = true) action =
+  `Assoc
+    [
+      ("ts_unix", `Float 2.0);
+      ("channel", `String "tool_event");
+      ("metric_event", `String "keeper_pr_review_action");
+      ("pr_review_action", `String action);
+      ("pr_review_action_success", `Bool success);
+      ("tool_call_count", `Int 0);
+      ("tools_used", `List []);
+    ]
+
 let summary_int field summary =
   match Yojson.Safe.Util.(summary |> member field) with
   | `Int value -> value
@@ -66,6 +78,11 @@ let test_metrics_window_exposes_observed_pr_work () =
               "masc_worktree_create";
               "masc_code_git";
             ];
+          pr_review_action "COMMENT";
+          pr_review_action "APPROVE";
+          pr_review_action "REQUEST_CHANGES";
+          pr_review_action "REPLY";
+          pr_review_action ~success:false "APPROVE";
           metric ~channel:"heartbeat" [ "keeper_pr_review_comment"; "masc_code_git" ];
         ]
       ~generation:0
@@ -85,14 +102,37 @@ let test_metrics_window_exposes_observed_pr_work () =
     (summary_int "pr_work_git_tool_call_count" summary);
   check int "pr work tool call count" 6
     (summary_int "pr_work_tool_call_count" summary);
+  check int "review action attempts" 5
+    (summary_int "pr_review_action_attempt_count" summary);
+  check int "review action successes" 4
+    (summary_int "pr_review_action_success_count" summary);
+  check int "comment actions" 1
+    (summary_int "pr_review_comment_action_count" summary);
+  check int "approve actions" 1
+    (summary_int "pr_review_approve_action_count" summary);
+  check int "request changes actions" 1
+    (summary_int "pr_review_request_changes_action_count" summary);
+  check int "reply actions" 1
+    (summary_int "pr_review_reply_action_count" summary);
   check bool "observed review" true
     (summary_bool "observed_pr_review_tool_calls" summary);
   check bool "observed mutation" true
     (summary_bool "observed_pr_mutation_tool_calls" summary);
   check bool "observed git" true
     (summary_bool "observed_git_tool_calls" summary);
-  check bool "observed pr work" true
-    (summary_bool "observed_pr_work_tool_calls" summary)
+  check bool "observed pr work tool calls" true
+    (summary_bool "observed_pr_work_tool_calls" summary);
+  check bool "observed review work" true
+    (summary_bool "observed_pr_review_work" summary);
+  check bool "observed mutation work" true
+    (summary_bool "observed_pr_mutation_work" summary);
+  check bool "observed approve" true
+    (summary_bool "observed_pr_approve_work" summary);
+  check bool "observed request changes" true
+    (summary_bool "observed_pr_request_changes_work" summary);
+  check bool "observed reply" true
+    (summary_bool "observed_pr_reply_work" summary);
+  ()
 
 let () =
   run "dashboard_keeper_metrics_10286"

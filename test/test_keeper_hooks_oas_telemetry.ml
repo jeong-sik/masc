@@ -600,6 +600,51 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check bool "on_context_compacted inactive" false
     (slot json "on_context_compacted" |> member "active" |> to_bool)
 
+let pr_review_event ~tool_name ~input ~output_text =
+  Hooks.For_testing.pr_review_action_metric_event_of_tool_io
+    ~tool_name ~input ~output_text ~transport_success:true
+
+let require_pr_review_event label = function
+  | Some event -> event
+  | None -> failf "expected PR review action event for %s" label
+
+let test_pr_review_action_metric_extracts_approve () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
+      ~output_text:
+        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu"}|}
+    |> require_pr_review_event "approve"
+  in
+  check string "action from output" "APPROVE" event.action;
+  check (option int) "pr number" (Some 13177) event.pr_number;
+  check bool "success" true event.success
+
+let test_pr_review_action_metric_marks_structured_failure () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 42); ("event", `String "approve") ])
+      ~output_text:{|{"ok":false,"error":"gh_failed"}|}
+    |> require_pr_review_event "failed approve"
+  in
+  check string "action fallback from input" "APPROVE" event.action;
+  check (option int) "number fallback" (Some 42) event.pr_number;
+  check bool "structured ok=false wins" false event.success
+
+let test_pr_review_action_metric_extracts_reply () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_reply"
+      ~input:(`Assoc [ ("pr_number", `Int 9); ("comment_id", `Int 1234) ])
+      ~output_text:{|{"ok":true,"pr_number":9,"comment_id":1234}|}
+    |> require_pr_review_event "reply"
+  in
+  check string "reply action" "REPLY" event.action;
+  check (option int) "reply pr" (Some 9) event.pr_number;
+  check (option int) "comment id" (Some 1234) event.comment_id
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -649,5 +694,13 @@ let () =
     ; ( "hook_introspection",
         [ test_case "reports current runtime slots" `Quick
             test_hook_introspection_reports_current_runtime_slots
+        ] )
+    ; ( "pr_review_action",
+        [ test_case "extracts approve event from structured output" `Quick
+            test_pr_review_action_metric_extracts_approve
+        ; test_case "marks structured gh failure as not successful" `Quick
+            test_pr_review_action_metric_marks_structured_failure
+        ; test_case "extracts reply action" `Quick
+            test_pr_review_action_metric_extracts_reply
         ] )
     ]

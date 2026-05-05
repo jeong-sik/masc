@@ -58,6 +58,9 @@ type agent_reputation = {
   autonomy_level: string;
   (** Derived operational envelope: "restricted" | "standard" | "elevated" | "full".
       Advisory only until calibration Phase 5 is complete. *)
+  thompson_confidence: float;
+  (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
+      0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t
@@ -94,6 +97,8 @@ val compute_overall_score :
   response_rate:float ->
   board_posts:int ->
   board_comments:int ->
+  thompson_confidence:float ->
   float
 (** Compute the weighted overall score from individual metrics.
+    Thompson confidence is the Beta expected value from Thompson Sampling.
     Exposed for testing. *)

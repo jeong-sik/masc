@@ -54,6 +54,9 @@ type agent_reputation = {
   (** Penalty-adjusted safety score; decreases with each sandbox violation. 0.0–1.0. *)
   autonomy_level: string; [@default "standard"]
   (** Derived autonomy envelope: "restricted" | "standard" | "elevated" | "full". *)
+  thompson_confidence: float; [@default 0.5]
+  (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
+      0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
 } [@@deriving yojson { strict = false }]
 
 (** {1 Defaults} *)
@@ -81,6 +84,7 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     goal_adherence = 1.0;
     safety_compliance = 1.0;
     autonomy_level = "standard";
+    thompson_confidence = 0.5;
   }
 
 (** {1 JSON Serialization}
@@ -187,17 +191,20 @@ let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
 (** {1 Reputation Score Weights}
 
     Weighted linear combination for overall reputation.
-    Rationale: task completion is the primary signal (0.4) because
-    it directly measures value delivered. Response rate (0.3) and
-    board activity (0.3) are secondary engagement signals.
+    Rationale: task completion is the primary signal (0.35) because
+    it directly measures value delivered. Response rate (0.25) and
+    board activity (0.25) are secondary engagement signals.
+    Thompson confidence (0.15) captures empirical quality from
+    Beta distribution feedback (votes, quality signals).
 
     Board activity is capped at [board_activity_cap] to prevent
     high-volume low-quality posting from inflating scores.
 
     TODO(RFC-0001 Phase 3): Register in Runtime_params for tuning. *)
-let weight_completion = 0.4
-let weight_response   = 0.3
-let weight_board      = 0.3
+let weight_completion = 0.35
+let weight_response   = 0.25
+let weight_board      = 0.25
+let weight_thompson   = 0.15
 let board_activity_cap = 20.0
 
 let compute_accountability_score ~evidence_coverage
@@ -209,12 +216,13 @@ let compute_accountability_score ~evidence_coverage
     (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
 
 let compute_overall_score ~completion_rate ~response_rate
-    ~board_posts ~board_comments : float =
+    ~board_posts ~board_comments ~thompson_confidence : float =
   let board_total = Float.of_int (board_posts + board_comments) in
   let board_norm = Float.min 1.0 (board_total /. board_activity_cap) in
   (weight_completion *. completion_rate)
   +. (weight_response *. response_rate)
   +. (weight_board *. board_norm)
+  +. (weight_thompson *. thompson_confidence)
 
 (** {1 Accountability Penalty} *)
 
@@ -260,6 +268,18 @@ let accountability_metrics (config : Coord.config) ~(agent_name : string) =
 (** Default window for v2 ledger metrics: 14 days matches accountability window. *)
 let v2_ledger_window_days = 14
 
+(** {1 Thompson Confidence}
+
+    Compute the Thompson Sampling Beta expected value for an agent.
+    Returns 0.5 (neutral prior) when no stats exist or when alpha+beta
+    is zero (should not happen given min 0.1 priors, but safe division
+    handles the edge case). *)
+let thompson_confidence_for_agent (agent_name : string) : float =
+  let stats = Thompson_sampling.get_stats agent_name in
+  let sum = stats.Thompson_sampling.alpha +. stats.Thompson_sampling.beta in
+  if sum > 0.0 then stats.Thompson_sampling.alpha /. sum
+  else 0.5
+
 let compute_reputation (config : Coord.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
@@ -288,9 +308,10 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
        accountability_source_label) =
     accountability_metrics config ~agent_name
   in
+  let thompson_confidence = thompson_confidence_for_agent agent_name in
   let overall_score =
     compute_overall_score ~completion_rate
-      ~response_rate ~board_posts ~board_comments
+      ~response_rate ~board_posts ~board_comments ~thompson_confidence
     *. clamp01 accountability_score
   in
   (* v2: pull multi-dimensional metrics from the reputation ledger. *)
@@ -327,4 +348,5 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
     goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
     safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
     autonomy_level = Reputation_autonomy.autonomy_level_to_string autonomy;
+    thompson_confidence;
   }

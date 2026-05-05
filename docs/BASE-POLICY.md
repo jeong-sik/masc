@@ -116,15 +116,21 @@ preferred over both Base and raw Stdlib when they already exist.
 |---|---|
 | `mli_open_base` | `.mli` files in `lib/` containing the `open Base` directive (anchored: `^[[:space:]]*open[[:space:]]+Base([^[:alnum:]_]|$)`, excludes comments/docstrings) |
 | `ml_base_stdlib_shadow` | `.ml` files in `lib/` that contain both the `open Base` directive and a Stdlib-shadow block (`^[[:space:]]*module[[:space:]]+List[[:space:]]*=[[:space:]]*Stdlib\.List([^[:alnum:]_]|$)`) |
+| `bin_ml_base_stdlib_shadow` | `.ml` files in `bin/` that contain both the `open Base` directive and the same Stdlib-shadow block |
 
 These counters are recorded in `.ci/health-baseline.json` and reported
-by `scripts/health_snapshot.sh`.  A PR that increases either counter
+by `scripts/health_snapshot.sh`.  A PR that increases any counter
 above the baseline fails the gate when the audit is run with
 `base-policy-audit.sh --fail-on-regression`;
 CI also includes them in the `health_snapshot.sh --fail-on-lib-regression`
 ratchet.  When a baseline ref predates these counters, the audit treats
 the first measured value as the bootstrap baseline rather than a
 regression.
+
+As of the 2026-05-05 ratchet, all three tracked counters are zero in
+current `main`; `.ci/health-baseline.json` records zero so any
+reintroduction of the forbidden interface open or shadow anti-pattern
+fails the ratchet.
 
 ```sh
 bash scripts/base-policy-audit.sh --fail-on-regression

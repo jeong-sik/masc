@@ -46,6 +46,7 @@
         test_post_verifier
         test_reward_advice_artifact
         test_keeper_cascade_profile
+        test_cascade_capability_profile
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
@@ -249,6 +250,7 @@
           test_post_verifier
         test_reward_advice_artifact
           test_keeper_cascade_profile
+          test_cascade_capability_profile
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry

@@ -1109,6 +1109,7 @@
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 (include stanzas/test_keeper_tool_emission_hook.inc)
 (include stanzas/test_keeper_tool_matrix.inc)
+(include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 (include stanzas/test_keeper_turn_up_create_meta_retry.inc)

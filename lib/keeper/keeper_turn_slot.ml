@@ -598,28 +598,34 @@ let force_release_holder_for ~keeper_name : (string * float) list =
   let now = Time_compat.now () in
   let released_with_age = ref [] in
   let try_release ~label ~sem =
-    let snapshot =
+    let snapshots =
       with_holder_lock (fun () ->
-        match Hashtbl.find_opt holder_table (label, keeper_name) with
-        | None -> None
-        | Some acquired_at ->
-          Hashtbl.remove holder_table (label, keeper_name);
-          Some acquired_at)
+        let collected = ref [] in
+        Hashtbl.iter
+          (fun key acquired_at ->
+            if String.equal key.holder_label label
+               && String.equal key.holder_keeper_name keeper_name
+            then collected := (key, acquired_at) :: !collected)
+          holder_table;
+        List.iter
+          (fun (key, _) -> Hashtbl.remove holder_table key)
+          !collected;
+        !collected)
     in
-    match snapshot with
-    | None -> ()
-    | Some acquired_at ->
-      let age = now -. acquired_at in
-      Eio.Semaphore.release sem;
-      released_with_age := (label, age) :: !released_with_age;
-      Prometheus.inc_counter
-        Prometheus.metric_keeper_slot_force_released
-        ~labels:[("keeper", keeper_name); ("label", label)]
-        ();
-      Log.Keeper.error
-        "%s: force-released %s slot held for %.0fs (zombie fiber, \
-         likely stuck in LLM subprocess)"
-        keeper_name label age
+    List.iter
+      (fun (_key, acquired_at) ->
+        let age = now -. acquired_at in
+        Eio.Semaphore.release sem;
+        released_with_age := (label, age) :: !released_with_age;
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_slot_force_released
+          ~labels:[("keeper", keeper_name); ("label", label)]
+          ();
+        Log.Keeper.error
+          "%s: force-released %s slot held for %.0fs (zombie fiber, \
+           likely stuck in LLM subprocess)"
+          keeper_name label age)
+      snapshots
   in
   try_release ~label:"reactive" ~sem:reactive_turn_semaphore;
   try_release ~label:"autonomous" ~sem:autonomous_turn_semaphore;

@@ -75,6 +75,7 @@ export function IdeShell() {
   const terminalOpen =
     route.value.params.terminal === 'open'
     || Boolean(route.value.params.keeper?.trim())
+  const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
 
   useEffect(() => {
@@ -99,6 +100,25 @@ export function IdeShell() {
       terminal: 'open',
     }
     if (terminalKeeper) nextParams.keeper = terminalKeeper
+    navigate('code', nextParams)
+  }
+
+  const handleFindOpen = () => {
+    navigate('code', {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      find: 'open',
+    })
+  }
+
+  const handleFindClose = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    delete nextParams.find
     navigate('code', nextParams)
   }
 
@@ -127,6 +147,7 @@ export function IdeShell() {
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
         onTerminalOpen=${handleTerminalOpen}
+        onFindOpen=${handleFindOpen}
       />
       <div
         class="ide-plane-grid"
@@ -153,6 +174,9 @@ export function IdeShell() {
             documentStore=${coordinator.documentStore}
             ownershipStore=${coordinator.ownershipStore}
             diffRows=${coordinator.diffRows}
+            findOpen=${findOpen}
+            onFindOpen=${handleFindOpen}
+            onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinInspectorKeeper}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />

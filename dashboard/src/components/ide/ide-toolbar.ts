@@ -45,6 +45,7 @@ interface IdeToolbarProps {
   readonly onViewChange: (id: ViewTab) => void
   readonly onLayersChange: (active: ReadonlySet<string>) => void
   readonly onTerminalOpen?: () => void
+  readonly onFindOpen?: () => void
 }
 
 export function IdeToolbar({
@@ -53,6 +54,7 @@ export function IdeToolbar({
   onViewChange,
   onLayersChange,
   onTerminalOpen,
+  onFindOpen,
 }: IdeToolbarProps) {
   const controller = useMemo(() => {
     const next = createLayeredOverlay(IDE_LAYERS)
@@ -89,6 +91,14 @@ export function IdeToolbar({
           title: 'Open Keeper Terminal',
           keywords: 'terminal shell keeper output',
           handler: onTerminalOpen,
+        }]
+      : []),
+    ...(onFindOpen
+      ? [{
+          id: 'find-open',
+          title: 'Find in Current File',
+          keywords: 'find search current file editor match',
+          handler: onFindOpen,
         }]
       : []),
   ]

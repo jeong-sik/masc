@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
-import { IdeEditor } from './ide-editor'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 
@@ -49,6 +49,85 @@ describe('IdeEditor', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('3 lines')
       expect(container.querySelector('.cm-content')?.textContent).toContain('masc-mcp')
+    })
+  })
+
+  it('finds current-file matches with case and whole-word options', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst RuntimeValue = runtime + 1\n',
+    })
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([1, 2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: true, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([1, 2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'Runtime',
+        { caseSensitive: true, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: true },
+      ).map(match => match.line),
+    ).toEqual([1, 2])
+  })
+
+  it('renders the current-file find panel and cycles matches', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\nreturn runtime\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        findOpen: true,
+      }),
+      container,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')
+    expect(input).not.toBeNull()
+    fireEvent.input(input!, { target: { value: 'runtime' } })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('1 of 2 matches')
+    })
+    expect(container.querySelector('[data-testid="ide-find-results"]')?.textContent)
+      .toContain('return runtime')
+
+    const next = container.querySelector<HTMLButtonElement>('[aria-label="Next match"]')
+    expect(next).not.toBeNull()
+    fireEvent.click(next!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('2 of 2 matches')
     })
   })
 })

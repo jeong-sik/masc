@@ -165,6 +165,24 @@ describe('IdeShell', () => {
     expect(route.value.params.terminal).toBe('open')
   })
 
+  it('opens the current-file find panel from the IDE command bar', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    const input = ideCommandInput(container)
+    input.value = 'find'
+    fireEvent.input(input)
+    await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(route.value.params.find).toBe('open')
+    expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
+  })
+
   it('renders the Cascade layer button and toggles it via URL', () => {
     route.value = {
       tab: 'code',

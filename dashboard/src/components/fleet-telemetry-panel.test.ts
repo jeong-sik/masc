@@ -509,7 +509,7 @@ describe('FleetTelemetryPanel', () => {
     ])
   })
 
-  it('marks tool-quality-only fallback rows as known tool activity', async () => {
+  it('does not synthesize fleet runtime rows from tool-quality-only data', async () => {
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
       fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
@@ -527,13 +527,7 @@ describe('FleetTelemetryPanel', () => {
       ],
     })
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      name: 'keeper-tool-only',
-      tool_calls: 5,
-      tool_activity_known: true,
-      model: 'unknown',
-    })
+    expect(rows).toEqual([])
   })
 
   it('prefers tool-quality call counts when success data is present', async () => {
@@ -699,7 +693,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('glm-5.1')
   })
 
-  it('shows partial telemetry warnings while keeping degraded data visible', async () => {
+  it('shows partial telemetry warnings without treating tool quality as runtime state', async () => {
     const fetchDashboardExecution = vi.fn().mockRejectedValue(new Error('execution down'))
     const fetchToolQuality = vi.fn().mockResolvedValue({
       ...toolQualityResponse,
@@ -726,7 +720,9 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('부분 텔레메트리')
     expect(container.textContent).toContain('실행 스냅샷 사용 불가: execution down')
-    expect(container.textContent).toContain('keeper-fallback')
+    expect(container.textContent).not.toContain('keeper-fallback')
+    expect(container.textContent).toContain('Keeper 데이터 없음.')
+    expect(container.textContent).toContain('95.5%')
     expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
 

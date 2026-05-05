@@ -272,6 +272,43 @@ let test_clean_subcommand_skips_pin_guard () =
       check int "exits zero for clean subcommand" 0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+(* PR #13117 review (P2): the original guards checked args[0], so prefixing
+   global options like `--root .` before `clean` misclassified the call as
+   a non-clean target and ran pin/deps/ocaml-version guards on a target
+   that does not compile.  Pin the new subcommand-detection helper so
+   guard-skipping still kicks in. *)
+let test_clean_subcommand_with_global_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-flag" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--root . clean"
+      in
+      check int
+        "exits zero for `--root . clean` even when pin guard would fail"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
+  with_temp_dir "dune-local-clean-eq-flag" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
+          "--display=quiet clean"
+      in
+      check int
+        "exits zero for `--display=quiet clean` even when pin guard would fail"
+        0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_pin_ok_build_proceeds () =
   with_temp_dir "dune-local-pin-ok" (fun dir ->
       let bin_dir, dune_log =
@@ -432,6 +469,13 @@ let () =
             test_opam_absent_skips_pin_guard;
           test_case "clean subcommand skips pin guard" `Quick
             test_clean_subcommand_skips_pin_guard;
+          test_case
+            "`--root . clean` (global flag before subcommand) skips pin guard"
+            `Quick test_clean_subcommand_with_global_flag_skips_pin_guard;
+          test_case
+            "`--display=quiet clean` (--flag=value before subcommand) skips \
+             pin guard"
+            `Quick test_clean_subcommand_with_eq_flag_skips_pin_guard;
           test_case "pin OK allows build to proceed" `Quick
             test_pin_ok_build_proceeds;
           test_case "MASC_DUNE_DRY_RUN=1 skips pin check" `Quick

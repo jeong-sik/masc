@@ -59,6 +59,43 @@ else
   cmd+=("${args[@]}")
 fi
 
+# Detect the actual dune subcommand by skipping global options and their
+# values.  PR #13117 review (P2): `args[0]` misclassified valid invocations
+# like `scripts/dune-local.sh --root . clean` as non-clean, making the
+# guards below fire on a clean target that never compiles.  The subcommand
+# is the first positional token after any leading global-option flags.
+_value_taking_flags=(--root --workspace --profile --build-dir --display \
+                     --default-target -j --jobs --config-file --cache \
+                     --cache-storage-backend --auto-promote --diff-command \
+                     --error-reporting --terminal-persistence)
+_detect_subcommand() {
+  local i=0
+  while (( i < ${#args[@]} )); do
+    local a="${args[i]}"
+    # `--flag=value` form: single token, skip it.
+    if [[ "$a" == --*=* ]]; then
+      i=$((i + 1)); continue
+    fi
+    # Known value-taking flag: skip flag + its value.
+    local _value_taking=0
+    for _vf in "${_value_taking_flags[@]}"; do
+      if [[ "$a" == "$_vf" ]]; then _value_taking=1; break; fi
+    done
+    if [[ "$_value_taking" -eq 1 ]]; then
+      i=$((i + 2)); continue
+    fi
+    # Other option-shaped tokens: skip just the flag.
+    if [[ "$a" == -* ]]; then
+      i=$((i + 1)); continue
+    fi
+    # First non-option token = subcommand.
+    printf '%s\n' "$a"
+    return
+  done
+  printf 'build\n'
+}
+_subcommand="$(_detect_subcommand)"
+
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   export DUNE_JOBS="${DUNE_JOBS:-${DUNE_LOCAL_JOBS:-2}}"
   export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$repo_root/_build}"
@@ -81,7 +118,7 @@ fi
 if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_SKIP_PIN_CHECK:-0}" != "1" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${args[0]:-build}" != "clean" ]]; then
+      && "${_subcommand}" != "clean" ]]; then
   _pin_check="${repo_root}/scripts/check-oas-pin.sh"
   if [[ -x "${_pin_check}" ]] && command -v opam >/dev/null 2>&1; then
     printf '[dune-local] checking agent_sdk pin...\n' >&2
@@ -116,7 +153,7 @@ fi
 if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_SKIP_DEPS_CHECK:-0}" != "1" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${args[0]:-build}" != "clean" ]]; then
+      && "${_subcommand}" != "clean" ]]; then
   if command -v opam >/dev/null 2>&1; then
     _core_deps=(httpun httpun-eio httpun-ws agent_sdk)
     _missing=()
@@ -151,7 +188,7 @@ fi
 if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_SKIP_OCAML_VERSION_CHECK:-0}" != "1" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${args[0]:-build}" != "clean" ]]; then
+      && "${_subcommand}" != "clean" ]]; then
   if command -v ocaml >/dev/null 2>&1; then
     _ocaml_v="$(ocaml -version 2>/dev/null \
                 | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')"

@@ -458,6 +458,36 @@ let test_goal_attainment_parses_grouped_count_target () =
   check string "grouped target not attained" "not_started"
     (attainment |> member "state" |> to_string)
 
+let test_goal_attainment_parses_range_target_start () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Range percent target goal"
+        ~metric:"completion_pct" ~target_value:"75-80%" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Done task 1";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 2";
+  create_done_task config ~goal_id:goal.id ~title:"Done task 3";
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Open task"
+       ~priority:3 ~description:"remaining work");
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "range target basis" "metric_target_percent"
+    (attainment |> member "basis" |> to_string);
+  check string "range target parse status" "parseable"
+    (attainment |> member "target_parse_status" |> to_string);
+  check (float 0.001) "range target numeric" 75.0
+    (attainment |> member "target_numeric" |> to_float);
+  check int "range target pct" 100
+    (attainment |> member "attainment_pct" |> to_int)
+
 let test_goal_attainment_rejects_substring_pr_metric () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -743,6 +773,8 @@ let () =
             test_goal_attainment_does_not_fake_unparseable_target;
           test_case "goal attainment parses grouped count targets" `Quick
             test_goal_attainment_parses_grouped_count_target;
+          test_case "goal attainment parses range target start" `Quick
+            test_goal_attainment_parses_range_target_start;
           test_case "goal attainment rejects substring pr metrics" `Quick
             test_goal_attainment_rejects_substring_pr_metric;
           test_case "blocked phase maps to blocked health" `Quick

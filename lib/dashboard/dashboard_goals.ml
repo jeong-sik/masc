@@ -354,26 +354,27 @@ let parse_first_float raw =
     | '0' .. '9' | '+' | '-' | '.' -> true
     | _ -> false
   in
-  let is_part index =
+  let is_part ~start index =
     match raw.[index] with
-    | '0' .. '9' | '+' | '-' | '.' -> true
+    | '0' .. '9' | '.' -> true
+    | '+' | '-' -> index = start
     | ',' ->
         index > 0 && index + 1 < len && is_digit raw.[index - 1]
         && is_digit raw.[index + 1]
     | _ -> false
   in
-  let rec token_end index =
-    if index >= len || not (is_part index) then index
-    else token_end (index + 1)
+  let rec token_end start index =
+    if index >= len || not (is_part ~start index) then index
+    else token_end start (index + 1)
   in
   let rec search index =
     if index >= len then None
     else if is_start raw.[index] then
-      let stop = token_end index in
+      let stop = token_end index index in
       let token = String.sub raw index (stop - index) in
       match float_of_string_opt (strip_number_group_separators token) with
       | Some value -> Some value
-      | None -> search (index + 1)
+      | None -> search stop
     else
       search (index + 1)
   in

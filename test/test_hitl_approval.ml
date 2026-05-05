@@ -908,6 +908,27 @@ let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
     Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
+let test_callback_production_worktree_create_auto_approved () =
+  with_test_config @@ fun config ->
+  let pending_before = AQ.pending_count () in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test" () in
+  let decision =
+    cb ~tool_name:"masc_worktree_create"
+      ~input:(`Assoc [
+        ("task_id", `String "task-187");
+        ("repo_name", `String "masc-mcp");
+      ])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+      Alcotest.(check int) "no pending approval"
+        pending_before (AQ.pending_count ())
+  | Agent_sdk.Hooks.Reject r ->
+      Alcotest.fail ("expected Approve for worktree create, got Reject: " ^ r)
+  | _ -> Alcotest.fail "unexpected decision"
+
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1140,6 +1161,8 @@ let () =
         test_callback_production_keeper_write_requires_approval;
       Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
         test_callback_production_keeper_shell_gh_read_only_auto_approved;
+      Alcotest.test_case "production worktree create auto-approved" `Quick
+        test_callback_production_worktree_create_auto_approved;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick

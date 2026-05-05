@@ -21,9 +21,10 @@
       optional error string surfaced by the just-completed turn,
       classify it via {!Recovery.classify_string}, derive the
       canonical strategy class via {!Recovery.default_strategy},
-      append an audit envelope (when an audit store is supplied),
-      and return a [`Assoc] meta sub-tree to be merged into
-      [working_context["resilience_meta"]].
+      optionally execute it through caller-supplied concrete
+      callbacks, append an audit envelope (when an audit store is
+      supplied), and return a [`Assoc] meta sub-tree to be merged
+      into [working_context["resilience_meta"]].
 
     {1 Feature flag contract}
 
@@ -81,6 +82,18 @@ val running_witness : running_valid_for_resilience
 (** {1 Main pipeline} *)
 
 (** Outcome of {!apply_post_turn_resilience}. *)
+type strategy_execution =
+  | Strategy_execution_not_configured
+      (** No concrete executor was supplied. No retry, fallback,
+          handoff, or abort side effect was attempted. *)
+  | Strategy_execution_completed of Recovery.execution_outcome
+      (** The selected strategy was consumed by
+          {!Recovery.execute_strategy}. The outcome may still be a
+          terminal recovery result such as retry exhaustion; this
+          constructor means the executor itself ran to completion. *)
+  | Strategy_execution_failed of string
+      (** The executor failed before producing a recovery outcome. *)
+
 type apply_outcome = {
   working_context : Yojson.Safe.t option;
       (** Updated [`Assoc] working_context with the new
@@ -93,11 +106,15 @@ type apply_outcome = {
       (** Identifier of the audit envelope appended for this turn,
           if any. [None] when no error was classified or when the
           [audit_store] argument was [None]. *)
+  strategy_execution : strategy_execution option;
+      (** Strategy execution result for the classified error.
+          [None] only when [maybe_error] is [None]. *)
 }
 
 val apply_post_turn_resilience :
   running_valid_for_resilience ->
   ?audit_store:Shared_audit.Store.t ->
+  ?strategy_executor:Recovery.strategy_executor ->
   now:float ->
   working_context:Yojson.Safe.t option ->
   maybe_error:string option ->
@@ -110,6 +127,13 @@ val apply_post_turn_resilience :
     @param audit_store optional handle. When omitted, no audit
            envelope is written; the [audit_envelope_id] field is
            [None].
+    @param strategy_executor optional concrete strategy executor.
+           When omitted, the selected recovery strategy is not run and
+           both metadata and [strategy_execution] report
+           {!Strategy_execution_not_configured}. When supplied, this
+           bridge consumes the default strategy through
+           {!Recovery.execute_strategy}; all retry/fallback/handoff/abort
+           side effects belong to the executor callbacks.
     @param now wall-clock seconds since epoch. Recorded in both
            the audit payload and the meta sub-tree.
     @param working_context current [`Assoc kv] tree, or [None].
@@ -121,5 +145,5 @@ val apply_post_turn_resilience :
     Side effects:
     - Audit envelope appended to [audit_store] (when supplied and
       [maybe_error] is [Some _]).
-
-    No other state is mutated. Pure with respect to OCaml memory. *)
+    - Callback side effects performed by [strategy_executor] (when
+      supplied and [maybe_error] is [Some _]). *)

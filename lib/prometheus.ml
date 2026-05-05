@@ -1808,7 +1808,7 @@ let init () =
     Counter;
   add metric_cache_desync_cleared
     "Total stale task-state cache emissions cleared after reloading backlog \
-     truth. Labeled by module, task_id, and status."
+     truth. Labeled by module and status."
     Counter;
   add metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \

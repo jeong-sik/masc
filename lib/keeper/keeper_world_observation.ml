@@ -183,6 +183,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
         else if
           Coord_task_cache_invariant.stale_active_task_signal_present
             ~config
+            ~from_agent:author
             ~module_name:"keeper_world_observation"
             ~content:msg.content
         then

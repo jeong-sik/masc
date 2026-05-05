@@ -219,6 +219,13 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     "normal task mention is not invalidated"
     false
     (str_contains normal_result "[cache_invalidated]");
+  let operator_result =
+    Coord.broadcast config ~from_agent:"operator" ~content:stale_message
+  in
+  Alcotest.(check bool)
+    "non-taskmaster stale-looking prose is not invalidated"
+    false
+    (str_contains operator_result "[cache_invalidated]");
 
   let _ = Coord.reset config in
   Unix.rmdir tmp_dir

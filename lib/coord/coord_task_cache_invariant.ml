@@ -42,6 +42,11 @@ let string_starts_with ~prefix s =
   len_s >= len_prefix && String.sub s 0 len_prefix = prefix
 ;;
 
+let trusted_cache_signal_sender from_agent =
+  String.lowercase_ascii from_agent |> fun value ->
+  string_contains value "taskmaster"
+;;
+
 let extract_task_ids content =
   Re.all (Lazy.force task_ref_re) content
   |> List.map (fun group -> Re.Group.get group 0)
@@ -105,7 +110,7 @@ let invalidation_message ~from_agent stale_tasks =
   in
   Printf.sprintf
     "[cache_invalidated] skipped stale task-state broadcast from %s: %s is \
-     terminal in backlog; original active-claim message was not emitted."
+     terminal in backlog; original cached-claim message was not emitted."
     from_agent
     task_summary
 ;;
@@ -163,8 +168,11 @@ let record_backlog_unavailable ~module_name task_ids =
     task_ids
 ;;
 
-let stale_active_task_signal_present ~config ~module_name ~content =
-  match check_cache_signal ~config ~content with
+let stale_active_task_signal_present ~config ~from_agent ~module_name ~content =
+  if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
+     || not (trusted_cache_signal_sender from_agent)
+  then false
+  else match check_cache_signal ~config ~content with
   | No_cache_signal | No_terminal_task -> false
   | stale_tasks ->
     (match stale_tasks with
@@ -178,6 +186,7 @@ let stale_active_task_signal_present ~config ~module_name ~content =
 
 let rewrite_broadcast_content ~config ~from_agent ~module_name ~content =
   if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
+     || not (trusted_cache_signal_sender from_agent)
   then content
   else
     match check_cache_signal ~config ~content with

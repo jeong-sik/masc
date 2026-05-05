@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { activeKeeperName } from '../../keeper-state'
-import { InspectorMultiKeeperBDI } from './inspector-multi-keeper-bdi'
+import {
+  InspectorMultiKeeperBDI,
+  KEEPER_DRAG_MIME,
+  buildDragHandlers,
+} from './inspector-multi-keeper-bdi'
 import {
   PIN_CAP,
   clearPins,
@@ -358,5 +362,189 @@ describe('InspectorMultiKeeperBDI — error handling', () => {
 
     const scholarPanel = container.querySelector('[data-keeper="scholar"]')
     expect(scholarPanel?.textContent).not.toContain('snapshot unavailable')
+  })
+})
+
+describe('InspectorMultiKeeperBDI — drag reorder wiring (RFC-0027 PR-γ §4)', () => {
+  // Component-level smoke: verify the drag scaffolding is on the rendered DOM.
+  // Behavior of the handlers themselves is unit-tested in the
+  // `buildDragHandlers` block below — Preact event dispatch on synthetic
+  // `Event` objects is unreliable in jsdom, so we keep the integration test
+  // surface narrow.
+  it('panels in compact-fold have draggable=true and consecutive data-drop-idx', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(SCHOLAR_SNAPSHOT))))
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('article[role="listitem"]').length).toBe(2)
+    })
+
+    const panels = Array.from(container.querySelectorAll('article[role="listitem"]'))
+    expect(panels.every(p => p.getAttribute('draggable') === 'true')).toBe(true)
+    expect(panels.map(p => p.getAttribute('data-drop-idx'))).toEqual(['0', '1'])
+  })
+
+  it('focus-mode focused panel has drop-idx 0 and chips have drop-idx 1..3', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(SCHOLAR_SNAPSHOT))))
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+    pinKeeper('c', 3)
+    pinKeeper('d', 4)
+    expect(pinnedKeepers.value.entries.length).toBe(PIN_CAP)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-layout="focus-mode"]')).not.toBeNull()
+    })
+
+    const focusedPanel = container.querySelector('article[data-drop-idx="0"]')
+    expect(focusedPanel?.getAttribute('data-keeper')).toBe('d')
+
+    const chips = Array.from(container.querySelectorAll('span[role="listitem"]'))
+    expect(chips.every(c => c.getAttribute('draggable') === 'true')).toBe(true)
+    expect(chips.map(c => c.getAttribute('data-drop-idx'))).toEqual(['1', '2', '3'])
+  })
+})
+
+describe('buildDragHandlers — RFC-0027 PR-γ §4 unit', () => {
+  interface SimulatedDataTransfer {
+    _data: Map<string, string>
+    _types: string[]
+    effectAllowed: string
+    dropEffect: string
+    setData: (format: string, data: string) => void
+    getData: (format: string) => string
+    readonly types: ReadonlyArray<string>
+  }
+
+  function makeDataTransfer(initial?: { mime: string; data?: string }): SimulatedDataTransfer {
+    const dt: SimulatedDataTransfer = {
+      _data: new Map(),
+      _types: initial?.mime ? [initial.mime] : [],
+      effectAllowed: '',
+      dropEffect: '',
+      setData(format: string, data: string) {
+        this._data.set(format, data)
+        if (!this._types.includes(format)) this._types.push(format)
+      },
+      getData(format: string) {
+        return this._data.get(format) ?? ''
+      },
+      get types() {
+        return this._types
+      },
+    }
+    if (initial?.mime && initial.data !== undefined) {
+      dt._data.set(initial.mime, initial.data)
+    }
+    return dt
+  }
+
+  function makeEvent(dt: SimulatedDataTransfer | null): DragEvent {
+    let prevented = false
+    return {
+      dataTransfer: dt,
+      preventDefault() {
+        prevented = true
+      },
+      get defaultPrevented() {
+        return prevented
+      },
+    } as unknown as DragEvent
+  }
+
+  beforeEach(() => {
+    clearPins()
+  })
+
+  afterEach(() => {
+    clearPins()
+  })
+
+  it('onDragStart writes the source name to the keeper MIME and sets effectAllowed=move', () => {
+    const handlers = buildDragHandlers('scholar', 0)
+    const dt = makeDataTransfer()
+    handlers.onDragStart(makeEvent(dt))
+    expect(dt.getData(KEEPER_DRAG_MIME)).toBe('scholar')
+    expect(dt.effectAllowed).toBe('move')
+  })
+
+  it('onDragStart is a no-op when dataTransfer is null', () => {
+    const handlers = buildDragHandlers('scholar', 0)
+    expect(() => handlers.onDragStart(makeEvent(null))).not.toThrow()
+  })
+
+  it('onDragOver with keeper MIME calls preventDefault and sets dropEffect=move', () => {
+    const handlers = buildDragHandlers('scholar', 0)
+    const dt = makeDataTransfer({ mime: KEEPER_DRAG_MIME })
+    const event = makeEvent(dt)
+    handlers.onDragOver(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(dt.dropEffect).toBe('move')
+  })
+
+  it('onDragOver with non-keeper MIME does NOT preventDefault', () => {
+    const handlers = buildDragHandlers('scholar', 0)
+    const dt = makeDataTransfer({ mime: 'text/plain' })
+    const event = makeEvent(dt)
+    handlers.onDragOver(event)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('onDrop with keeper MIME and a different source calls reorderPins', () => {
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+    pinKeeper('c', 3)
+    // Head order: ['c','b','a']
+
+    // Drop 'a' onto target 'c' (drop-idx 0).
+    const handlers = buildDragHandlers('c', 0)
+    const dt = makeDataTransfer({ mime: KEEPER_DRAG_MIME, data: 'a' })
+    const event = makeEvent(dt)
+    handlers.onDrop(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('onDrop on the same keeper (self-drop) is a no-op', () => {
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+
+    const stateBefore = pinnedKeepers.value
+    const handlers = buildDragHandlers('b', 0)
+    const dt = makeDataTransfer({ mime: KEEPER_DRAG_MIME, data: 'b' })
+    handlers.onDrop(makeEvent(dt))
+    expect(pinnedKeepers.value).toBe(stateBefore)
+  })
+
+  it('onDrop with empty source name is a no-op', () => {
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+
+    const stateBefore = pinnedKeepers.value
+    const handlers = buildDragHandlers('a', 1)
+    const dt = makeDataTransfer({ mime: KEEPER_DRAG_MIME, data: '' })
+    handlers.onDrop(makeEvent(dt))
+    expect(pinnedKeepers.value).toBe(stateBefore)
+  })
+
+  it('onDrop on a chip target reorders the source into that chip slot', () => {
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+    pinKeeper('c', 3)
+    pinKeeper('d', 4)
+    // Head order: ['d','c','b','a']
+
+    // Drag 'd' onto chip at drop-idx 3 ('a').
+    const handlers = buildDragHandlers('a', 3)
+    const dt = makeDataTransfer({ mime: KEEPER_DRAG_MIME, data: 'd' })
+    handlers.onDrop(makeEvent(dt))
+
+    expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['c', 'b', 'a', 'd'])
   })
 })

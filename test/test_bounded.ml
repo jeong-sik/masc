@@ -267,6 +267,13 @@ let test_is_retryable_error () =
   check bool "rate limit is retryable" true (Bounded.is_retryable_error "Rate limit exceeded 429");
   check bool "503 is retryable" true (Bounded.is_retryable_error "Service unavailable 503");
   check bool "connection refused is retryable" true (Bounded.is_retryable_error "ECONNREFUSED");
+  (* Hard quotas may include 429 but should not burn bounded same-agent retries. *)
+  check bool "cli-wrapped hard quota is not retryable" false
+    (Bounded.is_retryable_error
+       "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit resets Apr 24 at 4am (Asia/Seoul)\"}");
+  check bool "monthly usage cap is not retryable" false
+    (Bounded.is_retryable_error
+       "You have reached your specified API usage limits. You will regain access on 2026-05-07 at 10:00 UTC.");
   (* Non-retryable errors *)
   check bool "generic error not retryable" false (Bounded.is_retryable_error "Invalid JSON");
   check bool "auth error not retryable" false (Bounded.is_retryable_error "Unauthorized 401")

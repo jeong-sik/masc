@@ -13,8 +13,9 @@ type error_mode =
   | PermanentError of { detail : string; fallback_strategy : fallback }
   | ResourceExhausted of {
       resource : [ `Tokens | `Time | `Cost | `Memory | `Disk ];
-      consumed : float;
-      limit : float;
+      consumed : float option;
+      limit : float option;
+      detail : string option;
     }
   | AmbiguityError of { detail : string; branches : string list }
   | ConsensusError of { detail : string; dissenters : string list }
@@ -77,7 +78,12 @@ let permanent ~detail ~fallback =
   PermanentError { detail; fallback_strategy = fallback }
 
 let resource_exhausted ~resource ~consumed ~limit =
-  ResourceExhausted { resource; consumed; limit }
+  ResourceExhausted
+    { resource; consumed = Some consumed; limit = Some limit; detail = None }
+
+let resource_exhausted_unknown ~resource ~detail =
+  ResourceExhausted
+    { resource; consumed = None; limit = None; detail = Some detail }
 
 let ambiguity ~detail ~branches = AmbiguityError { detail; branches }
 
@@ -135,7 +141,7 @@ let classify_string (s : string) : error_mode =
         resource_phrases
     with
     | Some (_, resource) ->
-        resource_exhausted ~resource ~consumed:0.0 ~limit:0.0
+        resource_exhausted_unknown ~resource ~detail:s
     | None -> permanent ~detail:s ~fallback:(HumanHandoff s)
 
 (* ── Default strategy selection ───────────────────────────────── *)
@@ -176,7 +182,7 @@ let default_strategy (mode : error_mode) :
                   detail msg;
               preserve_state = true;
             })
-  | ResourceExhausted { resource; consumed; limit } ->
+  | ResourceExhausted { resource; consumed; limit; detail } ->
       let resource_str =
         match resource with
         | `Tokens -> "Tokens"
@@ -185,12 +191,22 @@ let default_strategy (mode : error_mode) :
         | `Memory -> "Memory"
         | `Disk -> "Disk"
       in
+      let measurement =
+        match consumed, limit with
+        | Some consumed, Some limit ->
+            Printf.sprintf "consumed=%.2f limit=%.2f" consumed limit
+        | _ ->
+            match detail with
+            | Some detail ->
+                Printf.sprintf "measurement=unknown detail=%S" detail
+            | None -> "measurement=unknown"
+      in
       Abort
         {
           reason =
             Printf.sprintf
-              "ResourceExhausted: %s consumed=%.2f limit=%.2f"
-              resource_str consumed limit;
+              "ResourceExhausted: %s %s"
+              resource_str measurement;
           cleanup = (fun () -> ());
         }
   | AmbiguityError { detail; branches } ->

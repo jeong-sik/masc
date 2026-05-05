@@ -2,6 +2,15 @@
 
 module R = Resilience.Recovery
 
+let contains haystack needle =
+  let h = String.length haystack in
+  let n = String.length needle in
+  let rec loop i =
+    i + n <= h
+    && (String.sub haystack i n = needle || loop (i + 1))
+  in
+  n = 0 || loop 0
+
 (* ─── Convenience constructors ────────────────────────────────── *)
 
 let test_transient_default_args () =
@@ -37,10 +46,10 @@ let test_resource_exhausted () =
     R.resource_exhausted ~resource:`Tokens ~consumed:1000.0 ~limit:500.0
   in
   match e with
-  | R.ResourceExhausted { resource; consumed; limit } ->
+  | R.ResourceExhausted { resource; consumed; limit; _ } ->
       assert (resource = `Tokens);
-      assert (consumed = 1000.0);
-      assert (limit = 500.0)
+      assert (consumed = Some 1000.0);
+      assert (limit = Some 500.0)
   | _ -> assert false
 
 let test_ambiguity_branches () =
@@ -89,7 +98,10 @@ let test_classify_resource_token () =
          match resource. But "budget" matches Cost first depending
          on iteration order — accept either resource. *)
       assert false
-  | R.ResourceExhausted _ -> ()
+  | R.ResourceExhausted { consumed; limit; detail; _ } ->
+      assert (consumed = None);
+      assert (limit = None);
+      assert (detail = Some "token budget exhausted")
   | _ -> assert false
 
 let test_classify_permanent_fallback () =
@@ -133,6 +145,15 @@ let test_strategy_for_resource_is_abort () =
   in
   match R.default_strategy mode with
   | R.Abort _ -> ()
+  | _ -> assert false
+
+let test_strategy_for_unknown_resource_does_not_fake_zeroes () =
+  let mode = R.classify_string "token budget exhausted" in
+  match R.default_strategy mode with
+  | R.Abort { reason; _ } ->
+      assert (contains reason "measurement=unknown");
+      assert (not (contains reason "consumed=0.00"));
+      assert (not (contains reason "limit=0.00"))
   | _ -> assert false
 
 let test_strategy_for_ambiguity_is_handoff () =
@@ -190,6 +211,7 @@ let () =
   test_strategy_for_permanent_default_string ();
   test_strategy_for_permanent_handoff ();
   test_strategy_for_resource_is_abort ();
+  test_strategy_for_unknown_resource_does_not_fake_zeroes ();
   test_strategy_for_ambiguity_is_handoff ();
   test_strategy_for_consensus_is_handoff ();
   test_strategy_for_degradation_is_handoff ();

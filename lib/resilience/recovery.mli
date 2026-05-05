@@ -63,10 +63,13 @@ type error_mode =
           known correct). *)
   | ResourceExhausted of {
       resource : [ `Tokens | `Time | `Cost | `Memory | `Disk ];
-      consumed : float;
-      limit : float;
+      consumed : float option;
+      limit : float option;
+      detail : string option;
     }
-      (** Budget or capacity exhausted. *)
+      (** Budget or capacity exhausted. [consumed] and [limit] are [None]
+          when the classifier only has a free-form error string and no
+          trustworthy numeric measurement. *)
   | AmbiguityError of { detail : string; branches : string list }
       (** Two or more equally plausible interpretations; speculative
           execution is the recommended response when available. *)
@@ -136,7 +139,8 @@ val all_strategy_tla_symbols : string list
 val classify_string : string -> error_mode
 (** Best-effort classification of a free-form exception or error
     string. Returns [TransientError] for known retryable phrases
-    (timeout, rate limit, connection reset, temporary), and
+    (timeout, rate limit, connection reset, temporary),
+    [ResourceExhausted] with unknown measurement for resource phrases, and
     [PermanentError { fallback_strategy = HumanHandoff _ }]
     otherwise. *)
 
@@ -168,6 +172,11 @@ val resource_exhausted :
   resource:[ `Tokens | `Time | `Cost | `Memory | `Disk ] ->
   consumed:float ->
   limit:float ->
+  error_mode
+
+val resource_exhausted_unknown :
+  resource:[ `Tokens | `Time | `Cost | `Memory | `Disk ] ->
+  detail:string ->
   error_mode
 
 val ambiguity : detail:string -> branches:string list -> error_mode

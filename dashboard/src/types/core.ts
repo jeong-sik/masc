@@ -573,6 +573,15 @@ export interface MetricsWindow {
 
   // -- Tool --
   tool_call_count?: number
+  pr_review_read_tool_count?: number
+  pr_review_mutation_tool_count?: number
+  pr_review_tool_count?: number
+  pr_work_git_tool_count?: number
+  pr_work_signal_count?: number
+  observed_pr_review_work?: boolean
+  observed_pr_mutation_work?: boolean
+  observed_git_work?: boolean
+  observed_pr_work?: boolean
 
   // -- Memory --
   memory_checks?: number

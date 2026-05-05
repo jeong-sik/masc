@@ -155,6 +155,21 @@ let json_member_string json key =
   | `String value -> value
   | _ -> Alcotest.failf "expected string field %s" key
 
+let json_member_int json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> value
+  | _ -> Alcotest.failf "expected int field %s" key
+
+let json_member_bool json key =
+  match Yojson.Safe.Util.member key json with
+  | `Bool value -> value
+  | _ -> Alcotest.failf "expected bool field %s" key
+
+let json_member_list json key =
+  match Yojson.Safe.Util.member key json with
+  | `List values -> values
+  | _ -> Alcotest.failf "expected list field %s" key
+
 let test_board_actor_identity_canonicalizes_keeper_alias () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -180,6 +195,74 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
   Alcotest.(check string) "source" "raw_agent"
     (json_member_string json "source")
+
+let test_board_dashboard_json_embeds_reaction_summaries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"reaction-author"
+        ~content:"reactable post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
+        ~content:"reactable comment" ()
+    with
+    | Ok comment -> comment
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+       ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let post_reactions =
+    Server_utils.board_reactions_for_post ~voter:(Some "reactor") ~post_id
+  in
+  let post_json =
+    Server_utils.board_post_dashboard_json ~reactions:post_reactions
+      ~author_karma:0 post
+  in
+  let post_summary =
+    match json_member_list post_json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected post reaction summary"
+  in
+  Alcotest.(check string) "post reaction emoji" "🚀"
+    (json_member_string post_summary "emoji");
+  Alcotest.(check int) "post reaction count" 1
+    (json_member_int post_summary "count");
+  Alcotest.(check bool) "post reaction selected" true
+    (json_member_bool post_summary "has_reacted");
+  let comment_reactions =
+    Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
+  in
+  let comment_json =
+    Server_utils.board_comment_dashboard_json ~reactions:comment_reactions comment
+  in
+  let comment_summary =
+    match json_member_list comment_json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected comment reaction summary"
+  in
+  Alcotest.(check string) "comment reaction emoji" "👏"
+    (json_member_string comment_summary "emoji");
+  Alcotest.(check bool) "comment reaction selected" true
+    (json_member_bool comment_summary "has_reacted")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -795,7 +878,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
+  Alcotest.(check int) "12 tool schemas" 12 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -830,6 +913,8 @@ let () =
             `Quick test_board_actor_identity_canonicalizes_keeper_alias;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
+          Alcotest.test_case "board dashboard json embeds reaction summaries"
+            `Quick test_board_dashboard_json_embeds_reaction_summaries;
           Alcotest.test_case "inline board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "inline board post author accepts matching alias"

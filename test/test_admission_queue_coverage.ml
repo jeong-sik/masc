@@ -24,14 +24,17 @@ let test_with_permit_runs () =
 
 let test_with_permit_propagates_exception () =
   Eio_main.run (fun _env ->
-    match
+    AQ.reset_for_test ~max_slots:3;
+    (match
       AQ.with_permit ~priority:Interactive
         ~keeper_name:"test" ~cascade_name:(cascade_name "test")
         (fun () -> failwith "boom")
     with
     | Ok _ -> fail "should raise"
     | exception Failure msg -> check string "exception propagates" "boom" msg
-    | Error _ -> fail "unexpected error")
+    | Error _ -> fail "unexpected error");
+    let s = AQ.snapshot () in
+    check int "active not leaked after exception" 0 s.active)
 
 let test_try_always_succeeds () =
   Eio_main.run (fun _env ->
@@ -102,6 +105,32 @@ let test_wait_timeout_passthrough_no_leak () =
     check int "no leaked slots" 0 s.active;
     check int "queue cleared" 0 s.queue_depth)
 
+let test_snapshot_tracks_passthrough_inflight () =
+  Eio_main.run (fun _env ->
+    AQ.reset_for_test ~max_slots:3;
+    let started_p, started_r = Eio.Promise.create () in
+    let release_p, release_r = Eio.Promise.create () in
+    Eio.Fiber.both
+      (fun () ->
+         match AQ.with_permit ~priority:Background
+           ~keeper_name:"snapshot-active" ~cascade_name:(cascade_name "test")
+           (fun () ->
+             Eio.Promise.resolve started_r ();
+             Eio.Promise.await release_p)
+         with
+         | Ok () -> ()
+         | Error _ -> fail "unexpected error")
+      (fun () ->
+         Eio.Promise.await started_p;
+         let s = AQ.snapshot () in
+         check int "active tracks running callback" 1 s.active;
+         check int "available subtracts active" 2 s.available;
+         check int "passthrough leaves queue empty" 0 s.queue_depth;
+         Eio.Promise.resolve release_r ());
+    let s = AQ.snapshot () in
+    check int "active returns to zero" 0 s.active;
+    check int "available restored" 3 s.available)
+
 (* ============================================================
    Configuration Tests
    ============================================================ *)
@@ -137,6 +166,14 @@ let test_snapshot_json_shape () =
     let json = AQ.snapshot_json () in
     match json with
     | `Assoc fields ->
+      let string_field name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> value
+        | _ -> failf "expected string field %s" name
+      in
+      check string "mode" "passthrough" (string_field "mode");
+      check string "throttle owner" "oas_cascade"
+        (string_field "throttle_owner");
       check bool "has max_concurrent" true
         (List.mem_assoc "max_concurrent" fields);
       check bool "has queue_depth" true
@@ -240,6 +277,8 @@ let () =
       test_case "concurrent all run" `Quick test_concurrent_all_run;
       test_case "wait timeout passthrough no leak" `Quick
         test_wait_timeout_passthrough_no_leak;
+      test_case "snapshot tracks passthrough inflight" `Quick
+        test_snapshot_tracks_passthrough_inflight;
     ];
     "config", [
       test_case "initial default" `Quick test_initial_max_concurrent_default;

@@ -1,14 +1,13 @@
-(** Admission_queue — MASC-layer priority admission queue for inference calls.
+(** Admission_queue — MASC-layer admission observability for inference calls.
 
-    Sits between MASC callers and OAS Agent.run(). Provides:
-    - Configurable concurrency limits per queue partition
-    - Priority-aware FIFO scheduling (reuses OAS Request_priority ranking)
-    - Per-waiter metadata for observability (keeper_name, enqueue_ts)
-    - Cancel-safe via Eio.Promise + Atomic cancellation flag
+    Current runtime mode is passthrough: provider-level throttling and retry
+    ownership live in the OAS cascade layer. This module still records
+    MASC-visible inflight state, host-resource rejection, and the configured
+    capacity hint used by dashboards.
 
-    The implementation mirrors OAS Slot_scheduler semantics (priority sorted
-    waiter list, Eio.Promise blocking) at the MASC layer with MASC-visible
-    metadata.
+    The waiter metadata and priority helpers are retained as observability
+    scaffolding for the RFC-0026 cascade-layer admission router. They are not
+    an active MASC-side scheduler in the current call path.
 
     @since 3.0.0 *)
 
@@ -43,12 +42,12 @@ val with_permit :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   (unit -> 'a) ->
   ('a, [> `Host_resource_saturated of string ]) result
-(** Acquire a permit, run [f], release permit on exit (normal or exception).
-    Returns [Error (`Host_resource_saturated msg)] if host FD count exceeds
-    the safety threshold. Otherwise returns [Ok (f ())].
+(** Run [f] in passthrough mode and record inflight observation for metrics
+    and snapshots. Returns [Error (`Host_resource_saturated msg)] if host FD
+    count exceeds the safety threshold. Otherwise returns [Ok (f ())].
 
-    Emits Prometheus metrics via [Admission_queue_metrics] on
-    enqueue/dequeue/acquire/release. *)
+    No MASC-side concurrency gate is applied here; OAS cascade owns provider
+    capacity, retry, and timeout behavior. *)
 
 val try_with_permit :
   priority:Llm_provider.Request_priority.t ->
@@ -65,9 +64,8 @@ val snapshot_json : unit -> Yojson.Safe.t
 (** JSON representation of [snapshot] for dashboard/MCP consumption. *)
 
 val set_max_concurrent : int -> unit
-(** Runtime reconfiguration. If lowered while permits are active,
-    no permits are revoked — new acquires block until active drops
-    below the new limit.
+(** Runtime reconfiguration of the dashboard capacity hint. In passthrough
+    mode this does not block new calls or revoke active calls.
 
     @raise Invalid_argument if [n < 1]. *)
 

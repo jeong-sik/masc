@@ -97,6 +97,29 @@ let () = Admission_queue_metrics.set_max_concurrent global.max_slots
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
+let bump_active delta =
+  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+    global.active <- max 0 (global.active + delta))
+
+let with_inflight_observation ~keeper_name ~cascade_name f =
+  bump_active 1;
+  (match
+     Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0
+   with
+   | () -> ()
+   | exception exn ->
+       bump_active (-1);
+       raise exn);
+  Fun.protect
+    ~finally:(fun () ->
+      (match Admission_queue_metrics.on_release ~keeper_name ~cascade_name with
+       | () -> ()
+       | exception exn ->
+           bump_active (-1);
+           raise exn);
+      bump_active (-1))
+    f
+
 (* ── Public API ────────────────────────────────────────── *)
 
 (* #10745: track previous rejection per keeper so successive rejection
@@ -160,29 +183,16 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
          and handles 429/timeout by falling to the next provider.
          Gating here starves cloud-routed keepers behind a serial local
          decode and cannot express per-provider capacity.
-         Metric observation tracks real inflight even though gating is off.
+         Metric and snapshot observation track real inflight even though
+         gating is off.
          RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
-      Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-      match f () with
-      | result ->
-        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-        Ok result
-      | exception exn ->
-        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-        raise exn
+      Ok (with_inflight_observation ~keeper_name ~cascade_name f)
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
   match check_host_resources ~keeper_name with
   | Error _ -> None
   | Ok () ->
-      Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-      match f () with
-      | result ->
-        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-        Some result
-      | exception exn ->
-        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-        raise exn
+      Some (with_inflight_observation ~keeper_name ~cascade_name f)
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->
@@ -196,6 +206,8 @@ let snapshot_json () =
   let s = snapshot () in
   let now = now_ts () in
   `Assoc [
+    ("mode", `String "passthrough");
+    ("throttle_owner", `String "oas_cascade");
     ("max_concurrent", `Int s.max_concurrent);
     ("active", `Int s.active);
     ("available", `Int s.available);

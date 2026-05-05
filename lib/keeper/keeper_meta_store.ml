@@ -262,6 +262,15 @@ let current_utc_timestamp () =
     t.tm_sec
 ;;
 
+let is_missing_progress_file_error exn =
+  match exn with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | _ ->
+    let message = Printexc.to_string exn in
+    String_util.contains_substring message "ENOENT"
+    || String_util.contains_substring message "No such file"
+;;
+
 let refresh_progress_updated_line config name =
   let progress_path = Keeper_types_support.keeper_progress_path config name in
   if Fs_compat.file_exists progress_path then try
@@ -278,6 +287,7 @@ let refresh_progress_updated_line config name =
     Fs_compat.save_file progress_path updated
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn when is_missing_progress_file_error exn -> ()
   | exn ->
     Prometheus.inc_counter
       Prometheus.metric_keeper_progress_updated_line_failures

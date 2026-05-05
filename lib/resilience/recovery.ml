@@ -1,8 +1,7 @@
 (* Recovery — Cycle 23 / Tier B6.
-   Classification surface only; strategy execution (Retry/Fallback/Handoff/
-   Abort) is intentionally deferred — see resilience_runtime.mli §Deferred
-   and docs/audit-responses/2026-05-05-dashboard-heuristic.md §4.
-   See recovery.mli for the design rationale. *)
+   Classification plus callback-driven strategy execution. Keeper-turn
+   lifecycle integration remains outside this module; see recovery.mli for
+   the design rationale. *)
 
 type error_mode =
   | TransientError of {
@@ -39,6 +38,92 @@ type _ strategy =
       -> [> `Handoff ] strategy
   | Abort : { reason : string; cleanup : unit -> unit }
       -> [> `Abort ] strategy
+
+type retry_attempt_result =
+  | Retry_success
+  | Retryable_failure of string
+  | Fatal_failure of string
+
+type execution_event =
+  | RetryAttempt of { attempt : int; max_attempts : int }
+  | RetryBackoff of { attempt : int; delay_s : float; error : string }
+  | FallbackApply of { value : string; confidence_delta : float }
+  | HandoffRequest of { message : string; preserve_state : bool }
+  | AbortRun of { reason : string }
+
+type execution_outcome =
+  | RetrySucceeded of { attempts : int }
+  | RetryExhausted of { attempts : int; last_error : string option }
+  | RetryFatal of { attempt : int; error : string }
+  | FallbackApplied of { value : string; confidence_delta : float }
+  | HandoffRequested of { message : string; preserve_state : bool }
+  | Aborted of { reason : string }
+
+type strategy_executor = {
+  run_retry_attempt : attempt:int -> retry_attempt_result;
+  sleep : float -> unit;
+  on_event : execution_event -> unit;
+  apply_fallback :
+    value:string -> confidence_delta:float -> (unit, string) result;
+  request_handoff :
+    message:string -> preserve_state:bool -> (unit, string) result;
+  abort : reason:string -> (unit, string) result;
+}
+
+let clamp_delay_s delay_s =
+  if Float.is_finite delay_s then max 0.0 delay_s else 0.0
+
+let execute_strategy : type a.
+    strategy_executor ->
+    a strategy ->
+    (execution_outcome, string) result =
+ fun executor strategy ->
+  match strategy with
+  | Retry { max_attempts; backoff } ->
+      let max_attempts = max 1 max_attempts in
+      let rec loop attempt =
+        executor.on_event (RetryAttempt { attempt; max_attempts });
+        match executor.run_retry_attempt ~attempt with
+        | Retry_success -> Ok (RetrySucceeded { attempts = attempt })
+        | Fatal_failure error ->
+            Ok (RetryFatal { attempt; error })
+        | Retryable_failure error ->
+            if attempt >= max_attempts then
+              Ok
+                (RetryExhausted
+                   { attempts = attempt; last_error = Some error })
+            else
+              let delay_s = clamp_delay_s (backoff attempt) in
+              executor.on_event
+                (RetryBackoff { attempt; delay_s; error });
+              executor.sleep delay_s;
+              loop (attempt + 1)
+      in
+      loop 1
+  | Fallback { fallback_value; degrade_confidence_by } ->
+      let confidence_delta = degrade_confidence_by in
+      executor.on_event
+        (FallbackApply { value = fallback_value; confidence_delta });
+      Result.map
+        (fun () ->
+          FallbackApplied { value = fallback_value; confidence_delta })
+        (executor.apply_fallback ~value:fallback_value ~confidence_delta)
+  | Handoff { operator_message; preserve_state } ->
+      executor.on_event
+        (HandoffRequest { message = operator_message; preserve_state });
+      Result.map
+        (fun () ->
+          HandoffRequested { message = operator_message; preserve_state })
+        (executor.request_handoff ~message:operator_message
+           ~preserve_state)
+  | Abort { reason; cleanup } -> (
+      match cleanup () with
+      | exception exn -> Error (Printexc.to_string exn)
+      | () ->
+          executor.on_event (AbortRun { reason });
+          Result.map
+            (fun () -> Aborted { reason })
+            (executor.abort ~reason))
 
 (* TLA+ taxonomy mirrors for specs/resilience/ResilienceDegradation.tla.
    Payload-bearing constructors cannot use ppx_tla's [all_states], so

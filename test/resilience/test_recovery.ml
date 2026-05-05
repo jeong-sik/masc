@@ -195,6 +195,117 @@ let test_strategy_phantom_tags_compile () =
   in
   ()
 
+(* ─── Strategy execution ──────────────────────────────────────── *)
+
+let make_executor
+    ?(run_retry_attempt = fun ~attempt:_ -> R.Retry_success)
+    ?(sleep = fun _ -> ())
+    ?(on_event = fun _ -> ())
+    ?(apply_fallback = fun ~value:_ ~confidence_delta:_ -> Ok ())
+    ?(request_handoff = fun ~message:_ ~preserve_state:_ -> Ok ())
+    ?(abort = fun ~reason:_ -> Ok ())
+    () =
+  {
+    R.run_retry_attempt = run_retry_attempt;
+    sleep;
+    on_event;
+    apply_fallback;
+    request_handoff;
+    abort;
+  }
+
+let test_execute_retry_until_success () =
+  let attempts = ref [] in
+  let sleeps = ref [] in
+  let executor =
+    make_executor
+      ~run_retry_attempt:(fun ~attempt ->
+        attempts := attempt :: !attempts;
+        if attempt < 3 then R.Retryable_failure "not yet"
+        else R.Retry_success)
+      ~sleep:(fun delay -> sleeps := delay :: !sleeps)
+      ()
+  in
+  let strategy =
+    R.Retry { max_attempts = 3; backoff = (fun n -> float_of_int n *. 0.5) }
+  in
+  match R.execute_strategy executor strategy with
+  | Ok (R.RetrySucceeded { attempts = 3 }) ->
+      assert (!attempts = [ 3; 2; 1 ]);
+      assert (!sleeps = [ 1.0; 0.5 ])
+  | _ -> assert false
+
+let test_execute_retry_exhausted () =
+  let executor =
+    make_executor
+      ~run_retry_attempt:(fun ~attempt ->
+        R.Retryable_failure (Printf.sprintf "attempt-%d" attempt))
+      ()
+  in
+  let strategy =
+    R.Retry { max_attempts = 2; backoff = (fun _ -> 0.0) }
+  in
+  match R.execute_strategy executor strategy with
+  | Ok (R.RetryExhausted { attempts = 2; last_error = Some "attempt-2" }) ->
+      ()
+  | _ -> assert false
+
+let test_execute_fallback_applies_value () =
+  let applied = ref None in
+  let executor =
+    make_executor
+      ~apply_fallback:(fun ~value ~confidence_delta ->
+        applied := Some (value, confidence_delta);
+        Ok ())
+      ()
+  in
+  let strategy =
+    R.Fallback { fallback_value = "cached"; degrade_confidence_by = 0.25 }
+  in
+  match R.execute_strategy executor strategy with
+  | Ok (R.FallbackApplied { value = "cached"; confidence_delta }) ->
+      assert (Float.abs (confidence_delta -. 0.25) < 1e-9);
+      assert (!applied = Some ("cached", 0.25))
+  | _ -> assert false
+
+let test_execute_handoff_requests_operator () =
+  let requested = ref None in
+  let executor =
+    make_executor
+      ~request_handoff:(fun ~message ~preserve_state ->
+        requested := Some (message, preserve_state);
+        Ok ())
+      ()
+  in
+  let strategy =
+    R.Handoff { operator_message = "rotate token"; preserve_state = true }
+  in
+  match R.execute_strategy executor strategy with
+  | Ok (R.HandoffRequested { message = "rotate token"; preserve_state = true }) ->
+      assert (!requested = Some ("rotate token", true))
+  | _ -> assert false
+
+let test_execute_abort_runs_cleanup_before_abort () =
+  let events = ref [] in
+  let executor =
+    make_executor
+      ~abort:(fun ~reason ->
+        events := ("abort:" ^ reason) :: !events;
+        Ok ())
+      ()
+  in
+  let strategy =
+    R.Abort
+      {
+        reason = "budget exhausted";
+        cleanup = (fun () -> events := "cleanup" :: !events);
+      }
+  in
+  match R.execute_strategy executor strategy with
+  | Ok (R.Aborted { reason = "budget exhausted" }) ->
+      assert (!events = [ "abort:budget exhausted"; "cleanup" ])
+  | _ -> assert false
+
 let () =
   test_transient_default_args ();
   test_transient_explicit_args ();
@@ -216,4 +327,9 @@ let () =
   test_strategy_for_consensus_is_handoff ();
   test_strategy_for_degradation_is_handoff ();
   test_strategy_phantom_tags_compile ();
+  test_execute_retry_until_success ();
+  test_execute_retry_exhausted ();
+  test_execute_fallback_applies_value ();
+  test_execute_handoff_requests_operator ();
+  test_execute_abort_runs_cleanup_before_abort ();
   print_endline "test_recovery: all assertions passed"

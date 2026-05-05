@@ -24,6 +24,8 @@
       structured error is available.
     - {!default_strategy}: pick the canonical strategy for an
       [error_mode]. Callers may override with a custom strategy.
+    - {!execute_strategy}: consume a selected strategy through
+      concrete retry/fallback/handoff/abort callbacks.
 
     {1 Deferred to follow-up Tiers}
 
@@ -32,9 +34,10 @@
       deferred to keep this PR's dependency footprint inside
       [shared_types]. Tier A6 (resilience keeper_bridge) introduces
       this bridge as it actually consumes OAS errors at the seam.
-    - [resolve] / [auto_resolve]: Eio-driven execution of the
-      strategy. Deferred until Tier A11 binds [Resilience_audit]
-      and [Speculative.execute].
+    - Eio-driven keeper lifecycle binding for {!execute_strategy}.
+      The executor here consumes Retry/Fallback/Handoff/Abort through
+      caller-supplied callbacks; the keeper turn loop decides which concrete
+      operation to retry or which operator channel receives a handoff.
     - [Degrade] / [Speculate] strategy constructors and the
       [DegradationRequired]'s [recommended_level] type are
       retained as plain ints here; Tier A11 retypes them with no
@@ -160,6 +163,54 @@ val default_strategy : error_mode -> [ `Retry | `Fallback | `Handoff | `Abort ] 
     - [ConsensusError]              → [Handoff]
     - [DegradationRequired]         → [Handoff] (Degrade deferred
                                         until A11) *)
+
+(** {1 Strategy execution} *)
+
+type retry_attempt_result =
+  | Retry_success
+  | Retryable_failure of string
+  | Fatal_failure of string
+
+type execution_event =
+  | RetryAttempt of { attempt : int; max_attempts : int }
+  | RetryBackoff of { attempt : int; delay_s : float; error : string }
+  | FallbackApply of { value : string; confidence_delta : float }
+  | HandoffRequest of { message : string; preserve_state : bool }
+  | AbortRun of { reason : string }
+
+type execution_outcome =
+  | RetrySucceeded of { attempts : int }
+  | RetryExhausted of { attempts : int; last_error : string option }
+  | RetryFatal of { attempt : int; error : string }
+  | FallbackApplied of { value : string; confidence_delta : float }
+  | HandoffRequested of { message : string; preserve_state : bool }
+  | Aborted of { reason : string }
+
+type strategy_executor = {
+  run_retry_attempt : attempt:int -> retry_attempt_result;
+  sleep : float -> unit;
+  on_event : execution_event -> unit;
+  apply_fallback :
+    value:string -> confidence_delta:float -> (unit, string) result;
+  request_handoff :
+    message:string -> preserve_state:bool -> (unit, string) result;
+  abort : reason:string -> (unit, string) result;
+}
+
+val execute_strategy :
+  strategy_executor ->
+  'a strategy ->
+  (execution_outcome, string) result
+(** Execute the selected strategy by invoking caller-supplied side-effect
+    callbacks.
+
+    [Retry] calls [run_retry_attempt] until success, fatal failure, or
+    exhaustion. Retryable failures sleep for the strategy backoff before the
+    next attempt and emit [RetryAttempt]/[RetryBackoff] events.
+
+    [Fallback], [Handoff], and [Abort] invoke their corresponding callbacks.
+    [Abort] always runs the strategy cleanup before calling [abort]; cleanup
+    exceptions are returned as [Error] and no abort callback is invoked. *)
 
 (** {1 Convenience constructors for [error_mode]} *)
 

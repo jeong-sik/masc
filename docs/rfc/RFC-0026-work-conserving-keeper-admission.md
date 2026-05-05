@@ -363,6 +363,85 @@ Total: ~3000 LOC including tests. 1.5-2 weeks.
 
 Each PR is independently mergeable except PR-E which is the swap-in.
 
+### 4.1.1 PR-E split — actual implementation breakdown
+
+PR-E in §4.1 was scoped as a single swap-in. During implementation
+it split along risk boundaries:
+
+| Sub-PR | Scope | LOC | Status | Risk |
+|---|---|---|---|---|
+| PR-E-1 | Glue module (`keeper_admission_glue.{ml,mli}`) — flag-gated decide entry point | ~100 | MERGED #12939 | Low (additive) |
+| PR-E-1.5 | Registry module (`keeper_admission_registry.{ml,mli}`) — JSON loader for `[admission.<keeper>]` blocks | ~110 | MERGED #12939 | Low (additive) |
+| **PR-E-1.6** | **Runtime wiring** — registry+bucket singletons, cascade.toml integration, heartbeat call site | **~150** | **PENDING** | **High (live runtime)** |
+| PR-E-2 | Semaphore retire — remove `keeper_turn_slot.ml` lines 38/101/114 + acquire_bounded + holder_table | ~200 | After §7 acceptance | High (legacy removal) |
+
+#### PR-E-1.6 — three-step wiring
+
+The merged PR-E modules are *dormant code* until PR-E-1.6 lands. The
+flag `MASC_ADMISSION_USE_NEW=true` has no observable effect because
+no caller invokes `Keeper_admission_glue.decide`.
+
+PR-E-1.6 wires three things:
+
+1. **Registry init at startup**
+   - Hook into `cascade_config_loader` JSON output
+   - Build `Keeper_admission_registry.t` once at process start
+   - Cache reference accessible from heartbeat loop
+   - Re-build on cascade.toml mtime change (existing reload path)
+
+2. **Bucket lookup wiring**
+   - Singleton `(string, Keeper_provider_token_bucket.t) Hashtbl.t`
+   - Populated from `[admission.<keeper>].candidates[].provider`
+     unique provider set + per-provider `[provider.<id>].rate_per_sec`
+   - Lookup function `string -> KPTB.t option` plugs into
+     `Keeper_admission_glue.decide`
+
+3. **Heartbeat call-site change** at `keeper_heartbeat_loop.ml:591`:
+   ```ocaml
+   match Keeper_admission_glue.decide
+           ~keeper_id:meta_after_triage.name
+           ~policies:Keeper_admission_runtime.policy_lookup
+           ~buckets:Keeper_admission_runtime.bucket_lookup
+   with
+   | Legacy_path ->
+       (* existing with_keeper_turn_slot path — unchanged *)
+       Keeper_turn_slot.with_keeper_turn_slot ~keeper_name ~channel ...
+   | New_admission (Dispatch { candidate; drift }) ->
+       Keeper_admission_drift.record drift;
+       (* run cycle directly without semaphore wait *)
+       Keeper_unified_turn.run_keeper_cycle ~candidate ...
+   | New_admission Wait ->
+       Keeper_wfq_overflow.enqueue ~keeper_id;
+       Prometheus.inc_counter metric_keeper_admission_wait;
+       skip_turn  (* WFQ wakes us next tick *)
+   | New_admission (Surface Min_tier_unsatisfiable) ->
+       Log.error "%s: min_tier unsatisfiable, no candidate provider configured" ...;
+       Prometheus.inc_counter metric_keeper_admission_surface;
+       skip_turn
+   ```
+
+#### Layering note (resolved during planning)
+
+`with_keeper_turn_slot` currently bundles three concerns: semaphore
+admission, fairness cooldown, watchdog instrumentation. The router
+only replaces the *admission* concern. PR-E-1.6 keeps the fairness
++ watchdog wrapping for the `Legacy_path` branch and inlines them
+into the `New_admission Dispatch` branch (record_semaphore_wait
+→ run_keeper_cycle without the slot acquire). PR-E-2 unifies them
+under a thin `Keeper_turn_envelope` wrapper that no longer holds a
+semaphore.
+
+#### Rollout order
+
+1. PR-E-1.6 lands as **shadow mode** first: call decide, record
+   what it *would have done* via Prometheus counters, but always
+   fall through to legacy. ~24h observation period to validate
+   registry + bucket wiring is correct.
+2. Flip flag for cohort A (7 keepers) → real swap. Cohort B (7
+   keepers) stays on legacy as control.
+3. 24h A/B per §7 acceptance criterion.
+4. PR-E-2 ships once acceptance met.
+
 ### 4.2 Backward compatibility
 
 PR-A through PR-D add new modules without touching existing code

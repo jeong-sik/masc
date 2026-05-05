@@ -743,6 +743,20 @@ let test_board_flusher_start_retry_contracts () =
     (file_contains_pattern "lib/board_dispatch.ml"
        "Board flusher actor startup CAS contention exhausted")
 
+let test_docker_config_storage_contracts () =
+  check bool "production image base path remains app root" true
+    (file_contains_pattern "Dockerfile" {|ENV MASC_BASE_PATH=/app|});
+  check bool "production image config dir remains image-baked config root" true
+    (file_contains_pattern "Dockerfile" {|ENV MASC_CONFIG_DIR=/app/config|});
+  check bool "production image documents config root is not runtime storage" true
+    (file_contains_pattern "Dockerfile"
+       "this is the image-baked config root, not");
+  check bool "production image declares runtime storage volume" true
+    (file_contains_pattern "Dockerfile" {|VOLUME ["/app/.masc"]|});
+  check bool "production image keeps runtime storage owned by appuser" true
+    (file_contains_pattern "Dockerfile"
+       {|chown -R appuser:appgroup /app/.masc|})
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1451,6 +1465,8 @@ let () =
              test_keeper_sandbox_credential_volume_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
+           test_case "docker config storage contracts" `Quick
+             test_docker_config_storage_contracts;
            test_case "dashboard warm hydration contracts" `Quick
              test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

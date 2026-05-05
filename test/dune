@@ -1010,6 +1010,7 @@
 (include stanzas/test_briefing_json_helpers.inc)
 (include stanzas/test_cascade_attempt_liveness.inc)
 (include stanzas/test_cascade_attempt_liveness_config.inc)
+(include stanzas/test_cascade_attempt_liveness_counters.inc)
 (include stanzas/test_cascade_attempt_liveness_runtime.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)

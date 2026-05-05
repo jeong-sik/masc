@@ -44,3 +44,30 @@ val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of
     [MASC_CASCADE_ATTEMPT_LIVENESS] takes effect. Production callers
     must not invoke this. *)
+
+val outer_wall_for_attempt
+  :  mode:mode
+  -> observer_attached:bool
+  -> per_provider_timeout_s:float option
+  -> provider_label:string
+  -> float option
+(** RFC-0022 §1 — backstop wall for the legacy [per_provider_timeout_s]
+    knob.
+
+    Decides what (if anything) {!Eio.Time.with_timeout_exn} should
+    enforce around an attempt, given the active liveness mode and
+    whether an observer is attached.
+
+    - [Enforce] + observer attached: returns [None]. The observer is
+      the authority and drives [Switch.fail] on TTFT, inter-chunk, or
+      attempt wall budget breach. The legacy outer wall must not
+      pre-empt it.
+    - [Off] / [Observe], or no observer: returns
+      [Some (max t (budget_for_label provider_label).attempt_wall_max)]
+      when [per_provider_timeout_s = Some t]. Slow-but-legitimate
+      streams (local Ollama 27B / 70B+) get the profile's attempt wall
+      so the legacy 120s knob cannot prematurely fall back the cascade.
+    - No legacy timeout configured ([per_provider_timeout_s = None]):
+      returns [None] (no outer wall).
+
+    @since 0.20.0 *)

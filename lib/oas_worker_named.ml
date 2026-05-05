@@ -428,8 +428,21 @@ let run_named
                 ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
                 ?contract goal
             in
+            (* RFC-0022 §1 (in-attempt liveness layer): see
+               [Cascade_attempt_liveness_config.outer_wall_for_attempt]
+               for the rule. The legacy [per_provider_timeout_s] is
+               clipped to the profile's wall budget so slow-but-honest
+               streams (local Ollama 27B / 70B+) are not pre-empted
+               before the observer would consider them stalled. *)
+            let outer_wall_for_provider =
+              Cascade_attempt_liveness_config.outer_wall_for_attempt
+                ~mode:liveness_mode
+                ~observer_attached:(Option.is_some liveness_observer_opt)
+                ~per_provider_timeout_s
+                ~provider_label:provider_cfg.model_id
+            in
             let result =
-              match per_provider_timeout_s with
+              match outer_wall_for_provider with
               | None -> run_fn ()
               | Some t ->
                   let clock_opt =

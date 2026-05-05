@@ -4,12 +4,12 @@
     Each named block is read from
     [<Config_dir_resolver.prompts_dir ()>/behavior/<name>.md] on first
     access and cached for the remainder of the process lifetime.  The
-    cache key is the block name; file content (frontmatter and all) is
-    returned verbatim to keep the loader free of markdown semantics.
+    cache key is the block name. A leading YAML frontmatter block is
+    stripped so callers receive only prompt body text.
 
-    Missing files do not crash.  [get name] returns [None] and emits a
-    [WARN] (once per name) so callers can fall back to an in-source
-    string while operators iterate on the external file.
+    Missing files do not crash.  [get name] returns [None] and logs
+    once per name so callers can fall back to an in-source string while
+    operators iterate on the external file.
 
     This module is a thin sibling of [Prompt_registry]: that registry
     handles versioned, override-able, frontmatter-aware system prompts.

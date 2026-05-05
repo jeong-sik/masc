@@ -108,6 +108,10 @@ let render_world_prompt ~allowed_orgs ~denied_repos : string =
         msg;
       Prompt_registry.get_prompt Keeper_prompt_names.world
 
+let behavior_prompt_block name ~fallback =
+  Option.value (Keeper_prompt_external.get name) ~default:fallback
+  |> String.trim
+
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
@@ -127,12 +131,16 @@ let build_keeper_system_prompt
      in-source string.  Subsequent C-5b PRs migrate the remaining
      blocks in this function. *)
   let profile_policy =
-    Option.value
-      (Keeper_prompt_external.get "profile_policy")
-      ~default:
+    behavior_prompt_block "profile_policy"
+      ~fallback:
         "Maintain high standard of reasoning, factual grounding, and clear communication."
   in
-  let profile_policy = String.trim profile_policy in
+  let continuity_contract =
+    behavior_prompt_block "continuity_contract"
+      ~fallback:
+        "Continuity and any end-of-reply STATE formatting requirements apply unless a more specific turn-level mode or output guard disables them.\n\
+         When <direct_reply_mode> is present, follow it instead: do not emit SKILL:, SKILL_REASON:, or [STATE]."
+  in
   (* Layer 2 PR-B (commit 7): three normalize_self_model_text calls
      consolidated through [Keeper_personality_io.to_prompt_form]. The
      fallback strings below are the same; only the trim+truncate path
@@ -202,9 +210,9 @@ let build_keeper_system_prompt
       profile_policy;
       "\n\
        \n\
-       <continuity>\n\
-       Continuity and any end-of-reply STATE formatting requirements apply unless a more specific turn-level mode or output guard disables them.\n\
-       When <direct_reply_mode> is present, follow it instead: do not emit SKILL:, SKILL_REASON:, or [STATE].\n";
+       <continuity>\n";
+      continuity_contract;
+      "\n";
       keeper_constitution ();
       "\n\
        </continuity>\n\

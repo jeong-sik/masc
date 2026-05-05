@@ -343,45 +343,22 @@ let reset_autonomous_completion_for_test () : unit =
    process restart, callers may seed it from the persisted
    [Oas_timeout_budget_loop] failure reason so restart cannot erase a
    partially observed loop. *)
-let consecutive_budget_exhaustions : (string, int) Hashtbl.t =
-  Hashtbl.create 16
-let consecutive_budget_exhaustions_mutex = Eio.Mutex.create ()
 let oas_timeout_budget_strike_limit = 3
 
-let with_budget_exhaustions f =
-  Eio.Mutex.use_rw ~protect:true consecutive_budget_exhaustions_mutex f
+let bump_budget_exhaustion_seeded ~keeper_name:_ ~prior_strikes : int =
+  max 0 prior_strikes + 1
 
-let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
-  with_budget_exhaustions (fun () ->
-    let prior =
-      match Hashtbl.find_opt consecutive_budget_exhaustions keeper_name with
-      | Some strikes -> strikes
-      | None -> max 0 prior_strikes
-    in
-    let next = prior + 1 in
-    Hashtbl.replace consecutive_budget_exhaustions keeper_name next;
-    next)
+let bump_budget_exhaustion ~keeper_name:_ : int =
+  1
 
-let bump_budget_exhaustion ~keeper_name : int =
-  bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes:0
+let reset_budget_exhaustion ~keeper_name:_ : unit =
+  ()
 
-let reset_budget_exhaustion ~keeper_name : unit =
-  with_budget_exhaustions (fun () ->
-    Hashtbl.remove consecutive_budget_exhaustions keeper_name)
+let peek_budget_exhaustion_for_test ~keeper_name:_ : int =
+  0
 
-(* Test-only seam so unit tests can pre-load strike counts and exercise
-   the promote/reset branches without driving a full keeper cycle. *)
-let peek_budget_exhaustion_for_test ~keeper_name : int =
-  with_budget_exhaustions (fun () ->
-    Hashtbl.find_opt consecutive_budget_exhaustions keeper_name
-    |> Option.value ~default:0)
-
-let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
-  with_budget_exhaustions (fun () ->
-    if strikes <= 0 then
-      Hashtbl.remove consecutive_budget_exhaustions keeper_name
-    else
-      Hashtbl.replace consecutive_budget_exhaustions keeper_name strikes)
+let set_budget_exhaustion_for_test ~keeper_name:_ ~strikes:_ : unit =
+  ()
 
 (** Test-only: stamp a completion time directly without going through
     [Time_compat.now].  Allows deterministic fairness-cooldown scenarios. *)

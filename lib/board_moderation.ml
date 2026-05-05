@@ -99,6 +99,11 @@ let max_note_length = 500
 
 let global_store : store option ref = ref None
 
+let flag_rate_limit_sec () =
+  Env_config_core.get_float ~default:1.0
+    "MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC"
+  |> Float.max 0.0
+
 let make_store () : store =
   { queue = Hashtbl.create 64; audit = ref [] }
 
@@ -122,6 +127,7 @@ let reset_for_test () : unit =
 
 let flag ~target_kind ~target_id ~reporter ~reason =
   let s = store () in
+  let now = Time_compat.now () in
   (* Reject duplicate unresolved flags for the same target *)
   let duplicate =
     Hashtbl.fold
@@ -132,20 +138,39 @@ let flag ~target_kind ~target_id ~reporter ~reason =
   in
   if duplicate then
     Error (Printf.sprintf "target %s is already flagged and pending review" target_id)
-  else begin
-    let entry_id = Random_id.prefixed ~prefix:"mq-" ~bytes:16 in
-    let entry = {
-      entry_id;
-      target_kind;
-      target_id;
-      reporter;
-      reason;
-      flagged_at = Time_compat.now ();
-      resolved   = false;
-    } in
-    Hashtbl.replace s.queue entry_id entry;
-    Ok entry
-  end
+  else
+    let window_sec = flag_rate_limit_sec () in
+    let retry_after =
+      if Float.compare window_sec 0.0 <= 0 then None
+      else
+        Hashtbl.fold
+          (fun _k (e : queue_entry) acc ->
+             if not (String.equal e.reporter reporter) then acc
+             else
+               let remaining = window_sec -. (now -. e.flagged_at) in
+               if Float.compare remaining 0.0 <= 0 then acc
+               else Some (Float.max remaining (Option.value acc ~default:0.0)))
+          s.queue None
+    in
+    match retry_after with
+    | Some remaining ->
+        Error
+          (Printf.sprintf
+             "reporter %s is rate limited; retry after %.3fs"
+             reporter remaining)
+    | None ->
+        let entry_id = Random_id.prefixed ~prefix:"mq-" ~bytes:16 in
+        let entry = {
+          entry_id;
+          target_kind;
+          target_id;
+          reporter;
+          reason;
+          flagged_at = now;
+          resolved   = false;
+        } in
+        Hashtbl.replace s.queue entry_id entry;
+        Ok entry
 
 let get_queue ?resolved () =
   let s = store () in

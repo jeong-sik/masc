@@ -21,6 +21,19 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 let reset () = BM.reset_for_test ()
 
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let with_flag_rate_limit value f =
+  with_env "MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC" value f
+
 (* ── flag_reason roundtrips ───────────────────────────────────────── *)
 
 let test_flag_reason_spam () =
@@ -118,14 +131,41 @@ let test_flag_duplicate_rejected () =
 
 let test_flag_different_targets () =
   reset ();
-  let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"p3"
-             ~reporter:"agent-c" ~reason:BM.Spam in
-  let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"c1"
-             ~reporter:"agent-c" ~reason:BM.Off_topic in
-  (match r1, r2 with
-   | Ok e1, Ok e2 ->
-       check bool "different ids" true (e1.BM.entry_id <> e2.BM.entry_id)
-   | _ -> fail "both flags should succeed")
+  with_flag_rate_limit "0" (fun () ->
+    let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"p3"
+               ~reporter:"agent-c" ~reason:BM.Spam in
+    let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"c1"
+               ~reporter:"agent-c" ~reason:BM.Off_topic in
+    match r1, r2 with
+    | Ok e1, Ok e2 ->
+        check bool "different ids" true (e1.BM.entry_id <> e2.BM.entry_id)
+    | _ -> fail "both flags should succeed")
+
+let test_flag_rate_limited_same_reporter () =
+  reset ();
+  with_flag_rate_limit "60" (fun () ->
+    (match BM.flag ~target_kind:BM.Target_post ~target_id:"rl1"
+             ~reporter:"agent-rl" ~reason:BM.Spam with
+     | Ok _ -> ()
+     | Error m -> fail ("first flag failed: " ^ m));
+    match BM.flag ~target_kind:BM.Target_comment ~target_id:"rl2"
+            ~reporter:"agent-rl" ~reason:BM.Off_topic with
+    | Error m ->
+        check bool "rate-limit message" true
+          (String.starts_with
+             ~prefix:"reporter agent-rl is rate limited" m)
+    | Ok _ -> fail "second flag by same reporter should be rate limited")
+
+let test_flag_rate_limit_allows_different_reporters () =
+  reset ();
+  with_flag_rate_limit "60" (fun () ->
+    let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"rl3"
+               ~reporter:"agent-rl-a" ~reason:BM.Spam in
+    let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"rl4"
+               ~reporter:"agent-rl-b" ~reason:BM.Off_topic in
+    match r1, r2 with
+    | Ok _, Ok _ -> ()
+    | _ -> fail "different reporters should not rate-limit each other")
 
 (* ── get_queue filtering ─────────────────────────────────────────── *)
 
@@ -140,9 +180,9 @@ let test_get_queue_unresolved () =
 let test_get_queue_all () =
   reset ();
   let _ = BM.flag ~target_kind:BM.Target_post ~target_id:"q2"
-            ~reporter:"r" ~reason:BM.Spam in
+            ~reporter:"r1" ~reason:BM.Spam in
   let _ = BM.flag ~target_kind:BM.Target_comment ~target_id:"c2"
-            ~reporter:"r" ~reason:BM.Harassment in
+            ~reporter:"r2" ~reason:BM.Harassment in
   let q = BM.get_queue () in
   check int "two entries total" 2 (List.length q)
 
@@ -317,7 +357,11 @@ let () =
       ( "flag",
         [ test_case "happy path"             `Quick test_flag_happy_path;
           test_case "duplicate rejected"     `Quick test_flag_duplicate_rejected;
-          test_case "different targets ok"   `Quick test_flag_different_targets ] );
+          test_case "different targets ok"   `Quick test_flag_different_targets;
+          test_case "same reporter rate limited" `Quick
+            test_flag_rate_limited_same_reporter;
+          test_case "different reporters bypass rate limit" `Quick
+            test_flag_rate_limit_allows_different_reporters ] );
       ( "get_queue",
         [ test_case "unresolved filter"      `Quick test_get_queue_unresolved;
           test_case "all entries"            `Quick test_get_queue_all;

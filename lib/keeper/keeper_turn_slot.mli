@@ -56,6 +56,8 @@ val reset_autonomous_completion_for_test : unit -> unit
     per keeper. Promoted to [Keeper_fiber_crash] at this limit. *)
 val oas_timeout_budget_strike_limit : int
 
+val bump_budget_exhaustion_seeded :
+  keeper_name:string -> prior_strikes:int -> int
 val bump_budget_exhaustion : keeper_name:string -> int
 val reset_budget_exhaustion : keeper_name:string -> unit
 val peek_budget_exhaustion_for_test : keeper_name:string -> int

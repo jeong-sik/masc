@@ -208,6 +208,9 @@ let run_turn
   let keeper_has_owned_active_task () =
     Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
   in
+  (* A claim tool mutates [acc.meta.current_task_id] during this run; contract
+     gating must judge claim-context tools against ownership at turn entry. *)
+  let had_owned_active_task_at_turn_start = keeper_has_owned_active_task () in
   (* 8. Run Agent *)
   let contract =
     if Env_config.Cdal.enabled () then Keeper_cdal_contract.of_keeper_meta meta else None
@@ -655,7 +658,7 @@ let run_turn
          in
          let actionable_tool_contract_violation_reason =
            Keeper_tool_disclosure.actionable_tool_contract_violation_reason
-             ~claim_context_allowed:(not (keeper_has_owned_active_task ()))
+             ~claim_context_allowed:(not had_owned_active_task_at_turn_start)
              ~actionable_signal_context
              ~tool_names:actual_keeper_tool_names
          in
@@ -691,7 +694,7 @@ let run_turn
            else if required_tool_names <> [] && not all_required_used then
              if actual_keeper_tool_names = [] then "missing_required_tool_use"
              else if all_class Keeper_tool_disclosure.Claim_context
-                     && keeper_has_owned_active_task ()
+                     && had_owned_active_task_at_turn_start
              then "claim_only_after_owned_task"
              else if all_class Keeper_tool_disclosure.Claim_context
              then "needs_execution_progress"
@@ -699,7 +702,7 @@ let run_turn
              else "missing_required_tool_use"
            else if actual_keeper_tool_names = [] then "satisfied_completion"
            else if all_class Keeper_tool_disclosure.Claim_context
-                   && keeper_has_owned_active_task ()
+                   && had_owned_active_task_at_turn_start
            then "claim_only_after_owned_task"
            else if all_class Keeper_tool_disclosure.Claim_context
            then "needs_execution_progress"

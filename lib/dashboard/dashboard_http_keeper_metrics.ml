@@ -1,5 +1,15 @@
 (** Dashboard_http_keeper_metrics — keeper metrics types, 24h bucket stats,
-    gen window stats, history summary, and helper utilities. *)
+    gen window stats, history summary, and helper utilities.
+
+    {b Note for code auditors}: this module does {b not} access a SQL
+    database — keeper telemetry flows through in-memory projections
+    populated by [Dashboard_mission_assembly] / [Mission_projection],
+    not a relational store.  Proposals to "use a single SQL batch
+    query" against keeper metrics are a stack mismatch.  Per-keeper
+    sub-op fan-out (the N+1 shape on [snapshot_json]) is real but
+    fixed via fiber-batched aggregation, not SQL.  See
+    {!docs/audit-responses/2026-05-05-integrated-improvement-design.md}
+    §1-2 and §3-3-C (Dashboard N+1, RFC-0029 candidate). *)
 
 
 let normalize_model_name s =

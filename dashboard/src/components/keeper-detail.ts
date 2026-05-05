@@ -215,6 +215,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
   const blocker = keeper.last_blocker?.trim()
+  const pendingFirst = keeper.trust?.approval_state?.pending_first ?? null
+  const pendingApprovalId = pendingFirst?.id?.trim() || null
+  const pendingApprovalTool = pendingFirst?.tool_name?.trim() || null
+  const pendingApprovalTaskId = pendingFirst?.task_id?.trim() || null
+  const pendingApprovalBlockerClass = pendingFirst?.blocker_class?.trim() || null
+  const isBlockedBeforeWorktree = pendingApprovalBlockerClass === 'blocked_before_worktree'
   const trustDisposition = keeper.trust?.disposition?.trim() || null
   const trustSummary =
     keeper.trust?.attention_reason?.trim()
@@ -438,8 +444,19 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.last_need
           ? html`<span><${StrongSecondary}>최근 필요</${StrongSecondary}> · ${keeper.last_need}</span>`
           : null}
-        ${attentionReason
+        ${attentionReason === 'approval_pending' && isBlockedBeforeWorktree
+          ? html`<${RuntimeBadge} tone="warn">워크트리 전 차단</${RuntimeBadge}>`
+          : attentionReason
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReason}</span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalId
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">승인 ID</strong> · <code class="font-mono">${pendingApprovalId}</code></span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalTool
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">차단 도구</strong> · ${pendingApprovalTool}</span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalTaskId
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">작업</strong> · ${pendingApprovalTaskId}</span>`
           : null}
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`

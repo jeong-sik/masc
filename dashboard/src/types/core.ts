@@ -303,10 +303,18 @@ export interface KeeperTrustLatestEvent {
   next_human_action?: string | null
 }
 
+export interface KeeperTrustApprovalPendingFirst {
+  id?: string | null
+  tool_name?: string | null
+  task_id?: string | null
+  blocker_class?: string | null
+}
+
 export interface KeeperTrustApprovalState {
   state?: string | null
   summary?: string | null
   pending_count?: number | null
+  pending_first?: KeeperTrustApprovalPendingFirst | null
 }
 
 export interface KeeperTrustExecutionSummary {

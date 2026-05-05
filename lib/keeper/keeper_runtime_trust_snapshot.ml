@@ -180,6 +180,40 @@ let tool_call_timeline_event json =
            ~summary ~severity:(severity_of_tool_call success) ())
   | _ -> None
 
+let is_worktree_tool tool_name =
+  String.equal tool_name "masc_worktree_create"
+
+let live_pending_approval_timeline_event json =
+  match json_float_opt_member "requested_at" json with
+  | None -> None
+  | Some ts_unix ->
+      let tool_name =
+        json_string_opt_member "tool_name" json |> Option.value ~default:"tool"
+      in
+      let approval_id =
+        json_string_opt_member "id" json |> Option.value ~default:"unknown"
+      in
+      let task_id = json_string_opt_member "task_id" json in
+      let blocker_class =
+        if is_worktree_tool tool_name then "blocked_before_worktree"
+        else "approval_pending"
+      in
+      let summary =
+        Printf.sprintf
+          "approval_required · id=%s · blocker=%s · waiting for operator"
+          approval_id blocker_class
+      in
+      Some
+        (timeline_event_json
+           ?task_id
+           ~ts_unix ~kind:"approval_pending_live"
+           ~title:(Printf.sprintf "Approval Pending · %s" tool_name)
+           ~summary
+           ~severity:"warn"
+           ~observation_only:true
+           ~next_human_action:"resolve_approval"
+           ())
+
 let approval_event_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "event" json with
   | Some ts_unix, Some event ->
@@ -203,10 +237,19 @@ let approval_event_timeline_event json =
               Printf.sprintf "approval %s" decision_label,
               None )
         | "expired" ->
+            let blocker_note =
+              if is_worktree_tool tool_name then
+                " · blocked_before_worktree"
+              else ""
+            in
+            let next_action =
+              if is_worktree_tool tool_name then "retry_worktree_approval"
+              else "retry_or_rerun"
+            in
             ( "approval_expired",
               Printf.sprintf "Approval · %s" tool_name,
-              Option.value ~default:"approval expired" decision,
-              Some "retry_or_rerun" )
+              (Option.value ~default:"approval expired" decision) ^ blocker_note,
+              Some next_action )
         | "auto_approved_rule_match" ->
             let matched_by =
               json |> json_member "rule_match"
@@ -651,7 +694,27 @@ let latest_causal_from_timeline = function
           | [] -> `Null))
   | _ -> `Null
 
-let approval_state_json ~pending_approval_count ~latest_tool_call
+let pending_first_json pending_approvals =
+  match pending_approvals with
+  | `List (first :: _) ->
+      let tool_name = json_string_opt_member "tool_name" first in
+      let approval_id = json_string_opt_member "id" first in
+      let task_id = json_string_opt_member "task_id" first in
+      let blocker_class =
+        match tool_name with
+        | Some t when is_worktree_tool t -> Some "blocked_before_worktree"
+        | _ -> None
+      in
+      `Assoc
+        [
+          ("id", Json_util.string_opt_to_json approval_id);
+          ("tool_name", Json_util.string_opt_to_json tool_name);
+          ("task_id", Json_util.string_opt_to_json task_id);
+          ("blocker_class", Json_util.string_opt_to_json blocker_class);
+        ]
+  | _ -> `Null
+
+let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_call
     ~latest_approval_audit ~latest_receipt =
   let latest_rule_match =
     Option.bind latest_approval_audit (fun json ->
@@ -706,6 +769,7 @@ let approval_state_json ~pending_approval_count ~latest_tool_call
             json_bool_opt_member "auto_approved" json
             |> Json_util.bool_opt_to_json
         | None -> `Null );
+      ("pending_first", pending_first_json pending_approvals);
     ]
 
 let execution_summary_json ~meta ~latest_receipt =
@@ -889,8 +953,13 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     then acc
     else item :: acc
   in
+  let live_pending_events =
+    match pending_approval_json ~keeper_name:meta.name with
+    | `List entries -> List.filter_map live_pending_approval_timeline_event entries
+    | _ -> []
+  in
   tool_events @ approval_events @ transition_events @ terminal_reason_events
-  @ decision_events @ receipt_events @ blocker_events
+  @ decision_events @ receipt_events @ blocker_events @ live_pending_events
   @ (List.filter_map Fun.id [ latest_tool_call_event; latest_approval_event ])
   |> List.fold_left dedupe []
   |> sort_timeline_events
@@ -972,8 +1041,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
     assoc_string_opt "next_human_action" attention_fields
   in
   let approval_state =
-    approval_state_json ~pending_approval_count ~latest_tool_call
-      ~latest_approval_audit ~latest_receipt
+    approval_state_json ~pending_approval_count ~pending_approvals
+      ~latest_tool_call ~latest_approval_audit ~latest_receipt
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt

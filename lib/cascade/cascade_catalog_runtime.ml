@@ -925,6 +925,79 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
               normalized)
        else Ok providers)
 
+(** RFC-0027 PR-9b dual-track resolution. The [primary] argument is one
+    of the providers returned by {!resolve_named_providers}; we walk the
+    cascade's parsed weighted entries and, for the entry whose parsed
+    {!Llm_provider.Provider_config.t} matches [primary] by [(kind,
+    model_id)], read its [secondary] field. When present, the secondary
+    string is wrapped in a synthesised {!Cascade_config_loader.weighted_entry}
+    (preserving [secondary_supports_tool_choice] -> [supports_tool_choice]
+    if set) and parsed via {!Cascade_config.parse_weighted_entry}, which
+    applies the cascade's [api_key_env_overrides]. Returns [None] when:
+    - the cascade has no entries with a secondary,
+    - no entry's primary parse matches [primary],
+    - or secondary parsing yields no provider (unregistered/unavailable
+      scheme, invalid syntax).
+    The function never raises; observability for swap success/failure is
+    the caller's responsibility (PR-9b adds [cascade_secondary_swap_total]
+    in [oas_worker_named_cascade]). *)
+let resolve_secondary_provider_for_primary ?sw ?net ?clock
+    ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
+  match lookup_active_profile ?sw ?net ?clock cascade_name with
+  | Error _ -> None
+  | Ok (_snapshot, normalized, profile) ->
+      let same_kind_model
+          (cfg : Llm_provider.Provider_config.t) =
+        cfg.kind = primary.kind
+        && String.trim cfg.model_id = String.trim primary.model_id
+      in
+      let synth_secondary_entry
+          (entry : Cascade_config_loader.weighted_entry)
+          (secondary : string) : Cascade_config_loader.weighted_entry =
+        {
+          model = secondary;
+          weight = 1;
+          supports_tool_choice = entry.secondary_supports_tool_choice;
+          secondary = None;
+          secondary_supports_tool_choice = None;
+        }
+      in
+      let try_entry (entry : Cascade_config_loader.weighted_entry) =
+        match entry.secondary with
+        | None -> None
+        | Some _ ->
+            (* Confirm this entry's primary parses to the same provider
+               we were called with. We compare on the parsed
+               Provider_config rather than on raw strings to handle
+               provider:auto expansion (e.g. claude_code:auto could
+               expand to several model strings, and the primary we got
+               carries the resolved model_id). *)
+            let primary_parsed =
+              Cascade_config.parse_weighted_entry
+                ~api_key_env_overrides:profile.api_key_env_overrides
+                entry
+            in
+            (match primary_parsed with
+             | Some parsed when same_kind_model parsed ->
+                 Cascade_config.parse_weighted_entry
+                   ~api_key_env_overrides:profile.api_key_env_overrides
+                   (synth_secondary_entry entry
+                      (Option.get entry.secondary))
+             | _ -> None)
+      in
+      (* Expand provider:auto entries before matching. The [primary] we
+         received from {!resolve_named_providers} carries a concrete
+         [model_id] post-expansion (e.g. ["claude-code-sonnet-4"]),
+         whereas the raw weighted entries may still hold ["auto"]. We
+         use the same rotation scope as the live resolver so that
+         expansion order matches what the caller observed. *)
+      let expanded =
+        Cascade_config.expand_weighted_auto_entries
+          ~rotation_scope:normalized
+          profile.weighted_entries
+      in
+      List.find_map try_entry expanded
+
 let resolve_inference_params ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with
   | Ok (_snapshot, _normalized, profile) -> Ok profile.inference_params

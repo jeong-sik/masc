@@ -179,6 +179,10 @@ let run_named
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
+  let secondary_resolver primary =
+    Cascade_catalog_runtime.resolve_secondary_provider_for_primary
+      ~sw ~net ~cascade_name ~primary ()
+  in
   let candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
@@ -186,6 +190,7 @@ let run_named
       ~tools
       ~require_tool_choice_support
       ~require_tool_support
+      ~secondary_resolver
       ~label:cascade_name
       candidate_cfgs
   in

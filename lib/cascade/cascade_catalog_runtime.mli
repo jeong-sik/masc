@@ -96,6 +96,24 @@ val resolve_named_providers_strict :
     Provider filter resolution fails closed instead of silently
     broadening to the full provider set. *)
 
+val resolve_secondary_provider_for_primary :
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  cascade_name:string ->
+  primary:Llm_provider.Provider_config.t ->
+  unit ->
+  Llm_provider.Provider_config.t option
+(** RFC-0027 PR-9b dual-track lookup. For a [primary] provider returned
+    from {!resolve_named_providers} of [cascade_name], find the matching
+    weighted entry and parse its [secondary] field (if any) into a fresh
+    [Provider_config.t]. Returns [None] when the entry has no secondary,
+    when the primary is not present in the cascade (e.g. cross-cascade
+    fallback path), or when secondary parsing fails (unregistered scheme,
+    invalid syntax). The lookup is read-only and does not mutate cascade
+    state — secondary resolution is invoked only after the primary has
+    been rejected by the tool-use gate. *)
+
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

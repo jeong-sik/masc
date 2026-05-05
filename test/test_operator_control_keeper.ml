@@ -348,15 +348,17 @@ let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
-      (* Reviewer #13227 (thread 2): clearing the registry while the
-         [masc_keeper_up] keepalive fiber is still tracked turns the
-         later [stop_keepalive] in [Fun.protect ~finally] into a no-op
-         (it looks up running fibers via [Keeper_registry.all]).
-         Without this, the live keeper fiber leaks into other tests
-         and makes the suite flaky.  Stop the keepalive explicitly
-         before clearing so the inline reset still observes an empty
-         registry without orphaning the fiber.  The finally block
-         keeps its own [stop_keepalive] as a defensive cleanup. *)
+      let keepers_dir =
+        Filename.concat (Coord.masc_root_dir config) "config/keepers"
+      in
+      ensure_dir keepers_dir;
+      write_file
+        (Filename.concat keepers_dir "persisted_sandbox.toml")
+        "[keeper]\n\
+         goal = \"Alias of persisted sandbox keeper\"\n\
+         sandbox_profile = \"local\"\n\
+         proactive_enabled = false\n\
+         autoboot_enabled = false\n";
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
       let ok, body =
@@ -366,19 +368,23 @@ let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
       Alcotest.(check bool) "fleet sandbox status ok" true ok;
       let open Yojson.Safe.Util in
       let json = parse_json_exn body in
-      let item =
+      let matching_items =
         json |> member "items" |> to_list
-        |> List.find_opt (fun row ->
+        |> List.filter (fun row ->
              row |> member "keeper" |> to_string = keeper_name)
       in
-      match item with
-      | None -> Alcotest.fail "persisted keeper missing from fleet sandbox status"
-      | Some row ->
+      Alcotest.(check int) "separator alias emits one fleet row" 1
+        (List.length matching_items);
+      match matching_items with
+      | [ row ] ->
           Alcotest.(check string) "persisted effective mode" "local"
             (row |> member "effective_mode" |> to_string);
           Alcotest.(check (option string)) "persisted why_no_container"
             (Some "sandbox_profile=local")
-            (row |> member "why_no_container" |> to_string_option))
+            (row |> member "why_no_container" |> to_string_option)
+      | [] -> Alcotest.fail "persisted keeper missing from fleet sandbox status"
+      | _ :: _ :: _ ->
+          Alcotest.fail "persisted keeper duplicated in fleet sandbox status")
 
 let test_keeper_sandbox_start_status_stop_with_fake_docker () =
   Eio_main.run @@ fun env ->

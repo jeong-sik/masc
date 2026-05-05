@@ -1089,12 +1089,6 @@ let handle_keeper_sandbox_status ctx args : tool_result =
   let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
   match String.trim (get_string args "name" "") with
   | "" ->
-      (* Reviewer #13227 (thread 1): [keeper_sandbox_status_fleet_names]
-         dedupes by raw source name before [read_meta] resolves
-         separator aliases.  If one source exposes "issue-king" and
-         another "issue_king", both survive raw dedup and resolve to
-         the same persisted meta — re-dedupe by [meta.name] so each
-         physical keeper renders exactly once. *)
       let resolved =
         keeper_sandbox_status_fleet_names ctx
         |> List.filter_map (fun name ->
@@ -1113,12 +1107,6 @@ let handle_keeper_sandbox_status ctx args : tool_result =
             end)
           resolved
       in
-      (* Reviewer #13227 (thread 3): docker_preflight is global rather
-         than per-keeper, so running it inside [live_status_json] for
-         every fleet item repeats the same expensive Docker probe N
-         times.  Probe once when at least one Docker keeper is in the
-         fleet, then feed the cached JSON into each render via
-         [preflight_override]. *)
       let any_docker =
         List.exists
           (fun (m : keeper_meta) -> m.sandbox_profile = Docker)

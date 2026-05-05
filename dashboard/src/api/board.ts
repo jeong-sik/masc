@@ -9,6 +9,11 @@ import type {
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
 } from '../types'
 
+export interface BoardHearth {
+  name: string
+  count: number
+}
+
 function toIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return null
@@ -418,9 +423,19 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   }
 }
 
+function normalizeBoardHearth(raw: unknown): BoardHearth | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name, '').trim()
+  if (!name) return null
+  return {
+    name,
+    count: asNumber(raw.count, 0),
+  }
+}
+
 export async function fetchBoard(
   sortBy?: BoardSortMode,
-  options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string },
+  options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
 ): Promise<{ posts: BoardPost[] }> {
   return withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
@@ -428,7 +443,8 @@ export async function fetchBoard(
     if (options?.excludeSystem) params.set('exclude_system', 'true')
     if (options?.excludeAutomation) params.set('exclude_automation', 'true')
     if (options?.author) params.set('author', options.author)
-    params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author ? '150' : '100')
+    if (options?.hearth) params.set('hearth', options.hearth)
+    params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
     const posts = Array.isArray(raw.posts)
@@ -437,6 +453,16 @@ export async function fetchBoard(
     return { posts }
   })
 }
+
+export async function fetchBoardHearths(): Promise<BoardHearth[]> {
+  return withRetries('fetchBoardHearths', async () => {
+    const raw = await get<{ hearths?: unknown[] }>('/api/v1/board/hearths')
+    return Array.isArray(raw.hearths)
+      ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
+      : []
+  })
+}
+
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
   return withRetries('fetchBoardPost', async () => {
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
@@ -485,12 +511,20 @@ export function voteComment(commentId: string, direction: 'up' | 'down'): Promis
   })
 }
 
-export function createPost(title: string, content: string, author: string): Promise<unknown> {
-  return post(`/api/v1/tools/masc_board_post`, {
+export function createPost(
+  title: string,
+  content: string,
+  author: string,
+  options: { hearth?: string } = {},
+): Promise<unknown> {
+  const body: Record<string, string> = {
     title,
     content,
     author,
-  })
+  }
+  const hearth = options.hearth?.trim()
+  if (hearth) body.hearth = hearth
+  return post(`/api/v1/tools/masc_board_post`, body)
 }
 
 export function commentPost(postId: string, author: string, content: string, parentId?: string): Promise<unknown> {

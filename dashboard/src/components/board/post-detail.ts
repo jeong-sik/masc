@@ -82,6 +82,32 @@ export function countCommentDescendants(
   )
 }
 
+export function buildCommentDescendantCounts(
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>()
+  const visiting = new Set<string>()
+
+  const countFor = (commentId: string): number => {
+    const cached = counts.get(commentId)
+    if (cached !== undefined) return cached
+    if (visiting.has(commentId)) return 0
+
+    visiting.add(commentId)
+    const children = childrenMap.get(commentId) ?? []
+    const total = children.reduce((sum, child) => sum + 1 + countFor(child.id), 0)
+    visiting.delete(commentId)
+    counts.set(commentId, total)
+    return total
+  }
+
+  for (const [commentId, children] of childrenMap) {
+    countFor(commentId)
+    for (const child of children) countFor(child.id)
+  }
+  return counts
+}
+
 /**
  * Pure tree-aware text filter on a comment forest.
  *
@@ -139,12 +165,14 @@ function CommentItem({
   postId,
   depth = 0,
   childrenMap,
+  descendantCounts,
   forceThreadExpanded = false,
 }: {
   comment: BoardComment
   postId: string
   depth?: number
   childrenMap: ReadonlyMap<string, readonly BoardComment[]>
+  descendantCounts: ReadonlyMap<string, number>
   forceThreadExpanded?: boolean
 }) {
   const contentChars = Array.from(comment.content ?? '')
@@ -159,7 +187,7 @@ function CommentItem({
   const visualDepth = Math.min(depth, MAX_INLINE_COMMENT_DEPTH)
   const indentStyle = visualDepth > 0 ? { marginLeft: `${visualDepth * 16}px` } : undefined
   const replies = childrenMap.get(comment.id) ?? []
-  const replyCount = countCommentDescendants(comment.id, childrenMap)
+  const replyCount = descendantCounts.get(comment.id) ?? 0
   const cappedByDepth = !forceThreadExpanded && !deepExpanded && depth >= MAX_INLINE_COMMENT_DEPTH && replies.length > 0
   const showReplies = replies.length > 0 && !collapsed && !cappedByDepth
   const childForceExpanded = forceThreadExpanded || deepExpanded
@@ -264,7 +292,7 @@ function CommentItem({
       </div>
       ${showReplies ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} forceThreadExpanded=${childForceExpanded} />`)}
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} />`)}
         </div>
       ` : null}
     </div>
@@ -281,6 +309,10 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
   const { roots: filteredRoots, childrenMap: filteredChildrenMap } = useMemo(
     () => filterCommentTree(roots, childrenMap, query.value),
     [roots, childrenMap, query.value],
+  )
+  const descendantCounts = useMemo(
+    () => buildCommentDescendantCounts(filteredChildrenMap),
+    [filteredChildrenMap],
   )
 
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
@@ -315,7 +347,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기<//>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${isFiltering} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"

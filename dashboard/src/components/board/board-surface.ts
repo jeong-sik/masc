@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { RefreshCw } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -13,6 +14,7 @@ import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
+import { registerBoardHearthsRefresh } from '../../sse-store'
 import { PostDetail } from './post-detail'
 import {
   boardActorAvatarKey,
@@ -28,6 +30,9 @@ import {
   boardSortMode,
   boardHiddenCategories,
   boardAuthorFilter,
+  boardHearthFilter,
+  boardHearths,
+  boardHearthsLoading,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -43,6 +48,7 @@ import {
   showNewPostForm,
   newPostTitle,
   newPostContent,
+  newPostHearth,
   newPostSubmitting,
   PAGE_SIZE,
   categoryVisibleLimits,
@@ -67,6 +73,7 @@ import {
   visibilityBadgeColor,
   votePost,
   deleteBoardPost,
+  refreshBoardHearths,
 } from './board-state'
 import type { BoardPost, ContentCategory } from './board-state'
 
@@ -200,7 +207,10 @@ function NewPostForm() {
     return html`
       <button type="button"
         class="w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
-        onClick=${() => { showNewPostForm.value = true }}
+        onClick=${() => {
+          newPostHearth.value = boardHearthFilter.value
+          showNewPostForm.value = true
+        }}
       >+ 새 글 작성</button>
     `
   }
@@ -223,10 +233,23 @@ function NewPostForm() {
         helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
         previewLimit=${2}
       />
+      <${TextInput}
+        name="board_post_hearth"
+        ariaLabel="새 글 hearth"
+        autoComplete="off"
+        placeholder="hearth (예: ops, research)"
+        value=${newPostHearth.value}
+        onInput=${(e: Event) => { newPostHearth.value = (e.target as HTMLInputElement).value }}
+      />
       <div class="flex gap-2 justify-end">
         <button type="button"
           class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)]"
-          onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
+          onClick=${() => {
+            showNewPostForm.value = false
+            newPostTitle.value = ''
+            newPostContent.value = ''
+            newPostHearth.value = ''
+          }}
         >취소</button>
         <button type="button"
           class="px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
@@ -234,6 +257,96 @@ function NewPostForm() {
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
       </div>
+    </div>
+  `
+}
+
+function setBoardHearthFilter(nextHearth: string) {
+  if (boardHearthFilter.value === nextHearth) return
+  boardHearthFilter.value = nextHearth
+  visibleLimit.value = PAGE_SIZE
+  automationVisibleLimit.value = PAGE_SIZE
+  systemVisibleLimit.value = PAGE_SIZE
+  categoryVisibleLimits.value = {
+    article: PAGE_SIZE,
+    review: PAGE_SIZE,
+    notice: PAGE_SIZE,
+    system: PAGE_SIZE,
+  }
+  refreshBoard()
+}
+
+function HearthFilterBar() {
+  const hearths = boardHearths.value
+  const active = boardHearthFilter.value
+  const activeInList = active !== '' && hearths.some(hearth => hearth.name === active)
+
+  const chipClass = (selected: boolean) => `px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer ${
+    selected
+      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] border-[var(--accent-20)]'
+      : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
+  }`
+
+  // PR #13152 review (P2): when initial refreshBoardHearths() fails the
+  // list ends up empty + not loading, and the original early-return hid
+  // the entire bar — including the refresh button — leaving users with no
+  // in-UI retry path.  Render a minimal bar (refresh button only) in that
+  // state so the manual retry stays reachable.
+  if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) {
+    return html`
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-2xs text-[var(--color-fg-muted)]" aria-hidden="true">hearth 목록을 불러오지 못했습니다</span>
+        <button
+          type="button"
+          class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+          aria-label="hearth 목록 새로고침"
+          disabled=${boardHearthsLoading.value}
+          onClick=${() => { void refreshBoardHearths() }}
+        >
+          <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+        </button>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="text-2xs font-semibold text-[var(--color-fg-muted)]" aria-hidden="true">#</span>
+      <button
+        type="button"
+        class=${chipClass(active === '')}
+        aria-pressed=${active === ''}
+        aria-label="전체 hearth"
+        onClick=${() => setBoardHearthFilter('')}
+      >전체</button>
+      ${hearths.map(hearth => html`
+        <button
+          key=${hearth.name}
+          type="button"
+          class=${chipClass(active === hearth.name)}
+          aria-pressed=${active === hearth.name}
+          aria-label=${`hearth ${hearth.name} ${hearth.count} posts`}
+          onClick=${() => setBoardHearthFilter(hearth.name)}
+        >${hearth.name} <span class="tabular-nums opacity-70">${hearth.count}</span></button>
+      `)}
+      ${active !== '' && !activeInList ? html`
+        <button
+          type="button"
+          class=${chipClass(true)}
+          aria-pressed="true"
+          aria-label=${`hearth ${active}`}
+          onClick=${() => setBoardHearthFilter(active)}
+        >${active}</button>
+      ` : null}
+      <button
+        type="button"
+        class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+        aria-label="hearth 목록 새로고침"
+        disabled=${boardHearthsLoading.value}
+        onClick=${() => { void refreshBoardHearths() }}
+      >
+        <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+      </button>
     </div>
   `
 }
@@ -264,6 +377,7 @@ function SortBar() {
           </button>
         `)}
       </div>
+      <${HearthFilterBar} />
       <div class="flex items-center gap-2 flex-wrap">
         ${grouped.groups.map(g => {
           const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
@@ -520,6 +634,12 @@ function PostCard({ post }: { post: BoardPost }) {
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
+  useEffect(() => registerBoardHearthsRefresh(() => {
+    void refreshBoardHearths()
+  }), [])
+  useEffect(() => {
+    if (boardHearths.value.length === 0) void refreshBoardHearths()
+  }, [])
   const [contentQuery, setContentQuery] = useState('')
   const rawPosts = boardPosts.value
   const filteredPosts = useMemo(

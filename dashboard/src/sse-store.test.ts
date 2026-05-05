@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RouteState } from './types'
+import type { BoardPost, BoardSortMode, RouteState } from './types'
 
 void vi
 
@@ -11,8 +11,12 @@ type CurrentRoute = typeof route.value
 
 const keeperHeartbeats = signal(new Map<string, number>())
 const serverStatus = signal<unknown>(null)
-const boardPosts = signal<Array<{ id: string }>>([])
-const boardSortMode = signal<'recent'>('recent')
+const boardPosts = signal<BoardPost[]>([])
+const boardSortMode = signal<BoardSortMode>('recent')
+const boardExcludeSystem = signal(true)
+const boardExcludeAutomation = signal(false)
+const boardAuthorFilter = signal('')
+const boardHearthFilter = signal('')
 const boardOffset = signal(0)
 const namespaceTruth = signal<unknown>(null)
 const namespaceTruthError = signal<unknown>(null)
@@ -56,6 +60,10 @@ async function loadSseStore() {
     serverStatus,
     boardPosts,
     boardSortMode,
+    boardExcludeSystem,
+    boardExcludeAutomation,
+    boardAuthorFilter,
+    boardHearthFilter,
     boardOffset,
     removeBoardPost,
   }))
@@ -111,6 +119,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     namespaceTruth.value = null
     namespaceTruthError.value = null
     boardPosts.value = []
+    boardSortMode.value = 'recent'
+    boardExcludeSystem.value = true
+    boardExcludeAutomation.value = false
+    boardAuthorFilter.value = ''
+    boardHearthFilter.value = ''
     boardOffset.value = 0
     keeperHeartbeats.value = new Map()
     serverStatus.value = null
@@ -251,6 +264,50 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps optimistic post_created hydration inside the active hearth filter', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardHearthFilter.value = 'ops'
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Research note',
+      content: 'body',
+      author: 'agent-a',
+      hearth: 'research',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value).toEqual([])
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes hearth chips when an optimistic board post carries a hearth', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshHearths = vi.fn()
+    sseStore.registerBoardHearthsRefresh(refreshHearths)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardHearthFilter.value = 'ops'
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Ops note',
+      content: 'body',
+      author: 'agent-a',
+      hearth: 'ops',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value[0]?.id).toBe('post-1')
+    expect(boardPosts.value[0]?.hearth).toBe('ops')
+    expect(refreshBoard).not.toHaveBeenCalled()
+    expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
   it('keeps websocket raw push refreshes hidden when the route does not need that surface', async () => {

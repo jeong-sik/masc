@@ -34,6 +34,10 @@ import {
   serverStatus,
   boardPosts,
   boardSortMode,
+  boardExcludeSystem,
+  boardExcludeAutomation,
+  boardAuthorFilter,
+  boardHearthFilter,
   boardOffset,
 } from './store'
 import {
@@ -89,6 +93,14 @@ export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
   return () => {
     _refreshActivityFns.delete(fn)
+  }
+}
+
+let _refreshBoardHearthsFn: (() => void) | null = null
+export function registerBoardHearthsRefresh(fn: () => void): () => void {
+  _refreshBoardHearthsFn = fn
+  return () => {
+    if (_refreshBoardHearthsFn === fn) _refreshBoardHearthsFn = null
   }
 }
 
@@ -151,7 +163,10 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   execution: () => { void refreshExecution() },
-  board:     refreshBoard,
+  board:     () => {
+    void refreshBoard()
+    _refreshBoardHearthsFn?.()
+  },
   operator:  () => _refreshOperatorFn?.(),
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()
@@ -165,6 +180,14 @@ function scheduleTargetRefresh(
 ): void {
   if (!routeWantsRefreshTarget(route.value, target)) return
   scheduleRefresh(target, fn, delayMs)
+}
+
+function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
+  if (!_refreshBoardHearthsFn) return
+  if (!routeWantsRefreshTarget(route.value, 'board')) return
+  scheduleRefresh('board-hearths', () => {
+    _refreshBoardHearthsFn?.()
+  }, delayMs)
 }
 
 // --- Named handlers for complex events ---
@@ -362,6 +385,9 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
   const content = event.content as string | undefined
   if (!postId || !content) return false
   if (boardPosts.value.some(p => p.id === postId)) return false
+  const eventHearth = event.hearth?.trim() ?? ''
+  if (eventHearth) scheduleBoardHearthsRefresh()
+  if (!eventMatchesActiveBoardFilters(event)) return false
 
   const now = new Date().toISOString()
   const post: BoardPost = {
@@ -377,10 +403,25 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
     votes: 0,
     vote_balance: 0,
     comment_count: 0,
-    hearth: event.hearth ?? undefined,
+    hearth: eventHearth || undefined,
   }
   boardPosts.value = [post, ...boardPosts.value]
   boardOffset.value = boardPosts.value.length
+  return true
+}
+
+function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
+  const hearthFilter = boardHearthFilter.value.trim()
+  if (hearthFilter !== '' && (event.hearth?.trim() ?? '') !== hearthFilter) return false
+
+  // Author filtering is server-defined today, so a filtered view should be
+  // reconciled through the board endpoint instead of guessing client-side.
+  if (boardAuthorFilter.value.trim() !== '') return false
+
+  const rawKind = (event.post_kind ?? 'direct').toLowerCase()
+  const postKind = rawKind === 'system' || rawKind === 'automation' ? rawKind : 'direct'
+  if (postKind === 'system' && boardExcludeSystem.value) return false
+  if (postKind === 'automation' && boardExcludeAutomation.value) return false
   return true
 }
 

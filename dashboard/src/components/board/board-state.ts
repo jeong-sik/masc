@@ -13,6 +13,7 @@ import {
   boardHasMore,
   boardOffset,
   boardTotal,
+  boardHearthFilter,
   lastBoardRefreshAt,
   refreshBoard,
   loadMoreBoardPosts,
@@ -20,9 +21,11 @@ import {
 import {
   votePost,
   voteComment,
+  fetchBoardHearths,
   fetchBoardPost,
   commentPost,
   createPost,
+  type BoardHearth,
 } from '../../api'
 import { deleteBoardPost } from '../../api/actions'
 import type { BoardComment, BoardPost, BoardSortMode } from '../../types'
@@ -40,6 +43,7 @@ export {
   boardHasMore,
   boardOffset,
   boardTotal,
+  boardHearthFilter,
   lastBoardRefreshAt,
   refreshBoard,
   loadMoreBoardPosts,
@@ -64,6 +68,10 @@ export const detailComments = signal<BoardComment[]>([])
 export const detailLoading = signal(false)
 export const detailPostId = signal<string | null>(null)
 
+// ── Signals: hearth filters ───────────────────────────────────────
+export const boardHearths = signal<BoardHearth[]>([])
+export const boardHearthsLoading = signal(false)
+
 // ── Signals: comments ──────────────────────────────────────────────
 export const commentText = signal('')
 export const commentSubmitting = signal(false)
@@ -73,6 +81,7 @@ export const replyingTo = signal<string | null>(null)
 export const showNewPostForm = signal(false)
 export const newPostTitle = signal('')
 export const newPostContent = signal('')
+export const newPostHearth = signal('')
 export const newPostSubmitting = signal(false)
 
 // ── Pagination ─────────────────────────────────────────────────────
@@ -92,6 +101,18 @@ export const categoryVisibleLimits = signal<Record<string, number>>({
 export const deletingPostId = signal<string | null>(null)
 export const selectedPostIds = signal<Set<string>>(new Set())
 export const bulkDeleting = signal(false)
+
+export async function refreshBoardHearths(): Promise<void> {
+  boardHearthsLoading.value = true
+  try {
+    boardHearths.value = await fetchBoardHearths()
+  } catch (err) {
+    console.warn('[Board] failed to load hearth filters:', err)
+    showToast('Hearth 목록을 불러오지 못했습니다', 'error')
+  } finally {
+    boardHearthsLoading.value = false
+  }
+}
 
 // ── Helper: default comment author ─────────────────────────────────
 function defaultCommentAuthor(): string {
@@ -344,15 +365,18 @@ export async function submitComment(postId: string, parentId?: string) {
 export async function submitNewPost() {
   const title = newPostTitle.value.trim()
   const content = newPostContent.value.trim()
+  const hearth = newPostHearth.value.trim() || boardHearthFilter.value.trim()
   if (!title || !content) return
   newPostSubmitting.value = true
   try {
-    await createPost(title, content, commentAuthor.value)
+    await createPost(title, content, commentAuthor.value, { hearth: hearth || undefined })
     newPostTitle.value = ''
     newPostContent.value = ''
+    newPostHearth.value = ''
     showNewPostForm.value = false
     showToast('글을 등록했습니다', 'success')
     refreshBoard()
+    void refreshBoardHearths()
   } catch (err) {
     console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
     showToast('글 등록에 실패했습니다', 'error')

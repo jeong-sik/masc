@@ -10,8 +10,50 @@ import {
   pinnedKeepers,
   PIN_CAP,
   PinnedKeeperEntry,
+  reorderPins,
   unpinKeeper,
 } from './multi-keeper-pin-store'
+
+/**
+ * RFC-0027 PR-γ drag reorder MIME. Custom token (not text/plain) so
+ * accidental browser drag of plain text from a keeper name does not match.
+ * Exported for tests; consumers should use `buildDragHandlers` rather than
+ * reading the MIME directly.
+ */
+export const KEEPER_DRAG_MIME = 'application/x-keeper-name'
+
+interface DragHandlers {
+  readonly draggable: true
+  readonly onDragStart: (event: DragEvent) => void
+  readonly onDragOver: (event: DragEvent) => void
+  readonly onDrop: (event: DragEvent) => void
+}
+
+export function buildDragHandlers(entryName: string, dropIdx: number): DragHandlers {
+  return {
+    draggable: true,
+    onDragStart: (event: DragEvent) => {
+      if (!event.dataTransfer) return
+      event.dataTransfer.setData(KEEPER_DRAG_MIME, entryName)
+      event.dataTransfer.effectAllowed = 'move'
+    },
+    onDragOver: (event: DragEvent) => {
+      const types = event.dataTransfer?.types
+      if (!types) return
+      // `types` is DOMStringList in browsers, ReadonlyArray in jsdom.
+      const containsKeeperMime = Array.from(types).includes(KEEPER_DRAG_MIME)
+      if (!containsKeeperMime) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault()
+      const fromName = event.dataTransfer?.getData(KEEPER_DRAG_MIME) ?? ''
+      if (!fromName || fromName === entryName) return
+      reorderPins(fromName, dropIdx)
+    },
+  }
+}
 
 /**
  * RFC-0027 PR-β: multi-keeper BDI inspector with three layouts.
@@ -192,13 +234,15 @@ interface KeeperPanelProps {
   readonly slot: KeeperBdiSlot
   readonly compact: boolean
   readonly focused: boolean
+  readonly dropIdx: number
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperPanel({ entry, slot, compact, focused, onUnpin }: KeeperPanelProps) {
+function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: KeeperPanelProps) {
   const snapshot = slot.snapshot
   const error = slot.error
   const lastTool = snapshot?.last_tool_call ?? null
+  const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
 
   return html`
     <article
@@ -206,6 +250,11 @@ function KeeperPanel({ entry, slot, compact, focused, onUnpin }: KeeperPanelProp
       aria-current=${focused ? 'true' : 'false'}
       data-keeper=${entry.keeperName}
       data-compact=${compact ? 'true' : 'false'}
+      data-drop-idx=${dropIdx}
+      draggable=${dragHandlers.draggable}
+      onDragStart=${dragHandlers.onDragStart}
+      onDragOver=${dragHandlers.onDragOver}
+      onDrop=${dragHandlers.onDrop}
       style=${focused ? PANEL_STYLE_FOCUSED : PANEL_STYLE_COMPACT}
     >
       <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
@@ -257,14 +306,25 @@ function KeeperPanel({ entry, slot, compact, focused, onUnpin }: KeeperPanelProp
 interface KeeperChipProps {
   readonly entry: PinnedKeeperEntry
   readonly slot: KeeperBdiSlot
+  readonly dropIdx: number
   readonly onFocus: (entry: PinnedKeeperEntry) => void
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperChip({ entry, slot, onFocus, onUnpin }: KeeperChipProps) {
+function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps) {
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
+  const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   return html`
-    <span role="listitem" data-keeper=${entry.keeperName} style=${{ display: 'inline-flex', gap: '2px' }}>
+    <span
+      role="listitem"
+      data-keeper=${entry.keeperName}
+      data-drop-idx=${dropIdx}
+      draggable=${dragHandlers.draggable}
+      onDragStart=${dragHandlers.onDragStart}
+      onDragOver=${dragHandlers.onDragOver}
+      onDrop=${dragHandlers.onDrop}
+      style=${{ display: 'inline-flex', gap: '2px' }}
+    >
       <button
         type="button"
         onClick=${() => onFocus(entry)}
@@ -329,6 +389,7 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             slot=${activeSlots[idx] ?? EMPTY_SLOT}
             compact=${idx > 0}
             focused=${idx === 0}
+            dropIdx=${idx}
             onUnpin=${unpinKeeper}
           />
         `)}
@@ -355,6 +416,7 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
         slot=${activeSlots[0] ?? EMPTY_SLOT}
         compact=${false}
         focused=${true}
+        dropIdx=${0}
         onUnpin=${unpinKeeper}
       />
       <div role="group" aria-label="other pinned keepers" style=${CHIP_GROUP_STYLE}>
@@ -363,6 +425,7 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             key=${entry.keeperName}
             entry=${entry}
             slot=${activeSlots[idx + 1] ?? EMPTY_SLOT}
+            dropIdx=${idx + 1}
             onFocus=${focusEntry}
             onUnpin=${unpinKeeper}
           />

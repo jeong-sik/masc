@@ -84,6 +84,34 @@ export function clearPins(): void {
 }
 
 /**
+ * Move a pinned keeper to a specific index (RFC-0027 §4 drag reorder).
+ *
+ *  - `fromName` is matched against the trimmed `keeperName`. Whitespace or
+ *    unknown name is a no-op (no allocation).
+ *  - `toIdx` is clamped to `[0, entries.length - 1]`.
+ *  - Same-position move is a no-op (no allocation).
+ *
+ * The moved entry preserves its `pinnedAtMs` and `line`. Drag reorder is a
+ * *position* change, not a fresh pin — refreshing the timestamp would
+ * conflate explicit reorder with implicit recency and break LRU semantics
+ * for the next eviction.
+ */
+export function reorderPins(fromName: string, toIdx: number): void {
+  const trimmed = fromName.trim()
+  if (!trimmed) return
+  const prev = pinnedKeepers.value
+  const fromIdx = prev.entries.findIndex(e => e.keeperName === trimmed)
+  if (fromIdx < 0) return
+  const clampedTo = Math.max(0, Math.min(toIdx, prev.entries.length - 1))
+  if (fromIdx === clampedTo) return
+  const next = prev.entries.slice()
+  const moved = next.splice(fromIdx, 1)[0]
+  if (!moved) return
+  next.splice(clampedTo, 0, moved)
+  pinnedKeepers.value = { ...prev, entries: next }
+}
+
+/**
  * Head entry projection for legacy single-pin callers. Returns `null` when no
  * keeper is pinned.
  */

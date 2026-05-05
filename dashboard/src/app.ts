@@ -39,6 +39,7 @@ import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
+import { DashboardStatusTray } from './components/status-tray'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
@@ -315,6 +316,7 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
+      <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${Suspense} fallback=${null}>

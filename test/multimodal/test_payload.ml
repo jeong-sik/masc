@@ -51,6 +51,30 @@ let test_to_json_streaming () =
   assert (kind = "streaming");
   assert (n = 4096)
 
+(* ─── strict to_json shape: pin exact key set per variant ──── *)
+(* Copilot review: previous to_json tests checked selected
+   fields via [member ...] but a wire-format regression like
+   adding extra keys (e.g. "format_version") would still pass.
+   Pin the EXACT key set of each variant so any addition or
+   removal fails. *)
+
+let assoc_keys_sorted = function
+  | `Assoc kv ->
+      List.map fst kv |> List.sort String.compare
+  | _ -> assert false
+
+let test_to_json_lazy_strict_keys () =
+  let j = P.to_json (P.Lazy_payload (fun () -> "x")) in
+  assert (assoc_keys_sorted j = [ "kind" ])
+
+let test_to_json_blob_ref_strict_keys () =
+  let j = P.to_json (P.Blob_ref "blob://x") in
+  assert (assoc_keys_sorted j = [ "kind"; "ref" ])
+
+let test_to_json_streaming_strict_keys () =
+  let j = P.to_json (P.Streaming 8) in
+  assert (assoc_keys_sorted j = [ "bytes"; "kind" ])
+
 (* ─── of_json ─────────────────────────────────────────────────── *)
 
 let test_of_json_lazy_returns_empty_closure () =
@@ -170,4 +194,7 @@ let () =
   test_of_json_streaming_wrong_type_bytes ();
   test_of_json_blob_ref_wrong_type_ref ();
   test_of_json_not_object ();
+  test_to_json_lazy_strict_keys ();
+  test_to_json_blob_ref_strict_keys ();
+  test_to_json_streaming_strict_keys ();
   print_endline "test_payload: all assertions passed"

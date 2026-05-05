@@ -135,6 +135,28 @@ let test_of_json_created_at_wrong_type () =
   | Error _ -> ()
   | Ok _ -> assert false
 
+let test_of_json_origin_artifact_ids_omitted_defaults_to_empty () =
+  (* Copilot review: of_json has a separate branch
+     [None -> Ok []] for an omitted [origin_artifact_ids] key.
+     Without a positive test that behavior could change
+     silently.  Pin: omitted key produces an empty origin list,
+     not an error. *)
+  let j =
+    `Assoc
+      [
+        ("created_by", `String "k");
+        ("created_at", `Float 1700000000.0);
+      ]
+  in
+  match Pr.of_json j with
+  | Ok r ->
+      assert (r.origin_artifact_ids = []);
+      assert (r.created_by = "k");
+      assert (r.created_at = 1700000000.0)
+  | Error e ->
+      Printf.eprintf "unexpected error: %s\n" e;
+      assert false
+
 let test_of_json_created_at_int_accepted () =
   (* Implementation accepts both `Float and `Int for created_at
      (line 46: float_of_int i).  Pin that behavior. *)
@@ -162,5 +184,6 @@ let () =
   test_of_json_origin_artifact_ids_invalid_member ();
   test_of_json_created_by_wrong_type ();
   test_of_json_created_at_wrong_type ();
+  test_of_json_origin_artifact_ids_omitted_defaults_to_empty ();
   test_of_json_created_at_int_accepted ();
   print_endline "test_provenance_stub: all assertions passed"

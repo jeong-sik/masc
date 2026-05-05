@@ -42,6 +42,9 @@ let critical_prompt_recovery_block =
       "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
       "</world>" ]
 
+let state_block_output_guard_text =
+  "Output guard: this turn uses runtime-managed continuity. Do not output raw [STATE] or [/STATE] blocks in visible text; the runtime will synthesize and persist state metadata when needed."
+
 let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with
   | [] -> prompt

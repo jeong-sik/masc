@@ -11,6 +11,11 @@ val ensure_critical_prompt_anchors : string -> string
     lost critical continuity/world/policy anchors. Normal prompts are returned
     unchanged. *)
 
+val state_block_output_guard_text : string
+(** Turn-level output guard for runtime-managed continuity. The runtime may
+    synthesize and persist STATE metadata, so direct/no-state turns should not
+    ask the model to emit raw STATE markers in visible text. *)
+
 val build_keeper_system_prompt :
   goal:string ->
   short_goal:string ->

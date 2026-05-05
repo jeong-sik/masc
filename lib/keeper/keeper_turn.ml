@@ -380,7 +380,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   (effective_no_skill_route,
                    "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
                   (effective_no_state_block,
-                   "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
+                   Keeper_prompt.state_block_output_guard_text);
                 ] in
                 let policy_lines =
                   List.filter_map

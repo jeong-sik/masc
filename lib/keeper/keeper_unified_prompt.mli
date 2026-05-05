@@ -7,6 +7,10 @@
 
     @since Unified Keeper Loop *)
 
+val state_block_instruction_text : string
+(** Generic STATE formatting instruction for normal keeper turns. Turn-level
+    output guards can override this when continuity is runtime-managed. *)
+
 (** Build unified system prompt and user message from keeper state.
 
     Returns [(system_prompt, user_message)] where:

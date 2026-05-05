@@ -11,6 +11,7 @@ open Alcotest
 module KAR = Masc_mcp.Keeper_agent_run
 module KSR = Masc_mcp.Keeper_skill_routing
 module KP = Masc_mcp.Keeper_prompt
+module KUP = Masc_mcp.Keeper_unified_prompt
 
 (* CJK-aware token estimator from OAS *)
 let estimate_tokens s =
@@ -20,6 +21,26 @@ let estimate_tokens s =
 let has_in s needle =
   try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
   with Not_found -> false
+
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.world.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+      let rec ascend path =
+        if has_prompt_root path then path
+        else
+          let parent = Filename.dirname path in
+          if String.equal parent path then Sys.getcwd () else ascend parent
+      in
+      ascend (Sys.getcwd ())
+
+let () =
+  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  Prompt_registry.set_markdown_dir prompts_dir;
+  Masc_mcp.Prompt_defaults.init ()
 
 (* ── Fixture: realistic keeper prompt components ──────── *)
 
@@ -69,8 +90,7 @@ let build_separated () : KAR.turn_prompt =
   let prompt =
     KP.append_direct_reply_mode_prompt ~base_prompt:base_system_prompt
   in
-  let prompt = prompt ^ "\n\n" ^
-    "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn." in
+  let prompt = prompt ^ "\n\n" ^ KP.state_block_output_guard_text in
   { system_prompt = prompt; dynamic_context }
 
 (* Simulate the pre-split combined prompt (everything in system_prompt) *)
@@ -80,7 +100,7 @@ let build_combined () : string =
   in
   let parts = [
     prompt;
-    "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.";
+    KP.state_block_output_guard_text;
     skill_route_text;
     continuity_snapshot_text;
     worktree_text;
@@ -220,6 +240,30 @@ let test_prompt_recovery_guard_restores_missing_anchors () =
   check bool "recovery state template present" true
     (has_in prompt "State block template");
   check bool "recovery world anchor present" true (has_in prompt "<world>")
+
+let test_state_block_guard_is_runtime_managed_not_absolute_never () =
+  let guard = KP.state_block_output_guard_text in
+  check bool "guard mentions runtime-managed continuity" true
+    (has_in guard "runtime-managed continuity");
+  check bool "guard avoids absolute NEVER state wording" false
+    (has_in guard ("NEVER output " ^ "[STATE]"));
+  check bool "guard names raw state markers" true
+    (has_in guard "raw [STATE]");
+  check bool "guard mentions runtime persistence" true
+    (has_in guard "persist state metadata")
+
+let test_unified_state_instruction_respects_turn_level_guard () =
+  let text = KUP.state_block_instruction_text in
+  check bool "instruction is scoped to non-direct turns" true
+    (has_in text "For non-direct keeper turns");
+  check bool "instruction names turn-level override" true
+    (has_in text "turn-level output guard");
+  check bool "instruction mentions runtime-managed continuity" true
+    (has_in text "runtime-managed");
+  check bool "instruction avoids old unconditional wording" false
+    (has_in text
+       ("End every response with a "
+        ^ "[STATE]...[/STATE] block:"))
 
 let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   let prompt =
@@ -363,6 +407,10 @@ let () =
             test_keeper_prompt_preserves_snapshot_delta_anchors;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
+          test_case "state block guard is runtime-managed" `Quick
+            test_state_block_guard_is_runtime_managed_not_absolute_never;
+          test_case "unified state instruction respects turn-level guard" `Quick
+            test_unified_state_instruction_respects_turn_level_guard;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
         ] );

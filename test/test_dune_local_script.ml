@@ -46,9 +46,10 @@ let rec rm_rf path =
     end else Sys.remove path
 
 let with_temp_dir prefix f =
-  let dir = Filename.temp_file prefix "" in
-  Sys.remove dir;
-  Unix.mkdir dir 0o755;
+  let dir =
+    Unix.mkdtemp
+      (Filename.concat (Filename.get_temp_dir_name ()) (prefix ^ "XXXXXX"))
+  in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let run_shell ?(env = []) ?(unset_env = []) ~cwd cmd =
@@ -160,7 +161,7 @@ let test_pin_drift_aborts_build () =
       let bin_dir, dune_log =
         setup_fake_repo dir ~pin_check_exit_code:1
           ~pin_check_stderr_msg:
-            "agent_sdk pin source is git+https://github.com/jeong-sik/oas.git#wrong_sha, expected git+https://github.com/jeong-sik/oas.git#correct_sha\nrepair: bash scripts/opam-pin-external-deps.sh"
+            "agent_sdk pin source does not match SSOT\nrepair: bash scripts/opam-pin-external-deps.sh"
       in
       let code, _stdout, stderr =
         run_dune_local dir bin_dir

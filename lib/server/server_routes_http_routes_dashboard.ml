@@ -75,6 +75,18 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
+let observe_worktree_status_sse_write writer event =
+  Telemetry_observe.observe_or_default
+    ~kind:"dashboard_worktree_status_sse_write"
+    ~default:() (fun () ->
+      Httpun.Body.Writer.write_string writer event)
+
+let observe_worktree_status_sse_close writer =
+  Telemetry_observe.observe_or_default
+    ~kind:"dashboard_worktree_status_sse_close"
+    ~default:() (fun () ->
+      Httpun.Body.Writer.close writer)
+
 let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
     ~(cascade_name : string) : (bool, string) result =
   let updated_at = Keeper_types.now_iso () in
@@ -775,12 +787,8 @@ let rec add_routes ~sw ~clock router =
          let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
          let events = Dashboard_worktree_status.sse_events ~base_path in
-         List.iter
-           (fun event ->
-             try Httpun.Body.Writer.write_string writer event
-             with _ -> ())
-           events;
-         (try Httpun.Body.Writer.close writer with _ -> ())
+         List.iter (observe_worktree_status_sse_write writer) events;
+         observe_worktree_status_sse_close writer
        ) request reqd)
 
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)

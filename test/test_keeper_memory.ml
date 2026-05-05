@@ -1207,6 +1207,135 @@ let test_cap_dropped_by_total () =
   let dropped = result.dropped_by_total_cap in
   check int "total drops 8" 8 dropped
 
+let memory_metric_value ~keeper ~source ~outcome =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_memory_consolidations
+    ~labels:[("keeper", keeper); ("source", source); ("outcome", outcome)]
+    ()
+
+let memory_bank_test_row ~kind ~trace_id ~text ~priority ~idx =
+  Yojson.Safe.to_string
+    (`Assoc
+       [
+         ("schema_version", `Int Keeper_memory_bank.keeper_memory_schema_version);
+         ("kind", `String kind);
+         ("horizon", `String (Keeper_memory_bank.memory_horizon_of_kind kind));
+         ("source", `String "test_seed");
+         ("text", `String text);
+         ("priority", `Int priority);
+         ("generation", `Int 1);
+         ("trace_id", `String trace_id);
+         ("turn", `Int idx);
+         ("ts_unix", `Float (1000.0 +. float_of_int idx));
+         ("ts", `String "2026-01-01T00:00:00Z");
+       ])
+
+let test_compaction_records_consolidation_metrics () =
+  with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" @@ fun () ->
+  with_env "MASC_KEEPER_MEMORY_MAX_LENGTH" "4096" @@ fun () ->
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
+    let keeper = "metric-memory-keeper" in
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
+    let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
+    Keeper_types.mkdir_p (Filename.dirname bank_path);
+    let progress_rows =
+      List.init 3 (fun i ->
+        memory_bank_test_row
+          ~kind:"progress"
+          ~trace_id:"trace-progress"
+          ~text:
+            (Printf.sprintf
+               "progress cluster item %d retains enough semantic detail %s"
+               i (String.make 700 'p'))
+          ~priority:80
+          ~idx:i)
+    in
+    let recurring_text =
+      "shared durable finding survives recurrence telemetry "
+      ^ String.make 700 'r'
+    in
+    let recurring_rows =
+      List.init 3 (fun i ->
+        memory_bank_test_row
+          ~kind:"decision"
+          ~trace_id:(Printf.sprintf "trace-recurring-%d" i)
+          ~text:recurring_text
+          ~priority:85
+          ~idx:(10 + i))
+    in
+    let filler_rows =
+      List.init 74 (fun i ->
+        memory_bank_test_row
+          ~kind:"goal"
+          ~trace_id:(Printf.sprintf "trace-fill-%d" i)
+          ~text:
+            (Printf.sprintf
+               "filler note %03d pushes memory bank over compaction trigger %s"
+               i (String.make 700 'f'))
+          ~priority:10
+          ~idx:(100 + i))
+    in
+    let content =
+      String.concat "\n" (progress_rows @ recurring_rows @ filler_rows) ^ "\n"
+    in
+    (match Fs_compat.save_file_atomic bank_path content with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed memory bank: " ^ err));
+    let generated_progress_before =
+      memory_metric_value
+        ~keeper
+        ~source:"progress_consolidation"
+        ~outcome:"generated"
+    in
+    let generated_recurrence_before =
+      memory_metric_value
+        ~keeper
+        ~source:"cross_trace_recurrence"
+        ~outcome:"generated"
+    in
+    let persisted_progress_before =
+      memory_metric_value
+        ~keeper
+        ~source:"progress_consolidation"
+        ~outcome:"persisted"
+    in
+    let persisted_recurrence_before =
+      memory_metric_value
+        ~keeper
+        ~source:"cross_trace_recurrence"
+        ~outcome:"persisted"
+    in
+    let compaction =
+      Keeper_memory_bank.compact_memory_bank_if_needed config meta
+    in
+    check bool "compaction ran" true compaction.performed;
+    check (float 0.001) "progress consolidation generated"
+      (generated_progress_before +. 1.0)
+      (memory_metric_value
+         ~keeper
+         ~source:"progress_consolidation"
+         ~outcome:"generated");
+    check (float 0.001) "recurrence consolidation generated"
+      (generated_recurrence_before +. 1.0)
+      (memory_metric_value
+         ~keeper
+         ~source:"cross_trace_recurrence"
+         ~outcome:"generated");
+    check (float 0.001) "progress consolidation persisted"
+      (persisted_progress_before +. 1.0)
+      (memory_metric_value
+         ~keeper
+         ~source:"progress_consolidation"
+         ~outcome:"persisted");
+    check (float 0.001) "recurrence consolidation persisted"
+      (persisted_recurrence_before +. 1.0)
+      (memory_metric_value
+         ~keeper
+         ~source:"cross_trace_recurrence"
+         ~outcome:"persisted"))
+
 let () =
   run "Keeper_memory"
     [
@@ -1343,5 +1472,7 @@ let () =
         [
           test_case "cap enforcement reports dropped_by_kind" `Quick test_cap_dropped_by_kind;
           test_case "total cap reports dropped_by_total_cap" `Quick test_cap_dropped_by_total;
+          test_case "compaction records consolidation metrics" `Quick
+            test_compaction_records_consolidation_metrics;
         ] );
     ]

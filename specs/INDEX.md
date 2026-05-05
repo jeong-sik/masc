@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-05T04:03:30Z (HEAD: a2df61c549)
+Generated: 2026-05-05T14:52:32Z (HEAD: 9f878eba7c)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 88 |
-| Manual specs | 88 |
+| Total .tla files | 89 |
+| Manual specs | 89 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 177 |
-| Buggy .cfg (bug-model pair) | 86 |
+| Total .cfg files | 179 |
+| Buggy .cfg (bug-model pair) | 87 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -51,7 +51,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AuditLogAppendOrder.tla | AuditLogAppendOrder | manual | 2 | 1 | clean={inv:TypeOK, inv:MutexExclusion} buggy={inv:MutexExclusion} | 5cafd04c9e66 |
 | AuditLogDurableBeforeAck.tla | AuditLogDurableBeforeAck | manual | 2 | 1 | clean={inv:TypeOK, inv:Durability} buggy={inv:Durability} | 2e72a23b081e |
 | Bounded.tla | Bounded | manual | 2 | 1 | clean={inv:TypeOK, inv:Termination, inv:TokenBudget} buggy={inv:Termination, inv:TokenBudget} | d22f3d75f262 |
-| Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | 834dcb495e5a |
+| Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | CascadeKeeperRecovery.tla | CascadeKeeperRecovery | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 370581910533 |
 | CascadeResolver.tla | CascadeResolver | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:NeverRouteToDown} | e0c5a7d1d999 |
 | CascadeStrategy.tla | CascadeStrategy | manual | 2 | 1 | clean={inv:Safety} buggy={inv:BoundedCycle} | 004523df4adf |
@@ -112,7 +112,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 |------|--------|------|-----|-------|-------------------------|---------------|
 | ContractClosure.tla | ContractClosure | manual | 2 | 1 | clean={inv:TypeOK, inv:ClosureIntegrity, prop:VerdictUnblocksFsm} buggy={inv:ClosureIntegrity} | d4121bf6a81c |
 
-### specs/keeper-state-machine (28 specs)
+### specs/keeper-state-machine (29 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -142,6 +142,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | dacc5ab9bbfc |
 | KeeperTraceSpec.tla | KeeperTraceSpec | manual | 1 | 0 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} | 12ceda9758f0 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 1 | 0 | clean={inv:TypeOK, inv:Safety, prop:Liveness} | 5edbfd9dcab8 |
+| KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | f75c324a95fe |
 | KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | ab03a79d78e6 |
 | OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 2ef619cbcd73 |
 

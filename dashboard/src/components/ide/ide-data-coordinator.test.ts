@@ -42,6 +42,24 @@ describe('selectPreferredIdeRepositoryId', () => {
     expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('masc-mcp')
   })
 
+  it('prefers a masc-mcp workspace when a same-name mirror appears first', () => {
+    const repositories = [
+      repo('mirror-masc', '.masc/repos/mirror-masc', 'masc-mcp'),
+      repo('workspace-masc', '/Users/dancer/me/workspace/yousleepwhen/masc-mcp', 'masc-mcp'),
+    ]
+
+    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-masc')
+  })
+
+  it('does not treat absolute .masc/repos mirrors as workspace checkouts', () => {
+    const repositories = [
+      repo('mirror-masc', '/Users/dancer/me/.masc/repos/mirror-masc', 'masc-mcp'),
+      repo('workspace-oas', '/Users/dancer/me/workspace/yousleepwhen/oas', 'oas'),
+    ]
+
+    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-oas')
+  })
+
   it('falls back to the first visible absolute workspace repository', () => {
     const repositories = [
       repo('masc', '.masc/repos/masc'),

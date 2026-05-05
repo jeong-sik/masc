@@ -50,13 +50,20 @@ function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly ha
 }
 
 function isManagedMirrorRepository(repository: Repository): boolean {
-  return repository.local_path === `.masc/repos/${repository.id}`
-    || repository.local_path.startsWith('.masc/repos/')
+  const localPath = repository.local_path.replace(/\\/g, '/')
+  return localPath === `.masc/repos/${repository.id}`
+    || localPath.startsWith('.masc/repos/')
+    || localPath.includes('/.masc/repos/')
 }
 
 function isWorkspaceRepository(repository: Repository): boolean {
-  return repository.local_path.startsWith('/')
-    && !repository.local_path.includes('/.masc/')
+  const localPath = repository.local_path.replace(/\\/g, '/')
+  return localPath.startsWith('/')
+    && !localPath.includes('/.masc/')
+}
+
+function isMascMcpRepository(repository: Repository): boolean {
+  return repository.id === 'masc-mcp' || repository.name === 'masc-mcp'
 }
 
 export function selectPreferredIdeRepositoryId(
@@ -67,9 +74,9 @@ export function selectPreferredIdeRepositoryId(
     return current
   }
 
-  return repositories.find(repository => repository.id === 'masc-mcp')?.id
-    ?? repositories.find(repository => repository.name === 'masc-mcp')?.id
+  return repositories.find(repository => isMascMcpRepository(repository) && isWorkspaceRepository(repository))?.id
     ?? repositories.find(isWorkspaceRepository)?.id
+    ?? repositories.find(isMascMcpRepository)?.id
     ?? repositories.find(repository => !isManagedMirrorRepository(repository))?.id
     ?? repositories[0]?.id
     ?? null

@@ -10,11 +10,8 @@
     2. An honest thunk (no assert raised) leaves the counter alone.
     3. A buggy thunk (raises [Assert_failure], simulating a PPX-injected
        guard that observed a spec violation) bumps the counter by one
-       and re-raises by default (assert mode is now the default — see
-       commit "invert MASC_FSM_GUARD_ASSERT default to assert mode").
-    4. With [MASC_FSM_GUARD_ASSERT=0], the same buggy thunk is swallowed
-       after bumping the counter (counter mode opts out of re-raise so
-       hot paths like keeper heartbeats degrade gracefully).
+       and re-raises.
+    4. [MASC_FSM_GUARD_ASSERT=0] no longer enables counter-only mode.
     5. Non-[Assert_failure] exceptions propagate unchanged — only the
        spec-violation channel is intercepted. *)
 
@@ -35,8 +32,6 @@ let test_counter_constant_is_stable () =
     counter_name
 
 let test_honest_thunk_leaves_counter_alone () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
-  G.refresh_policy_for_test ();
   let action = "TestAction" in
   let stage = "honest" in
   let before = read_count ~action ~stage in
@@ -46,25 +41,31 @@ let test_honest_thunk_leaves_counter_alone () =
     "honest thunk does not bump the counter"
     before after
 
-let test_buggy_thunk_in_counter_mode_swallows_and_bumps () =
+let test_env_zero_still_reraises_and_bumps () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
   G.refresh_policy_for_test ();
+  Alcotest.(check bool)
+    "env zero no longer disables assert mode"
+    true (G.assert_mode_for_test ());
   let action = "TestAction" in
-  let stage = "buggy_counter" in
+  let stage = "env_zero_assert" in
   let before = read_count ~action ~stage in
-  (* Should not raise — the wrapper catches Assert_failure. *)
-  G.wrap_unit ~action ~stage (fun () -> assert false);
+  let raised =
+    try
+      G.wrap_unit ~action ~stage (fun () -> assert false);
+      false
+    with Assert_failure _ -> true
+  in
   let after = read_count ~action ~stage in
+  Alcotest.(check bool)
+    "Assert_failure propagates even with env zero"
+    true raised;
   Alcotest.(check (float 0.0001))
-    "Assert_failure is caught and counter bumped by one"
+    "Assert_failure counter bumped by one before re-raise"
     (before +. 1.0) after
 
-(* Pin the contract change from commit eb6fc718b7 ("invert
-   MASC_FSM_GUARD_ASSERT default to assert mode"): when the env var is
-   unset / cleared, the policy must default to assert mode.  The
-   codebase uses [Unix.putenv NAME ""] as the unset approximation
-   (matched in [test_board_vote_quarantine.ml:17] and several siblings;
-   see the convention note there). *)
+(* [Unix.putenv NAME ""] is the repo convention for clearing env in tests
+   (matched in [test_board_vote_quarantine.ml:17] and siblings). *)
 let test_default_is_assert_mode_when_env_cleared () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
   G.refresh_policy_for_test ();
@@ -88,16 +89,15 @@ let test_default_is_assert_mode_when_env_cleared () =
     "counter is bumped before re-raise under default mode"
     (before +. 1.0) after
 
-let test_buggy_thunk_in_assert_mode_reraises () =
+let test_buggy_thunk_reraises () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "1";
   G.refresh_policy_for_test ();
   Alcotest.(check bool)
-    "policy is now assert mode"
+    "policy remains assert mode"
     true (G.assert_mode_for_test ());
   let action = "TestAction" in
   let stage = "buggy_assert" in
   let before = read_count ~action ~stage in
-  (* Should raise — assert mode bumps then re-raises. *)
   let raised =
     try
       G.wrap_unit ~action ~stage (fun () -> assert false);
@@ -116,8 +116,6 @@ let test_buggy_thunk_in_assert_mode_reraises () =
   G.refresh_policy_for_test ()
 
 let test_non_assert_exception_propagates_unchanged () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
-  G.refresh_policy_for_test ();
   let action = "TestAction" in
   let stage = "non_assert" in
   let before = read_count ~action ~stage in
@@ -136,16 +134,22 @@ let test_non_assert_exception_propagates_unchanged () =
     before after
 
 let test_distinct_action_label_isolation () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
-  G.refresh_policy_for_test ();
   let stage = "iso" in
   let action_a = "ActionA" in
   let action_b = "ActionB" in
   let a_before = read_count ~action:action_a ~stage in
   let b_before = read_count ~action:action_b ~stage in
-  G.wrap_unit ~action:action_a ~stage (fun () -> assert false);
+  let raised =
+    try
+      G.wrap_unit ~action:action_a ~stage (fun () -> assert false);
+      false
+    with Assert_failure _ -> true
+  in
   let a_after = read_count ~action:action_a ~stage in
   let b_after = read_count ~action:action_b ~stage in
+  Alcotest.(check bool)
+    "action A violation re-raises"
+    true raised;
   Alcotest.(check (float 0.0001))
     "action A counter bumped"
     (a_before +. 1.0) a_after;
@@ -160,20 +164,20 @@ let () =
       test_case "name matches documented series" `Quick
         test_counter_constant_is_stable;
     ];
-    "counter mode (MASC_FSM_GUARD_ASSERT=0)", [
+    "fail closed", [
       test_case "honest thunk does not bump" `Quick
         test_honest_thunk_leaves_counter_alone;
-      test_case "buggy thunk swallows + bumps" `Quick
-        test_buggy_thunk_in_counter_mode_swallows_and_bumps;
+      test_case "env zero still re-raises + bumps" `Quick
+        test_env_zero_still_reraises_and_bumps;
       test_case "non-assert exception propagates" `Quick
         test_non_assert_exception_propagates_unchanged;
       test_case "action label isolation" `Quick
         test_distinct_action_label_isolation;
     ];
-    "assert mode (default + MASC_FSM_GUARD_ASSERT=1)", [
+    "assert mode", [
       test_case "default with cleared env is assert mode" `Quick
         test_default_is_assert_mode_when_env_cleared;
       test_case "buggy thunk re-raises after bumping" `Quick
-        test_buggy_thunk_in_assert_mode_reraises;
+        test_buggy_thunk_reraises;
     ];
   ]

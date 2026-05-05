@@ -28,7 +28,7 @@ The repo has **two TLA-related PPX systems**, with separate purposes and adoptio
 | Implementation | `ppx_tla/ppx_tla.ml` + `lib/keeper/keeper_fsm_guard_runtime.{ml,mli}` (33 + 36 LOC) |
 | Behaviour | Identity helper wrapping any value with `try assert(<expr>); v with Assert_failure -> incr counter; v` |
 | Metric | `metric_fsm_guard_violation` (`lib/prometheus.mli:293`) |
-| Runtime gate | `MASC_FSM_GUARD_ASSERT=0` disables re-raise (assert mode is default — production fails fast) |
+| Runtime gate | fail-closed: `Assert_failure` always re-raises after the violation counter increments |
 
 This is the canonical "spec-action as runtime invariant" hook documented in CLAUDE.md (`feedback_fsm_guard_identity_helper_counter_wrap_pattern`).
 

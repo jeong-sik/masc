@@ -100,6 +100,35 @@ let safe_path base requested =
     let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
     if String.starts_with ~prefix:base full then full else base
 
+(* Strip [base] (and the following separator) from [safe]. Handles
+   [base = "/"], trailing slash on [base], and [safe = base] (returns "").
+   Assumes [safe_path] has already enforced the prefix invariant. *)
+let rel_under base safe =
+  if safe = base then ""
+  else
+    let base_norm =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    let bn = String.length base_norm in
+    if String.length safe >= bn && String.starts_with ~prefix:base_norm safe
+    then String.sub safe bn (String.length safe - bn)
+    else safe
+
+(* Reject anything that could be parsed by git as an option (leading
+   "-") or that contains separators outside the conservative ref/SHA
+   charset. Defense against `?base_ref=-L1,9999` style injection
+   even on git versions that lack [--end-of-options]. *)
+let valid_git_ref s =
+  let n = String.length s in
+  n > 0 && n <= 256 && s.[0] <> '-'
+  && String.for_all (fun c ->
+       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+       || (c >= '0' && c <= '9')
+       || c = '/' || c = '.' || c = '_' || c = '-'
+       || c = '~' || c = '^' || c = '@')
+       s
+
 (* --- Recursive file tree --- *)
 
 let file_tree_node ~path ~label ~depth ~parent ~has_children =
@@ -162,6 +191,16 @@ let git_run_lines ~cwd args =
   | Some out ->
     String.split_on_char '\n' out
     |> List.filter (fun l -> l <> "")
+
+(* Surface git failure to the caller instead of collapsing to []. Lets
+   route handlers distinguish "command errored / invalid ref" from
+   "command succeeded with no output". *)
+let git_run_lines_or_error ~cwd args =
+  match git_run ~cwd args with
+  | None -> Error "git command failed"
+  | Some out ->
+    Ok (String.split_on_char '\n' out
+        |> List.filter (fun l -> l <> ""))
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
 
@@ -358,12 +397,16 @@ let add_routes router =
              else if not (Sys.file_exists safe) then
                json_response ~status:`Not_found request reqd (json_error "File not found")
              else
-               let rel = String.sub safe (String.length base + 1)
-                 (String.length safe - String.length base - 1) in
-               match git_run_lines ~cwd:base ["blame"; "--porcelain"; rel] with
-               | [] ->
+               let rel = rel_under base safe in
+               match git_run_lines_or_error ~cwd:base
+                       ["blame"; "--porcelain"; "--"; rel]
+               with
+               | Error _ ->
+                 json_response ~status:`Bad_request request reqd
+                   (json_error "git blame failed")
+               | Ok [] ->
                  json_response_with_source ~status:`OK ~source request reqd (`List [])
-               | lines ->
+               | Ok lines ->
                  let entries = parse_blame_porcelain lines in
                  let grouped = group_blame_entries rel entries in
                  json_response_with_source ~status:`OK ~source request reqd (`List grouped))
@@ -387,17 +430,25 @@ let add_routes router =
                | Some r -> r
                | None -> "HEAD"
              in
+             if not (valid_git_ref base_ref) then
+               json_response ~status:`Bad_request request reqd
+                 (json_error "Invalid base_ref")
+             else
              let safe = safe_path base file_path in
              if safe = base then
                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
              else
-               let rel = String.sub safe (String.length base + 1)
-                 (String.length safe - String.length base - 1) in
-               match git_run_lines ~cwd:base ["diff"; base_ref; "--"; rel] with
-               | [] ->
+               let rel = rel_under base safe in
+               match git_run_lines_or_error ~cwd:base
+                       ["diff"; base_ref; "--"; rel]
+               with
+               | Error _ ->
+                 json_response ~status:`Bad_request request reqd
+                   (json_error "git diff failed")
+               | Ok [] ->
                  json_response_with_source ~status:`OK ~source request reqd
                    (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
-               | diff_lines ->
+               | Ok diff_lines ->
                  let unified = parse_unified_diff diff_lines in
                  let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
                  json_response_with_source ~status:`OK ~source request reqd json)

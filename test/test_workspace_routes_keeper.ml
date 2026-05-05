@@ -141,6 +141,63 @@ let test_header_keeper_unknown () =
   let v = header_value (W.source_header (`KeeperUnknown "ghost")) in
   Alcotest.(check string) "unknown encoding" "keeper_unknown:ghost" v
 
+(* ─── rel_under (path math, root-base safety) ───────────────────── *)
+
+let test_rel_under_normal () =
+  Alcotest.(check string) "/repo + /repo/src/main.ml -> src/main.ml"
+    "src/main.ml" (W.rel_under "/repo" "/repo/src/main.ml")
+
+let test_rel_under_root_base () =
+  Alcotest.(check string) "/ + /etc/hosts -> etc/hosts"
+    "etc/hosts" (W.rel_under "/" "/etc/hosts")
+
+let test_rel_under_trailing_slash () =
+  Alcotest.(check string) "trailing-slash base normalises"
+    "src/a.ml" (W.rel_under "/repo/" "/repo/src/a.ml")
+
+let test_rel_under_equal () =
+  Alcotest.(check string) "safe = base -> empty"
+    "" (W.rel_under "/repo" "/repo")
+
+(* ─── valid_git_ref (option-injection guard) ────────────────────── *)
+
+let test_valid_ref_main () =
+  Alcotest.(check bool) "main is valid" true (W.valid_git_ref "main")
+
+let test_valid_ref_sha () =
+  Alcotest.(check bool) "40-char SHA is valid"
+    true (W.valid_git_ref "0123456789abcdef0123456789abcdef01234567")
+
+let test_valid_ref_path_form () =
+  Alcotest.(check bool) "origin/main is valid"
+    true (W.valid_git_ref "origin/main")
+
+let test_valid_ref_caret () =
+  Alcotest.(check bool) "HEAD^ is valid" true (W.valid_git_ref "HEAD^")
+
+let test_valid_ref_rejects_leading_dash () =
+  Alcotest.(check bool) "leading dash refused"
+    false (W.valid_git_ref "-L1,9999")
+
+let test_valid_ref_rejects_empty () =
+  Alcotest.(check bool) "empty refused" false (W.valid_git_ref "")
+
+let test_valid_ref_rejects_whitespace () =
+  Alcotest.(check bool) "embedded space refused"
+    false (W.valid_git_ref "main ; rm -rf /")
+
+let test_valid_ref_rejects_semicolon () =
+  Alcotest.(check bool) "semicolon refused"
+    false (W.valid_git_ref "main;ls")
+
+let test_valid_ref_rejects_newline () =
+  Alcotest.(check bool) "newline refused"
+    false (W.valid_git_ref "main\nrm")
+
+let test_valid_ref_rejects_oversize () =
+  Alcotest.(check bool) "oversize refused"
+    false (W.valid_git_ref (String.make 257 'a'))
+
 let () =
   Alcotest.run "workspace_routes_keeper"
     [ ( "classify_keeper_query"
@@ -157,5 +214,23 @@ let () =
         ; Alcotest.test_case "playground"        `Quick test_header_playground
         ; Alcotest.test_case "playground missing" `Quick test_header_playground_missing
         ; Alcotest.test_case "keeper unknown"    `Quick test_header_keeper_unknown
+        ] )
+    ; ( "rel_under"
+      , [ Alcotest.test_case "normal nested"     `Quick test_rel_under_normal
+        ; Alcotest.test_case "root base"         `Quick test_rel_under_root_base
+        ; Alcotest.test_case "trailing slash"    `Quick test_rel_under_trailing_slash
+        ; Alcotest.test_case "safe equals base"  `Quick test_rel_under_equal
+        ] )
+    ; ( "valid_git_ref"
+      , [ Alcotest.test_case "main"              `Quick test_valid_ref_main
+        ; Alcotest.test_case "40-char SHA"       `Quick test_valid_ref_sha
+        ; Alcotest.test_case "origin/main"       `Quick test_valid_ref_path_form
+        ; Alcotest.test_case "HEAD^"             `Quick test_valid_ref_caret
+        ; Alcotest.test_case "rejects -L1,9999"  `Quick test_valid_ref_rejects_leading_dash
+        ; Alcotest.test_case "rejects empty"     `Quick test_valid_ref_rejects_empty
+        ; Alcotest.test_case "rejects whitespace" `Quick test_valid_ref_rejects_whitespace
+        ; Alcotest.test_case "rejects semicolon" `Quick test_valid_ref_rejects_semicolon
+        ; Alcotest.test_case "rejects newline"   `Quick test_valid_ref_rejects_newline
+        ; Alcotest.test_case "rejects oversize"  `Quick test_valid_ref_rejects_oversize
         ] )
     ]

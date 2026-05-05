@@ -14,6 +14,18 @@ describe('parseWorkspaceSource', () => {
     expect(parseWorkspaceSource('project')).toEqual({ kind: 'project' })
   })
 
+  it('decodes "repository:<id>"', () => {
+    expect(parseWorkspaceSource('repository:masc'))
+      .toEqual({ kind: 'repository', repoId: 'masc' })
+  })
+
+  it('decodes repository fallback variants', () => {
+    expect(parseWorkspaceSource('repository_missing:masc'))
+      .toEqual({ kind: 'repository_missing', repoId: 'masc' })
+    expect(parseWorkspaceSource('repository_unknown:ghost'))
+      .toEqual({ kind: 'repository_unknown', repoId: 'ghost' })
+  })
+
   it('decodes "playground:<name>"', () => {
     expect(parseWorkspaceSource('playground:alpha'))
       .toEqual({ kind: 'playground', keeper: 'alpha' })

@@ -123,6 +123,10 @@ export function IdeShell() {
             fileTreeStore=${coordinator.fileTreeStore}
             workspaceSource=${coordinator.workspaceSource}
             subscribeWorkspaceSource=${coordinator.subscribeWorkspaceSource}
+            repositories=${coordinator.repositories}
+            activeRepositoryId=${coordinator.activeRepositoryId}
+            onRepositoryChange=${coordinator.setActiveRepositoryId}
+            subscribeRepositories=${coordinator.subscribeRepositories}
           />
         </div>
         <div

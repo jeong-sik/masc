@@ -20,7 +20,7 @@ export interface KeeperActivityDisplay {
   ageSeconds: number | null
 }
 
-export interface KeeperModelDisplay {
+interface KeeperModelDisplay {
   label: string
   value: string
 }

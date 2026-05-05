@@ -37,9 +37,9 @@ import {
   KEEPER_STREAM_IDLE_TIMEOUT_MS,
 } from './config/constants'
 
-export type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
+type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
-export interface KeeperInterjectCommand {
+interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
   readonly keeperName: string
   readonly message?: string

@@ -124,6 +124,10 @@ let autonomous_turn_semaphore_value_for_test () =
 let reactive_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value reactive_turn_semaphore
 
+let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
+let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
+let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
+
 type autonomous_waiter =
   {
     ticket : int;

@@ -1107,6 +1107,7 @@
 (include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
 (include stanzas/test_keeper_semaphore_fairness.inc)
 (include stanzas/test_keeper_semaphore_wait_counter.inc)
+(include stanzas/test_keeper_turn_slot_holders.inc)
 (include stanzas/test_keeper_shell_docker_cwd_response.inc)
 (include stanzas/test_keeper_state_snapshot_json.inc)
 (include stanzas/test_keeper_summarizer.inc)

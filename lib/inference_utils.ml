@@ -52,72 +52,9 @@ let timed (f : unit -> 'a) : 'a * int =
 (* UTF-8 Sanitization                                               *)
 (* ================================================================ *)
 
-let is_disallowed_control_char (c : char) : bool =
-  let code = Char.code c in
-  (code < 32 && c <> '\n' && c <> '\r' && c <> '\t') || code = 127
+let sanitize_text_utf8 = Safe_ops.sanitize_text_utf8
 
-let sanitize_text_utf8 (s : string) : string =
-  let len = String.length s in
-  (* Fast path: scan for invalid UTF-8 or prompt-breaking control chars
-     without allocating. Keep LF/CR/TAB because prompts rely on them. *)
-  let rec has_invalid_or_control i =
-    if i >= len then false
-    else
-      let dec = String.get_utf_8_uchar s i in
-      let dlen = Uchar.utf_decode_length dec in
-      if dlen > 0 && Uchar.utf_decode_is_valid dec then
-        if dlen = 1 && is_disallowed_control_char s.[i] then true
-        else has_invalid_or_control (i + dlen)
-      else true
-  in
-  if not (has_invalid_or_control 0) then s
-  else
-    let buf = Buffer.create len in
-    let rec loop i =
-      if i >= len then ()
-      else
-        let dec = String.get_utf_8_uchar s i in
-        let dlen = Uchar.utf_decode_length dec in
-        if dlen > 0 && Uchar.utf_decode_is_valid dec then (
-          if dlen = 1 && is_disallowed_control_char s.[i] then
-            Buffer.add_char buf ' '
-          else
-            Buffer.add_substring buf s i dlen;
-          loop (i + dlen))
-        else (
-          Buffer.add_string buf "\xEF\xBF\xBD";
-          loop (i + 1))
-    in
-    loop 0;
-    Buffer.contents buf
-
-let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `String s ->
-      let sanitized = sanitize_text_utf8 s in
-      if sanitized == s then json else `String sanitized
-  | `Assoc fields ->
-      let changed = ref false in
-      let sanitized_fields =
-        List.map (fun (key, value) ->
-          let sanitized_key = sanitize_text_utf8 key in
-          let sanitized_value = sanitize_json_utf8 value in
-          if sanitized_key != key || sanitized_value != value then changed := true;
-          (sanitized_key, sanitized_value)
-        ) fields
-      in
-      if !changed then `Assoc sanitized_fields else json
-  | `List items ->
-      let changed = ref false in
-      let sanitized_items =
-        List.map (fun item ->
-          let sanitized = sanitize_json_utf8 item in
-          if sanitized != item then changed := true;
-          sanitized
-        ) items
-      in
-      if !changed then `List sanitized_items else json
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
+let sanitize_json_utf8 = Safe_ops.sanitize_json_utf8
 
 let rec sanitize_content_blocks_utf8
     (blocks : Agent_sdk.Types.content_block list)

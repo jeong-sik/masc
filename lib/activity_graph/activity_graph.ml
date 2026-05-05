@@ -47,9 +47,32 @@ let write_current_seq config seq =
 let append_line path line =
   Fs_compat.append_file path line
 
+let sanitize_entity_ref (value : entity_ref) =
+  {
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
+    id = Safe_ops.sanitize_text_utf8 value.id;
+  }
+
+let sanitize_event (value : event) =
+  {
+    value with
+    ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
+    room_id = Safe_ops.sanitize_text_utf8 value.room_id;
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
+    actor = Option.map sanitize_entity_ref value.actor;
+    subject = Option.map sanitize_entity_ref value.subject;
+    payload = Safe_ops.sanitize_json_utf8 value.payload;
+    tags = List.map Safe_ops.sanitize_text_utf8 value.tags;
+  }
+
+let event_json_string (value : event) =
+  value |> sanitize_event |> event_to_yojson |> Yojson.Safe.to_string
+
+let format_sse_event_data ~seq data =
+  Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" seq data
+
 let format_sse_event (value : event) =
-  let data = Yojson.Safe.to_string (event_to_yojson value) in
-  Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" value.seq data
+  format_sse_event_data ~seq:value.seq (event_json_string value)
 
 (* ================================================================ *)
 (* Event reading                                                    *)
@@ -143,7 +166,7 @@ let latest_seq config = read_current_seq config
 (* ================================================================ *)
 
 let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
-  let value =
+  let value, json_line =
     Coord_utils.with_file_lock config (lock_path config) (fun () ->
         ensure_dirs config;
         let seq = read_current_seq config + 1 in
@@ -160,12 +183,13 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             payload;
             tags;
           }
+          |> sanitize_event
         in
-        append_line (day_path config)
-          (Yojson.Safe.to_string (event_to_yojson value) ^ "\n");
-        value)
+        let json_line = Yojson.Safe.to_string (event_to_yojson value) in
+        append_line (day_path config) (json_line ^ "\n");
+        (value, json_line))
   in
-  let encoded = format_sse_event value in
+  let encoded = format_sse_event_data ~seq:value.seq json_line in
   let snapshot =
     with_registry_ro (fun () -> Hashtbl.fold (fun key client acc -> (key, client) :: acc) clients [])
   in

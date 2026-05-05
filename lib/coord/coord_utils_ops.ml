@@ -148,9 +148,12 @@ let read_json_local path =
 let read_json_local_result path =
   Safe_ops.read_json_file_safe path
 
+let json_to_pretty_utf8 json =
+  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
-  let content = Yojson.Safe.pretty_to_string json in
+  let content = json_to_pretty_utf8 json in
   Fs_compat.save_file_atomic path content
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
@@ -179,7 +182,7 @@ let read_json_root config path =
 let write_json_root config path json =
   match root_key_of_path config path with
   | Some key ->
-      let content = Yojson.Safe.pretty_to_string json in
+      let content = json_to_pretty_utf8 json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
@@ -284,7 +287,7 @@ let should_dual_write_local (config : config) =
 let write_json config path json =
   match key_of_path config path with
   | Some key ->
-      let content = Yojson.Safe.pretty_to_string json in
+      let content = json_to_pretty_utf8 json in
       (match backend_set config ~key ~value:content with
        | Ok () -> ()
        | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));

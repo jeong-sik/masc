@@ -155,6 +155,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_ids_missing_from_source": 19,
                         "source_structured_item_ids_total": 0,
                         "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
                         "source_structured_item_id_families": [],
                         "source_aggregate_claim_status": "INCOMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
@@ -185,6 +186,10 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 19)
         self.assertEqual(audit_catalog["source_structured_item_ids_total"], 0)
         self.assertEqual(audit_catalog["source_structured_item_ids_uncataloged"], 0)
+        self.assertEqual(
+            audit_catalog["source_structured_item_ids_uncataloged_occurrences"],
+            0,
+        )
         self.assertEqual(audit_catalog["source_structured_item_id_families"], [])
         self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
@@ -233,6 +238,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_ids_missing_from_source": 0,
                         "source_structured_item_ids_total": 18,
                         "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
                         "source_structured_item_id_families": [
                             {
                                 "family": "NF",

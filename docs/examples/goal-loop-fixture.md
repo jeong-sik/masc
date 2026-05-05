@@ -141,7 +141,9 @@ digest metadata, it should also show `source_identity_status=COMPLETE` and
 `source_structured_item_ids_uncataloged` fields expose broader structured IDs
 that need separate triage instead of silently expanding the strict GOAL LOOP
 audit catalog. `source_structured_item_id_families` groups that backlog by ID
-family so it can be assigned to the right follow-up catalog. `--require-complete-catalog`
+family so it can be assigned to the right follow-up catalog.
+`source_structured_item_ids_uncataloged_occurrence_samples` preserves concrete
+source path and line evidence for the uncataloged IDs. `--require-complete-catalog`
 can still fail because the row-level 206 corpus is incomplete.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when

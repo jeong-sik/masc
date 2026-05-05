@@ -191,6 +191,9 @@ def build_completion_audit(status: dict[str, Any]) -> CompletionAudit:
         "source_structured_item_ids_uncataloged": audit_catalog.get(
             "source_structured_item_ids_uncataloged"
         ),
+        "source_structured_item_ids_uncataloged_occurrences": audit_catalog.get(
+            "source_structured_item_ids_uncataloged_occurrences"
+        ),
         "source_structured_item_id_families": audit_catalog.get(
             "source_structured_item_id_families",
             [],

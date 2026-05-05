@@ -479,6 +479,7 @@ def source_artifact_summary(
     resolved = 0
     source_finding_ids: set[str] = set()
     source_structured_item_ids: set[str] = set()
+    source_structured_item_occurrences: dict[str, list[dict[str, Any]]] = {}
     catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
     resolved_contents: dict[str, str] = {}
     source_identity_errors: list[dict[str, Any]] = []
@@ -520,7 +521,18 @@ def source_artifact_summary(
         content = content_bytes.decode("utf-8")
         resolved_contents[path_text] = content
         source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
-        source_structured_item_ids.update(SOURCE_STRUCTURED_ITEM_ID_RE.findall(content))
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            for match in SOURCE_STRUCTURED_ITEM_ID_RE.finditer(line):
+                item_id = match.group(0)
+                source_structured_item_ids.add(item_id)
+                source_structured_item_occurrences.setdefault(item_id, []).append(
+                    {
+                        "item_id": item_id,
+                        "family": structured_item_id_family(item_id),
+                        "path": path_text,
+                        "line": line_number,
+                    }
+                )
         source_expectation = source_expectations.get(path_text)
         if source_expectation is not None and has_source_identity_expectation(
             source_expectation
@@ -574,6 +586,11 @@ def source_artifact_summary(
     source_structured_ids_uncataloged = sorted(
         source_structured_item_ids - catalog_finding_ids
     )
+    source_structured_uncataloged_occurrences = [
+        occurrence
+        for item_id in source_structured_ids_uncataloged
+        for occurrence in source_structured_item_occurrences.get(item_id, [])
+    ]
     source_structured_item_id_families = structured_item_id_family_summary(
         source_structured_item_ids,
         catalog_finding_ids,
@@ -629,6 +646,9 @@ def source_artifact_summary(
         "source_structured_item_ids_uncataloged": len(
             source_structured_ids_uncataloged
         ),
+        "source_structured_item_ids_uncataloged_occurrences": len(
+            source_structured_uncataloged_occurrences
+        ),
         "source_structured_item_id_families": source_structured_item_id_families,
         **aggregate_claims,
         "source_identity_status": source_identity_status,
@@ -643,6 +663,9 @@ def source_artifact_summary(
         "catalog_ids_missing_from_source_samples": catalog_ids_missing_from_source[:10],
         "source_structured_item_ids_uncataloged_samples": (
             source_structured_ids_uncataloged[:20]
+        ),
+        "source_structured_item_ids_uncataloged_occurrence_samples": (
+            source_structured_uncataloged_occurrences[:30]
         ),
     }
 

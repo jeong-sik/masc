@@ -52,6 +52,7 @@ def complete_status() -> dict[str, object]:
                         "consistency_findings_open": 0,
                         "source_structured_item_ids_total": 206,
                         "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
                         "source_structured_item_id_families": [
                             {
                                 "family": "NF",
@@ -83,6 +84,7 @@ def blocked_status() -> dict[str, object]:
     audit_catalog["consistency_findings_open"] = 1
     audit_catalog["source_structured_item_ids_total"] = 91
     audit_catalog["source_structured_item_ids_uncataloged"] = 72
+    audit_catalog["source_structured_item_ids_uncataloged_occurrences"] = 72
     audit_catalog["source_structured_item_id_families"] = [
         {
             "family": "P-DASH",

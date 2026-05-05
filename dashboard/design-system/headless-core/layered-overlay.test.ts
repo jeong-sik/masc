@@ -145,6 +145,63 @@ describe('createLayeredOverlay', () => {
   })
 })
 
+describe('createLayeredOverlay — conflictsWith (RFC-0028 §3 / §10)', () => {
+  const CONFLICT_LAYERS: ReadonlyArray<OverlayLayer> = [
+    { kind: 'time', label: 'Time', description: '' },
+    { kind: 'cascade', label: 'Cascade', description: '' },
+    {
+      kind: 'keeper-trace',
+      label: 'Keeper Trace',
+      description: '',
+      conflictsWith: ['cascade'],
+    },
+  ]
+
+  it('activating a layer with conflictsWith drops every active conflicting layer', () => {
+    const c = createLayeredOverlay(CONFLICT_LAYERS)
+    c.toggle('cascade')
+    c.toggle('keeper-trace')
+    expect([...c.active()]).toEqual(['keeper-trace'])
+  })
+
+  it('activating the conflicted-with layer drops the layer that declared the conflict', () => {
+    const c = createLayeredOverlay(CONFLICT_LAYERS)
+    c.toggle('keeper-trace')
+    c.toggle('cascade')
+    // Symmetric: cascade activating drops keeper-trace because keeper-trace
+    // declared cascade in its conflictsWith.
+    expect([...c.active()]).toEqual(['cascade'])
+  })
+
+  it('preserves a non-conflicting layer alongside the new one', () => {
+    const c = createLayeredOverlay(CONFLICT_LAYERS)
+    c.toggle('time')
+    c.toggle('cascade')
+    c.toggle('keeper-trace')
+    // 'time' is not in any conflictsWith → stays. 'cascade' goes.
+    expect([...c.active()].sort()).toEqual(['keeper-trace', 'time'])
+  })
+
+  it('setActive resolves multi-layer conflicts deterministically (registration order)', () => {
+    const c = createLayeredOverlay(CONFLICT_LAYERS)
+    c.setActive(new Set(['cascade', 'keeper-trace', 'time']))
+    // 'cascade' is registered first → wins; 'keeper-trace' (later) loses.
+    expect([...c.active()].sort()).toEqual(['cascade', 'time'])
+  })
+
+  it('self-conflict declarations are ignored (kindA === kindB never conflicts)', () => {
+    const SELF_CONFLICT_LAYERS: ReadonlyArray<OverlayLayer> = [
+      { kind: 'a', label: 'A', description: '', conflictsWith: ['a'] },
+      { kind: 'b', label: 'B', description: '' },
+    ]
+    const c = createLayeredOverlay(SELF_CONFLICT_LAYERS)
+    c.toggle('a')
+    expect(c.isActive('a')).toBe(true)
+    c.toggle('b')
+    expect([...c.active()].sort()).toEqual(['a', 'b'])
+  })
+})
+
 describe('serializeActive / parseActive', () => {
   const KNOWN = new Set(LAYERS.map(l => l.kind))
 

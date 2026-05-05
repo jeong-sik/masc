@@ -255,6 +255,39 @@ let test_rel_under_equal () =
   Alcotest.(check string) "safe = base -> empty"
     "" (W.rel_under "/repo" "/repo")
 
+(* ─── scan_dir (bounded file-tree scan) ──────────────────────────── *)
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
+let with_temp_dir name f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-workspace-routes-%d-%s" (Unix.getpid ()) name)
+  in
+  remove_tree dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
+
+let touch path =
+  let oc = open_out path in
+  close_out oc
+
+let test_scan_dir_respects_max_nodes () =
+  with_temp_dir "wide-tree" (fun dir ->
+    for i = 1 to 80 do
+      touch (Filename.concat dir (Printf.sprintf "file-%03d.txt" i))
+    done;
+    let nodes = W.scan_dir ~base:dir ~depth:0 ~max_depth:1 ~max_nodes:25 [] dir in
+    Alcotest.(check int) "node cap" 25 (List.length nodes))
+
 (* ─── valid_git_ref (option-injection guard) ────────────────────── *)
 
 let test_valid_ref_main () =
@@ -338,6 +371,9 @@ let () =
         ; Alcotest.test_case "root base"         `Quick test_rel_under_root_base
         ; Alcotest.test_case "trailing slash"    `Quick test_rel_under_trailing_slash
         ; Alcotest.test_case "safe equals base"  `Quick test_rel_under_equal
+        ] )
+    ; ( "scan_dir"
+      , [ Alcotest.test_case "respects max node cap" `Quick test_scan_dir_respects_max_nodes
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

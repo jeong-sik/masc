@@ -19,6 +19,7 @@ import { registerBoardHearthsRefresh } from '../../sse-store'
 import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
+import { StateBlockMessages } from './state-block-messages'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -734,6 +735,15 @@ export function BoardSurface() {
       <div>
         <${BoardSummary} />
         <${MentionInbox} />
+      </div>
+    `
+  }
+
+  if (focus === 'state-block') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${StateBlockMessages} />
       </div>
     `
   }

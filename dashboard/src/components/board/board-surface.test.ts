@@ -244,6 +244,16 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
+  it('routes the state-block focus to the message surface', () => {
+    route.value = { params: { focus: 'state-block' } } as any
+    messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]' }]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
   it('hides system posts by default', () => {
     boardPosts.value = [
       makePost({

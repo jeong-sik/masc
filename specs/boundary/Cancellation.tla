@@ -1,7 +1,7 @@
 ---- MODULE Cancellation ----
 \* Boundary spec for the keeper cancellation token (lib/cancellation.ml).
 \*
-\* Runtime truth (lib/cancellation.ml:150-160):
+\* Runtime truth (archived: lib/cancellation.ml):
 \*
 \*   let cancel ?(reason : string option) (token : token) : unit =
 \*     (* Write reason first, then atomically transition cancelled to true.

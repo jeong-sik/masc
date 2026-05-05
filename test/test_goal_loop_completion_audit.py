@@ -12,6 +12,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "goal_loop_completion_audit.py"
+TRIAGE_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "structured-id-triage.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_completion_audit", SCRIPT_PATH)
 assert spec is not None
@@ -84,14 +91,80 @@ def blocked_status() -> dict[str, object]:
     audit_catalog["consistency_findings_open"] = 1
     audit_catalog["source_structured_item_ids_total"] = 91
     audit_catalog["source_structured_item_ids_uncataloged"] = 72
-    audit_catalog["source_structured_item_ids_uncataloged_occurrences"] = 72
+    audit_catalog["source_structured_item_ids_uncataloged_occurrences"] = 260
     audit_catalog["source_structured_item_id_families"] = [
+        {
+            "family": "F",
+            "total": 4,
+            "uncataloged": 4,
+            "uncataloged_samples": ["F01", "F02", "F03", "F04"],
+        },
+        {
+            "family": "NEW",
+            "total": 10,
+            "uncataloged": 10,
+            "uncataloged_samples": ["NEW-1"],
+        },
         {
             "family": "P-DASH",
             "total": 13,
             "uncataloged": 13,
             "uncataloged_samples": ["P-DASH-01"],
-        }
+        },
+        {
+            "family": "P-EIO",
+            "total": 7,
+            "uncataloged": 7,
+            "uncataloged_samples": ["P-EIO-01"],
+        },
+        {
+            "family": "P-FSM",
+            "total": 10,
+            "uncataloged": 10,
+            "uncataloged_samples": ["P-FSM-01"],
+        },
+        {
+            "family": "P-HARD",
+            "total": 5,
+            "uncataloged": 5,
+            "uncataloged_samples": ["P-HARD-01"],
+        },
+        {
+            "family": "P-MUT",
+            "total": 2,
+            "uncataloged": 2,
+            "uncataloged_samples": ["P-MUT-01"],
+        },
+        {
+            "family": "P-PROAC",
+            "total": 1,
+            "uncataloged": 1,
+            "uncataloged_samples": ["P-PROAC-01"],
+        },
+        {
+            "family": "P-PROV",
+            "total": 4,
+            "uncataloged": 4,
+            "uncataloged_samples": ["P-PROV-01"],
+        },
+        {
+            "family": "P-STR",
+            "total": 3,
+            "uncataloged": 3,
+            "uncataloged_samples": ["P-STR-01"],
+        },
+        {
+            "family": "P-TURN",
+            "total": 3,
+            "uncataloged": 3,
+            "uncataloged_samples": ["P-TURN-02"],
+        },
+        {
+            "family": "S",
+            "total": 10,
+            "uncataloged": 10,
+            "uncataloged_samples": ["S01"],
+        },
     ]
     verify_summary = status["phases"]["verify"]["summary"]
     verify_summary["verify_status"] = "FAIL"
@@ -114,11 +187,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("strict_row_level_catalog_complete", audit.blockers)
         self.assertIn("aggregate_consistency_resolved", audit.blockers)
-        self.assertIn("broader_structured_ids_cataloged", audit.blockers)
+        self.assertIn("broader_structured_ids_triaged", audit.blockers)
         self.assertIn("post_act_verify_complete", audit.blockers)
         by_id = {item.criterion_id: item for item in audit.criteria}
         self.assertEqual(
-            by_id["broader_structured_ids_cataloged"].status,
+            by_id["broader_structured_ids_triaged"].status,
             "WARN",
         )
         self.assertEqual(
@@ -126,6 +199,25 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                 "missing_itemized_findings"
             ],
             187,
+        )
+
+    def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
+        triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))
+        audit = goal_loop_completion_audit.build_completion_audit(
+            blocked_status(),
+            structured_id_triage=triage,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertNotIn("broader_structured_ids_triaged", audit.blockers)
+        self.assertIn("strict_row_level_catalog_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        self.assertEqual(by_id["broader_structured_ids_triaged"].status, "PASS")
+        self.assertEqual(
+            by_id["broader_structured_ids_triaged"].evidence["structured_id_triage"][
+                "triage_families_total"
+            ],
+            12,
         )
 
     def test_completion_audit_cli_can_fail_until_goal_is_closeable(self) -> None:
@@ -137,6 +229,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     sys.executable,
                     str(SCRIPT_PATH),
                     str(status_path),
+                    "--structured-id-triage",
+                    str(TRIAGE_FIXTURE),
                     "--require-complete",
                 ],
                 text=True,
@@ -149,6 +243,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertIn("post_act_verify_complete", payload["blockers"])
+        self.assertNotIn("broader_structured_ids_triaged", payload["blockers"])
 
 
 if __name__ == "__main__":

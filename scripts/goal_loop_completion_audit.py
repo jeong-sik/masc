@@ -43,6 +43,16 @@ def load_json_input(path: str, *, stdin: TextIO = sys.stdin) -> dict[str, Any]:
     return data
 
 
+def load_optional_json_file(path: str | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    with Path(path).open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected JSON object: {path}")
+    return data
+
+
 def nested_dict(value: Any, *keys: str) -> dict[str, Any]:
     current = value
     for key in keys:
@@ -78,7 +88,105 @@ def criterion(
     )
 
 
-def build_completion_audit(status: dict[str, Any]) -> CompletionAudit:
+def structured_triage_evidence(
+    structured_evidence: dict[str, Any],
+    structured_id_triage: dict[str, Any] | None,
+) -> tuple[bool, bool, dict[str, Any]]:
+    structured_uncataloged = as_int(
+        structured_evidence["source_structured_item_ids_uncataloged"]
+    )
+    structured_occurrences = as_int(
+        structured_evidence.get("source_structured_item_ids_uncataloged_occurrences")
+    )
+    structured_families = structured_evidence["source_structured_item_id_families"]
+    if structured_uncataloged == 0:
+        return True, False, {"triage_status": "NOT_REQUIRED"}
+    if not isinstance(structured_families, list):
+        return False, True, {"triage_status": "MISSING_FAMILY_SUMMARY"}
+    if structured_id_triage is None:
+        return False, True, {"triage_status": "MISSING_TRIAGE_MANIFEST"}
+
+    required_families = {
+        family["family"]: as_int(family.get("uncataloged"))
+        for family in structured_families
+        if isinstance(family, dict)
+        and isinstance(family.get("family"), str)
+        and as_int(family.get("uncataloged")) > 0
+    }
+    raw_entries = structured_id_triage.get("families", [])
+    entries = raw_entries if isinstance(raw_entries, list) else []
+    coverage: dict[str, int] = {}
+    incomplete: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        family = entry.get("family")
+        if not isinstance(family, str):
+            continue
+        coverage[family] = as_int(entry.get("uncataloged"))
+        if not isinstance(entry.get("owner_catalog"), str) or not entry.get(
+            "owner_catalog"
+        ):
+            incomplete.append(family)
+        if not isinstance(entry.get("disposition"), str) or not entry.get(
+            "disposition"
+        ):
+            incomplete.append(family)
+
+    missing_families = sorted(set(required_families) - set(coverage))
+    extra_families = sorted(set(coverage) - set(required_families))
+    count_mismatches = [
+        {
+            "family": family,
+            "expected": required_count,
+            "actual": coverage.get(family),
+        }
+        for family, required_count in sorted(required_families.items())
+        if coverage.get(family) != required_count
+    ]
+    expected_ids_total = structured_id_triage.get("expected_uncataloged_ids_total")
+    expected_occurrences = structured_id_triage.get("expected_uncataloged_occurrences")
+    total_matches = (
+        as_int(expected_ids_total) == structured_uncataloged
+        if expected_ids_total is not None
+        else False
+    )
+    occurrence_matches = (
+        as_int(expected_occurrences) == structured_occurrences
+        if expected_occurrences is not None
+        else False
+    )
+    triage_status = structured_id_triage.get("status")
+    passed = (
+        triage_status == "TRIAGED"
+        and total_matches
+        and occurrence_matches
+        and not missing_families
+        and not extra_families
+        and not count_mismatches
+        and not incomplete
+    )
+    evidence = {
+        "triage_status": triage_status,
+        "triage_id": structured_id_triage.get("triage_id"),
+        "triage_families_total": len(entries),
+        "missing_families": missing_families,
+        "extra_families": extra_families,
+        "count_mismatches": count_mismatches,
+        "incomplete_families": sorted(set(incomplete)),
+        "expected_uncataloged_ids_total": expected_ids_total,
+        "expected_uncataloged_occurrences": expected_occurrences,
+        "total_matches": total_matches,
+        "occurrence_matches": occurrence_matches,
+    }
+    return passed, not passed, evidence
+
+
+def build_completion_audit(
+    status: dict[str, Any],
+    *,
+    structured_id_triage: dict[str, Any] | None = None,
+) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
 
@@ -199,16 +307,10 @@ def build_completion_audit(status: dict[str, Any]) -> CompletionAudit:
             [],
         ),
     }
-    structured_uncataloged = as_int(
-        structured_evidence["source_structured_item_ids_uncataloged"]
+    structured_passed, structured_warning, structured_triage = (
+        structured_triage_evidence(structured_evidence, structured_id_triage)
     )
-    structured_families = structured_evidence["source_structured_item_id_families"]
-    structured_passed = structured_uncataloged == 0
-    structured_warning = (
-        structured_uncataloged > 0
-        and isinstance(structured_families, list)
-        and len(structured_families) > 0
-    )
+    structured_evidence["structured_id_triage"] = structured_triage
 
     violation_kinds_raw = verify_summary.get("violation_kinds", [])
     violation_kinds = (
@@ -269,9 +371,9 @@ def build_completion_audit(status: dict[str, Any]) -> CompletionAudit:
             consistency_evidence,
         ),
         criterion(
-            "broader_structured_ids_cataloged",
+            "broader_structured_ids_triaged",
             structured_passed,
-            "Broader structured source IDs are cataloged; uncataloged groups remain follow-up work.",
+            "Broader structured source IDs are either absent from the backlog or covered by an ownership triage manifest.",
             structured_evidence,
             warning=structured_warning,
         ),
@@ -322,6 +424,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Output format (default: json).",
     )
     parser.add_argument(
+        "--structured-id-triage",
+        help="Optional triage manifest for broader uncataloged structured IDs.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -331,7 +437,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    audit = build_completion_audit(load_json_input(args.status_json))
+    audit = build_completion_audit(
+        load_json_input(args.status_json),
+        structured_id_triage=load_optional_json_file(args.structured_id_triage),
+    )
     if args.format == "json":
         print(audit_to_json(audit))
     else:

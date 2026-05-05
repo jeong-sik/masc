@@ -169,6 +169,7 @@ complete:
 ```bash
 python3 scripts/goal_loop_completion_audit.py \
   /tmp/goal-loop-status-audit.json \
+  --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
   --require-complete \
   --format text
 ```
@@ -176,5 +177,6 @@ python3 scripts/goal_loop_completion_audit.py \
 Expected key fact: this exits non-zero until every completion criterion passes.
 With the current fixture and external source manifest it reports `BLOCKED`
 because the strict row-level catalog is incomplete, the aggregate mismatch is
-open, broader structured IDs remain uncataloged, and post-ACT Verify is still
-pending.
+open, and post-ACT Verify is still pending. The broader structured-ID criterion
+passes only when the triage manifest covers every uncataloged family and
+expected occurrence count.

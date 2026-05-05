@@ -121,13 +121,15 @@
   confidence High: exits non-zero while the 206-vs-214 aggregate-count
   consistency finding remains open.
 - [근거] `python3 scripts/goal_loop_completion_audit.py
-  /tmp/goal-loop-status-audit.json --require-complete --format text` checked at
-  2026-05-06T06:50:00+09:00, confidence High: exits non-zero with explicit
-  blockers `strict_row_level_catalog_complete`,
-  `aggregate_consistency_resolved`, `broader_structured_ids_cataloged`, and
+  /tmp/goal-loop-status-audit.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T07:02:00+09:00,
+  confidence High: exits non-zero with explicit blockers
+  `strict_row_level_catalog_complete`, `aggregate_consistency_resolved`, and
   `post_act_verify_complete`, while preserving PASS evidence for source
   manifest coverage, source artifact validation, source identity, aggregate
-  claim source verification, and strict source/catalog ID sync.
+  claim source verification, strict source/catalog ID sync, and broader
+  structured-ID ownership triage.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   19 unique audit IDs, but the underlying prompt source artifacts are not yet

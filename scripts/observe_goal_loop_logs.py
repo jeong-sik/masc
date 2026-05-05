@@ -117,6 +117,24 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "Configuration parser ignored unknown keys after warning.",
     ),
     PatternSpec(
+        "autoboot_warmup",
+        r"warmup=\s*\d+s",
+        "warning",
+        "Keeper autoboot warmup delay marker.",
+    ),
+    PatternSpec(
+        "tool_policy_unknown_tools",
+        r"(tool[_ -]?policy.*unknown tools|unknown tools.*tool[_ -]?policy)",
+        "warning",
+        "Tool policy reported unknown tools.",
+    ),
+    PatternSpec(
+        "keeper_checkpoint_migration_data_loss",
+        r"(checkpoint migration.*data loss|data loss.*checkpoint migration)",
+        "critical",
+        "Keeper checkpoint migration reported data loss.",
+    ),
+    PatternSpec(
         "metric_all_zero",
         r"ka=0ms.*audit=0ms.*profile=0ms",
         "warning",

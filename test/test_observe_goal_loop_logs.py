@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "observe_goal_loop_logs.py"
+ORIENT_SCRIPT_PATH = REPO_ROOT / "scripts" / "orient_goal_loop_logs.py"
 
 spec = importlib.util.spec_from_file_location("observe_goal_loop_logs", SCRIPT_PATH)
 assert spec is not None
@@ -18,6 +19,15 @@ observe_goal_loop_logs = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 sys.modules[spec.name] = observe_goal_loop_logs
 spec.loader.exec_module(observe_goal_loop_logs)
+
+orient_spec = importlib.util.spec_from_file_location(
+    "orient_goal_loop_logs", ORIENT_SCRIPT_PATH
+)
+assert orient_spec is not None
+orient_goal_loop_logs = importlib.util.module_from_spec(orient_spec)
+assert orient_spec.loader is not None
+sys.modules[orient_spec.name] = orient_goal_loop_logs
+orient_spec.loader.exec_module(orient_goal_loop_logs)
 
 
 class ObserveGoalLoopLogsTest(unittest.TestCase):
@@ -32,6 +42,9 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s)",
                         "[WARN] [Governance] Governance judge returned unparseable response (Lenient_json fallback hit; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
+                        "[INFO] verifier: warmup=255s",
+                        "[WARN] tool_policy unknown tools: foo, bar, baz",
+                        "[ERROR] keeper checkpoint migration data loss detected",
                         "[keepers_json:*] sub-op: meta=12ms agent=7ms ka=0ms audit=0ms profile=0ms phase=0ms activity=0ms",
                     ]
                 )
@@ -41,13 +54,18 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
             report = observe_goal_loop_logs.scan_logs([str(path)], max_samples=2)
 
-        self.assertEqual(report.total_lines, 6)
+        self.assertEqual(report.total_lines, 9)
         self.assertEqual(report.patterns["provider_health_skipped"].count, 1)
         self.assertEqual(report.patterns["credential_archived_starvation"].count, 1)
         self.assertEqual(report.patterns["alive_but_stuck"].count, 1)
         self.assertEqual(report.patterns["governance_unparseable"].count, 1)
         self.assertEqual(report.patterns["lenient_json_fallback"].count, 1)
         self.assertEqual(report.patterns["config_unknown_key"].count, 1)
+        self.assertEqual(report.patterns["autoboot_warmup"].count, 1)
+        self.assertEqual(report.patterns["tool_policy_unknown_tools"].count, 1)
+        self.assertEqual(
+            report.patterns["keeper_checkpoint_migration_data_loss"].count, 1
+        )
         self.assertEqual(report.patterns["metric_all_zero"].count, 1)
 
     def test_fail_on_critical_exits_nonzero(self) -> None:
@@ -68,6 +86,52 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("alive_but_stuck", result.stdout)
+
+    def test_orient_reports_present_findings_from_scan_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            empty_log = Path(raw_dir) / "empty.log"
+            empty_log.write_text("", encoding="utf-8")
+            scan = observe_goal_loop_logs.scan_logs([str(empty_log)], max_samples=1)
+        scan.patterns["provider_health_skipped"].count = 1
+        scan.patterns["provider_health_skipped"].samples.append(
+            observe_goal_loop_logs.MatchSample(
+                path="server.log",
+                line=1,
+                text="bootstrap skips live probe",
+            )
+        )
+        scan.patterns["config_unknown_key"].count = 1
+
+        report = orient_goal_loop_logs.orient_scan(
+            {
+                "files": scan.files,
+                "total_lines": scan.total_lines,
+                "matched_lines": scan.matched_lines,
+                "patterns": {
+                    name: {
+                        "count": item.count,
+                        "severity": item.severity,
+                        "description": item.description,
+                        "samples": [
+                            {
+                                "path": sample.path,
+                                "line": sample.line,
+                                "text": sample.text,
+                            }
+                            for sample in item.samples
+                        ],
+                    }
+                    for name, item in scan.patterns.items()
+                },
+            }
+        )
+
+        by_id = {finding.finding_id: finding for finding in report.findings}
+        self.assertEqual(by_id["NF-1"].status, "EVIDENCE_PRESENT")
+        self.assertEqual(by_id["NF-6"].status, "EVIDENCE_PRESENT")
+        self.assertEqual(by_id["NF-2"].status, "EVIDENCE_ABSENT")
+        self.assertEqual(report.summary["evidence_present"], 2)
+        self.assertEqual(report.summary["critical_present"], 1)
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ const DEFAULT_LIMIT = 100
  *
  * Input is never mutated.
  */
-export function filterVerificationRequests(
+function filterVerificationRequests(
   rows: readonly VerificationRequest[],
   query: string,
 ): readonly VerificationRequest[] {

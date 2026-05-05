@@ -17,7 +17,7 @@ interface DecisionStats {
 
 const decisions: AsyncResource<KeeperDecisionsResponse> = createAsyncResource()
 
-export function decisionOutcomeTone(outcome?: string | null): string {
+function decisionOutcomeTone(outcome?: string | null): string {
   switch ((outcome ?? '').trim().toLowerCase()) {
     case 'success':
     case 'ok':
@@ -31,11 +31,11 @@ export function decisionOutcomeTone(outcome?: string | null): string {
   }
 }
 
-export function formatDecisionTime(tsUnix: number | null): string {
+function formatDecisionTime(tsUnix: number | null): string {
   return tsUnix == null ? '-' : formatTimeHms(tsUnix)
 }
 
-export function summarizeDecisionEvents(events: readonly KeeperDecision[]): DecisionStats {
+function summarizeDecisionEvents(events: readonly KeeperDecision[]): DecisionStats {
   return events.reduce<DecisionStats>(
     (acc, event) => {
       acc.total += 1
@@ -58,7 +58,7 @@ function MetricCell({ label, value }: { label: string; value: string | number })
   `
 }
 
-export function KeeperDecisionsTable({
+function KeeperDecisionsTable({
   events,
   limit,
 }: {

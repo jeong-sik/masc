@@ -15,7 +15,7 @@ import { useSavedSignal } from '../lib/saved-signal'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { get, type GetOptions } from '../api/core'
 
-export interface ToolRejection {
+interface ToolRejection {
   tool: string
   reason: string
   count: number
@@ -32,7 +32,7 @@ export interface ToolRejection {
  *
  * Input is never mutated.
  */
-export function filterToolRejections(
+function filterToolRejections(
   rows: readonly ToolRejection[],
   query: string,
 ): readonly ToolRejection[] {

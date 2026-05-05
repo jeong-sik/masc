@@ -299,7 +299,7 @@ function JudgmentsSection() {
  *
  * Input is never mutated; `KeeperApprovalQueueItem` is treated as readonly.
  */
-export function filterApprovalQueue(
+function filterApprovalQueue(
   items: readonly KeeperApprovalQueueItem[],
   query: string,
 ): readonly KeeperApprovalQueueItem[] {

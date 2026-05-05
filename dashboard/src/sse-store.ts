@@ -169,7 +169,7 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   execution: () => { void refreshExecution() },
-  board:     refreshBoard,
+  board:     () => { void refreshBoard() },
   operator:  () => _refreshOperatorFn?.(),
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()

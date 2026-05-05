@@ -134,8 +134,10 @@ files exist under `<GOAL_LOOP_SOURCE_ROOT>`. The source-artifact summary should 
 `source_artifacts_resolved=12`, `source_itemized_finding_ids_total=18`,
 `catalog_itemized_finding_ids_total=18`, zero source/catalog ID mismatch,
 `source_aggregate_claim_status=COMPLETE`, and
-`source_aggregate_claim_sources_verified=5`. `--require-complete-catalog` can
-still fail because the row-level 206 corpus is incomplete.
+`source_aggregate_claim_sources_verified=5`. With the checked catalog's
+digest metadata, it should also show `source_identity_status=COMPLETE` and
+`source_identity_checks_verified=12`. `--require-complete-catalog` can still
+fail because the row-level 206 corpus is incomplete.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:

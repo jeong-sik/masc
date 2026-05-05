@@ -94,15 +94,21 @@
   repository, with 12 resolved source artifacts, 18 source-itemized audit IDs,
   18 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, and 5/5
   aggregate claim source checks verified from resolved documents.
+- [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and `wc -l
+  <GOAL_LOOP_SOURCE_ROOT>/*.md` checked at 2026-05-06T06:23:00+09:00,
+  confidence High: the catalog records SHA-256 and line-count identity for all
+  12 prompt source artifacts, totaling 7,553 lines.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
   --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
   prompt_corpus/GOAL_LOOP --require-source-artifacts --format text` checked at
-  2026-05-06T06:17:46+09:00, confidence High: reports
-  `aggregate_claim_sources: COMPLETE verified=5 missing=0`, proving the
-  catalog's 206, 214, and 36-keeper aggregate claims are present in the
-  resolved source artifacts even though they remain mutually inconsistent.
+  2026-05-06T06:26:20+09:00, confidence High: reports
+  `aggregate_claim_sources: COMPLETE verified=5 missing=0` and
+  `source_identity: COMPLETE verified=12 failed=0`, proving the catalog's 206,
+  214, and 36-keeper aggregate claims are present in the resolved source
+  artifacts and that the external files match the checked digest manifest even
+  though the aggregate claims remain mutually inconsistent.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
@@ -237,8 +243,9 @@ source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
 external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
 `--audit-source-strip-prefix`, 18 source-itemized IDs matching the 18
 catalog-itemized findings, 5/5 aggregate claim source checks verified from
-resolved documents, 188 missing 206-itemized rows, one open consistency
-finding for the 206-vs-214 count mismatch that fails
+resolved documents, 12/12 source identity checks verified against checked
+SHA-256 and line-count metadata, 188 missing 206-itemized rows, one open
+consistency finding for the 206-vs-214 count mismatch that fails
 `--require-consistency-resolved`, and 8 itemized rows that are not evaluable
 from the startup log patterns.
 
@@ -364,8 +371,9 @@ No convergence claim is valid yet. The only safe current statement is:
    the aggregate numbers appear in the supplied documents.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
-   passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, but
-   public-repo replay still needs a stable non-user-local artifact policy.
+   passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and
+   the checked digest manifest proves source identity, but public-repo replay
+   still needs a stable non-user-local artifact distribution policy.
 3. Reconcile whether the governing audit total is 206 or 214 before closing
    the GOAL LOOP objective so `--require-consistency-resolved` passes.
 4. Re-run Orient against the complete corpus without changing code and update
@@ -384,6 +392,8 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
   `--require-complete-catalog` passing.
 - The catalog source paths are not replayed from a stable agreed artifact root
   with `--require-source-artifacts` passing.
+- The replayed external artifact root does not match the checked SHA-256 and
+  line-count identity manifest.
 - The 206-vs-214 aggregate-count consistency finding is still open and
   `--require-consistency-resolved` fails.
 - The 206-vs-214 aggregate-count mismatch is still open.

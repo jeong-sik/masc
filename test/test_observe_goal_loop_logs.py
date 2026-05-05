@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import subprocess
 import sys
@@ -68,6 +69,18 @@ def catalog_finding_ids(catalog: dict[str, object]) -> list[str]:
         assert isinstance(finding_id, str)
         ids.append(finding_id)
     return ids
+
+
+def catalog_without_source_identity(catalog: dict[str, object]) -> dict[str, object]:
+    stripped = json.loads(json.dumps(catalog))
+    assert isinstance(stripped, dict)
+    external_sources = stripped["external_sources"]
+    assert isinstance(external_sources, list)
+    for source in external_sources:
+        assert isinstance(source, dict)
+        source.pop("sha256", None)
+        source.pop("line_count", None)
+    return stripped
 
 
 def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
@@ -268,6 +281,9 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         )
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(source_artifacts["source_identity_status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_identity_checks_total"], 12)
+        self.assertEqual(source_artifacts["source_identity_checks_failed"], 12)
         self.assertIn(
             "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
             source_artifacts["missing_paths"],
@@ -342,6 +358,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             str(FIXTURE_DIR / "audit-corpus.external-claim.json")
         )
         assert catalog is not None
+        catalog = catalog_without_source_identity(catalog)
         external_sources = catalog["external_sources"]
         assert isinstance(external_sources, list)
         ids = catalog_finding_ids(catalog)
@@ -381,6 +398,75 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 5)
         self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 0)
+        self.assertEqual(source_artifacts["source_identity_status"], "NOT_APPLICABLE")
+
+    def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
+        content = "206건 감사 결과\nR-FATAL-1\n"
+        catalog = {
+            "external_sources": [
+                {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    "line_count": 2,
+                    "line_refs": [1, 2],
+                }
+            ],
+            "aggregate_claims": [
+                {
+                    "claim_id": "audit_total_206",
+                    "claimed_total": 206,
+                    "source_paths": [
+                        "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md"
+                    ],
+                }
+            ],
+            "findings": [{"finding_id": "R-FATAL-1"}],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
+            source_path.write_text(content, encoding="utf-8")
+            source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                catalog,
+                Path(raw_dir),
+                source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_identity_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_identity_checks_verified"], 1)
+        self.assertEqual(source_artifacts["source_identity_checks_failed"], 0)
+
+    def test_orient_catalog_detects_source_identity_mismatch(self) -> None:
+        catalog = {
+            "external_sources": [
+                {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "sha256": "0" * 64,
+                    "line_count": 999,
+                    "line_refs": [1],
+                }
+            ],
+            "findings": [],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
+            source_path.write_text("source line\n", encoding="utf-8")
+            source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                catalog,
+                Path(raw_dir),
+                source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_identity_status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_identity_checks_failed"], 1)
+        sample = source_artifacts["source_identity_error_samples"][0]
+        self.assertIn("sha256", sample)
+        self.assertIn("line_count", sample)
 
     def test_orient_catalog_can_detect_missing_aggregate_claim_evidence(self) -> None:
         scan = json_from_fixture("observe.startup.json")
@@ -388,6 +474,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             str(FIXTURE_DIR / "audit-corpus.external-claim.json")
         )
         assert catalog is not None
+        catalog = catalog_without_source_identity(catalog)
         external_sources = catalog["external_sources"]
         assert isinstance(external_sources, list)
         ids = catalog_finding_ids(catalog)
@@ -549,12 +636,14 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             str(FIXTURE_DIR / "audit-corpus.external-claim.json")
         )
         assert catalog is not None
+        catalog = catalog_without_source_identity(catalog)
         external_sources = catalog["external_sources"]
         assert isinstance(external_sources, list)
         ids = catalog_finding_ids(catalog)
 
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)
+            catalog_path = root / "catalog.json"
             for source in external_sources:
                 assert isinstance(source, dict)
                 source_path = source["path"]
@@ -563,6 +652,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     source_text_with_optional_ids(source_path, ids),
                     encoding="utf-8",
                 )
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
 
             result = subprocess.run(
                 [
@@ -570,7 +660,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     str(ORIENT_SCRIPT_PATH),
                     str(FIXTURE_DIR / "observe.startup.json"),
                     "--audit-catalog",
-                    str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                    str(catalog_path),
                     "--audit-source-root",
                     str(root),
                     "--audit-source-strip-prefix",

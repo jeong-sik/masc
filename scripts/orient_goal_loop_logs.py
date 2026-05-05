@@ -9,6 +9,7 @@ as fixed; absence of log evidence is only reported as ``EVIDENCE_ABSENT``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -18,6 +19,7 @@ from typing import Any, TextIO
 
 
 AUDIT_FINDING_ID_RE = re.compile(r"\b(?:R-FATAL|CD|CE|CF|NF)-[0-9]+\b")
+SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 def exact_number_pattern(value: int) -> str:
@@ -186,6 +188,14 @@ def valid_external_source(source: Any) -> dict[str, Any] | None:
     if isinstance(line_refs, list) and any(
         not isinstance(item, int) for item in line_refs
     ):
+        return None
+    sha256 = source.get("sha256")
+    if sha256 is not None and (
+        not isinstance(sha256, str) or SHA256_RE.fullmatch(sha256) is None
+    ):
+        return None
+    line_count = source.get("line_count")
+    if line_count is not None and (not isinstance(line_count, int) or line_count < 0):
         return None
     return source
 
@@ -356,6 +366,12 @@ def aggregate_claim_source_summary(
     }
 
 
+def has_source_identity_expectation(source: dict[str, Any]) -> bool:
+    return isinstance(source.get("sha256"), str) or isinstance(
+        source.get("line_count"), int
+    )
+
+
 def source_artifact_summary(
     catalog: dict[str, Any],
     source_root: Path | None,
@@ -365,19 +381,26 @@ def source_artifact_summary(
         return None
 
     refs: dict[str, list[int]] = {}
+    source_expectations: dict[str, dict[str, Any]] = {}
 
-    def add_ref(path_raw: Any, line_refs_raw: Any = None) -> None:
+    def add_ref(
+        path_raw: Any,
+        line_refs_raw: Any = None,
+        source_raw: dict[str, Any] | None = None,
+    ) -> None:
         if not isinstance(path_raw, str) or not path_raw:
             return
         line_refs = refs.setdefault(path_raw, [])
         if isinstance(line_refs_raw, list):
             line_refs.extend(item for item in line_refs_raw if isinstance(item, int))
+        if source_raw is not None:
+            source_expectations[path_raw] = source_raw
 
     external_sources = catalog.get("external_sources", [])
     if isinstance(external_sources, list):
         for source in external_sources:
             if isinstance(source, dict):
-                add_ref(source.get("path"), source.get("line_refs"))
+                add_ref(source.get("path"), source.get("line_refs"), source)
 
     aggregate_claims = catalog.get("aggregate_claims", [])
     if isinstance(aggregate_claims, list):
@@ -415,6 +438,10 @@ def source_artifact_summary(
     source_finding_ids: set[str] = set()
     catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
     resolved_contents: dict[str, str] = {}
+    source_identity_errors: list[dict[str, Any]] = []
+    source_identity_checked_paths: set[str] = set()
+    source_identity_checks_total = 0
+    source_identity_checks_verified = 0
 
     source_root_resolved = source_root.resolve(strict=False)
 
@@ -446,9 +473,39 @@ def source_artifact_summary(
             missing_paths.append(path_text)
             continue
         resolved += 1
-        content = candidate.read_text(encoding="utf-8")
+        content_bytes = candidate.read_bytes()
+        content = content_bytes.decode("utf-8")
         resolved_contents[path_text] = content
         source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
+        source_expectation = source_expectations.get(path_text)
+        if source_expectation is not None and has_source_identity_expectation(
+            source_expectation
+        ):
+            source_identity_checked_paths.add(path_text)
+            source_identity_checks_total += 1
+            identity_errors: dict[str, Any] = {"path": path_text}
+            expected_sha256 = source_expectation.get("sha256")
+            if isinstance(expected_sha256, str):
+                actual_sha256 = hashlib.sha256(content_bytes).hexdigest()
+                if actual_sha256 != expected_sha256:
+                    identity_errors["sha256"] = {
+                        "expected": expected_sha256,
+                        "actual": actual_sha256,
+                    }
+            expected_line_count = source_expectation.get("line_count")
+            line_count = len(content.splitlines())
+            if (
+                isinstance(expected_line_count, int)
+                and line_count != expected_line_count
+            ):
+                identity_errors["line_count"] = {
+                    "expected": expected_line_count,
+                    "actual": line_count,
+                }
+            if len(identity_errors) == 1:
+                source_identity_checks_verified += 1
+            else:
+                source_identity_errors.append(identity_errors)
         if not line_refs:
             continue
         line_count = len(content.splitlines())
@@ -477,6 +534,22 @@ def source_artifact_summary(
     )
     aggregate_claims = aggregate_claim_source_summary(catalog, resolved_contents)
     source_aggregate_claim_status = aggregate_claims["source_aggregate_claim_status"]
+    for path_text, source_expectation in sorted(source_expectations.items()):
+        if path_text in source_identity_checked_paths:
+            continue
+        if not has_source_identity_expectation(source_expectation):
+            continue
+        source_identity_checks_total += 1
+        source_identity_errors.append({"path": path_text, "error": "not_resolved"})
+    source_identity_checks_failed = (
+        source_identity_checks_total - source_identity_checks_verified
+    )
+    if source_identity_checks_total == 0:
+        source_identity_status = "NOT_APPLICABLE"
+    elif source_identity_checks_failed == 0:
+        source_identity_status = "COMPLETE"
+    else:
+        source_identity_status = "INCOMPLETE"
     status = (
         "COMPLETE"
         if not invalid_paths
@@ -484,6 +557,7 @@ def source_artifact_summary(
         and not line_ref_errors
         and source_itemized_id_status == "COMPLETE"
         and source_aggregate_claim_status in {"COMPLETE", "NOT_APPLICABLE"}
+        and source_identity_status in {"COMPLETE", "NOT_APPLICABLE"}
         else "INCOMPLETE"
     )
     return {
@@ -501,6 +575,11 @@ def source_artifact_summary(
         "source_ids_missing_from_catalog": len(source_ids_missing_from_catalog),
         "catalog_ids_missing_from_source": len(catalog_ids_missing_from_source),
         **aggregate_claims,
+        "source_identity_status": source_identity_status,
+        "source_identity_checks_total": source_identity_checks_total,
+        "source_identity_checks_verified": source_identity_checks_verified,
+        "source_identity_checks_failed": source_identity_checks_failed,
+        "source_identity_error_samples": source_identity_errors[:10],
         "invalid_paths": invalid_paths[:10],
         "missing_paths": missing_paths[:10],
         "line_ref_error_samples": line_ref_errors[:10],
@@ -698,6 +777,12 @@ def report_to_text(report: OrientReport) -> str:
                 f"{source_artifacts['source_aggregate_claim_status']} "
                 f"verified={source_artifacts['source_aggregate_claim_sources_verified']} "
                 f"missing={source_artifacts['source_aggregate_claim_sources_missing']}"
+            )
+            lines.append(
+                "source_identity: "
+                f"{source_artifacts['source_identity_status']} "
+                f"verified={source_artifacts['source_identity_checks_verified']} "
+                f"failed={source_artifacts['source_identity_checks_failed']}"
             )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:

@@ -220,6 +220,16 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             audit_catalog_summary["source_aggregate_claim_sources_missing"] = (
                 source_artifacts.get("source_aggregate_claim_sources_missing")
             )
+            audit_catalog_summary["source_identity_status"] = source_artifacts.get(
+                "source_identity_status",
+                "unknown",
+            )
+            audit_catalog_summary["source_identity_checks_verified"] = (
+                source_artifacts.get("source_identity_checks_verified")
+            )
+            audit_catalog_summary["source_identity_checks_failed"] = (
+                source_artifacts.get("source_identity_checks_failed")
+            )
         else:
             audit_catalog_summary["source_artifacts_status"] = "NOT_CHECKED"
         audit_catalog_warning = (

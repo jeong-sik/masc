@@ -8,61 +8,85 @@
   "external_sources": [
     {
       "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+      "sha256": "fcab9e94f3e06765caca814719f8dd462e2bd981114975aea06ad94a7e0aa8e8",
+      "line_count": 475,
       "line_refs": [4, 453, 456, 458, 460, 461, 462, 463, 467],
       "claim": "Claims a 214-finding audit basis, a 36-keeper operating goal, 18 action items, and concrete Verify metrics for 36 healthy keepers."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+      "sha256": "b63b928da93d952b822ef50f62551481a777b6d1b38773b488126d24ad9413bb",
+      "line_count": 606,
       "line_refs": [4, 9, 331, 334, 335, 336, 340, 348, 352, 359, 382, 402, 531, 589],
       "claim": "Claims 206 audit findings and itemizes 18 finding IDs, but does not contain the full 206-row corpus."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+      "sha256": "56a46feb1f19bbabdfe2880ea9b4ca2952d1638b77dafb9fd3ec3cd3a1c483fb",
+      "line_count": 386,
       "line_refs": [3, 4, 5, 6, 12, 16, 17, 94, 109, 148, 173],
       "claim": "Separates closed issue work from remaining open root-cause work; records 53 open issues and identifies turn-slot, dashboard, FSM, telemetry, and deterministic-boundary gaps."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+      "sha256": "9df57464415c79e849bd8821564052b7701ababdebb0c3c8047d796f3cb4af84",
+      "line_count": 216,
       "line_refs": [16, 29, 60, 100, 156, 169, 172, 193, 215],
       "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/cascade failures."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+      "sha256": "104fbd66def4a27f302091fe2dba527a41da57b61d9990cbe73c465b153640fa",
+      "line_count": 1935,
       "line_refs": [3, 1934],
       "claim": "Claims the roadmap is based on 206 audit findings, but does not contain the full 206-row corpus."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+      "sha256": "61f32a613162e3f6d91c58e543dcea4a1e4eb2e14b22308bccf83cc17a984717",
+      "line_count": 821,
       "line_refs": [1, 3, 10, 13, 18, 24, 63, 74, 126],
       "claim": "Audits dashboard, heuristic metrics, admission queue, resilience, cancellation, local runtime pool, bounded token heuristics, and LLM metric bridge for fake data, silent failures, and no-op recovery."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+      "sha256": "928c49553975b5a6d3de04a15285d4b4b2fa1b03fabfd7a7aa9ebf036836e73e",
+      "line_count": 766,
       "line_refs": [1, 3, 4, 20, 44, 90],
       "claim": "Claims 32 derived-state anti-patterns across masc-mcp, oas, and dashboard files, including 8 critical consistency risks."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+      "sha256": "c1c9ade1e684594860d6500f329cfa8ead04e7c8d3fa6cb6a6fdb90c9252e389",
+      "line_count": 217,
       "line_refs": [62, 74, 148, 149, 165],
       "claim": "Evaluates current progress after prior PRs and records improvements in dashboard utilities, typed keepers, error handling, and remaining unchanged areas."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+      "sha256": "f8eae87d93587c8f1200675b134faa40f46bc599e9d2e6f3c40f3379180722c9",
+      "line_count": 1215,
       "line_refs": [147, 398, 415, 499, 531, 747, 782, 798, 1071, 1138],
       "claim": "Analyzes OAS/MASC LLM provider compatibility, tool capability routing, reasoning/thinking exposure, structured error boundaries, provider metrics, and capability drift."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+      "sha256": "93d0ec27e77a575647edfb86cf71aa9309dfa523dd7d21e6cc9d5acbb1f758f8",
+      "line_count": 299,
       "line_refs": [8, 10, 30, 46, 72, 86, 105, 146, 155, 157],
       "claim": "Diagnoses simultaneous provider failures and cascade exhaustion as the reason keepers repeatedly die or restart without useful progress."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+      "sha256": "6c1a6b9b7451dd56b61fb57c94477c6089fcd5eee67bd1555f4febaa9ca26d1c",
+      "line_count": 319,
       "line_refs": [103, 133, 148, 296, 302],
       "claim": "Proposes a keeper event queue and wakeup layering changes, including implementation targets and TLA+ follow-up."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+      "sha256": "8519894053b54bf096644fa34ebf3b74dd3d19354639ec623d78e91b451e14b5",
+      "line_count": 298,
       "line_refs": [24, 53, 57, 62, 71, 87, 94, 131, 154, 210],
       "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio cascade death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
     }

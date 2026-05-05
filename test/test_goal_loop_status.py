@@ -156,6 +156,9 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "source_aggregate_claim_status": "INCOMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 5,
+                        "source_identity_status": "INCOMPLETE",
+                        "source_identity_checks_verified": 0,
+                        "source_identity_checks_failed": 12,
                     },
                 },
             },
@@ -180,6 +183,9 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
         self.assertEqual(audit_catalog["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(audit_catalog["source_identity_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_identity_checks_verified"], 0)
+        self.assertEqual(audit_catalog["source_identity_checks_failed"], 12)
 
     def test_closed_catalog_consistency_findings_do_not_warn(self) -> None:
         report = goal_loop_status.build_status_report(
@@ -222,6 +228,9 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "source_aggregate_claim_status": "COMPLETE",
                         "source_aggregate_claim_sources_verified": 0,
                         "source_aggregate_claim_sources_missing": 0,
+                        "source_identity_status": "COMPLETE",
+                        "source_identity_checks_verified": 12,
+                        "source_identity_checks_failed": 0,
                     },
                 },
             },

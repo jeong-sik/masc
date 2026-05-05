@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { RefreshCw } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -28,6 +29,9 @@ import {
   boardSortMode,
   boardHiddenCategories,
   boardAuthorFilter,
+  boardHearthFilter,
+  boardHearths,
+  boardHearthsLoading,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -67,6 +71,7 @@ import {
   visibilityBadgeColor,
   votePost,
   deleteBoardPost,
+  refreshBoardHearths,
 } from './board-state'
 import type { BoardPost, ContentCategory } from './board-state'
 
@@ -238,6 +243,75 @@ function NewPostForm() {
   `
 }
 
+function setBoardHearthFilter(nextHearth: string) {
+  if (boardHearthFilter.value === nextHearth) return
+  boardHearthFilter.value = nextHearth
+  visibleLimit.value = PAGE_SIZE
+  automationVisibleLimit.value = PAGE_SIZE
+  systemVisibleLimit.value = PAGE_SIZE
+  categoryVisibleLimits.value = {
+    article: PAGE_SIZE,
+    review: PAGE_SIZE,
+    notice: PAGE_SIZE,
+    system: PAGE_SIZE,
+  }
+  refreshBoard()
+}
+
+function HearthFilterBar() {
+  const hearths = boardHearths.value
+  const active = boardHearthFilter.value
+  const activeInList = active !== '' && hearths.some(hearth => hearth.name === active)
+  if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) return null
+
+  const chipClass = (selected: boolean) => `px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer ${
+    selected
+      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] border-[var(--accent-20)]'
+      : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
+  }`
+
+  return html`
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="text-2xs font-semibold text-[var(--color-fg-muted)]" aria-hidden="true">#</span>
+      <button
+        type="button"
+        class=${chipClass(active === '')}
+        aria-pressed=${active === ''}
+        aria-label="전체 hearth"
+        onClick=${() => setBoardHearthFilter('')}
+      >전체</button>
+      ${hearths.map(hearth => html`
+        <button
+          key=${hearth.name}
+          type="button"
+          class=${chipClass(active === hearth.name)}
+          aria-pressed=${active === hearth.name}
+          aria-label=${`hearth ${hearth.name} ${hearth.count} posts`}
+          onClick=${() => setBoardHearthFilter(hearth.name)}
+        >${hearth.name} <span class="tabular-nums opacity-70">${hearth.count}</span></button>
+      `)}
+      ${active !== '' && !activeInList ? html`
+        <button
+          type="button"
+          class=${chipClass(true)}
+          aria-pressed="true"
+          aria-label=${`hearth ${active}`}
+          onClick=${() => setBoardHearthFilter(active)}
+        >${active}</button>
+      ` : null}
+      <button
+        type="button"
+        class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+        aria-label="hearth 목록 새로고침"
+        disabled=${boardHearthsLoading.value}
+        onClick=${() => { void refreshBoardHearths() }}
+      >
+        <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+      </button>
+    </div>
+  `
+}
+
 // ── Sort bar ───────────────────────────────────────────────────────
 function SortBar() {
   const current = boardSortMode.value
@@ -264,6 +338,7 @@ function SortBar() {
           </button>
         `)}
       </div>
+      <${HearthFilterBar} />
       <div class="flex items-center gap-2 flex-wrap">
         ${grouped.groups.map(g => {
           const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
@@ -506,6 +581,9 @@ function PostCard({ post }: { post: BoardPost }) {
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
+  useEffect(() => {
+    if (boardHearths.value.length === 0) void refreshBoardHearths()
+  }, [])
   const [contentQuery, setContentQuery] = useState('')
   const rawPosts = boardPosts.value
   const filteredPosts = useMemo(

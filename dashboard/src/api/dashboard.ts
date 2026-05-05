@@ -354,6 +354,7 @@ interface FetchDashboardMemoryOptions {
   excludeSystem?: boolean
   excludeAutomation?: boolean
   author?: string
+  hearth?: string
   /** Page size. Defaults to 200 when any filter is active, else 100. */
   limit?: number
   /** Number of posts to skip from the start of the sorted list. Defaults to 0. */
@@ -366,7 +367,7 @@ export function fetchDashboardMemory(
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
-  const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author
+  const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author || opts?.hearth
   const defaultLimit = hasFilter ? 200 : 100
   const limit = Math.max(1, Math.min(500, opts?.limit ?? defaultLimit))
   const offset = Math.max(0, Math.min(5000, opts?.offset ?? 0))
@@ -375,6 +376,7 @@ export function fetchDashboardMemory(
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)
+  if (opts?.hearth) params.set('hearth', opts.hearth)
   return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
 }
 

@@ -125,6 +125,7 @@ export const boardExcludeAutomation = signal(false)
 /** Content-category filter: which categories to hide */
 export const boardHiddenCategories = signal<Set<string>>(new Set(['system']))
 export const boardAuthorFilter = signal('')
+export const boardHearthFilter = signal('')
 /** Number of posts currently loaded — the offset for the next page request. */
 export const boardOffset = signal<number>(0)
 /** true when the server indicates (or we optimistically believe) more posts are available. */
@@ -868,6 +869,7 @@ function boardPageSize(): number {
     boardExcludeAutomation.value
     || boardExcludeSystem.value
     || boardAuthorFilter.value.trim() !== ''
+    || boardHearthFilter.value.trim() !== ''
   return hasFilter ? BOARD_PAGE_SIZE_FILTERED : BOARD_PAGE_SIZE_DEFAULT
 }
 
@@ -880,6 +882,7 @@ export async function refreshBoard(): Promise<void> {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
+      hearth: boardHearthFilter.value || undefined,
       limit,
       offset: 0,
     })
@@ -926,6 +929,7 @@ export async function loadMoreBoardPosts(): Promise<void> {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
+      hearth: boardHearthFilter.value || undefined,
       limit,
       offset,
     })

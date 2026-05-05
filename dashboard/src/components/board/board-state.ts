@@ -13,6 +13,7 @@ import {
   boardHasMore,
   boardOffset,
   boardTotal,
+  boardHearthFilter,
   lastBoardRefreshAt,
   refreshBoard,
   loadMoreBoardPosts,
@@ -20,9 +21,11 @@ import {
 import {
   votePost,
   voteComment,
+  fetchBoardHearths,
   fetchBoardPost,
   commentPost,
   createPost,
+  type BoardHearth,
 } from '../../api'
 import { deleteBoardPost } from '../../api/actions'
 import type { BoardComment, BoardPost, BoardSortMode } from '../../types'
@@ -40,6 +43,7 @@ export {
   boardHasMore,
   boardOffset,
   boardTotal,
+  boardHearthFilter,
   lastBoardRefreshAt,
   refreshBoard,
   loadMoreBoardPosts,
@@ -63,6 +67,10 @@ export const detailPost = signal<BoardPost | null>(null)
 export const detailComments = signal<BoardComment[]>([])
 export const detailLoading = signal(false)
 export const detailPostId = signal<string | null>(null)
+
+// ── Signals: hearth filters ───────────────────────────────────────
+export const boardHearths = signal<BoardHearth[]>([])
+export const boardHearthsLoading = signal(false)
 
 // ── Signals: comments ──────────────────────────────────────────────
 export const commentText = signal('')
@@ -92,6 +100,18 @@ export const categoryVisibleLimits = signal<Record<string, number>>({
 export const deletingPostId = signal<string | null>(null)
 export const selectedPostIds = signal<Set<string>>(new Set())
 export const bulkDeleting = signal(false)
+
+export async function refreshBoardHearths(): Promise<void> {
+  boardHearthsLoading.value = true
+  try {
+    boardHearths.value = await fetchBoardHearths()
+  } catch (err) {
+    console.warn('[Board] failed to load hearth filters:', err)
+    showToast('Hearth 목록을 불러오지 못했습니다', 'error')
+  } finally {
+    boardHearthsLoading.value = false
+  }
+}
 
 // ── Helper: default comment author ─────────────────────────────────
 function defaultCommentAuthor(): string {

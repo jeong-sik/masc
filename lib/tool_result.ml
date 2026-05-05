@@ -76,10 +76,9 @@ let to_json t =
     ; ("duration_ms", `Float t.duration_ms)
     ]
 
-let to_legacy_compat t =
-  let message =
-    match t.data with
-    | `String s -> s
-    | json -> Yojson.Safe.to_string json
-  in
-  (t.success, message)
+let message t =
+  match t.data with
+  | `String s -> s
+  | json -> Yojson.Safe.to_string json
+
+let to_legacy_compat t = (t.success, message t)

@@ -82,7 +82,8 @@ let handle_keeper_board_tool
     let result =
       Tool_board.handle_tool (Tool_name.Masc.to_string Tool_name.Masc.Board_post) board_args
     in
-    let ok, msg = Tool_result.to_legacy_compat result in
+    let ok = result.success in
+    let msg = Tool_result.message result in
     Log.Keeper.info
       "handle_tool result: ok=%b msg=%s"
       ok

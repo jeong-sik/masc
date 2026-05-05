@@ -34,6 +34,10 @@ val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
 (** [to_json t] serializes to JSON for logging and observability. *)
 val to_json : t -> Yojson.Safe.t
 
+(** [message t] returns the human-readable payload string. JSON payloads are
+    serialized with Yojson's compact representation. *)
+val message : t -> string
+
 (** [to_legacy_compat t] converts back to [(bool * string)] for callers
     that have not yet migrated to the typed result interface.
 

@@ -37,9 +37,8 @@ let () =
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "found" true (Option.is_some result);
               let tr = Option.get result in
-              let (ok, msg) = Tool_result.to_legacy_compat tr in
-              check bool "success" true ok;
-              check string "message" ("ok:" ^ tool) msg);
+              check bool "success" true tr.success;
+              check string "message" ("ok:" ^ tool) (Tool_result.message tr));
           test_case "mint_token unknown tool returns Error" `Quick (fun () ->
               let result =
                 Tool_dispatch.mint_token
@@ -64,9 +63,8 @@ let () =
                 Tool_dispatch.dispatch ~token ~args:`Null
               in
               let tr = Option.get result in
-              let (ok, msg) = Tool_result.to_legacy_compat tr in
-              check bool "ok" true ok;
-              check string "msg" "ok:__test_bulk_b" msg);
+              check bool "ok" true tr.success;
+              check string "msg" "ok:__test_bulk_b" (Tool_result.message tr));
         ] );
       ( "replace_semantics",
         [
@@ -74,17 +72,13 @@ let () =
               let tool = "__test_dispatch_replace" in
               register_full ~tool_name:tool ~handler:echo_handler;
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let (ok1, _) =
-                Tool_result.to_legacy_compat (Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null))
-              in
-              check bool "first ok" true ok1;
+              let tr1 = Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null) in
+              check bool "first ok" true tr1.success;
               register_full ~tool_name:tool ~handler:fail_handler;
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let (ok2, msg2) =
-                Tool_result.to_legacy_compat (Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null))
-              in
-              check bool "replaced fail" false ok2;
-              check string "fail msg" "fail" msg2);
+              let tr2 = Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null) in
+              check bool "replaced fail" false tr2.success;
+              check string "fail msg" "fail" (Tool_result.message tr2));
         ] );
       ( "registry_queries",
         [
@@ -220,8 +214,9 @@ let () =
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "still returns Some" true (Option.is_some result);
-              let (ok, msg) = Tool_result.to_legacy_compat (Option.get result) in
-              check bool "marked as failure" false ok;
+              let tr = Option.get result in
+              let msg = Tool_result.message tr in
+              check bool "marked as failure" false tr.success;
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
         ] );

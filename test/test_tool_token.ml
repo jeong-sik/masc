@@ -102,8 +102,8 @@ let test_dispatch_with_token () =
   | Ok token ->
     match Tool_dispatch.dispatch ~token ~args:`Null with
     | Some tr ->
-      let (ok, msg) = Tool_result.to_legacy_compat tr in
-      (match ok with
+      let msg = Tool_result.message tr in
+      (match tr.success with
        | true -> check string "dispatch result" ("dispatched:" ^ tool) msg
        | false -> fail ("dispatch returned false: " ^ msg))
     | None -> fail "dispatch returned None for minted token"

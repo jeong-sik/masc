@@ -154,8 +154,8 @@ let handle_keeper_masc_tool
        else (
          match Tool_dispatch.dispatch ~token ~args with
          | Some tr ->
-           let (ok, msg) = Tool_result.to_legacy_compat tr in
-           if ok then msg else error_json msg
+           let msg = Tool_result.message tr in
+           if tr.success then msg else error_json msg
          | None ->
            if Tool_dispatch.is_mcp_context_required name
            then

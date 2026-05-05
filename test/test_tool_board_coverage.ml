@@ -34,7 +34,8 @@ let cleanup () =
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =
-  Tool_result.to_legacy_compat (Tool_board.handle_tool name args)
+  let r = Tool_board.handle_tool name args in
+  (r.success, Tool_result.message r)
 
 let make_args pairs = `Assoc pairs
 

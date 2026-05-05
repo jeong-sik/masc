@@ -198,8 +198,7 @@ let oas_descriptor_of_masc_tool name =
   Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
 
 let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
-  let success, msg = Tool_result.to_legacy_compat tr in
-  to_oas_tool_result (success, msg)
+  to_oas_tool_result (tr.success, Tool_result.message tr)
 
 (** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
 

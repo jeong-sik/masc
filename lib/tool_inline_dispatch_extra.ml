@@ -257,7 +257,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   match (name : string) with
   | "masc_board_post" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let (success, message) as result = Tool_result.to_legacy_compat result_tr in
+      let success = result_tr.success in
+      let message = Tool_result.message result_tr in
+      let result = (success, message) in
       if success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -320,7 +322,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
   | "masc_board_comment" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let (success, _message) as result = Tool_result.to_legacy_compat result_tr in
+      let success = result_tr.success in
+      let result = (success, Tool_result.message result_tr) in
       if success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -378,7 +381,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let (success, _message) as result = Tool_result.to_legacy_compat result_tr in
+      let success = result_tr.success in
+      let result = (success, Tool_result.message result_tr) in
       (* Record vote activity as a fitness metric (Issue #1861). *)
       if success then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
@@ -424,7 +428,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
   | "masc_board_delete" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let (success, _message) as result = Tool_result.to_legacy_compat result_tr in
+      let success = result_tr.success in
+      let result = (success, Tool_result.message result_tr) in
       if success then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
@@ -445,6 +450,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_stats"
   | "masc_board_search" | "masc_board_profile"
   | "masc_board_hearths" ->
-      Some (Tool_result.to_legacy_compat (Tool_board.handle_tool name arguments))
+      let result = Tool_board.handle_tool name arguments in
+      Some (result.success, Tool_result.message result)
 
   | _ -> None

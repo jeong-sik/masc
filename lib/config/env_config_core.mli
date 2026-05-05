@@ -55,10 +55,18 @@ val get_float_nonneg : default:float -> string -> float
 val get_ratio : default:float -> string -> float
 (** Like {!get_float_nonneg} but additionally rejects parses [> 1.0].
     Use for env vars whose semantic is a fraction in [\[0, 1\]]:
-    score thresholds, probabilities, context-ratio caps.  The
-    [default] argument is itself clamped to [\[0, 1\]] as
-    defense-in-depth, so a caller passing a stale out-of-range
-    default still gets a valid ratio back. *)
+    score thresholds, probabilities, context-ratio caps.
+
+    The [default] argument is sanitised before clamping:
+    non-finite defaults ([NaN], [+∞], [-∞]) are coerced to
+    [0.0]; finite out-of-range defaults are clamped to
+    [\[0, 1\]] via [Float.max 0.0 (Float.min 1.0 default)].
+    [Float.min nan 1.0] propagates [NaN] in OCaml's IEEE 754
+    semantics, so a naive clamp on its own would still leak
+    [NaN]; the explicit {!Float.is_finite} check before
+    clamping is what makes this helper [NaN]-safe.  Callers
+    can rely on the return value always being a finite float
+    in [\[0, 1\]]. *)
 
 (** {1 String / path helpers} *)
 

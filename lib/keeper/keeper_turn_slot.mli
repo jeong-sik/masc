@@ -60,6 +60,40 @@ val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list
 
+(** Force-release semaphore permits held by [keeper_name] after the watchdog
+    has classified the holder as stale. Returns the labels actually released.
+
+    This is intentionally narrower than normal cleanup: it only releases
+    holders still present in the diagnostic holder table, and the normal
+    [with_keeper_turn_slot] finalizer consumes the same acquisition's
+    force-release marker so a late-returning fiber cannot double-release the
+    same permit, and a newer keeper generation cannot consume the stale
+    predecessor's marker. *)
+val force_release_stale_holder : keeper_name:string -> string list
+
+(** Test-only: TTL used to bound orphaned force-release markers left behind
+    when a cancelled stale fiber never reaches its finalizer. *)
+val force_released_marker_ttl_sec_for_test : float
+
+(** Test-only: count force-release markers still awaiting finalizer
+    consumption or expiry pruning. *)
+val force_released_marker_count_for_test : unit -> int
+
+(** Test-only: inject a marker without touching semaphores, so marker-retention
+    behavior can be exercised without creating a double-release path. *)
+val add_force_released_marker_for_test :
+  label:string ->
+  keeper_name:string ->
+  acquisition_id:int ->
+  marked_at:float ->
+  unit
+
+(** Test-only: prune expired force-release markers using an injected clock. *)
+val purge_force_released_markers_for_test : now:float -> unit
+
+(** Test-only: clear force-release markers between tests. *)
+val clear_force_released_markers_for_test : unit -> unit
+
 (** Render a compact holder list such as [[keeper-a/181s, +2 more]].
     The input is expected to be sorted longest-first, as returned by the
     holder accessors above. *)

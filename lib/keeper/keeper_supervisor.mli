@@ -67,7 +67,13 @@ val apply_self_preservation :
   (Keeper_registry.registry_entry * string) list
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
+    Bounded minority [stale_turn_timeout] cohorts are allowed through so
+    alive-but-stuck recovery can drain partial slot starvation; larger stale
+    cohorts still use the circuit breaker/probe path.
     Returns the filtered list of entries that should proceed with restart. *)
+
+val reset_self_preservation_escape_state_for_test : unit -> unit
+(** Reset the self-preservation probe state. Test-only. *)
 
 (** {1 Liveness Recovery} *)
 

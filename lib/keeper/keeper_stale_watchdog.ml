@@ -121,6 +121,21 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   | In_turn_hung _ -> "in_turn_hung"
   | Noop_failure_loop _ -> "noop_failure_loop"
 
+let slot_holder_age ~now keeper_name =
+  let holder_age holders = List.assoc_opt keeper_name holders in
+  [
+    holder_age (Keeper_turn_slot.turn_slot_holders ~now);
+    holder_age (Keeper_turn_slot.reactive_slot_holders ~now);
+    holder_age (Keeper_turn_slot.autonomous_slot_holders ~now);
+  ]
+  |> List.filter_map Fun.id
+  |> function
+  | [] -> None
+  | age :: rest -> Some (List.fold_left (fun acc age -> max acc age) age rest)
+
+let slot_holder_age_for_test ~now ~keeper_name =
+  slot_holder_age ~now keeper_name
+
 let has_recent_skip_observation ~now ~threshold
     (entry : Keeper_registry.registry_entry) : bool =
   match entry.last_skip_observation with
@@ -256,6 +271,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let turn_timeout = Keeper_runtime_resolved.turn_timeout_sec () in
                Float.max turn_timeout threshold
              in
+             let active_slot_holder_age = slot_holder_age ~now meta.name in
              let idle_stale, in_turn_stale, in_turn_age,
                  idle_skip_suppressed =
                match entry.current_turn_observation with
@@ -266,7 +282,21 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    && fiber_age >= grace_period_sec ()
                  , elapsed
                  , false )
-               | None ->
+               | None -> (
+                 match active_slot_holder_age with
+                 | Some elapsed ->
+                   (* A keeper can still own reactive/turn semaphores even
+                      when the registry observation is absent or has been
+                      replaced by restart bookkeeping. Treat holder evidence
+                      as in-flight work; otherwise the watchdog restarts a
+                      keeper at the short idle threshold while the old fiber
+                      still owns slots, causing fleet-wide slot starvation. *)
+                   ( false
+                   , elapsed > active_turn_timeout_sec
+                     && fiber_age >= grace_period_sec ()
+                   , elapsed
+                   , false )
+                 | None ->
                  let skip_observed =
                    has_recent_skip_observation ~now ~threshold entry
                  in
@@ -276,7 +306,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    && fiber_age >= grace_period_sec ()
                    && not skip_observed
                  in
-                 (stale, false, 0.0, skip_observed)
+                 (stale, false, 0.0, skip_observed))
              in
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
@@ -375,6 +405,18 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                Keeper_registry.set_failure_reason ~base_path meta.name
                  (Keeper_registry.stale_watchdog_failure_reason
                     ~prior:prior_failure_reason ~kill_class);
+               let force_released_slots =
+                 if in_turn_stale || Option.is_some active_slot_holder_age then
+                   Keeper_turn_slot.force_release_stale_holder
+                     ~keeper_name:meta.name
+                 else
+                   []
+               in
+               if force_released_slots <> [] then
+                 Log.Keeper.error
+                   "%s: stale watchdog force-released holder slot(s) [%s] \
+                    before restart"
+                   meta.name (String.concat "," force_released_slots);
                (* tla-lint: allow-mutation: fiber signal — stop the wedged keeper after stale-turn classification *)
                request_watchdog_stop ();
                let window_count = record_stale_termination meta.name now in

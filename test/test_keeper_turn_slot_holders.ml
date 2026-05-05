@@ -9,12 +9,14 @@
     requires an Eio fiber context (Eio.Mutex on holder_table). *)
 
 module KK = Masc_mcp.Keeper_keepalive
+module SW = Masc_mcp.Keeper_stale_watchdog
 
 exception After_flag_injected
 
 let with_fresh_state body () =
   Eio_main.run @@ fun _env ->
     KK.set_after_acquire_flag_hook_for_test None;
+    KK.clear_force_released_markers_for_test ();
     KK.reset_autonomous_completion_for_test ();
     KK.reset_autonomous_turn_queue_for_test ();
     body ()
@@ -157,6 +159,252 @@ let test_reactive_slot_released_when_hook_raises_after_flag () =
   if List.mem keeper_name names then
     failwith "reactive holder leaked after injected failure"
 
+let test_watchdog_slot_holder_age_reflects_active_holder () =
+  let keeper_name = "diag-watchdog-holder" in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ ->
+        match
+          SW.slot_holder_age_for_test ~now:(Time_compat.now ()) ~keeper_name
+        with
+        | None -> failwith "expected watchdog holder age for active holder"
+        | Some age ->
+            if age < 0.0 || age > 5.0 then
+              failwith
+                (Printf.sprintf "unreasonable watchdog holder age=%.2fs" age))
+  in
+  match result with
+  | Ok () -> ()
+  | Error (`Semaphore_wait_timeout _) ->
+      failwith "unexpected semaphore wait timeout in test"
+
+let test_force_release_stale_holder_restores_slots_once () =
+  let keeper_name = "diag-force-release" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ ->
+        assert_eq ~msg:"turn acquired" ~expected:(turn_before - 1)
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq ~msg:"reactive acquired" ~expected:(reactive_before - 1)
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+        let released = KK.force_release_stale_holder ~keeper_name in
+        if not (List.mem "turn" released) then
+          failwith "force release did not report turn slot";
+        if not (List.mem "reactive" released) then
+          failwith "force release did not report reactive slot";
+        if List.mem "autonomous" released then
+          failwith "force release unexpectedly reported autonomous slot";
+        assert_eq ~msg:"turn restored by force release" ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq ~msg:"reactive restored by force release"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+        let nested =
+          KK.with_keeper_turn_slot_for_test
+            ~keeper_name
+            ~channel:Masc_mcp.Keeper_world_observation.Reactive
+            (fun ~semaphore_wait_ms:_ ->
+              let released_again =
+                KK.force_release_stale_holder ~keeper_name
+              in
+              if not (List.mem "turn" released_again) then
+                failwith "second force release did not report turn slot";
+              if not (List.mem "reactive" released_again) then
+                failwith "second force release did not report reactive slot")
+        in
+        (match nested with
+         | Ok () -> ()
+         | Error (`Semaphore_wait_timeout _) ->
+             failwith "unexpected nested semaphore wait timeout");
+        assert_eq ~msg:"nested force release preserved turn count"
+          ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq ~msg:"nested force release preserved reactive count"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test");
+  assert_eq ~msg:"turn not double-released by finalizer" ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq ~msg:"reactive not double-released by finalizer"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
+
+let test_force_release_marker_is_acquisition_scoped () =
+  let keeper_name = "diag-force-generation" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ ->
+        let released = KK.force_release_stale_holder ~keeper_name in
+        if not (List.mem "turn" released) then
+          failwith "force release did not report turn slot";
+        if not (List.mem "reactive" released) then
+          failwith "force release did not report reactive slot";
+        assert_eq ~msg:"turn restored by force release" ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq ~msg:"reactive restored by force release"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+        let nested =
+          KK.with_keeper_turn_slot_for_test
+            ~keeper_name
+            ~channel:Masc_mcp.Keeper_world_observation.Reactive
+            (fun ~semaphore_wait_ms:_ -> ())
+        in
+        (match nested with
+         | Ok () -> ()
+         | Error (`Semaphore_wait_timeout _) ->
+             failwith "unexpected nested semaphore wait timeout");
+        assert_eq
+          ~msg:"nested normal finalizer did not consume stale turn marker"
+          ~expected:turn_before
+          ~actual:(KK.turn_semaphore_value_for_test ());
+        assert_eq
+          ~msg:"nested normal finalizer did not consume stale reactive marker"
+          ~expected:reactive_before
+          ~actual:(KK.reactive_turn_semaphore_value_for_test ()))
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test");
+  assert_eq ~msg:"old turn marker consumed by old finalizer"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq ~msg:"old reactive marker consumed by old finalizer"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
+
+(* Reviewer #13190: existing tests exercise force_release_stale_holder
+   while the outer fiber's protect-finalizer eventually runs to
+   completion.  The watchdog restart path looks different — the
+   supervisor force-releases the slot from outside the stale fiber,
+   the stale fiber raises before normal cleanup, and a replacement
+   keeper takes the slot under the same keeper_name.  Pin that the
+   replacement's acquire/release cycle is unaffected by any leftover
+   marker from the previous generation: both semaphores must return
+   to baseline even after the outer fiber exits via exception, and a
+   fresh acquisition under the same keeper_name must complete cleanly
+   with semaphores still at baseline. *)
+let test_force_release_marker_does_not_leak_to_replacement () =
+  let keeper_name = "diag-replacement-leak" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let reactive_before = KK.reactive_turn_semaphore_value_for_test () in
+  let exception Outer_simulated_raise in
+  (try
+     let _ =
+       KK.with_keeper_turn_slot_for_test
+         ~keeper_name
+         ~channel:Masc_mcp.Keeper_world_observation.Reactive
+         (fun ~semaphore_wait_ms:_ ->
+           let released = KK.force_release_stale_holder ~keeper_name in
+           if not (List.mem "turn" released) then
+             failwith "force release did not report turn slot";
+           if not (List.mem "reactive" released) then
+             failwith "force release did not report reactive slot";
+           raise Outer_simulated_raise)
+     in
+     ()
+   with Outer_simulated_raise -> ());
+  assert_eq
+    ~msg:"turn semaphore restored to baseline after outer raise"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq
+    ~msg:"reactive semaphore restored to baseline after outer raise"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ());
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ -> ())
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "replacement acquire timed out — leftover force-release \
+                 marker may have skipped the previous release");
+  assert_eq
+    ~msg:"turn semaphore baseline preserved after replacement keeper run"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq
+    ~msg:"reactive semaphore baseline preserved after replacement keeper run"
+    ~expected:reactive_before
+    ~actual:(KK.reactive_turn_semaphore_value_for_test ())
+
+let test_force_released_autonomous_holder_does_not_stamp_completion () =
+  let keeper_name = "diag-force-autonomous" in
+  let turn_before = KK.turn_semaphore_value_for_test () in
+  let autonomous_before = KK.autonomous_turn_semaphore_value_for_test () in
+  let result =
+    KK.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      (fun ~semaphore_wait_ms:_ ->
+         let released = KK.force_release_stale_holder ~keeper_name in
+         if not (List.mem "turn" released) then
+           failwith "force release did not report turn slot";
+         if not (List.mem "autonomous" released) then
+           failwith "force release did not report autonomous slot";
+         assert_eq ~msg:"turn restored by force release" ~expected:turn_before
+           ~actual:(KK.turn_semaphore_value_for_test ());
+         assert_eq ~msg:"autonomous restored by force release"
+           ~expected:autonomous_before
+           ~actual:(KK.autonomous_turn_semaphore_value_for_test ()))
+  in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test");
+  assert_eq ~msg:"turn not double-released by autonomous finalizer"
+    ~expected:turn_before
+    ~actual:(KK.turn_semaphore_value_for_test ());
+  assert_eq ~msg:"autonomous not double-released by finalizer"
+    ~expected:autonomous_before
+    ~actual:(KK.autonomous_turn_semaphore_value_for_test ());
+  let delay =
+    let ticket = KK.enqueue_autonomous_waiter_for_test "diag-waiting-peer" in
+    Fun.protect
+      ~finally:(fun () -> KK.drop_autonomous_waiter_for_test ticket)
+      (fun () ->
+         KK.fairness_delay_sec_at ~keeper_name ~now:(Time_compat.now ()))
+  in
+  if delay <> 0.0 then
+    failwith
+      (Printf.sprintf
+         "force-released autonomous holder stamped normal completion: delay=%.3f"
+         delay)
+
+let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
+  KK.clear_force_released_markers_for_test ();
+  let marked_at = 1_000.0 in
+  KK.add_force_released_marker_for_test
+    ~label:"turn"
+    ~keeper_name:"diag-orphan-marker"
+    ~acquisition_id:42
+    ~marked_at;
+  assert_eq ~msg:"orphan marker recorded" ~expected:1
+    ~actual:(KK.force_released_marker_count_for_test ());
+  KK.purge_force_released_markers_for_test
+    ~now:(marked_at +. KK.force_released_marker_ttl_sec_for_test +. 1.0);
+  assert_eq ~msg:"expired orphan marker purged" ~expected:0
+    ~actual:(KK.force_released_marker_count_for_test ())
+
 let () =
   let cases =
     [
@@ -174,6 +422,18 @@ let () =
         test_slot_holders_summary_reflects_active_holder;
       "reactive slot releases when hook raises after acquired flag",
         test_reactive_slot_released_when_hook_raises_after_flag;
+      "watchdog holder fallback sees active holder",
+        test_watchdog_slot_holder_age_reflects_active_holder;
+      "force release restores stale holder slots once",
+        test_force_release_stale_holder_restores_slots_once;
+      "force release markers are acquisition scoped",
+        test_force_release_marker_is_acquisition_scoped;
+      "force release marker does not leak to replacement",
+        test_force_release_marker_does_not_leak_to_replacement;
+      "force released autonomous holder skips completion stamp",
+        test_force_released_autonomous_holder_does_not_stamp_completion;
+      "force release marker ttl bounds unfinalized fibers",
+        test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]
   in
   List.iter

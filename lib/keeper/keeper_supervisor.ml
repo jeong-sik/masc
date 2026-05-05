@@ -750,6 +750,12 @@ let cleanup_dead_tombstone (ctx : _ context)
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
 let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
 
+let stale_turn_timeout_cohort_key =
+  cohort_key_of_reason
+    (Some
+       (Keeper_registry.Stale_turn_timeout
+          (Keeper_registry.Idle_turn { stall_seconds = 0.0 })))
+
 (* #10887: persistent self-preservation lock.  Fleet log shows 125
    identical [ratio=1.00, cohort=stale_turn_timeout] events / 2 days
    with no escape — every sweep re-suppresses the same dominant
@@ -784,15 +790,26 @@ let sp_escape_state =
     not operator policy. *)
 let probe_after_n_suppressions = 10
 
+(** Bounded minority exception for partial stale recovery.
+
+    The live regression was 6/17 keepers: enough to trip the global
+    self-preservation ratio gate, but not a fleet-wide provider/cascade
+    storm.  Keep this below a majority so large-but-not-universal stale
+    cohorts still go through the circuit breaker/probe path. *)
+let partial_stale_recovery_max_ratio = 0.50
+
 (** Reset the escape-valve state.  Test-only; production code never
     needs to call this (state cycles through the [last_dominant_cohort]
     inequality branch naturally). *)
-let reset_self_preservation_escape_state () =
+let reset_self_preservation_escape_state_for_test () =
   sp_escape_state.last_dominant_cohort <- "";
   sp_escape_state.consecutive_suppressions <- 0
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
+    Bounded minority [stale_turn_timeout] cohorts are allowed through so
+    alive-but-stuck recovery can drain partial slot starvation; larger stale
+    cohorts still use the circuit breaker/probe path.
     #10887: emits a probe restart every [probe_after_n_suppressions]
     consecutive suppressions of the same cohort. *)
 let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
@@ -817,6 +834,22 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       ) cohorts ("", [])
     in
     if List.length dominant_entries >= sp_min then begin
+      let dominant_count = List.length dominant_entries in
+      let dominant_ratio =
+        float_of_int dominant_count /. float_of_int n_total
+      in
+      if String.equal dominant_key stale_turn_timeout_cohort_key
+         && dominant_ratio <= partial_stale_recovery_max_ratio
+      then begin
+        reset_self_preservation_escape_state_for_test ();
+        Log.Keeper.warn
+          "self-preservation: allowing partial stale_turn_timeout recovery \
+           cohort through (dominant=%d/%d ratio_dominant=%.2f, \
+           overall_candidates=%d/%d ratio_overall=%.2f)"
+          dominant_count n_total dominant_ratio
+          n_candidates n_total ratio;
+        to_restart
+      end else begin
       (* #10887: track consecutive suppressions of the same dominant
          cohort.  Different cohort -> counter resets to 1; same
          cohort -> counter increments. *)
@@ -910,15 +943,16 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       List.filter (fun ((e : Keeper_registry.registry_entry), _) ->
         not (List.mem e.name suppressed_names)
       ) to_restart
+      end
     end else begin
       (* Dominant cohort below sp_min — no suppression this cycle,
          so the streak no longer applies to this cohort. *)
-      reset_self_preservation_escape_state ();
+      reset_self_preservation_escape_state_for_test ();
       to_restart
     end
   end else begin
     (* No suppression: streak resets. *)
-    reset_self_preservation_escape_state ();
+    reset_self_preservation_escape_state_for_test ();
     to_restart
   end
 

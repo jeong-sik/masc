@@ -1295,7 +1295,13 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
    | Error Not_found ->
        Log.Keeper.debug "keeper:%s OAS checkpoint not found, falling back to legacy loader" trace_id
    | Ok _ -> ());
-  let oas_checkpoint = Result.to_option oas_result in
+  let oas_checkpoint = match oas_result with
+    | Ok v -> Some v
+    | Error Not_found -> None
+    | Error _ ->
+      Log.Keeper.warn "keeper:%s OAS checkpoint error discarded at to_option" trace_id;
+      None
+  in
   let legacy_checkpoint =
     try load_latest_checkpoint session
     with ex ->
@@ -1317,7 +1323,12 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
       "keeper:%s checkpoint migration fallback: legacy newer than OAS"
       trace_id;
   let oas_checkpoint =
-    Result.to_option oas_result
+    (match oas_result with
+     | Ok v -> Some v
+     | Error Not_found -> None
+     | Error _ ->
+       Log.Keeper.warn "keeper:%s OAS checkpoint error discarded at sanitize to_option" trace_id;
+       None)
     |> Option.map (fun checkpoint ->
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin

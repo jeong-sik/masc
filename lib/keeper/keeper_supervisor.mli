@@ -112,9 +112,19 @@ val alive_but_stuck_scan : 'a context -> unit
     alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
     increment and a single warn log line, with per-keeper dedup so the
     counter is at most incremented once per
-    [alive_but_stuck_dedup_ttl_sec] window.  Detection-only — no
-    transition or restart is triggered.  Gated behind
+    [alive_but_stuck_dedup_ttl_sec] window.  Also request supervised
+    recovery by setting the keeper's structured failure reason plus
+    [fiber_stop]/[fiber_wakeup], allowing the next sweep to route it
+    through the existing crash/restart path.  Gated behind
     [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true). *)
+
+val request_alive_but_stuck_recovery_for_test :
+  base_path:string ->
+  elapsed:float ->
+  Keeper_registry.registry_entry ->
+  unit
+(** Test-only hook for the recovery request side effect used by
+    [alive_but_stuck_scan]. *)
 
 val alive_but_stuck_reset_for_test : unit -> unit
 (** Test-only: clear the alive-but-stuck dedup table. *)

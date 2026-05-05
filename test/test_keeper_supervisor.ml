@@ -1386,5 +1386,34 @@ let () =
           in
           check (option (float 0.1)) "below per-keeper threshold → None"
             None (detect entry));
+        test_case "recovery request sets stale reason and stop flags" `Quick
+          (fun () ->
+            Reg.clear ();
+            let name = "abs-request-recovery" in
+            let entry = Reg.register ~base_path:bp name (make_meta name) in
+            let before =
+              Masc_mcp.Prometheus.metric_value_or_zero
+                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                ~labels:[("keeper", name)]
+                ()
+            in
+            Sup.request_alive_but_stuck_recovery_for_test
+              ~base_path:bp ~elapsed:99_000.0 entry;
+            check bool "fiber_stop set" true (Atomic.get entry.Reg.fiber_stop);
+            check bool "fiber_wakeup set" true (Atomic.get entry.Reg.fiber_wakeup);
+            (match Reg.get ~base_path:bp name with
+             | None -> fail "expected registry entry"
+             | Some updated ->
+               check string "failure reason cohort"
+                 "stale_turn_timeout"
+                 (Reg.failure_reason_cohort_key updated.Reg.last_failure_reason));
+            let after =
+              Masc_mcp.Prometheus.metric_value_or_zero
+                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                ~labels:[("keeper", name)]
+                ()
+            in
+            check (float 0.0001) "recovery request metric +1"
+              (before +. 1.0) after);
       ]);
   ]

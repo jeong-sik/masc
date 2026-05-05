@@ -79,10 +79,14 @@ val metric_keeper_usage_anomalies : string
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 val metric_keeper_contract_violations : string
 
-(** #12838: keepers detected as alive-but-stuck.  Detection-only
-    counter; bounded to one increment per dedup window per keeper.
-    Labels: keeper. *)
+(** #12838: keepers detected as alive-but-stuck.  Bounded to one
+    increment per dedup window per keeper. Labels: keeper. *)
 val metric_keeper_alive_but_stuck : string
+
+(** #12838 follow-up: alive-but-stuck recovery requests.  Each increment
+    means the supervisor requested a supervised restart via
+    [failure_reason] plus [fiber_stop]/[fiber_wakeup]. Labels: keeper. *)
+val metric_keeper_alive_but_stuck_recovery_requests : string
 
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string

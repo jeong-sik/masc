@@ -262,10 +262,13 @@ let oas_retry_budget_available_for_turn ~(is_retry : bool)
        ~reserve_degraded_retry_budget:false ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
 
+(* PR #13120 review: declared in [Env_config_keeper.KeeperRetryBackoff]
+   so the env knob catalog generator at [bin/env_knob_catalog.ml]
+   picks it up — that generator only scans [lib/config/env_config_*.ml],
+   so a knob declared here would silently drift from
+   [docs/runtime-tunables.md] and from [env_config_snapshot]. *)
 let degraded_retry_slot_phase_budget_sec =
-  Keeper_config.float_of_env_default
-    "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC"
-    ~default:60.0 ~min_v:5.0 ~max_v:Float.max_float
+  Env_config_keeper.KeeperRetryBackoff.degraded_retry_slot_phase_budget_sec
 ;;
 
 let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =

@@ -906,6 +906,26 @@ module KeeperRetryBackoff = struct
     let base = transient_backoff_base_sec () in
     let cap = transient_backoff_cap_sec () in
     Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
+
+  (** Productive slot-phase budget (seconds).  PR #13120: when a
+      cascade returns a recoverable error after the keeper has
+      already burned this many seconds inside the outer turn slot,
+      degraded retry rotation is rejected (the rotation evidence is
+      still recorded in [cascade_rotation_attempts] for audit).  The
+      keeper releases the outer slot instead of holding it for a
+      retry that may itself stall.  Floor 5s prevents accidental
+      always-reject configs.
+
+      Declared here (not in keeper_turn_cascade_budget.ml) so the
+      env knob catalog generator at bin/env_knob_catalog.ml picks
+      it up — the catalog only scans lib/config/env_config_*.ml.
+
+      Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
+      Default: 60.0. *)
+  let degraded_retry_slot_phase_budget_sec =
+    Float.max 5.0
+      (get_float ~default:60.0
+         "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
 end
 
 (** RFC-0022 §9 rollout flag for the in-attempt streaming liveness gate.

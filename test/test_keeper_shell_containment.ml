@@ -8,10 +8,12 @@
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
+module Keeper_gh_env = Masc_mcp.Keeper_gh_env
 module Keeper_id = Masc_mcp.Keeper_id
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
+module Keeper_shell_shared = Masc_mcp.Keeper_shell_shared
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_tool_policy = Masc_mcp.Keeper_tool_policy
@@ -359,6 +361,69 @@ let test_docker_keeper_allows_inside_playground () =
   Alcotest.(check bool) "playground-internal cat not blocked" false
     (blocked_by_sandbox_boundary raw)
 
+let test_docker_container_cwd_maps_to_host_worktree () =
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let host_worktree =
+    Filename.concat playground "repos/masc-mcp/.worktrees/task-186"
+  in
+  ensure_dir host_worktree;
+  let container_worktree =
+    Filename.concat
+      (Keeper_sandbox.container_root meta.name)
+      "repos/masc-mcp/.worktrees/task-186"
+  in
+  let args = `Assoc [ ("cwd", `String container_worktree) ] in
+  let expect = normalize_realpath host_worktree in
+  (match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+   | Ok cwd ->
+     Alcotest.(check string) "read cwd maps to host" expect
+       (normalize_realpath cwd)
+   | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
+  match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+  | Ok cwd ->
+    Alcotest.(check string) "write cwd maps to host" expect
+      (normalize_realpath cwd)
+  | Error e -> Alcotest.fail ("write cwd should map container path: " ^ e)
+
+let test_docker_container_file_path_maps_to_host_worktree () =
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let host_file =
+    Filename.concat playground
+      "repos/masc-mcp/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
+  in
+  ensure_dir (Filename.dirname host_file);
+  ignore (Fs_compat.save_file_atomic host_file "let touched = true\n");
+  let container_file =
+    Filename.concat
+      (Keeper_sandbox.container_root meta.name)
+      "repos/masc-mcp/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
+  in
+  let args =
+    `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
+  in
+  match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
+  | Ok path ->
+    Alcotest.(check string) "file path maps to host"
+      (normalize_realpath host_file) (normalize_realpath path)
+  | Error e -> Alcotest.fail ("file path should map container path: " ^ e)
+
+let test_docker_other_container_root_stays_blocked () =
+  setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
+  @@ fun ~base:_ ~config ~meta ~playground:_ ->
+  let other_container_cwd =
+    Filename.concat
+      (Keeper_sandbox.container_root "analyst")
+      "repos/masc-mcp"
+  in
+  let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
+  match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
+  | Error e ->
+    Alcotest.(check bool) "outside project root" true
+      (String_util.contains_substring e "path_outside_project_root")
+
 let test_docker_git_creds_contained () =
   setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -402,6 +467,7 @@ let test_gh_binds_repo_from_active_task_worktree () =
   let gh_args_file = Filename.concat playground "gh-args.txt" in
   let gh_pwd_file = Filename.concat playground "gh-pwd.txt" in
   ensure_dir bin_dir;
+  ensure_dir (Keeper_gh_env.root_gh_config_dir config);
   write_executable
     (Filename.concat bin_dir "gh")
     "#!/bin/sh\nprintf '%s' \"$*\" > \"$GH_ARGS_FILE\"\nprintf '%s' \"$PWD\" > \"$GH_PWD_FILE\"\necho fake-gh-ok\n";
@@ -417,6 +483,8 @@ let test_gh_binds_repo_from_active_task_worktree () =
             ("cmd", `String "pr list --state open");
           ])
   in
+  if not (Sys.file_exists gh_args_file) then
+    Alcotest.failf "gh did not run: %s" raw;
   let recorded_args = read_file gh_args_file in
   let recorded_pwd = read_file gh_pwd_file in
   Alcotest.(check bool) "repo flag injected"
@@ -477,6 +545,12 @@ let () =
             test_docker_keeper_blocks_find_outside;
           Alcotest.test_case "docker keeper allows inside playground"
             `Quick test_docker_keeper_allows_inside_playground;
+          Alcotest.test_case "docker container cwd maps to host worktree"
+            `Quick test_docker_container_cwd_maps_to_host_worktree;
+          Alcotest.test_case "docker container file path maps to host worktree"
+            `Quick test_docker_container_file_path_maps_to_host_worktree;
+          Alcotest.test_case "docker other container root stays blocked"
+            `Quick test_docker_other_container_root_stays_blocked;
           Alcotest.test_case "docker git-creds also contained" `Quick
             test_docker_git_creds_contained;
           Alcotest.test_case "gh binds repo from active task worktree" `Quick

@@ -267,6 +267,31 @@ let rewrite_single_repo_relative_path ~(config : Coord.config) ~(meta : keeper_m
            raw)
 ;;
 
+let host_path_of_own_container_path ~(config : Coord.config) ~(meta : keeper_meta)
+      (raw : string) =
+  if Filename.is_relative raw || meta.sandbox_profile <> Keeper_types.Docker then
+    None
+  else
+    let strip = Keeper_alerting_path.strip_trailing_slashes in
+    let normalize path =
+      Keeper_alerting_path.normalize_path_for_check path |> strip
+    in
+    let container_root = Keeper_sandbox.container_root meta.name |> normalize in
+    let raw_norm = normalize raw in
+    let host_root = keeper_playground_root ~config ~meta |> strip in
+    if String.equal raw_norm container_root then
+      Some host_root
+    else if String.starts_with ~prefix:(container_root ^ "/") raw_norm then
+      let suffix =
+        String.sub raw_norm
+          (String.length container_root + 1)
+          (String.length raw_norm - String.length container_root - 1)
+      in
+      Some (Filename.concat host_root suffix)
+    else
+      None
+;;
+
 (* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
    but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics.
@@ -280,6 +305,14 @@ let rewrite_single_repo_relative_path ~(config : Coord.config) ~(meta : keeper_m
 let playground_relative_unless_allowed_root ~(config : Coord.config)
     ~(meta : keeper_meta) (raw : string) : (string, string) result =
   let trimmed = String.trim raw in
+  let trimmed =
+    match host_path_of_own_container_path ~config ~meta trimmed with
+    | Some host_path ->
+      Log.Keeper.debug "playground_relative: mapped container path %S → %S"
+        trimmed host_path;
+      host_path
+    | None -> trimmed
+  in
   let trimmed =
     match strip_keeper_playground_prefix ~meta trimmed with
     | Some stripped ->

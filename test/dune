@@ -1014,6 +1014,7 @@
 (include stanzas/test_auth_token_uniqueness_audit.inc)
 (include stanzas/test_base_path_prod_guard.inc)
 (include stanzas/test_board_api_e2e.inc)
+(include stanzas/test_briefing_compactors.inc)
 (include stanzas/test_briefing_gaps.inc)
 (include stanzas/test_briefing_json_helpers.inc)
 (include stanzas/test_briefing_sections.inc)

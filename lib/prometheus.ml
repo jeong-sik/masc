@@ -610,6 +610,10 @@ let metric_keeper_tool_selection_failures =
   "masc_keeper_tool_selection_failures_total"
 let metric_keeper_tool_policy_failures =
   "masc_keeper_tool_policy_failures_total"
+let metric_tool_policy_unloaded_query =
+  "masc_tool_policy_unloaded_query_total"
+let metric_tool_policy_init_failed =
+  "masc_tool_policy_init_failed_total"
 let metric_keeper_reconcile_failures =
   "masc_keeper_reconcile_failures_total"
 let metric_keeper_decision_audit_flush_failures =
@@ -1721,6 +1725,14 @@ let init () =
      Labels: site, preset. The policy layer runs at module-init and preset \
      resolution time so it does not carry keeper context; keeper attribution \
      is recovered from the surrounding Log.Keeper line."
+    Counter;
+  add metric_tool_policy_unloaded_query
+    "Total tool-policy accessors called before init_policy_config loaded \
+     config/tool_policy.toml. Labeled by accessor."
+    Counter;
+  add metric_tool_policy_init_failed
+    "Total server startup tool-policy initialization failures. \
+     Labeled by base_path."
     Counter;
   add metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \

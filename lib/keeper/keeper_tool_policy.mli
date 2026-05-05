@@ -21,6 +21,10 @@ val init_policy_config :
 val policy_config_for_validation :
   unit -> Keeper_tool_policy_config.t option
 
+(** Reset the loaded policy config and one-shot unloaded-accessor warning
+    state. Intended for isolated regression tests only. *)
+val reset_policy_config_for_test : unit -> unit
+
 (** {1 Preset Names and Mapping} *)
 
 (** Convert a [tool_preset] variant to its string name. *)

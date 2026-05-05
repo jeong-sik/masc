@@ -224,6 +224,18 @@ let _policy_config_cache : policy_config_cache_entry option ref = ref None
 (** Reset internal config cache — for test isolation only. *)
 let reset_policy_config_cache () = _policy_config_cache := None
 
+let observe_policy_config_load_error ~base_path ~env_config_dir msg =
+  let config_dir =
+    Option.value ~default:"<resolved-from-base-path>" env_config_dir
+  in
+  Prometheus.inc_counter Prometheus.metric_keeper_tool_policy_failures
+    ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
+    ();
+  Log.Keeper.warn
+    "tool_code_write: tool_policy.toml load failed; git clone policy is \
+     unavailable (base_path=%S config_dir=%S): %s"
+    base_path config_dir msg
+
 let get_policy_config_result ~base_path =
   let env_config_dir = Env_config.config_dir_opt () in
   match !_policy_config_cache with
@@ -232,6 +244,10 @@ let get_policy_config_result ~base_path =
     result
   | _ ->
     let result = Keeper_tool_policy_config.load ~base_path in
+    (match result with
+     | Ok _ -> ()
+     | Error msg ->
+         observe_policy_config_load_error ~base_path ~env_config_dir msg);
     _policy_config_cache := Some { base_path; env_config_dir; result };
     result
 

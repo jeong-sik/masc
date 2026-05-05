@@ -7,6 +7,7 @@ open Alcotest
 
 module Tool_code_write = Masc_mcp.Tool_code_write
 module Coord = Masc_mcp.Coord
+module Prometheus = Masc_mcp.Prometheus
 
 let msg_contains ~needle haystack =
   let hlen = String.length haystack in
@@ -17,6 +18,12 @@ let msg_contains ~needle haystack =
     else loop (i + 1)
   in
   nlen = 0 || loop 0
+
+let tool_code_write_policy_load_failure_metric () =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_keeper_tool_policy_failures
+    ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
+    ()
 
 (* OCaml's Unix module does not expose unsetenv; for config overrides that are
    read via Env_config_core.trim_opt, an empty string is equivalent to unset. *)
@@ -268,6 +275,19 @@ let test_missing_policy_does_not_reuse_previous_cache () =
       check bool "mentions unavailable policy" true
         (msg_contains ~needle:"Git clone policy unavailable" reason)
   | Ok () -> fail "missing policy should not reuse prior cached config"
+
+let test_policy_load_error_emits_metric () =
+  Tool_code_write.reset_policy_config_cache ();
+  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
+    with_trimmed_env "MASC_CONFIG_DIR" None @@ fun () ->
+    let before = tool_code_write_policy_load_failure_metric () in
+    (match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
+       "https://github.com/jeong-sik/repo.git" with
+     | Error _ -> ()
+     | Ok () -> fail "missing policy should fail closed");
+    let after = tool_code_write_policy_load_failure_metric () in
+    check bool "policy load failure increments metric" true
+      (after >= before +. 1.0))
 
 let test_explicit_config_dir_override_still_validates () =
   with_temp_dir "tool-code-write-env-policy" @@ fun root ->
@@ -582,6 +602,8 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "missing policy does not reuse previous cache" `Quick
         test_missing_policy_does_not_reuse_previous_cache;
+      test_case "policy load error emits metric" `Quick
+        test_policy_load_error_emits_metric;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
       test_case "normalize ssh clone url to https" `Quick

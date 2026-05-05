@@ -251,6 +251,49 @@ let test_oas_mainline_warns_are_promoted_in_bridge () =
     (file_contains_pattern "lib/oas_log_bridge.ml"
        {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
 
+let tool_policy_unloaded_metric accessor =
+  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_unloaded_query
+    ~labels:[("accessor", accessor)]
+    ()
+
+let test_tool_policy_unloaded_accessors_emit_metric () =
+  Keeper_tool_policy.reset_policy_config_for_test ();
+  let allowed_orgs_before =
+    tool_policy_unloaded_metric "git_clone_allowed_orgs"
+  in
+  check bool "pre-init allowed_orgs remains fail-closed" true
+    (Option.is_none (Keeper_tool_policy.git_clone_allowed_orgs ()));
+  let allowed_orgs_after =
+    tool_policy_unloaded_metric "git_clone_allowed_orgs"
+  in
+  check bool "allowed_orgs pre-init query increments metric" true
+    (allowed_orgs_after >= allowed_orgs_before +. 1.0);
+  let clone_depth_before =
+    tool_policy_unloaded_metric "clone_depth"
+  in
+  check int "pre-init clone_depth fallback unchanged" 0
+    (Keeper_tool_policy.clone_depth ());
+  let clone_depth_after =
+    tool_policy_unloaded_metric "clone_depth"
+  in
+  check bool "clone_depth pre-init query increments metric" true
+    (clone_depth_after >= clone_depth_before +. 1.0);
+  init_registry ()
+
+let tool_policy_init_failed_metric base_path =
+  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_init_failed
+    ~labels:[("base_path", base_path)]
+    ()
+
+let test_tool_policy_init_failure_emits_metric () =
+  let base_path = "/tmp/masc-test-tool-policy-init-failed" in
+  let before = tool_policy_init_failed_metric base_path in
+  Server_runtime_bootstrap.record_tool_policy_init_failure ~base_path
+    "synthetic test failure";
+  let after = tool_policy_init_failed_metric base_path in
+  check bool "tool policy init failure increments metric" true
+    (after >= before +. 1.0)
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -280,5 +323,9 @@ let () =
             test_keeper_mainline_failures_log_at_error;
           test_case "oas mainline warns are promoted in bridge" `Quick
             test_oas_mainline_warns_are_promoted_in_bridge;
+          test_case "tool policy pre-init accessors emit metric" `Quick
+            test_tool_policy_unloaded_accessors_emit_metric;
+          test_case "tool policy init failure emits metric" `Quick
+            test_tool_policy_init_failure_emits_metric;
         ] );
     ]

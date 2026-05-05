@@ -39,6 +39,16 @@ describe('KeeperShellDrawer event mapping', () => {
     expect(lines[0]).toEqual({ text: 'dropped 15 older bytes', stream: 'meta' })
   })
 
+  it('renders shell output through the shared terminal molecule', async () => {
+    mounted = document.createElement('div')
+    render(h(KeeperShellDrawer, { keeperName: '' }), mounted)
+
+    await waitFor(() => expect(mounted?.textContent).toContain('no keeper selected'))
+    const terminal = mounted.querySelector('[data-terminal][data-testid="keeper-shell-terminal"]')
+    expect(terminal?.getAttribute('aria-label')).toBe('Keeper shell terminal')
+    expect(terminal?.querySelector('.term-line.is-meta')?.textContent).toContain('no keeper selected')
+  })
+
   it('does not auto-scroll when reduced motion is preferred', async () => {
     let resolveFetch: (value: Response) => void = () => undefined
     const fetchPromise = new Promise<Response>(resolve => {

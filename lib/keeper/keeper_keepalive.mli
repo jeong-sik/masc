@@ -184,9 +184,10 @@ val set_after_acquire_flag_hook_for_test :
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
     per keeper. Promoted to [Keeper_fiber_crash] at
     [oas_timeout_budget_strike_limit]; reset on any successful turn.
-    Counter survives within a server lifetime. After restart, callers
-    may hydrate the first bump from persisted [Oas_timeout_budget_loop]
-    state so multi-process loops still reach the supervisor gate. *)
+    The in-process CAS map survives within a server lifetime. After
+    restart, callers may hydrate the first bump from persisted
+    [Oas_timeout_budget_loop] state so multi-process loops still reach
+    the supervisor gate. *)
 val oas_timeout_budget_strike_limit : int
 
 val bump_budget_exhaustion_seeded :

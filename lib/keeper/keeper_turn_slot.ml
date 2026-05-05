@@ -667,20 +667,46 @@ let reset_autonomous_completion_for_test () : unit =
    partially observed loop. *)
 let oas_timeout_budget_strike_limit = 3
 
-let bump_budget_exhaustion_seeded ~keeper_name:_ ~prior_strikes : int =
-  max 0 prior_strikes + 1
+module Budget_strike_map = Map.Make (String)
 
-let bump_budget_exhaustion ~keeper_name:_ : int =
-  1
+let budget_exhaustions : int Budget_strike_map.t Atomic.t =
+  Atomic.make Budget_strike_map.empty
 
-let reset_budget_exhaustion ~keeper_name:_ : unit =
-  ()
+let update_budget_exhaustions f =
+  let rec loop () =
+    let current = Atomic.get budget_exhaustions in
+    let next, result = f current in
+    if Atomic.compare_and_set budget_exhaustions current next then result
+    else loop ()
+  in
+  loop ()
 
-let peek_budget_exhaustion_for_test ~keeper_name:_ : int =
-  0
+let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
+  let prior_strikes = max 0 prior_strikes in
+  update_budget_exhaustions (fun current ->
+    let current_strikes =
+      Budget_strike_map.find_opt keeper_name current
+      |> Option.value ~default:prior_strikes
+    in
+    let next_strikes = max current_strikes prior_strikes + 1 in
+    (Budget_strike_map.add keeper_name next_strikes current, next_strikes))
 
-let set_budget_exhaustion_for_test ~keeper_name:_ ~strikes:_ : unit =
-  ()
+let bump_budget_exhaustion ~keeper_name : int =
+  bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes:0
+
+let reset_budget_exhaustion ~keeper_name : unit =
+  update_budget_exhaustions (fun current ->
+    (Budget_strike_map.remove keeper_name current, ()))
+
+let peek_budget_exhaustion_for_test ~keeper_name : int =
+  Budget_strike_map.find_opt keeper_name (Atomic.get budget_exhaustions)
+  |> Option.value ~default:0
+
+let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
+  if strikes <= 0 then reset_budget_exhaustion ~keeper_name
+  else
+    update_budget_exhaustions (fun current ->
+      (Budget_strike_map.add keeper_name strikes current, ()))
 
 (** Test-only: stamp a completion time directly without going through
     [Time_compat.now].  Allows deterministic fairness-cooldown scenarios. *)

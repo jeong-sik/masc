@@ -75,7 +75,7 @@ type RefreshTask =
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
-      return ['shell', 'namespaceTruth', 'missionSnapshot']
+      return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
         return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']

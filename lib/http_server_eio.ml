@@ -84,6 +84,35 @@ module Compression = struct
       with Zstd.Error _ -> (data, false)
 end
 
+(** Late-response failure classifier (#13059).
+
+    [Failure] string-literal patterns are fragile (warning 52) — the
+    upstream library is free to change them.  We accept that risk
+    because:
+
+    - These exact strings ARE the public API surface for the upstream
+      libraries (httpun + the [Faraday]-style writer).  Library
+      authors treat the message text as user-facing diagnostics.
+    - This module is a defensive log-and-skip path only — if a
+      future library version reshapes the message we lose the
+      log-downgrade and revert to the fallback 500 attempt, not a
+      crash.
+    - Substring-match guards (via [String.starts_with] /
+      [String.equal]) localise the dependency rather than spreading
+      the literal across many call sites. *)
+[@@@warning "-52"]
+module Late_response = struct
+  let classify_write_failure = function
+    | Failure msg
+      when String.starts_with msg
+             ~prefix:"httpun.Reqd.respond_with_string: invalid state" ->
+        Some msg
+    | Failure msg when String.equal msg "cannot write to closed writer" ->
+        Some "cannot write to closed writer"
+    | _ -> None
+end
+[@@@warning "+52"]
+
 (** [safe_respond_with_string reqd response body] wraps
     [Httpun.Reqd.respond_with_string] to silently discard the
     [Failure "...invalid state..."] that httpun raises when the
@@ -93,22 +122,29 @@ end
     2026-05-05 cycle9 FATAL race).
 
     [Eio.Cancel.Cancelled] is always re-raised so structured
-    concurrency cancellation is never swallowed.  Any other
-    unexpected exception is logged at WARN level so the incident
-    remains observable without crashing the server. *)
+    concurrency cancellation is never swallowed.
+
+    Recognized late-response failures route through the shared
+    [Late_response.classify_write_failure] SSOT (#13082 review,
+    copilot thread on safe_respond_with_string drift) so the
+    classifier and this helper cannot diverge silently — anything
+    the classifier owns is logged identically here.  Genuinely
+    unexpected exceptions still log at WARN. *)
 let safe_respond_with_string reqd response body =
   try Httpun.Reqd.respond_with_string reqd response body
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Failure msg ->
-      Log.Http.warn
-        "[http-eio] respond_with_string skipped (reqd already in \
-         error-handling state; 2026-05-05 OAS cancellation race): %s"
-        msg
-  | exn ->
-      Log.Http.warn
-        "[http-eio] respond_with_string unexpected exception: %s"
-        (Printexc.to_string exn)
+  | exn -> (
+      match Late_response.classify_write_failure exn with
+      | Some msg ->
+          Log.Http.warn
+            "[http-eio] respond_with_string skipped (reqd already in \
+             error-handling state; classifier match — 2026-05-05 OAS \
+             cancellation race): %s" msg
+      | None ->
+          Log.Http.warn
+            "[http-eio] respond_with_string unexpected exception: %s"
+            (Printexc.to_string exn))
 
 (** Simple response helpers *)
 module Response = struct

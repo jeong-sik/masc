@@ -68,13 +68,28 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
            closed during a cancel/disconnect race (2026-05-05 cycle9 incident).
            The outer connection_handler catch already swallows these, but
            wrapping here makes the intent explicit and avoids an intermediate
-           httpun-ws state-machine inconsistency. *)
+           httpun-ws state-machine inconsistency.
+
+           Use the centralized [Late_response.classify_write_failure]
+           SSOT so the recognized "writer closed during cancel" race
+           is downgraded to debug here too — matching the outer
+           connection_handler.  Anything the classifier does not own
+           (genuine bugs / unexpected exceptions) still warns.  This
+           closes the warn-noise gap reported in #13082 review. *)
         (try Ws.Wsd.send_pong wsd
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-                Log.Server.warn
-                  "[ws-standalone] send_pong failed (closed wsd race): %s"
-                  (Printexc.to_string exn));
+                (match
+                   Http_server_eio.Late_response.classify_write_failure exn
+                 with
+                 | Some _ ->
+                     Log.Server.debug
+                       "[ws-standalone] send_pong skipped (writer closed during \
+                        cancel race)"
+                 | None ->
+                     Log.Server.warn
+                       "[ws-standalone] send_pong failed: %s"
+                       (Printexc.to_string exn)));
         Ws.Payload.close payload
       | `Connection_close ->
         Server_mcp_transport_ws.cleanup_session session_id;
@@ -152,9 +167,17 @@ let start
                     try connection_handler client_addr flow
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
-                    | exn ->
-                      Log.Server.warn "WS standalone handler error: %s"
-                        (Printexc.to_string exn)));
+                    | exn -> (
+                      match
+                        Http_server_eio.Late_response.classify_write_failure
+                          exn
+                      with
+                      | Some _ ->
+                          Log.Server.debug
+                            "WS standalone handler closed before write completed"
+                      | None ->
+                          Log.Server.warn "WS standalone handler error: %s"
+                            (Printexc.to_string exn))));
                 accept_loop 0.05
               with
               | Eio.Cancel.Cancelled _ as e -> raise e

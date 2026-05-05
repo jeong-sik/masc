@@ -1,5 +1,3 @@
-module Types = Masc_domain
-
 (** CI/dashboard hardening source guards. *)
 
 open Alcotest
@@ -1033,6 +1031,22 @@ let test_transport_health_contracts () =
           {|Coord.get_messages_raw_in_room|}))
   (* command plane topology reads guard removed (CP purge: Command_plane_v2 deleted) *)
 
+let test_http_cancel_response_contracts () =
+  check bool "main_eio preserves cancellation propagation before 500 fallback" true
+    (file_contains_nearby_line_with_patterns "bin/main_eio.ml"
+       ~anchor:{|else dispatch_route ~routes ~request ~path reqd|}
+       ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
+       ~max_lines:3);
+  check bool "main_eio suppresses stale httpun response writes" true
+    (file_contains_pattern "bin/main_eio.ml"
+       {|httpun.Reqd.respond_with_string: invalid state|});
+  check bool "main_eio 500 fallback is best-effort" true
+    (file_contains_pattern "bin/main_eio.ml"
+       {|try_internal_error_response|});
+  check bool "standalone ws closed writer is not warning noise" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|Failure "cannot write to closed writer"|})
+
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/tool_worktree.ml"
@@ -1401,6 +1415,8 @@ let () =
              test_transport_route_contracts;
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
+           test_case "http cancel response contracts (#13059)" `Quick
+             test_http_cancel_response_contracts;
            test_case "worktree list contracts" `Quick
              test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick

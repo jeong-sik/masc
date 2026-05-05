@@ -254,6 +254,84 @@ let request_tests = [
   "header", `Quick, test_request_header;
 ]
 
+(* ===== Late_response classifier (#13059) ===== *)
+
+(* Behavioural regression for the cancellation-vs-late-write race.
+   Before #13059 a top-level handler [exception] arm caught
+   [Eio.Cancel.Cancelled] and converted it into a 500 — that 500
+   write itself would fail because the underlying writer was already
+   in "invalid state" / "closed", and the *secondary* failure shadowed
+   the original cancellation.  The fix re-raises [Cancelled] and
+   downgrades the two well-known late-response failure shapes to a
+   warning.  The classifier below is the SSOT for "what counts as a
+   recognised late-response failure" — these tests pin its truth
+   table so a future refactor cannot silently widen or narrow it. *)
+
+let test_late_response_classifies_invalid_state_failure () =
+  let exn =
+    Failure
+      "httpun.Reqd.respond_with_string: invalid state, response already \
+       written"
+  in
+  match Late_response.classify_write_failure exn with
+  | Some msg ->
+      Alcotest.(check bool) "preserves the original message"
+        true (String.length msg > 0);
+      Alcotest.(check bool) "message is the failure payload"
+        true
+        (String.starts_with msg
+           ~prefix:"httpun.Reqd.respond_with_string: invalid state")
+  | None -> Alcotest.fail "expected Some _ for httpun invalid state failure"
+
+let test_late_response_classifies_closed_writer_failure () =
+  match
+    Late_response.classify_write_failure
+      (Failure "cannot write to closed writer")
+  with
+  | Some msg ->
+      Alcotest.(check string) "stable closed-writer label"
+        "cannot write to closed writer" msg
+  | None -> Alcotest.fail "expected Some _ for closed-writer failure"
+
+let test_late_response_does_not_classify_cancellation () =
+  (* Cancellation MUST NOT be classified as a late-response failure —
+     callers re-raise [Cancelled] before invoking the classifier so
+     that the cancellation propagates out of the request handler. *)
+  let cancelled = Eio.Cancel.Cancelled (Failure "test cancellation") in
+  Alcotest.(check (option string))
+    "Cancelled is not a late-response failure"
+    None
+    (Late_response.classify_write_failure cancelled)
+
+let test_late_response_ignores_unrelated_failures () =
+  let cases =
+    [
+      ("Failure with unrelated message", Failure "boom");
+      ("Failure with empty message", Failure "");
+      ("Not_found", Not_found);
+      ("Division_by_zero", Division_by_zero);
+      ( "Failure mentioning httpun without invalid state prefix",
+        Failure "httpun.Reqd: nothing to do" );
+    ]
+  in
+  List.iter
+    (fun (label, exn) ->
+      Alcotest.(check (option string))
+        label None
+        (Late_response.classify_write_failure exn))
+    cases
+
+let late_response_tests = [
+  "invalid state failure -> Some msg", `Quick,
+  test_late_response_classifies_invalid_state_failure;
+  "closed writer failure -> Some 'cannot write to closed writer'", `Quick,
+  test_late_response_classifies_closed_writer_failure;
+  "Eio.Cancel.Cancelled -> None (caller re-raises)", `Quick,
+  test_late_response_does_not_classify_cancellation;
+  "unrelated exceptions -> None", `Quick,
+  test_late_response_ignores_unrelated_failures;
+]
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -263,4 +341,5 @@ let () =
     "router", router_tests;
     "config", config_tests;
     "request", request_tests;
+    "late_response", late_response_tests;
   ]

@@ -173,6 +173,8 @@ let apply_autonomous_wirein
    keeper's primary turn outcome. *)
 
 let apply_resilience_wirein
+    ?audit_store
+    ?strategy_executor
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
   if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then lifecycle
@@ -193,7 +195,7 @@ let apply_resilience_wirein
           let witness = Resilience.Keeper_bridge.running_witness in
           let outcome =
             Resilience.Keeper_bridge.apply_post_turn_resilience
-              witness ~now
+              witness ?audit_store ?strategy_executor ~now
               ~working_context:cp.Agent_sdk.Checkpoint.working_context
               ~maybe_error ()
           in
@@ -348,7 +350,9 @@ let apply_multimodal_wirein
             ();
           lifecycle)
 
-let apply_post_turn_lifecycle
+let apply_post_turn_lifecycle_with_resilience_handles
+    ~(resilience_audit_store : Shared_audit.Store.t option)
+    ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
     ~(on_compaction_started : unit -> unit)
     ~(on_handoff_started : unit -> unit)
     ~(base_dir : string)
@@ -624,9 +628,35 @@ let apply_post_turn_lifecycle
      depends on whether prior passes have already mutated
      [working_context]. *)
   let body = apply_autonomous_wirein ~now:now_ts body in
-  let body = apply_resilience_wirein ~now:now_ts body in
+  let body =
+    apply_resilience_wirein
+      ?audit_store:resilience_audit_store
+      ?strategy_executor:resilience_strategy_executor
+      ~now:now_ts body
+  in
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
+
+let apply_post_turn_lifecycle
+    ~(on_compaction_started : unit -> unit)
+    ~(on_handoff_started : unit -> unit)
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int)
+    ~(current_turn_overflow_blocker : string option)
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+  apply_post_turn_lifecycle_with_resilience_handles
+    ~resilience_audit_store:None
+    ~resilience_strategy_executor:None
+    ~on_compaction_started
+    ~on_handoff_started
+    ~base_dir
+    ~meta
+    ~model
+    ~primary_model_max_tokens
+    ~current_turn_overflow_blocker
+    ~checkpoint
 
 let forced_overflow_retry_meta
     (meta : keeper_meta)

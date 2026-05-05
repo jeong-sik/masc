@@ -29,6 +29,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  (match value with
+   | Some v -> Unix.putenv key v
+   | None -> Unix.putenv key "");
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
 let base_lifecycle ~(meta : KT.keeper_meta) : KEC.post_turn_lifecycle =
   {
     updated_meta = meta;
@@ -504,6 +516,106 @@ let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
       check bool "handoff emitted" true (Option.is_some lifecycle.handoff_json);
       check int "generation advanced" 1
         lifecycle.updated_meta.runtime.generation)
+
+let test_apply_post_turn_lifecycle_passes_resilience_handles () =
+  let base_dir = temp_dir "keeper_lifecycle_resilience" in
+  let audit_dir = temp_dir "keeper_lifecycle_resilience_audit" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod base_dir 0o755 with _ -> ());
+      cleanup_dir base_dir;
+      cleanup_dir audit_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_env "MASC_RESILIENCE" (Some "1") @@ fun () ->
+      let meta =
+        let base =
+          make_keeper_meta ~trace_id:"trace-resilience-handles" ()
+        in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      let checkpoint =
+        KEC.create ~system_prompt:"stable" ~max_tokens:4096
+        |> fun ctx -> KEC.append ctx (Agent_sdk.Types.user_msg "checkpoint")
+        |> KEC.sync_oas_context
+        |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
+      in
+      let audit_store = Shared_audit.Store.create ~base_dir:audit_dir in
+      let handoff_requests = ref 0 in
+      let strategy_executor =
+        {
+          Resilience.Recovery.run_retry_attempt =
+            (fun ~attempt:_ -> Resilience.Recovery.Retry_success);
+          sleep = (fun _ -> ());
+          on_event = (fun _ -> ());
+          apply_fallback =
+            (fun ~value:_ ~confidence_delta:_ -> Ok ());
+          request_handoff =
+            (fun ~message:_ ~preserve_state:_ ->
+              incr handoff_requests;
+              Ok ());
+          abort = (fun ~reason:_ -> Ok ());
+        }
+      in
+      Unix.chmod base_dir 0o555;
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle_with_resilience_handles
+          ~resilience_audit_store:(Some audit_store)
+          ~resilience_strategy_executor:(Some strategy_executor)
+          ~base_dir ~meta
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:(Some checkpoint)
+      in
+      Unix.chmod base_dir 0o755;
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check bool "handoff failure recorded" true
+        (Option.is_some lifecycle.handoff_failure_reason);
+      check int "strategy executor requested handoff" 1 !handoff_requests;
+      let entries = Shared_audit.Store.recent audit_store ~n:2 in
+      let categories =
+        List.map
+          (fun (entry : Shared_audit.Envelope.t) -> entry.category)
+          entries
+      in
+      check bool "attempt audit written" true
+        (List.mem "RecoveryAttempted" categories);
+      check bool "outcome audit written" true
+        (List.mem "RecoverySucceeded" categories);
+      match lifecycle.checkpoint with
+      | Some cp -> (
+          match cp.Agent_sdk.Checkpoint.working_context with
+          | Some (`Assoc kv) -> (
+              match List.assoc_opt "resilience_meta" kv with
+              | Some (`Assoc meta_kv) ->
+                  check (option string) "execution status" (Some "completed")
+                    (match List.assoc_opt "strategy_execution" meta_kv with
+                     | Some (`Assoc exec_kv) -> (
+                         match List.assoc_opt "status" exec_kv with
+                         | Some (`String status) -> Some status
+                         | _ -> None)
+                     | _ -> None)
+              | _ -> fail "expected resilience_meta in working context")
+          | _ -> fail "expected assoc working context")
+      | None -> fail "expected checkpoint")
 
 let test_rollover_aborts_on_save_failure () =
   let base_dir = temp_dir "keeper_lifecycle_rollover_abort" in
@@ -2120,6 +2232,8 @@ let () =
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
           test_case "handoff runs on current-turn overflow signal" `Quick
             test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
+          test_case "resilience handles reach bridge" `Quick
+            test_apply_post_turn_lifecycle_passes_resilience_handles;
           test_case "rollover aborts on save failure" `Quick
             test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick

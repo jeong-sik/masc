@@ -316,6 +316,7 @@
    ambient-context-eio
    ;; Autonomous engine sub-library (Tier B3-A4) used by Keeper post-turn wire-in (Tier A5)
    masc_mcp.autonomous
+   masc_mcp.shared_audit
    masc_mcp.shared_types
    ;; Resilience sub-library (Tier B6-B7) used by Keeper post-turn wire-in (Tier A6)
    masc_mcp.resilience

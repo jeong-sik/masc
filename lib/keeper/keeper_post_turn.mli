@@ -77,6 +77,25 @@ val apply_post_turn_lifecycle :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
+val apply_post_turn_lifecycle_with_resilience_handles :
+  resilience_audit_store:Shared_audit.Store.t option ->
+  resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
+  on_compaction_started:(unit -> unit) ->
+  on_handoff_started:(unit -> unit) ->
+  base_dir:string ->
+  meta:Keeper_types.keeper_meta ->
+  model:string ->
+  primary_model_max_tokens:int ->
+  current_turn_overflow_blocker:string option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
+  post_turn_lifecycle
+(** Variant of {!apply_post_turn_lifecycle} for callers that own
+    concrete resilience recovery handles.  Passing [None] for both
+    handles is equivalent to {!apply_post_turn_lifecycle}; passing a
+    store and executor lets the feature-flagged resilience wire-in
+    write durable audit records and consume the selected recovery
+    strategy. *)
+
 (** Build the relaxed-policy meta used during forced overflow
     retry: zero compaction gates so the next compaction always
     fires. *)

@@ -228,6 +228,19 @@ val apply_post_turn_lifecycle :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
+val apply_post_turn_lifecycle_with_resilience_handles :
+  resilience_audit_store:Shared_audit.Store.t option ->
+  resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
+  on_compaction_started:(unit -> unit) ->
+  on_handoff_started:(unit -> unit) ->
+  base_dir:string ->
+  meta:keeper_meta ->
+  model:string ->
+  primary_model_max_tokens:int ->
+  current_turn_overflow_blocker:string option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
+  post_turn_lifecycle
+
 val dispatch_keeper_phase_event :
   config:Coord.config ->
   keeper_name:string ->

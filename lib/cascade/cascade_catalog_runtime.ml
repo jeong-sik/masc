@@ -607,7 +607,7 @@ let runtime_required_profile_names ?config_path () =
   else
     runtime_required_profiles ~config_path
 
-let validate_path_result ?sw ?net ~config_path =
+let validate_path_result ?sw ?net ~config_path () =
   let checked_at = Unix.gettimeofday () in
   let source_state = active_source_state ~config_path in
   let source_path = source_state.info.source_path in
@@ -736,7 +736,7 @@ let validate_path_result ?sw ?net ~config_path =
 
 let validate_path ?sw ?net ?clock ~config_path () =
   let (_ : float Eio.Time.clock_ty Eio.Resource.t option) = clock in
-  match validate_path_result ?sw ?net ~config_path with
+  match validate_path_result ?sw ?net ~config_path () with
   | Ok result -> Ok result.snapshot
   | Error _ as e -> e
 
@@ -801,7 +801,7 @@ let inspect_active ?sw ?net ?clock () =
       match cached_result with
       | Some result -> result
       | None -> (
-          match validate_path_result ?sw ?net ~config_path with
+          match validate_path_result ?sw ?net ~config_path () with
           | Ok { snapshot; rejected_update = None } ->
               with_cache_lock (fun () ->
                   cache :=

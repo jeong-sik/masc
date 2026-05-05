@@ -2143,15 +2143,24 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
   let codex_provider = make_codex_cli_provider_cfg () in
-  let skip_log =
-    Masc_mcp.Oas_worker_named.codex_keeper_bound_skip_log_message
-      ~label:"tool_use_strict" ~keeper_name:"sangsu" codex_provider
-      Masc_mcp.Oas_worker_named.Codex_keeper_bound_actor_required
+  (* Post-#13149 review: this test originally pinned the
+     [codex_keeper_bound_skip_log_message] pure helper.  That left
+     the production [log_codex_keeper_bound_skip] emission path
+     uncovered (removing it / changing its level / suppressing the
+     first emission would still pass) and forced the helper to be
+     part of [Oas_worker_named]'s public API.  Drive the actual
+     emission from [filter_candidate_providers_for_tool_support]
+     and observe it via [Log.Ring].
+
+     [since_seq] is exclusive ([> seq]), so a falsy [Some 0] would
+     skip a fresh entry whose seq is 0 (e.g. when this test runs in
+     isolation against an empty ring).  Pass [None] when the ring
+     is empty so [recent] returns every entry. *)
+  let before_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | (entry : Log.Ring.entry) :: _ -> Some entry.seq
+    | [] -> None
   in
-  Alcotest.(check (option string)) "codex skip decision log message"
-    (Some
-       "cascade tool_use_strict: skipped provider=codex_cli:codex for keeper=sangsu reason=codex_keeper_bound_actor_required")
-    skip_log;
   let filtered =
     Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
@@ -2161,6 +2170,30 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       ~label:"tool_use_strict"
       [ codex_provider; make_kimi_cli_provider_cfg () ]
   in
+  let codex_skip_entries =
+    Log.Ring.recent ~limit:50 ~module_filter:"Misc" ?since_seq:before_seq ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+        contains_substring ~needle:"reason=codex_keeper_bound_actor_required"
+          entry.message)
+  in
+  (match codex_skip_entries with
+   | [] ->
+       Alcotest.failf
+         "expected at least one codex bound-actor skip log entry; \
+          observed none under module_filter=Misc since seq=%s"
+         (match before_seq with Some s -> string_of_int s | None -> "<empty>")
+   | (entry : Log.Ring.entry) :: _ ->
+       Alcotest.(check bool)
+         "skip log mentions cascade tool_use_strict label" true
+         (contains_substring
+            ~needle:"cascade tool_use_strict:" entry.message);
+       Alcotest.(check bool)
+         "skip log mentions provider=codex_cli:codex" true
+         (contains_substring
+            ~needle:"provider=codex_cli:codex" entry.message);
+       Alcotest.(check bool)
+         "skip log mentions keeper=sangsu" true
+         (contains_substring ~needle:"keeper=sangsu" entry.message));
   match filtered with
   | [ provider_cfg ] ->
       Alcotest.(check bool) "kimi remains after codex bound-actor filter" true

@@ -68,7 +68,7 @@ function categoryTone(cat: TlaSpecCategory): 'ok' | 'warn' | 'neutral' {
   }
 }
 
-export function tlcStatusLabel(status: TlcResultStatus): string {
+function tlcStatusLabel(status: TlcResultStatus): string {
   switch (status) {
     case 'passed':
       return '통과'
@@ -85,7 +85,7 @@ export function tlcStatusLabel(status: TlcResultStatus): string {
   }
 }
 
-export function tlcStatusTone(status: TlcResultStatus): 'ok' | 'warn' | 'bad' | 'info' | 'neutral' {
+function tlcStatusTone(status: TlcResultStatus): 'ok' | 'warn' | 'bad' | 'info' | 'neutral' {
   switch (status) {
     case 'passed':
       return 'ok'
@@ -101,15 +101,15 @@ export function tlcStatusTone(status: TlcResultStatus): 'ok' | 'warn' | 'bad' | 
   }
 }
 
-export function formatTlcMetric(value: number | null): string {
+function formatTlcMetric(value: number | null): string {
   return value == null ? '-' : value.toLocaleString('ko-KR')
 }
 
-export function formatTlcTimestamp(value: string | null): string {
+function formatTlcTimestamp(value: string | null): string {
   return value ? value.slice(0, 19).replace('T', ' ') : '기록 없음'
 }
 
-export function hasTlcEvidence(entry: TlcResultEntry): boolean {
+function hasTlcEvidence(entry: TlcResultEntry): boolean {
   return entry.status !== 'not_run'
     || entry.last_run_at != null
     || entry.states_explored != null
@@ -119,7 +119,7 @@ export function hasTlcEvidence(entry: TlcResultEntry): boolean {
     || entry.log_path != null
 }
 
-export function filterTlcEntries(entries: TlcResultEntry[], filter: StatusFilter): TlcResultEntry[] {
+function filterTlcEntries(entries: TlcResultEntry[], filter: StatusFilter): TlcResultEntry[] {
   const filtered = filter === 'all'
     ? entries
     : entries.filter((entry) => entry.status === filter)

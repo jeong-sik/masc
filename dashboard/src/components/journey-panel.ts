@@ -49,7 +49,7 @@ type JourneyLifeEntry = {
   timestamp: string | number | null
 }
 
-export interface JourneyRecord {
+interface JourneyRecord {
   key: string
   kind: 'task' | 'keeper'
   title: string
@@ -284,7 +284,7 @@ function collectLifeEntries(
   return merged.slice(0, 3)
 }
 
-export function buildJourneyRecords(input: JourneyBuildInput): JourneyRecord[] {
+function buildJourneyRecords(input: JourneyBuildInput): JourneyRecord[] {
   const activeTasks = input.tasks
     .filter((task) => ACTIVE_TASK_STATUSES.has(task.status ?? 'todo'))
     .slice()
@@ -436,7 +436,7 @@ export function buildJourneyRecords(input: JourneyBuildInput): JourneyRecord[] {
   return [...taskRecords, ...keeperRecords]
 }
 
-export function filterJourneyRecords(
+function filterJourneyRecords(
   records: readonly JourneyRecord[],
   query: string,
 ): readonly JourneyRecord[] {

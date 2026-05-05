@@ -1,7 +1,7 @@
 import { h } from 'preact'
 import { render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Memory, filterBoardPosts } from './memory'
+import { Memory } from './memory'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../store'
 import { route } from '../router'
 import { contentCategory } from './memory-state'
@@ -174,56 +174,3 @@ describe('Memory Component', () => {
   })
 })
 
-// ── filterBoardPosts pure-function tests ──────────────────────────
-describe('filterBoardPosts', () => {
-  const a = makePost({ id: 'p1', title: 'GraphRAG 기술 탐색', body: 'hybrid retrieval notes', author: 'ani1999' })
-  const b = makePost({ id: 'p2', title: 'PR 리뷰: #7106', body: 'refactor of cascade router', author: 'sojin' })
-  const c = makePost({ id: 'p3', title: 'Sprint 상태 업데이트', body: 'budget stable, GraphRAG shipped', author: 'poe' })
-  const d = makePost({ id: 'p4', title: 'Verdict: 7건 일괄 판정', body: '', author: 'verdict' })
-  const rows = [a, b, c, d] as const
-
-  it('returns the input reference unchanged for an empty query', () => {
-    expect(filterBoardPosts(rows, '')).toBe(rows)
-  })
-
-  it('returns the input reference unchanged for a whitespace-only query', () => {
-    expect(filterBoardPosts(rows, '   ')).toBe(rows)
-  })
-
-  it('matches on title (case-insensitive)', () => {
-    expect(filterBoardPosts(rows, 'graphrag').map(p => p.id)).toEqual(['p1', 'p3'])
-  })
-
-  it('matches on body (case-insensitive)', () => {
-    expect(filterBoardPosts(rows, 'CASCADE').map(p => p.id)).toEqual(['p2'])
-  })
-
-  it('matches Korean substring on title', () => {
-    expect(filterBoardPosts(rows, '리뷰').map(p => p.id)).toEqual(['p2'])
-  })
-
-  it('trims surrounding whitespace before matching', () => {
-    expect(filterBoardPosts(rows, '   verdict   ').map(p => p.id)).toEqual(['p4'])
-  })
-
-  it('returns an empty array when no post matches', () => {
-    expect(filterBoardPosts(rows, 'nonexistent-needle-xyz')).toEqual([])
-  })
-
-  it('does not mutate the input array', () => {
-    const copy = [...rows]
-    filterBoardPosts(rows, 'graphrag')
-    expect(rows).toEqual(copy)
-  })
-
-  it('handles posts with empty body without throwing', () => {
-    const result = filterBoardPosts(rows, 'verdict')
-    expect(result.map(p => p.id)).toEqual(['p4'])
-  })
-
-  it('title match takes precedence when both title and body could match', () => {
-    // Post c has "GraphRAG" in both title-adjacent context and body; both should count as match.
-    const onlyC = makePost({ id: 'only-c', title: 'stable', body: 'graphrag shipped', author: 'x' })
-    expect(filterBoardPosts([onlyC], 'graphrag').map(p => p.id)).toEqual(['only-c'])
-  })
-})

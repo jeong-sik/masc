@@ -66,7 +66,7 @@ function lazyPanelFallback(label: string) {
  *
  * Input is never mutated.
  */
-export function filterActionGroups(
+function filterActionGroups(
   groups: readonly ActionTimelineGroup[],
   query: string,
 ): readonly ActionTimelineGroup[] {
@@ -81,7 +81,7 @@ export function filterActionGroups(
   })
 }
 
-export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
+function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
   const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
   if (!value || value === 'default') return null
   return value

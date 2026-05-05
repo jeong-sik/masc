@@ -83,7 +83,7 @@ import type { BoardPost, ContentCategory } from './memory-state'
  *
  * Input is never mutated; BoardPost is treated as readonly.
  */
-export function filterBoardPosts(
+function filterBoardPosts(
   posts: readonly BoardPost[],
   query: string,
 ): readonly BoardPost[] {

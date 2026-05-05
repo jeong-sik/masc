@@ -17,15 +17,16 @@
       -> [set_bucket_lookup]
 
     This module is the shadow-mode shim.  [observe] calls
-    [Keeper_admission_glue.decide] and increments the
-    [metric_keeper_admission_shadow_outcome] counter so we can read a
-    24h distribution of "what would the new router have done" before
-    any real swap. *)
+    [Keeper_admission_glue.decide_shadow] (not [decide]) and increments
+    the [metric_keeper_admission_shadow_outcome] counter so we can read
+    a 24h distribution of "what would the new router have done" before
+    any real swap.  The shadow path bypasses [MASC_ADMISSION_USE_NEW]
+    and does not consume tokens. *)
 
 (** {1 First-call lazy init} *)
 
 val init_once_from_base_path : base_path:string -> unit
-(** Idempotent init.  First call:
+(** Idempotent init.  First successful call:
       1. Reads [<base_path>/.masc/config/cascade.json] via
          [Cascade_config_loader.load_json] (mtime-cached).
       2. Builds [Keeper_admission_registry] from the [admission]
@@ -34,24 +35,30 @@ val init_once_from_base_path : base_path:string -> unit
       4. Sets [bucket_lookup] to a lazy per-provider hashtbl (default
          capacity 10, refill 1.0 RPS — PR-E-1.8 makes this
          configurable per-provider from cascade rate-limit blocks).
-    Subsequent calls are no-ops.
+    Once installed, subsequent calls are no-ops.
 
-    Safe to invoke from multiple keeper fibers — internal state is
-    guarded by [Mutex.protect].  Failures are logged via
-    [Log.Keeper.warn] and do not raise; the registry stays empty,
-    the call site continues to return [Legacy_path]. *)
+    Concurrency model: a three-state flag (Idle/In_progress/Done) is
+    guarded by a [Mutex.protect] that is held ONLY across state
+    transitions, never across the file I/O step.  This prevents
+    domain-wide stalls when [Cascade_config_loader.load_json] traces
+    via [Eio.traceln] or blocks on disk.
+
+    Failure model: a transient load failure logs via [Log.Keeper.warn],
+    reverts the flag to Idle, and returns.  The next heartbeat tick
+    re-enters and retries.  Until the registry is installed, the call
+    site continues to return [Legacy_path]. *)
 
 (** {1 Lookup registration (alternative entry, e.g. for tests)} *)
 
 val set_policy_lookup : Keeper_admission_glue.policy_lookup -> unit
 (** Replace the policy lookup function.  PR-E-1.7 calls this once at
-    startup with [Keeper_admission_registry.lookup registry].  Idempotent;
-    last call wins. *)
+    startup with [Keeper_admission_registry.lookup registry].  Replaces
+    the lookup atomically; last call wins. *)
 
 val set_bucket_lookup : Keeper_admission_router.bucket_lookup -> unit
 (** Replace the bucket lookup function.  PR-E-1.7 calls this once at
     startup with a [Hashtbl.find_opt] over the provider table.
-    Idempotent; last call wins. *)
+    Replaces the lookup atomically; last call wins. *)
 
 (** {1 Read-only access for the heartbeat loop} *)
 
@@ -66,21 +73,27 @@ val bucket_lookup : Keeper_admission_router.bucket_lookup
 (** {1 Shadow-mode observation} *)
 
 val observe : keeper_id:string -> Keeper_admission_glue.outcome
-(** Call [Keeper_admission_glue.decide] with the registered lookups
-    and increment [metric_keeper_admission_shadow_outcome] with one of
-    four label values: ["legacy"], ["dispatch"], ["wait"], ["surface"].
+(** Call [Keeper_admission_glue.decide_shadow] with the registered
+    lookups and increment [metric_keeper_admission_shadow_outcome]
+    with one of four label values: ["legacy"], ["dispatch"], ["wait"],
+    ["surface"].
 
     The caller is expected to *ignore* the returned outcome for now —
     PR-E-1.6 always falls through to the existing
     [Keeper_turn_slot.with_keeper_turn_slot] path.  PR-E-1.7 swaps in
     the real handler.
 
-    Side effects: Prometheus counter increment only.  No log line per
-    call (heartbeat already prints one INFO/skip per turn; doubling
-    the volume is noise). *)
+    Side effects:
+    - Prometheus counter increment.
+    - Lazy refill of inspected token buckets ([tokens_available]
+      mutates [last_refill_at]; does NOT consume tokens).
+
+    No log line per call (heartbeat already prints one INFO/skip per
+    turn; doubling the volume is noise). *)
 
 (** {1 Test seam} *)
 
 val reset_for_test : unit -> unit
-(** Reset both lookup functions to the default [fun _ -> None].
-    Tests only — production code never calls this. *)
+(** Reset both lookup functions to the default [fun _ -> None] and
+    clear the init state.  Tests only — production code never calls
+    this. *)

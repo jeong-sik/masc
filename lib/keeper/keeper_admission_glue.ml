@@ -33,3 +33,23 @@ let decide ~keeper_id ~policies ~buckets =
     | Some policy ->
         let decision = Keeper_admission_router.schedule ~policy ~buckets in
         New_admission decision
+
+(* Shadow-mode decision: compute the router outcome WITHOUT consulting
+   [MASC_ADMISSION_USE_NEW] and WITHOUT consuming bucket tokens.
+
+   This exists because RFC-0026 PR-E-1.6 ships in shadow mode by
+   default (flag off).  [decide] short-circuits to [Legacy_path] when
+   the flag is off, which would defeat the purpose of the
+   [metric_keeper_admission_shadow_outcome] counter — we'd only see
+   the [legacy] label.  PR-E-1.8 reads the dispatch/wait/surface
+   distribution from this counter to decide when to flip the flag,
+   so we need real outcomes regardless of flag state.
+
+   Flag still gates whether the result is APPLIED (caller checks
+   [decide]).  This function only COMPUTES. *)
+let decide_shadow ~keeper_id ~policies ~buckets =
+  match policies keeper_id with
+  | None -> Legacy_path
+  | Some policy ->
+      let decision = Keeper_admission_router.schedule_peek ~policy ~buckets in
+      New_admission decision

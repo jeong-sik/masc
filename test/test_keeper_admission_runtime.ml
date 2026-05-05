@@ -1,12 +1,14 @@
 (** Unit tests for Keeper_admission_runtime (RFC-0026 PR-E-1.6).
 
-    The shadow-mode shim has three behaviors worth pinning:
+    The shadow-mode shim has these behaviors worth pinning:
     - default lookups return [None] (no policies registered)
     - [observe] returns [Legacy_path] when no policy is registered
-    - [set_policy_lookup] / [set_bucket_lookup] are idempotent and
-      observable through the public lookups
-    - flag-off behavior matches flag-on with [None] policy
-      (both produce [Legacy_path])
+    - [set_policy_lookup] / [set_bucket_lookup] replace atomically
+      and are observable through the public lookups
+    - [observe] uses the shadow path: when a policy IS registered,
+      it returns [New_admission ...] regardless of
+      [MASC_ADMISSION_USE_NEW] flag state, and does not consume
+      bucket tokens.
 
     The Prometheus counter increment is a side effect that lives in
     Prometheus_test territory; we verify the *outcome* the counter is
@@ -137,6 +139,37 @@ let test_init_creates_lazy_bucket_lookup () =
   | Some a, Some b -> Alcotest.(check bool) "stable identity" true (a == b)
   | _ -> Alcotest.fail "expected Some bucket on both lookups"
 
+(* ------------------------------------------------------------------ *)
+(* Shadow-mode observation                                              *)
+(* ------------------------------------------------------------------ *)
+
+(* When a policy + bucket are registered, [observe] must return
+   [New_admission ...] WITHOUT consulting [MASC_ADMISSION_USE_NEW]
+   (flag is unset in CI by default, but [decide_shadow] bypasses it).
+   And critically, the bucket must still be full afterward — shadow
+   mode peeks via [tokens_available], it does not [try_acquire]. *)
+let test_observe_with_policy_returns_new_admission_without_flag () =
+  KAR.reset_for_test ();
+  let policy = make_policy "anthropic" in
+  KAR.set_policy_lookup (fun id ->
+    if id = "k1" then Some policy else None);
+  let bucket = KPTB.create ~provider:"anthropic"
+      ~capacity:5 ~refill_rate:1.0 ~now in
+  let tokens_before = KPTB.tokens_available bucket in
+  KAR.set_bucket_lookup (fun p ->
+    if p = "anthropic" then Some bucket else None);
+  let outcome = KAR.observe ~keeper_id:"k1" in
+  (match outcome with
+   | Keeper_admission_glue.New_admission _ -> ()
+   | Keeper_admission_glue.Legacy_path ->
+       Alcotest.fail
+         "observe with policy registered must return New_admission \
+          (shadow path bypasses MASC_ADMISSION_USE_NEW)");
+  let tokens_after = KPTB.tokens_available bucket in
+  Alcotest.(check (float 0.001))
+    "shadow observation does not consume tokens"
+    tokens_before tokens_after
+
 let () =
   Alcotest.run "keeper_admission_runtime"
     [
@@ -153,7 +186,7 @@ let () =
             test_set_policy_lookup_observable;
           Alcotest.test_case "set_bucket_lookup observable" `Quick
             test_set_bucket_lookup_observable;
-          Alcotest.test_case "set_*_lookup is idempotent (last wins)" `Quick
+          Alcotest.test_case "set_*_lookup replaces atomically (last wins)" `Quick
             test_set_lookup_is_idempotent_last_wins;
         ] );
       ( "reset",
@@ -165,5 +198,13 @@ let () =
         [
           Alcotest.test_case "lazy bucket lookup is stable per provider"
             `Quick test_init_creates_lazy_bucket_lookup;
+        ] );
+      ( "shadow",
+        [
+          Alcotest.test_case
+            "observe with policy returns New_admission without flag \
+             and does not consume tokens"
+            `Quick
+            test_observe_with_policy_returns_new_admission_without_flag;
         ] );
     ]

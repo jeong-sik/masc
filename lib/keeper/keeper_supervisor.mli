@@ -112,7 +112,8 @@ val alive_but_stuck_scan : 'a context -> unit
     alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
     increment and a single warn log line, with per-keeper dedup so the
     counter is at most incremented once per
-    [alive_but_stuck_dedup_ttl_sec] window.  Also request supervised
+    [alive_but_stuck_dedup_ttl_sec] window.  Also queue a bounded Event
+    Layer recovery wakeup for Running keepers, then request supervised
     recovery by setting the keeper's structured failure reason plus
     [fiber_stop]/[fiber_wakeup], allowing the next sweep to route it
     through the existing crash/restart path.  Gated behind

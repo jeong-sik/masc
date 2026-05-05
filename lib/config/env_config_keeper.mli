@@ -75,9 +75,13 @@ module KeeperSupervisor : sig
   (** Maximum total liveness recovery attempts per keeper. *)
 
   val alive_but_stuck_enabled : bool
-  (** #12838 Detection-only scan for alive-but-stuck keepers
+  (** #12838 Scan for alive-but-stuck keepers
       (proactive_rt.last_ts frozen while autonomous turns advance).
-      Default: true (counter only, no transitions). *)
+      Default: true. *)
+
+  val alive_but_stuck_recovery_enabled : bool
+  (** Queue a bounded Event Layer wakeup for each deduped
+      alive-but-stuck detection. Default: true. *)
 
   val alive_but_stuck_stall_multiplier : int
   (** Multiplier on the keeper's [proactive.cooldown_sec] before

@@ -1366,6 +1366,69 @@ let () =
             | None -> fail "expected stalled keeper to be detected"
             | Some elapsed ->
               check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
+        test_case "scan queues recovery wakeup for running stalled keeper" `Quick
+          (fun () ->
+            Eio_main.run @@ fun env ->
+            Eio.Switch.run @@ fun sw ->
+            let base_dir = temp_dir () in
+            Fun.protect
+              ~finally:(fun () ->
+                Reg.clear ();
+                Sup.alive_but_stuck_reset_for_test ();
+                cleanup_dir base_dir)
+              (fun () ->
+                Reg.clear ();
+                Sup.alive_but_stuck_reset_for_test ();
+                let name = "abs-scan-recovery" in
+                let config = Masc_mcp.Coord.default_config base_dir in
+                let base = make_meta name in
+                let meta =
+                  {
+                    base with
+                    proactive = { base.proactive with cooldown_sec = 60 };
+                    runtime = {
+                      base.runtime with
+                      autonomous_turn_count = 7;
+                      proactive_rt = {
+                        base.runtime.proactive_rt with
+                        last_ts = 1.0;
+                      };
+                    };
+                  }
+                in
+                ignore (Reg.register ~base_path:config.base_path name meta);
+                ignore (Reg.dispatch_event ~base_path:config.base_path name
+                          KSM.Fiber_started);
+                let ctx : _ KT.context =
+                  {
+                    config;
+                    agent_name = "supervisor";
+                    sw;
+                    clock = Eio.Stdenv.clock env;
+                    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+                    net = Some (Eio.Stdenv.net env);
+                  }
+                in
+                Sup.alive_but_stuck_scan ctx;
+                let queue =
+                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                in
+                check int "one recovery stimulus queued" 1
+                  (Masc_mcp.Keeper_event_queue.length queue);
+                (match Masc_mcp.Keeper_event_queue.dequeue queue with
+                 | Some (stim, _) ->
+                    check string "post id" ("alive-but-stuck:" ^ name)
+                      stim.post_id;
+                    (match Masc_mcp.Keeper_event_queue.classify stim with
+                     | Masc_mcp.Keeper_event_queue.Alive_but_stuck_recovery ->
+                        ()
+                     | _ -> fail "expected recovery stimulus class")
+                 | None -> fail "expected queued recovery stimulus");
+                match Reg.get ~base_path:config.base_path name with
+                | Some entry ->
+                    check bool "fiber wakeup set" true
+                      (Atomic.get entry.fiber_wakeup)
+                | None -> fail "expected registered keeper"));
         test_case "never_started + autonomous + old started_at → Some" `Quick
           (fun () ->
             (* Mirrors production case: glm-coding-plan with

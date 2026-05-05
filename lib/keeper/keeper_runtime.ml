@@ -756,8 +756,8 @@ let start_supervisor_sweep ctx =
           (* #12838 Alive-but-stuck detector: emit a Prometheus counter
              (and a warn log) for keepers that are alive in every other
              health metric but have a frozen [proactive_rt.last_ts] while
-             autonomous turns keep advancing.  Detection-only — no
-             transition or restart is triggered. *)
+             autonomous turns keep advancing.  Running keepers also receive
+             a deduped Event Layer recovery wakeup; no restart is triggered. *)
           (try Keeper_supervisor.alive_but_stuck_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter

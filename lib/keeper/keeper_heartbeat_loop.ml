@@ -416,6 +416,7 @@ let run_keepalive_unified_turn
               match Keeper_event_queue.classify stim with
               | Board_signal -> "board_signal"
               | Bootstrap -> "bootstrap"
+              | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
               | Unsupported _ -> "unsupported"
             in
             Prometheus.inc_counter
@@ -435,6 +436,11 @@ let run_keepalive_unified_turn
                  Log.Keeper.info
                    "turn entry: bootstrap stimulus consumed (keeper=%s)"
                    meta_after_triage.name;
+                 None
+             | Alive_but_stuck_recovery ->
+                 Log.Keeper.warn
+                   "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s (keeper=%s)"
+                   stim.post_id meta_after_triage.name;
                  None
              | Unsupported prefix ->
                  Prometheus.inc_counter

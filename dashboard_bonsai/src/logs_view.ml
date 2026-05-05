@@ -1619,13 +1619,21 @@ let view_hud
     | "" -> "—"
     | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
   in
+  let fetch_v = Keepers_types.fetch_status_label keepers.fetch_status in
+  let fetch_cls : Hud.v_class =
+    match keepers.fetch_status with
+    | Keepers_types.Fetch_pending -> `Neutral
+    | Keepers_types.Fetch_fresh -> `Ok
+    | Keepers_types.Fetch_stale { consecutive_failures; _ } ->
+      if consecutive_failures >= 3 then `Bad else `Warn
+  in
   Hud.strip ~label:"Log controls"
     [ Hud.cell ~k:"Source" ~v:"Log.Ring" ()
     ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
     ; Hud.cell ~k:"Level" ~v:"INFO+" ()
     ; Hud.cell ~v_class:`Ok ~k:"Refresh" ~v:"poll · 3s" ()
     ; Hud.cell ~k:"Limit" ~v:"200" ()
-    ; Hud.cell ~v_class:`Ok ~k:"Link" ~v:"fetch · ok" ()
+    ; Hud.cell ~v_class:fetch_cls ~k:"Link" ~v:fetch_v ()
     ; Hud.cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
     ; Hud.cell ~k:"Synced" ~v:sync_v ()
     ]

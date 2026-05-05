@@ -247,6 +247,7 @@ let handle_keeper_task_tool
         ~agent_tool_names
         ~config
         ~meta
+        ()
     in
     let result =
       Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names

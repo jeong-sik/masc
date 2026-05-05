@@ -244,12 +244,13 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false
 
 let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
-    ~(meta : keeper_meta) =
+    ~(meta : keeper_meta) () =
   let scope =
     Keeper_runtime_contract.resolve_claim_goal_scope
       ?agent_tool_names
       ~config
       ~meta
+      ()
   in
   scope.task_filter
 
@@ -270,6 +271,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
         ?agent_tool_names:allowed_tool_names
         ~config
         ~meta
+        ()
     in
     let required_tools_allowed required_tools =
       match allowed_tool_names with

@@ -15,6 +15,7 @@ val resolve_claim_goal_scope :
   ?agent_tool_names:string list ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
+  unit ->
   claim_goal_scope
 
 val runtime_contract_json :

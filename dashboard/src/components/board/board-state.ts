@@ -365,7 +365,7 @@ export async function submitComment(postId: string, parentId?: string) {
 export async function submitNewPost() {
   const title = newPostTitle.value.trim()
   const content = newPostContent.value.trim()
-  const hearth = newPostHearth.value.trim() || boardHearthFilter.value.trim()
+  const hearth = newPostHearth.value.trim()
   if (!title || !content) return
   newPostSubmitting.value = true
   try {

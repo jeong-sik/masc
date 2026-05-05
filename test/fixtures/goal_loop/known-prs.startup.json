@@ -1,6 +1,11 @@
 {
   "prs": [
     {
+      "number": 13218,
+      "state": "OPEN",
+      "title": "fix(keeper): self-heal archived credentials"
+    },
+    {
       "number": 13123,
       "state": "MERGED",
       "title": "fix(keeper): wake alive-stuck keepers"

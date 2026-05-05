@@ -17,6 +17,7 @@ let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_directive = "/directive"
+let keeper_suffix_bdi_snapshot = "/bdi-snapshot"
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
@@ -988,6 +989,21 @@ let handle_keeper_get_subroutes state req request reqd =
       let config = state.Mcp_server.room_config in
       let (st, json) =
         Dashboard_http_keeper.keeper_config_json config name
+      in
+      let status : Httpun.Status.t =
+        match st with `OK -> `OK | `Not_found -> `Not_found
+      in
+      Http.Response.json ~status ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
+  else if ends_with keeper_suffix_bdi_snapshot then
+    let name = extract_name keeper_suffix_bdi_snapshot in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let config = state.Mcp_server.room_config in
+      let (st, json) =
+        Dashboard_http_keeper.keeper_bdi_snapshot_json config name
       in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found

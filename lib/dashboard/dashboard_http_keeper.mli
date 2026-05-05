@@ -11,8 +11,8 @@
       {!execution_trust_dashboard_json}) consumed by the
       dashboard execution test and the dashboard HTTP
       execution-surfaces facade.
-    - {b per-keeper config snapshot}
-      ({!keeper_config_json}) consumed by
+    - {b per-keeper runtime snapshots}
+      ({!keeper_config_json}, {!keeper_bdi_snapshot_json}) consumed by
       [server_dashboard_http_keeper_api] +
       [test/test_operator_control_keeper].
     - {b outcomes rollup} ({!compute_outcomes_rollup})
@@ -106,7 +106,7 @@ val keeper_memory_log_json :
   Yojson.Safe.t
 (** Renders the K2 cross-keeper memory-bank feed. *)
 
-(** {1 Per-keeper config snapshot} *)
+(** {1 Per-keeper runtime snapshots} *)
 
 val keeper_config_json :
   Coord.config ->
@@ -119,3 +119,12 @@ val keeper_config_json :
     returns [None], [`OK] otherwise.  The handler avoids
     [bootstrap_runtime] mutations to keep the HTTP
     request path off the keeper-meta mutex (#3335). *)
+
+val keeper_bdi_snapshot_json :
+  Coord.config ->
+  string ->
+  [ `OK | `Not_found ] * Yojson.Safe.t
+(** Returns a small live BDI snapshot for the IDE inspector rail:
+    belief/desire/intention, recent token spend, and the latest tool call.
+    Reads keeper meta + recent metrics/tool-call JSONL only; it does not
+    mutate runtime state. *)

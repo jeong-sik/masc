@@ -10,6 +10,7 @@ import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
+import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { WorldVisualizer } from '../world-visualizer'
 import { navigate, route } from '../../router'
 import {
@@ -144,9 +145,18 @@ export function IdeShell() {
             documentStore=${coordinator.documentStore}
             ownershipStore=${coordinator.ownershipStore}
             diffRows=${coordinator.diffRows}
+            onKeeperLineSelect=${pinInspectorKeeper}
           />
         </div>
-        <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>
+        <div
+          class="ide-plane-conversation"
+          style=${{
+            display: 'grid',
+            gridTemplateRows: 'auto 1fr',
+            minHeight: 0,
+          }}
+        >
+          <${InspectorKeeperBDI} />
           <${IdeConversationRailMock} />
         </div>
         <div class="ide-plane-activity" style=${{ minHeight: 0 }}>

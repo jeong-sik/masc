@@ -150,6 +150,24 @@ export function pushOwnership(view: EditorView, ownership: ReadonlyMap<number, L
   view.dispatch({ effects: [setOwnership.of(ownership)] })
 }
 
+export function keeperLineSelectExt(
+  getOwnership: () => ReadonlyMap<number, LineOwnership>,
+  onKeeperLineSelect: (keeperId: string, line: number) => void,
+): Extension {
+  return EditorView.domEventHandlers({
+    click(event, view) {
+      if (!(event instanceof MouseEvent) || event.button !== 0) return false
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+      if (pos === null) return false
+      const line = view.state.doc.lineAt(pos)
+      const owner = getOwnership().get(line.number)
+      if (!owner) return false
+      onKeeperLineSelect(owner.keeper_id, line.number)
+      return false
+    },
+  })
+}
+
 // ── Language support (dynamic import) ─────────────────────────────
 
 type LanguageModule = () => Promise<{ extension: Extension }>

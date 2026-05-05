@@ -345,7 +345,9 @@ let test_keeper_board_post_schema_supports_judgment () =
           Alcotest.(check bool) "has judgment" true
             (List.mem_assoc "judgment" props);
           Alcotest.(check bool) "has sources" true
-            (List.mem_assoc "sources" props)
+            (List.mem_assoc "sources" props);
+          Alcotest.(check bool) "has quantitative_evidence" true
+            (List.mem_assoc "quantitative_evidence" props)
       | None -> Alcotest.fail "keeper_board_post missing properties"
 
 (* ============================================================

@@ -247,7 +247,7 @@ let test_agent_reputation_penalizes_unsupported_claims () =
       let unpenalized =
         Agent_reputation.compute_overall_score ~completion_rate:1.0
           ~response_rate:0.0 ~board_posts:0 ~board_comments:0
-          ~thompson_confidence:1.0
+          ~thompson_confidence:0.5
       in
       let rep =
         Agent_reputation.compute_reputation config

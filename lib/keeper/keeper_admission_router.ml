@@ -80,3 +80,44 @@ let schedule ~policy ~buckets =
       (match walk 0 above_floor with
        | Surface All_candidates_throttled -> Wait
        | other -> other)
+
+(* Non-mutating variant of [schedule] for shadow-mode observation.
+   Mirrors the walk above but uses [KPTB.tokens_available >= 1.0] in
+   place of [KPTB.try_acquire].  Returns the decision the live
+   scheduler WOULD have produced without consuming a token.
+
+   Note: [tokens_available] performs a lazy refill (mutates
+   [last_refill_at] inside the bucket) but does not consume.  That
+   side effect is fine for shadow — it's exactly what would happen
+   on a real call too. *)
+let schedule_peek ~policy ~buckets =
+  let preferred = KAP.top_provider policy in
+  let above_floor = KAP.candidates_above_min_tier policy in
+  let rec walk count = function
+    | [] ->
+        if count = 0 then Surface Min_tier_unsatisfiable
+        else Surface All_candidates_throttled
+    | (c : KAP.candidate) :: rest -> (
+        match buckets c.provider with
+        | None -> walk count rest
+        | Some bucket ->
+            if KPTB.tokens_available bucket >= 1.0 then
+              let drift =
+                {
+                  preferred_provider = preferred;
+                  actual_provider = c.provider;
+                  tier = c.tier;
+                  reason =
+                    classify_reason ~preferred ~actual:c.provider ~tier:c.tier;
+                }
+              in
+              Dispatch { candidate = c; drift }
+            else
+              walk (count + 1) rest)
+  in
+  match above_floor with
+  | [] -> Surface Min_tier_unsatisfiable
+  | _ ->
+      (match walk 0 above_floor with
+       | Surface All_candidates_throttled -> Wait
+       | other -> other)

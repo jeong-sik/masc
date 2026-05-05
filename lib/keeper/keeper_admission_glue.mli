@@ -70,3 +70,26 @@ val decide :
     Pure-ish: the only side effect is the bucket decrement inside
     [try_acquire] when Dispatch fires — same contract as the router
     itself.  No global mutation. *)
+
+val decide_shadow :
+  keeper_id:string ->
+  policies:policy_lookup ->
+  buckets:Keeper_admission_router.bucket_lookup ->
+  outcome
+(** Shadow-mode decision (RFC-0026 PR-E-1.6).
+
+    Computes the router outcome the live system WOULD produce, without
+    consulting [MASC_ADMISSION_USE_NEW] and without consuming bucket
+    tokens.  Calls [Keeper_admission_router.schedule_peek], which uses
+    [tokens_available] in place of [try_acquire].
+
+    Returns:
+    - [Legacy_path] when no policy is registered for [keeper_id].
+    - [New_admission Dispatch _] when a candidate has [>= 1.0] tokens.
+    - [New_admission Wait] when above-floor candidates exist but are
+      all currently empty.
+    - [New_admission (Surface _)] for misconfiguration.
+
+    Side effect: lazy refill on the inspected bucket(s) (mutates
+    [last_refill_at] only — does not consume a token).  Safe to call
+    every turn from the heartbeat loop while the flag is off. *)

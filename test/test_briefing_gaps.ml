@@ -13,7 +13,7 @@
     2. {b Cap on gap count} — collect_metadata_gaps returns at
        most 8 records (mli §22).
     3. {b Section bucketing} — gap kinds map to the right
-       section: Communication = {communication_mode_missing,
+       section: Communication = {session_communication_mode_missing,
        keeper_last_reply_missing}, Alignment = {session_goal_missing,
        agent_focus_missing}, Watch = {} (empty allow-list).
     4. {b Active-agent guard} — agent_focus_missing only fires
@@ -80,7 +80,9 @@ let test_session_communication_mode_unknown () =
   let s = session ~comm:"unknown" () in
   let gaps = G.collect_metadata_gaps ~sessions:[ s ] ~keepers:[] ~agents:[] in
   assert (List.length gaps = 1);
-  assert (kind_of (List.hd gaps) = "session_communication_mode_missing")
+  let g = List.hd gaps in
+  assert (kind_of g = "session_communication_mode_missing");
+  assert (scope_type_of g = "session")
 
 let test_keeper_last_reply_not_recorded () =
   let k = keeper ~status:"not_recorded" () in
@@ -142,6 +144,34 @@ let test_collect_caps_at_eight () =
   let gaps =
     G.collect_metadata_gaps ~sessions:many_sessions ~keepers:[]
       ~agents:[]
+  in
+  assert (List.length gaps = 8)
+
+let test_collect_caps_with_mixed_sources () =
+  (* Cap is global across sessions+keepers+agents.  Build 6
+     sessions × 2 sentinels = 12 candidates, plus keeper + agent
+     gaps that should still bring total to 8 (not 12+2). *)
+  let many_sessions =
+    List.init 6 (fun i ->
+        session
+          ~session_id:(Printf.sprintf "s%d" i)
+          ~goal:"unassigned" ~comm:"unknown" ())
+  in
+  let many_keepers =
+    List.init 3 (fun i ->
+        keeper
+          ~name:(Printf.sprintf "k%d" i)
+          ~status:"not_recorded" ())
+  in
+  let many_agents =
+    List.init 3 (fun i ->
+        agent
+          ~name:(Printf.sprintf "a%d" i)
+          ~status:"active" ~assignment:"unassigned" ())
+  in
+  let gaps =
+    G.collect_metadata_gaps ~sessions:many_sessions
+      ~keepers:many_keepers ~agents:many_agents
   in
   assert (List.length gaps = 8)
 
@@ -264,6 +294,7 @@ let () =
   test_no_gaps_when_no_sentinels ();
   test_session_id_omitted_when_blank ();
   test_collect_caps_at_eight ();
+  test_collect_caps_with_mixed_sources ();
   test_count_communication_section ();
   test_count_alignment_section ();
   test_count_watch_section_always_zero ();

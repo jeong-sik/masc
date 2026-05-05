@@ -717,11 +717,16 @@ include Gh_command_validation
 let mkdir_p path _perm =
   Fs_compat.mkdir_p path
 
+type tool_exec_error_kind = Tool_exec_error_kind of string
+
+let tool_exec_error_kind_of_string value = Tool_exec_error_kind value
+let tool_exec_error_kind_to_string (Tool_exec_error_kind value) = value
+
 type tool_exec_observer =
   tool_name:string ->
   success:bool ->
   duration_ms:int ->
-  ?error_kind:string ->
+  ?error_kind:tool_exec_error_kind ->
   ?error_message:string ->
   unit ->
   unit
@@ -767,7 +772,8 @@ let make_file_read ?workdir ?on_exec () =
            Option.iter
              (fun (f : tool_exec_observer) ->
                 f ~tool_name:"file_read" ~success:false ~duration_ms
-                  ~error_kind:"path_blocked" ~error_message:err ())
+                  ~error_kind:(tool_exec_error_kind_of_string "path_blocked")
+                  ~error_message:err ())
              on_exec;
            tool_error err
          else
@@ -792,7 +798,8 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun (f : tool_exec_observer) ->
                   f ~tool_name:"file_read" ~success:false ~duration_ms
-                    ~error_kind:"file_read_error" ~error_message:msg ())
+                    ~error_kind:(tool_exec_error_kind_of_string "file_read_error")
+                    ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot read: %s" msg))
 
@@ -828,7 +835,8 @@ let make_file_write ?workdir ?on_exec () =
            Option.iter
              (fun (f : tool_exec_observer) ->
                 f ~tool_name:"file_write" ~success:false ~duration_ms
-                  ~error_kind:"path_blocked" ~error_message:err ())
+                  ~error_kind:(tool_exec_error_kind_of_string "path_blocked")
+                  ~error_message:err ())
              on_exec;
            tool_error err
          else
@@ -853,7 +861,8 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun (f : tool_exec_observer) ->
                   f ~tool_name:"file_write" ~success:false ~duration_ms
-                    ~error_kind:"file_write_error" ~error_message:msg ())
+                    ~error_kind:(tool_exec_error_kind_of_string "file_write_error")
+                    ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot write: %s" msg))
 
@@ -991,7 +1000,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                    f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
                  else
                    f ~tool_name:"shell_exec" ~success:false ~duration_ms
-                     ~error_kind:"shell_error" ())
+                     ~error_kind:(tool_exec_error_kind_of_string "shell_error") ())
                on_exec;
              result
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -1000,7 +1009,8 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Option.iter
                (fun (f : tool_exec_observer) ->
                  f ~tool_name:"shell_exec" ~success:false ~duration_ms
-                   ~error_kind:"shell_error" ~error_message:exn_msg ())
+                   ~error_kind:(tool_exec_error_kind_of_string "shell_error")
+                   ~error_message:exn_msg ())
                on_exec;
              tool_error
                (Printf.sprintf "Command failed: %s" exn_msg)))

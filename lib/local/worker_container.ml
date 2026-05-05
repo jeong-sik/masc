@@ -339,7 +339,12 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
         | Some config, Some fs -> (
             try
               let kind =
-                Option.map Telemetry_eio.error_kind_of_string error_kind
+                Option.map
+                  (fun kind ->
+                    kind
+                    |> Worker_dev_tools.tool_exec_error_kind_to_string
+                    |> Telemetry_eio.error_kind_of_string)
+                  error_kind
               in
               Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
                 ~duration_ms ~agent_id:worker_name

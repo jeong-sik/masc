@@ -940,7 +940,6 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const latencySeries = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? null,
   )
-  const latencies = latencySeries.filter(isFiniteMetricValue)
   const cacheNs = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.cache_n ?? 0,
   )
@@ -959,7 +958,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
     hwTokPerSec.length > 0
       ? hwTokPerSec.reduce((a, b) => a + b, 0) / hwTokPerSec.length
       : 0
-  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const lastLatency = latencySeries[latencySeries.length - 1] ?? null
   const totalCacheN = cacheNs.reduce((a, b) => a + b, 0)
   const totalReasoning = reasoningTokens.reduce((a, b) => a + b, 0)
 
@@ -1007,7 +1006,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>API latency</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </${DetailRow}>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
             ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
@@ -1037,11 +1036,10 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   if (series.length < 2) return null
 
   const latencySeries = series.map((p: KeeperMetricPoint) => p.latency_ms)
-  const latencies = latencySeries.filter(isFiniteMetricValue)
   const costs = series.map((p: KeeperMetricPoint) => p.cost_usd ?? 0)
   const W = SPARKLINE_W, H = SPARKLINE_H
 
-  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const lastLatency = latencySeries[latencySeries.length - 1] ?? null
   const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
 
   const modelSwitches: { index: number; model: string }[] = []
@@ -1069,7 +1067,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <${Eyebrow}>지연 시간</${Eyebrow}>
           <span class="flex items-center gap-2">
             ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </span>
         </${DetailRow}>
         <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" style="background:var(--bg-deepest);">

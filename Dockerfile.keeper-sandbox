@@ -6,6 +6,7 @@
 #     MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false
 #     REQUIRE_USERNS=false
 # - The host docker socket is typically mounted for DinD operations.
+# - Keeper GitHub/SSH credential bundles are projected at /tmp/keeper-creds.
 
 FROM ubuntu:24.04
 
@@ -43,5 +44,7 @@ RUN opam init --disable-sandboxing --root "$OPAMROOT" --bare -y \
  && rm -rf "$OPAMROOT/repo" "$OPAMROOT/.opam-switch/sources"
 
 ENV PATH="/opt/opam/default/bin:${PATH}"
+
+VOLUME ["/tmp/keeper-creds"]
 
 CMD ["/bin/bash"]

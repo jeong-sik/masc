@@ -496,7 +496,7 @@ let keeper_bootstrap_stagger_step_sec_rp =
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_STAGGER_STEP_SEC"
                           ~default:15 ~min_v:0 ~max_v:120)
     ~min_v:0 ~max_v:120
-    ~description:"Bootstrap stagger interval between keepers (seconds)" ()
+    ~description:"Bootstrap warmup deterministic jitter window (seconds)" ()
 let keeper_bootstrap_stagger_step_sec () : int =
   Runtime_params.get keeper_bootstrap_stagger_step_sec_rp
 

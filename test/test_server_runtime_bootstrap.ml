@@ -497,6 +497,26 @@ let test_force_jsonl_fallback_env () =
   Alcotest.(check string) "storage type forced to filesystem" "filesystem"
     (Sys.getenv "MASC_STORAGE_TYPE")
 
+let test_storage_enforcement_fallback_reason () =
+  Alcotest.(check (option string))
+    "filesystem request needs no fallback reason" None
+    (Server_runtime_bootstrap.storage_enforcement_fallback_reason
+       ~requested:"filesystem" ~effective:"filesystem");
+  Alcotest.(check (option string))
+    "memory request records filesystem enforcement"
+    (Some
+       "MASC_STORAGE_TYPE=memory requested; filesystem-only bootstrap enforced as filesystem")
+    (Server_runtime_bootstrap.storage_enforcement_fallback_reason
+       ~requested:"memory" ~effective:"filesystem");
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Server_runtime_bootstrap.note_storage_enforcement_fallback
+    ~requested:"memory" ~effective:"filesystem";
+  let json = Server_startup_state.to_yojson () in
+  Alcotest.(check string)
+    "startup fallback reason is operator visible"
+    "MASC_STORAGE_TYPE=memory requested; filesystem-only bootstrap enforced as filesystem"
+    (Yojson.Safe.Util.(json |> member "fallback_reason" |> to_string))
+
 let test_default_oas_cascade_timeout_tracks_keeper_timeout () =
   with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" None @@ fun () ->
   with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" (Some "300") @@ fun () ->
@@ -2272,6 +2292,9 @@ let () =
         [
           Alcotest.test_case "force_jsonl_fallback_env forces filesystem" `Quick
             test_force_jsonl_fallback_env;
+          Alcotest.test_case
+            "storage enforcement fallback reason is visible"
+            `Quick test_storage_enforcement_fallback_reason;
           Alcotest.test_case
             "default OAS cascade timeout tracks keeper timeout"
             `Quick test_default_oas_cascade_timeout_tracks_keeper_timeout;

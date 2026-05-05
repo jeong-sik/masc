@@ -28,7 +28,8 @@ val run_in_systhread : (unit -> 'a) -> 'a
 
 val yield_if_ready : unit -> unit
 (** Cooperatively yield to the Eio scheduler if the runtime is active.
-    No-op before {!enable}. *)
+    No-op before {!enable} or when called from a context where Eio cannot
+    currently yield. *)
 
 type yield_meter
 (** Counter for periodic cooperative yields in CPU-heavy loops. *)

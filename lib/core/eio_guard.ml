@@ -51,10 +51,10 @@ let run_in_systhread f =
   else
     f ()
 
-(** Cooperatively yield without raising [Effect.Unhandled] before
-    [Eio_main.run]. *)
+(** Cooperatively yield without raising if the Eio scheduler is unavailable. *)
 let yield_if_ready () =
-  if Atomic.get ready then Eio.Fiber.yield ()
+  if Atomic.get ready then
+    Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
 type yield_meter = {
   interval : int;

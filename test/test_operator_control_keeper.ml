@@ -43,6 +43,12 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
+let count_log_lines_with_prefix log prefix =
+  log
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.starts_with ~prefix line)
+  |> List.length
+
 let read_keeper_meta_exn config keeper_name =
   match Keeper_types.read_meta config keeper_name with
   | Ok (Some meta) -> meta
@@ -310,6 +316,219 @@ let test_keeper_sandbox_status_exposes_local_summary () =
         Yojson.Safe.Util.(
           status_json |> member "sandbox_live" |> member "effective_mode"
           |> to_string))
+
+let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-persisted" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect persisted sandbox summary");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let keepers_dir =
+        Filename.concat (Coord.masc_root_dir config) "config/keepers"
+      in
+      ensure_dir keepers_dir;
+      write_file
+        (Filename.concat keepers_dir "sandbox_persisted.toml")
+        "[keeper]\n\
+         goal = \"Alias of persisted sandbox keeper\"\n\
+         sandbox_profile = \"local\"\n\
+         proactive_enabled = false\n\
+         autoboot_enabled = false\n";
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:(`Assoc [ ("include_preflight", `Bool false) ])
+      in
+      Alcotest.(check bool) "fleet sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let json = parse_json_exn body in
+      let matching_items =
+        json |> member "items" |> to_list
+        |> List.filter (fun row ->
+             row |> member "keeper" |> to_string = keeper_name)
+      in
+      Alcotest.(check int) "separator alias emits one fleet row" 1
+        (List.length matching_items);
+      match matching_items with
+      | [ row ] ->
+          Alcotest.(check string) "persisted effective mode" "local"
+            (row |> member "effective_mode" |> to_string);
+          Alcotest.(check (option string)) "persisted why_no_container"
+            (Some "sandbox_profile=local")
+            (row |> member "why_no_container" |> to_string_option)
+      | [] -> Alcotest.fail "persisted keeper missing from fleet sandbox status"
+      | _ :: _ :: _ ->
+          Alcotest.fail "persisted keeper duplicated in fleet sandbox status")
+
+let test_keeper_sandbox_status_fleet_includes_configured_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "configured-sandbox" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keepers_dir =
+        Filename.concat (Coord.masc_root_dir config) "config/keepers"
+      in
+      ensure_dir keepers_dir;
+      write_file
+        (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        "[keeper]\n\
+         goal = \"Configured-only sandbox keeper\"\n\
+         sandbox_profile = \"local\"\n\
+         proactive_enabled = false\n\
+         autoboot_enabled = false\n";
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:(`Assoc [ ("include_preflight", `Bool false) ])
+      in
+      Alcotest.(check bool) "fleet sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let json = parse_json_exn body in
+      let matching_items =
+        json |> member "items" |> to_list
+        |> List.filter (fun row ->
+             row |> member "keeper" |> to_string = keeper_name)
+      in
+      Alcotest.(check int) "configured keeper emits one fleet row" 1
+        (List.length matching_items);
+      match matching_items with
+      | [ row ] ->
+          Alcotest.(check string) "configured effective mode" "local"
+            (row |> member "effective_mode" |> to_string);
+          Alcotest.(check (option string)) "configured why_no_container"
+            (Some "sandbox_profile=local")
+            (row |> member "why_no_container" |> to_string_option)
+      | [] -> Alcotest.fail "configured keeper missing from fleet sandbox status"
+      | _ :: _ :: _ ->
+          Alcotest.fail "configured keeper duplicated in fleet sandbox status")
+
+let test_keeper_sandbox_status_fleet_reuses_docker_preflight () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_names = [ "fleet-docker-a"; "fleet-docker-b" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Keeper_keepalive.stop_keepalive keeper_names;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      List.iter
+        (fun keeper_name ->
+          let ok, _ =
+            dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+              ~args:
+                (`Assoc
+                  [
+                    ("name", `String keeper_name);
+                    ("goal", `String "Inspect cached Docker preflight");
+                    ("proactive_enabled", `Bool false);
+                    ("autoboot_enabled", `Bool false);
+                  ])
+          in
+          Alcotest.(check bool) ("keeper up ok: " ^ keeper_name) true ok;
+          update_keeper_sandbox_mode config keeper_name
+            ~sandbox_profile:Keeper_types.Docker
+            ~network_mode:Keeper_types.Network_none)
+        keeper_names;
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("include_preflight", `Bool true);
+                ("timeout_sec", `Float 1.0);
+              ])
+      in
+      Alcotest.(check bool) "fleet sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let json = parse_json_exn body in
+      let docker_items =
+        json |> member "items" |> to_list
+        |> List.filter (fun row ->
+             List.mem (row |> member "keeper" |> to_string) keeper_names)
+      in
+      Alcotest.(check int) "docker keepers emitted" 2
+        (List.length docker_items);
+      let log = read_file log_path in
+      Alcotest.(check int) "docker preflight info once" 1
+        (count_log_lines_with_prefix log "info "))
 
 let test_keeper_sandbox_start_status_stop_with_fake_docker () =
   Eio_main.run @@ fun env ->

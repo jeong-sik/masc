@@ -47,9 +47,24 @@ val cleanup_stale :
 
 val live_status_json :
   ?include_preflight:bool ->
+  ?preflight_override:Yojson.Safe.t option ->
   config:Coord.config ->
   meta:keeper_meta ->
   timeout_sec:float ->
   verbose:bool ->
   unit ->
   Yojson.Safe.t
+(** [preflight_override] lets a fleet caller reuse a single Docker
+    preflight probe across many keepers; when set (even to [None]),
+    the per-keeper render skips its own [docker_preflight] call.
+    Pass [Some json] for the cached result, or [None] for "preflight
+    was attempted but yielded nothing".  Without this override the
+    render falls back to its own preflight invocation. *)
+
+val preflight_status_json :
+  timeout_sec:float -> Yojson.Safe.t option
+(** Run the global Docker preflight once and return its JSON
+    representation, or [None] when no preflight result is available.
+    Exposed so fleet renderers can run it a single time and feed the
+    cached value into many [live_status_json] calls instead of
+    repeating the expensive Docker probe per keeper. *)

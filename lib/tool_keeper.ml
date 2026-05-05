@@ -1101,26 +1101,68 @@ let parse_network_mode_or_error raw =
         (Printf.sprintf "invalid network_mode %S (allowed: %s)" raw
            (String.concat ", " valid_network_mode_strings))
 
+let keeper_sandbox_status_fleet_names ctx =
+  let registry_names =
+    Keeper_registry.all ~base_path:ctx.config.base_path ()
+    |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+  in
+  registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
+  |> dedupe_sorted_strings
+
 let handle_keeper_sandbox_status ctx args : tool_result =
   let verbose = get_bool args "verbose" false in
   let include_preflight = get_bool args "include_preflight" true in
   let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
-  let render_item (meta : keeper_meta) =
-    Keeper_sandbox_control.live_status_json
-      ~include_preflight ~config:ctx.config ~meta ~timeout_sec ~verbose ()
-  in
   match String.trim (get_string args "name" "") with
   | "" ->
-      let items =
-        Keeper_registry.all ~base_path:ctx.config.base_path ()
-        |> List.sort (fun (a : Keeper_registry.registry_entry)
-                          (b : Keeper_registry.registry_entry) ->
-             String.compare a.name b.name)
-        |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-             match read_meta ctx.config entry.name with
-             | Ok (Some meta) -> Some (render_item meta)
+      let configured_names = configured_keeper_names ctx.config in
+      let candidate_names = keeper_sandbox_status_fleet_names ctx in
+      let resolved =
+        candidate_names
+        |> List.filter_map (fun name ->
+             match read_meta ctx.config name with
+             | Ok (Some meta) -> Some meta
+             | Ok None when List.mem name configured_names -> (
+                 match load_or_materialize_boot_meta ctx name with
+                 | Ok { meta; _ } -> Some meta
+                 | Error msg ->
+                     Log.Keeper.warn
+                       "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
+                       name msg;
+                     None)
              | Ok None | Error _ -> None)
       in
+      let seen = Hashtbl.create 16 in
+      let unique_metas =
+        List.filter_map
+          (fun (meta : keeper_meta) ->
+            if Hashtbl.mem seen meta.name then None
+            else begin
+              Hashtbl.add seen meta.name ();
+              Some meta
+            end)
+          resolved
+      in
+      let any_docker =
+        List.exists
+          (fun (m : keeper_meta) -> m.sandbox_profile = Docker)
+          unique_metas
+      in
+      let cached_preflight =
+        if include_preflight && any_docker then
+          Keeper_sandbox_control.preflight_status_json ~timeout_sec
+        else
+          None
+      in
+      let render_item (meta : keeper_meta) =
+        let preflight_override =
+          if meta.sandbox_profile = Docker then cached_preflight else None
+        in
+        Keeper_sandbox_control.live_status_json
+          ~include_preflight ?preflight_override
+          ~config:ctx.config ~meta ~timeout_sec ~verbose ()
+      in
+      let items = List.map render_item unique_metas in
       ( true,
         Yojson.Safe.pretty_to_string
           (`Assoc
@@ -1139,7 +1181,10 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                  `Assoc
                    [
                      ("keeper", `String meta.name);
-                     ("sandbox", render_item meta);
+                     ( "sandbox",
+                       Keeper_sandbox_control.live_status_json
+                         ~include_preflight ~config:ctx.config ~meta
+                         ~timeout_sec ~verbose () );
                    ]
                  |> attach_identity_reseed ?identity_reseed
                in

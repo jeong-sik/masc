@@ -484,7 +484,7 @@ let keeper_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Keeper handle. When omitted, return sandbox status for all registered keepers.");
+          ("description", `String "Keeper handle. When omitted, return sandbox status for all persisted or registered keepers.");
         ]);
         ("verbose", `Assoc [
           ("type", `String "boolean");

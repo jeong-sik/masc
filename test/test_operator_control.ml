@@ -175,6 +175,18 @@ let () =
             Test_operator_control_keeper
             .test_keeper_sandbox_status_exposes_local_summary;
           Alcotest.test_case
+            "keeper sandbox fleet includes persisted keeper" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_fleet_includes_persisted_keeper;
+          Alcotest.test_case
+            "keeper sandbox fleet includes configured keeper" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_fleet_includes_configured_keeper;
+          Alcotest.test_case
+            "keeper sandbox fleet reuses docker preflight" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_fleet_reuses_docker_preflight;
+          Alcotest.test_case
             "keeper sandbox status reseeds separator identity drift" `Quick
             Test_operator_control_keeper
             .test_keeper_sandbox_status_reseeds_separator_identity_drift;

@@ -696,6 +696,21 @@ let metric_codex_cli_mcp_tool_omission =
 let metric_telemetry_coverage_gap =
   "masc_telemetry_coverage_gap_total"
 
+(* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
+   in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
+   [Keeper_accountability.record_task_transition].  Those three try/with
+   sites swallow the exception that fires when the lifecycle hook is
+   dispatched from a non-Eio context (test path, bootstrap, certain HTTP
+   handlers).  Before this counter, the entire Audit_log + Telemetry pair
+   silently disappeared, exactly matching the 5-tag → 2-tag attrition
+   ledger pattern (only [tool_called] survives because it is wired on a
+   different fiber-bearing path).  Labels: [event_family] (one of
+   [agent_lifecycle] / [task_transition] / [accountability]) and
+   [event_kind] (the lifecycle/transition variant); both vocabularies are
+   bounded so series cardinality is at most ~12. *)
+let metric_coord_telemetry_drop =
+  "masc_coord_telemetry_drop_total"
+
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
    timeouts.  The [caller] string supplied at the run_safe entry
    point lets the operator see WHICH caller is timing out at
@@ -1957,6 +1972,17 @@ let init () =
      stale_reason. Any positive rate means a telemetry lane is missing, \
      stale, or failed to append and dashboards should mark the source \
      coverage_gap."
+    Counter;
+  add metric_coord_telemetry_drop
+    "Total times a Coord lifecycle/transition hook dropped its Audit_log \
+     + Telemetry emit because the dispatch happened outside an Eio \
+     scheduler. Labels: event_family (agent_lifecycle | task_transition \
+     | accountability), event_kind (the variant — join/rejoin/leave for \
+     lifecycle, claim/start/done/release/cancel/submit/approve/reject \
+     for transitions, record for accountability). Non-zero rate means a \
+     production path is firing the lifecycle outside an Eio context; \
+     before this counter the drop was silent (#10358 attrition root \
+     cause)."
     Counter;
   add metric_auth_credential_ambiguous_lookup
     "Total runtime credential lookups where N>=2 credentials share the \

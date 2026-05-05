@@ -1288,6 +1288,7 @@ let memory_bank_test_row ~kind ~trace_id ~text ~priority ~idx =
 let test_compaction_records_consolidation_metrics () =
   with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" @@ fun () ->
   with_env "MASC_KEEPER_MEMORY_MAX_LENGTH" "4096" @@ fun () ->
+  with_env "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES" "60000" @@ fun () ->
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
     let keeper = "metric-memory-keeper" in
@@ -1365,7 +1366,11 @@ let test_compaction_records_consolidation_metrics () =
     let compaction =
       Keeper_memory_bank.compact_memory_bank_if_needed config meta
     in
-    check bool "compaction ran" true compaction.performed;
+    let compaction_reason =
+      Option.value ~default:"none" compaction.reason
+    in
+    check bool (Printf.sprintf "compaction ran (%s)" compaction_reason)
+      true compaction.performed;
     check (float 0.001) "progress consolidation generated"
       (generated_progress_before +. 1.0)
       (memory_metric_value

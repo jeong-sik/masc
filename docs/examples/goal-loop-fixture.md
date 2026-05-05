@@ -100,6 +100,22 @@ Expected key fact: this exits non-zero until the catalog's source files exist
 under `prompt_corpus/GOAL_LOOP/...`. That is separate from the row-level
 `--require-complete-catalog` gate.
 
+Validate against a local external source root without checking the documents
+into the public repository:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --audit-source-root /Users/dancer/Downloads \
+  --audit-source-strip-prefix prompt_corpus/GOAL_LOOP \
+  --require-source-artifacts
+```
+
+Expected key fact: this can pass locally when the 12 prompt-supplied source
+files exist in Downloads, while `--require-complete-catalog` can still fail
+because the row-level 206 corpus is incomplete.
+
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:
 

@@ -236,6 +236,7 @@ def merged_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
 def source_artifact_summary(
     catalog: dict[str, Any],
     source_root: Path | None,
+    source_strip_prefix: str | None = None,
 ) -> dict[str, Any] | None:
     if source_root is None:
         return None
@@ -287,9 +288,22 @@ def source_artifact_summary(
     missing_paths: list[str] = []
     line_ref_errors: list[dict[str, Any]] = []
     resolved = 0
-    for path_text, line_refs in sorted(refs.items()):
+
+    def resolve_candidate(path_text: str) -> Path:
         path = Path(path_text)
-        candidate = path if path.is_absolute() else source_root / path
+        if path.is_absolute():
+            return path
+        if source_strip_prefix is None:
+            return source_root / path
+        normalized_prefix = source_strip_prefix.strip("/")
+        normalized_path = path_text.strip("/")
+        prefix = f"{normalized_prefix}/"
+        if normalized_path.startswith(prefix):
+            return source_root / normalized_path[len(prefix) :]
+        return source_root / path
+
+    for path_text, line_refs in sorted(refs.items()):
+        candidate = resolve_candidate(path_text)
         if not candidate.is_file():
             missing_paths.append(path_text)
             continue
@@ -312,6 +326,7 @@ def source_artifact_summary(
     return {
         "status": status,
         "source_root": str(source_root),
+        "source_strip_prefix": source_strip_prefix,
         "source_artifacts_total": len(refs),
         "source_artifacts_resolved": resolved,
         "source_artifacts_missing": len(missing_paths),
@@ -325,6 +340,7 @@ def audit_catalog_summary(
     catalog: dict[str, Any] | None,
     *,
     source_root: Path | None = None,
+    source_strip_prefix: str | None = None,
 ) -> dict[str, Any] | None:
     if catalog is None:
         return None
@@ -369,7 +385,11 @@ def audit_catalog_summary(
         "aggregate_claims": catalog.get("aggregate_claims", []),
         "consistency_findings": catalog.get("consistency_findings", []),
     }
-    artifacts = source_artifact_summary(catalog, source_root)
+    artifacts = source_artifact_summary(
+        catalog,
+        source_root,
+        source_strip_prefix=source_strip_prefix,
+    )
     if artifacts is not None:
         summary["source_artifacts"] = artifacts
     return summary
@@ -380,6 +400,7 @@ def orient_scan(
     *,
     audit_catalog: dict[str, Any] | None = None,
     audit_source_root: Path | None = None,
+    audit_source_strip_prefix: str | None = None,
 ) -> OrientReport:
     patterns_raw = scan.get("patterns", {})
     patterns = patterns_raw if isinstance(patterns_raw, dict) else {}
@@ -436,6 +457,7 @@ def orient_scan(
         audit_catalog=audit_catalog_summary(
             audit_catalog,
             source_root=audit_source_root,
+            source_strip_prefix=audit_source_strip_prefix,
         ),
     )
 
@@ -537,6 +559,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--audit-source-strip-prefix",
+        help=(
+            "Optional logical source path prefix to strip before resolving "
+            "paths under --audit-source-root."
+        ),
+    )
+    parser.add_argument(
         "--require-complete-catalog",
         action="store_true",
         help="Exit non-zero when --audit-catalog is absent or incomplete.",
@@ -560,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         audit_source_root=Path(args.audit_source_root)
         if args.audit_source_root is not None
         else None,
+        audit_source_strip_prefix=args.audit_source_strip_prefix,
     )
     if args.format == "json":
         print(report_to_json(report))

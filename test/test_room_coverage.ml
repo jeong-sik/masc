@@ -532,6 +532,43 @@ let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
       Alcotest.fail "expected one fallback-claimable task"
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 
+let test_claim_next_uses_routing_handoff_as_fallback () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Rerouted coding task" ~priority:1
+        ~description:""
+    in
+    let backlog = Coord.read_backlog config in
+    let tasks =
+      List.map
+        (fun (t : Masc_domain.task) ->
+           if String.equal t.id "task-001"
+           then
+             { t with
+               cycle_count = 1
+             ; do_not_reclaim_reason =
+                 Some
+                   "Auto-claimed via auto_goal_fallback; sandbox-isolated \
+                    keeper has no access to masc-mcp source. Releasing for \
+                    keeper with repo access."
+             }
+           else t)
+        backlog.tasks
+    in
+    write_tasks config tasks;
+    match Coord.claim_next_r config ~agent_name:claude () with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.(check string) "fallback claim" "task-001" task_id;
+      let task = task_by_id config task_id in
+      Alcotest.(check (option string)) "routing handoff cleared" None
+        task.do_not_reclaim_reason
+    | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "routing handoff reason should be fallback claimable"
+    | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected one fallback-claimable task"
+    | Coord.Claim_next_error msg -> Alcotest.fail msg)
+
 let test_claim_next_prefers_unblocked_over_legacy_auto_cycle () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
@@ -589,6 +626,39 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
     | Error e ->
       Alcotest.fail
         ("retryable task should remain claimable: " ^ Masc_domain.masc_error_to_string e))
+
+let test_claim_next_allows_failed_verification_repair () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Repair rejected task" ~priority:1
+        ~description:""
+    in
+    let req =
+      match
+        Verification.create_request ~base_path:config.Coord.base_path
+          ~task_id:"task-001" ~output:(`Assoc [])
+          ~criteria:[ Verification.Custom "tests pass" ] ~worker:"worker" ()
+      with
+      | Ok req -> req
+      | Error msg -> Alcotest.fail ("create verification failed: " ^ msg)
+    in
+    (match
+       Verification.submit_verdict ~base_path:config.Coord.base_path
+         ~req_id:req.id ~verifier:"verifier-agent"
+         ~verdict:(Verification.Fail "missing evidence")
+     with
+     | Ok _ -> ()
+     | Error msg -> Alcotest.fail ("submit verdict failed: " ^ msg));
+    match Coord.claim_next_r config ~agent_name:claude () with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.(check string) "rejected task is repair-claimable" "task-001"
+        task_id
+    | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "failed verification should not permanently block repair"
+    | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected failed verification task to remain in backlog"
+    | Coord.Claim_next_error msg -> Alcotest.fail msg)
 
 (* ============================================================ *)
 (* Update Priority Tests                                         *)
@@ -1395,10 +1465,14 @@ let () =
         test_release_hard_stop_blocks_direct_reclaim;
       Alcotest.test_case "legacy auto-cycle block is fallback claimable" `Quick
         test_claim_next_uses_legacy_auto_cycle_as_fallback;
+      Alcotest.test_case "routing handoff block is fallback claimable" `Quick
+        test_claim_next_uses_routing_handoff_as_fallback;
       Alcotest.test_case "unblocked tasks beat legacy auto-cycle fallback" `Quick
         test_claim_next_prefers_unblocked_over_legacy_auto_cycle;
       Alcotest.test_case "release cycles do not create auto block" `Quick
         test_release_cycles_do_not_create_auto_do_not_reclaim;
+      Alcotest.test_case "failed verification stays repair-claimable" `Quick
+        test_claim_next_allows_failed_verification_repair;
     ];
 
     (* === Update Priority === *)

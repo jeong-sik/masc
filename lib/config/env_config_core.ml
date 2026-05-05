@@ -64,6 +64,21 @@ let get_float_nonneg ~default name =
   if (not (Float.is_finite parsed)) || parsed < 0.0 then default
   else parsed
 
+(** Variant for [\[0.0, 1.0\]]-bounded floats — probabilities,
+    score thresholds, context-ratio caps, anything where the
+    operator's mental model is "this is a fraction".  Out-of-range
+    parses ([< 0.0], [> 1.0], or non-finite) fall back to
+    [default].  The default itself is also clamped to
+    [\[0.0, 1.0\]] as defense-in-depth so a future caller cannot
+    accidentally introduce an out-of-range default. *)
+let get_ratio ~default name =
+  let clamp01 v = Float.max 0.0 (Float.min 1.0 v) in
+  let safe_default = clamp01 default in
+  let parsed = get_float ~default:safe_default name in
+  if (not (Float.is_finite parsed)) || parsed < 0.0 || parsed > 1.0
+  then safe_default
+  else parsed
+
 let get_bool ~default name =
   match raw_value_opt name with
   | Some v ->

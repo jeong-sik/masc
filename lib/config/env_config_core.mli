@@ -52,6 +52,14 @@ val get_float_nonneg : default:float -> string -> float
     [float_of_string "inf"] succeeds and [+∞ > 0.0] would
     otherwise pass an effectively unbounded value through. *)
 
+val get_ratio : default:float -> string -> float
+(** Like {!get_float_nonneg} but additionally rejects parses [> 1.0].
+    Use for env vars whose semantic is a fraction in [\[0, 1\]]:
+    score thresholds, probabilities, context-ratio caps.  The
+    [default] argument is itself clamped to [\[0, 1\]] as
+    defense-in-depth, so a caller passing a stale out-of-range
+    default still gets a valid ratio back. *)
+
 (** {1 String / path helpers} *)
 
 val trim_opt : string option -> string option

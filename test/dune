@@ -1044,6 +1044,7 @@
 (include stanzas/test_env_config_dashboard_execution_timeouts.inc)
 (include stanzas/test_env_config_dashboard_shell_prewarm.inc)
 (include stanzas/test_env_config_exec_timeout_10426.inc)
+(include stanzas/test_env_config_get_ratio.inc)
 (include stanzas/test_env_config_keeper_bootstrap_intervals.inc)
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
 (include stanzas/test_env_config_sandbox.inc)

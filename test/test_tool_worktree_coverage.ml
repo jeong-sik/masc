@@ -491,6 +491,18 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
       (Filename.concat ".worktrees"
          (Playground_paths.worktree_dir_name "sangsu" task_id))
   in
+  let docker_visible_worktree =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat
+            (Filename.concat
+               Env_config_keeper.DockerPlayground.container_playground_root
+               "sangsu")
+            "repos")
+         "masc-mcp")
+      (Filename.concat ".worktrees"
+         (Playground_paths.worktree_dir_name "sangsu" task_id))
+  in
   let legacy_worktree =
     Filename.concat base_path
       (Filename.concat ".masc/playground/sangsu/repos/masc-mcp/.worktrees"
@@ -506,6 +518,12 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
   | Some (true, msg) ->
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg);
+      check bool "message contains docker-visible worktree path" true
+        (contains docker_visible_worktree msg);
+      check bool "message hides host docker worktree path" false
+        (contains docker_worktree msg);
+      check bool "message tells keeper to pass cwd to keeper_bash" true
+        (contains "keeper_bash cwd=" msg);
       check bool "docker sandbox clone created" true
         (Sys.file_exists docker_clone);
       check bool "docker worktree created" true

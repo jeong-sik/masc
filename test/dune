@@ -1114,6 +1114,7 @@
 (include stanzas/test_keeper_summarizer.inc)
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
+(include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
 (include stanzas/test_keeper_tool_emission_hook.inc)
 (include stanzas/test_keeper_tool_matrix.inc)
 (include stanzas/test_keeper_tool_policy_paths.inc)

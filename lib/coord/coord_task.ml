@@ -436,8 +436,11 @@ let transition_task_r
                  then (
                    let t =
                      match action with
-                     | Masc_domain.Claim -> clear_soft_do_not_reclaim_reason t
-                     | Masc_domain.Release
+                     | Masc_domain.Claim ->
+                       t
+                       |> clear_soft_do_not_reclaim_reason
+                       |> clear_stale_worktree_binding
+                     | Masc_domain.Release -> clear_stale_worktree_binding t
                      | Masc_domain.Start
                      | Masc_domain.Done_action
                      | Masc_domain.Cancel

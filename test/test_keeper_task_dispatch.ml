@@ -177,6 +177,33 @@ let with_registered_keeper config meta f =
 let current_task_id_string (meta : Keeper_types.keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 
+let with_claim_post_provision_hook hook f =
+  let previous = Atomic.get Coord_hooks.claim_post_provision_fn in
+  Atomic.set Coord_hooks.claim_post_provision_fn hook;
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Coord_hooks.claim_post_provision_fn previous)
+    f
+
+let stale_worktree_info ~agent_name ~task_id : Masc_domain.worktree_info =
+  {
+    branch = Printf.sprintf "%s/%s" agent_name task_id;
+    path = Printf.sprintf ".worktrees/%s-%s" agent_name task_id;
+    git_root = "/tmp/stale-sandbox/repos/masc-mcp";
+    repo_name = "masc-mcp";
+  }
+
+let link_stale_worktree config ~agent_name ~task_id =
+  match
+    Coord_worktree.link_worktree_to_task config ~task_id
+      ~worktree_info:(stale_worktree_info ~agent_name ~task_id)
+  with
+  | Ok () -> ()
+  | Error e ->
+    fail
+      (Printf.sprintf
+         "failed to link stale worktree: %s"
+         (Masc_domain.masc_error_to_string e))
+
 (* --- keeper_task_claim tests --- *)
 
 let test_claim_returns_result () =
@@ -279,6 +306,77 @@ let test_release_clears_keeper_current_task_id () =
       in
       check (option string) "persisted current_task_id cleared" None
         (current_task_id_string persisted_meta)))
+
+let test_claim_clears_stale_task_worktree_metadata () =
+  with_claim_post_provision_hook
+    (fun _config ~agent_name:_ ~task_id:_ -> ())
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Stale worktree claim" ~priority:1
+              ~description:"desc"
+          in
+          let task_id = (only_task config).id in
+          link_stale_worktree config ~agent_name:"previous-agent" ~task_id;
+          check bool "stale worktree linked" true
+            (Option.is_some (only_task config).worktree);
+          let _ = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          check bool "stale worktree cleared on claim" true
+            (Option.is_none (only_task config).worktree))))
+
+let test_release_clears_task_worktree_metadata () =
+  with_claim_post_provision_hook
+    (fun _config ~agent_name:_ ~task_id:_ -> ())
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Worktree release task" ~priority:1
+              ~description:"desc"
+          in
+          let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          let json = parse_json result in
+          let task_id =
+            Yojson.Safe.Util.(
+              json |> member "claimed_task" |> member "task_id" |> to_string)
+          in
+          link_stale_worktree config ~agent_name:meta.agent_name ~task_id;
+          check bool "worktree linked before release" true
+            (Option.is_some (only_task config).worktree);
+          let ok, message =
+            Tool_task.handle_transition
+              { Tool_task.config; agent_name = meta.agent_name; sw = None }
+              (`Assoc
+                 [
+                   ("task_id", `String task_id);
+                   ("action", `String "release");
+                   ("reason", `String "handoff to another keeper");
+                 ])
+          in
+          if not ok then fail message;
+          check bool "worktree cleared on release" true
+            (Option.is_none (only_task config).worktree))))
+
+let test_claim_next_runs_post_provision_hook () =
+  let observed = ref None in
+  with_claim_post_provision_hook
+    (fun _config ~agent_name ~task_id -> observed := Some (agent_name, task_id))
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Provision hook task" ~priority:1
+              ~description:"desc"
+          in
+          let task_id = (only_task config).id in
+          let _ = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          check (option (pair string string)) "claim-next provision hook"
+            (Some (meta.agent_name, task_id))
+            !observed)))
 
 let test_stale_current_task_id_is_cleared_from_backlog () =
   with_room (fun config ->
@@ -988,6 +1086,12 @@ let () =
         test_claim_syncs_keeper_current_task_id;
       test_case "release clears keeper current_task_id" `Quick
         test_release_clears_keeper_current_task_id;
+      test_case "claim clears stale task worktree metadata" `Quick
+        test_claim_clears_stale_task_worktree_metadata;
+      test_case "release clears task worktree metadata" `Quick
+        test_release_clears_task_worktree_metadata;
+      test_case "claim-next runs post-provision hook" `Quick
+        test_claim_next_runs_post_provision_hook;
       test_case "stale current_task_id clears from backlog" `Quick
         test_stale_current_task_id_is_cleared_from_backlog;
       test_case "claim empty room" `Quick test_claim_empty_room;

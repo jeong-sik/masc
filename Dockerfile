@@ -1,12 +1,12 @@
 # MASC MCP Server - Production Dockerfile
 # Two stages:
-#   1. dashboard-builder: Vite SPA build (Node 20).  Produces /build/assets/dashboard.
+#   1. dashboard-builder: Vite SPA build (Node 22).  Produces /build/assets/dashboard.
 #   2. runtime: Ubuntu 24.04 with the OCaml binary + the SPA copied in.
 
 # ---- Stage 1: dashboard SPA -------------------------------------------------
-FROM node:20-slim AS dashboard-builder
+FROM node:22-slim AS dashboard-builder
 
-# corepack ships with Node 20+ but is opt-in.  Pin pnpm to the version
+# corepack ships with Node 22 but is opt-in.  Pin pnpm to the version
 # package.json declares (10.31.0) so build-time pnpm matches dev/CI.
 RUN corepack enable && corepack prepare pnpm@10.31.0 --activate
 

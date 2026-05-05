@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.19.9] - 2026-05-05
+
+### Changed
+- Bumped `agent_sdk` pin to `0.190.6` (released version from OAS main).
+- Dashboard dependency refresh: minor/patch bumps for tailwindcss, typescript, vitest, eslint-plugin-react-hooks, lucide-preact, cytoscape, dompurify, marked, zod, solid-js.
+- Removed deprecated `@types/cytoscape` (built-in types now available).
+
 ## [0.19.8] - 2026-05-05
 
 ### Added

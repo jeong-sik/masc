@@ -104,6 +104,26 @@ let model_names_for_profile json profile_name =
        | `String model -> model
        | value -> value |> member "model" |> to_string)
 
+let model_entry_for_profile json profile_name model_name =
+  json
+  |> member (profile_name ^ "_models")
+  |> to_list
+  |> List.find_opt (function
+       | `String model -> String.equal model model_name
+       | value -> String.equal (value |> member "model" |> to_string) model_name)
+
+let supports_tool_choice_for_profile json profile_name model_name =
+  match model_entry_for_profile json profile_name model_name with
+  | None -> failf "%s missing from %s models" model_name profile_name
+  | Some (`String _) -> None
+  | Some value -> (
+      match value |> member "supports_tool_choice" with
+      | `Null -> None
+      | `Bool enabled -> Some enabled
+      | other ->
+          failf "unexpected supports_tool_choice value for %s/%s: %s"
+            profile_name model_name (Yojson.Safe.to_string other))
+
 let test_repo_seed_uses_two_profiles_plus_routes () =
   let rendered = render_or_fail (repo_toml_path ()) |> Yojson.Safe.from_string in
   let expect_profile_models profile_name expected =
@@ -127,6 +147,20 @@ let test_repo_seed_uses_two_profiles_plus_routes () =
       "glm-coding:auto";
       "claude_code:auto";
     ];
+  check (option bool) "big_three GLM declares tool choice support"
+    (Some true)
+    (supports_tool_choice_for_profile rendered "big_three" "glm-coding:auto");
+  check (option bool) "__safe_lane GLM declares tool choice support"
+    (Some true)
+    (supports_tool_choice_for_profile rendered "__safe_lane" "glm-coding:auto");
+  check (option bool) "tier_fast GLM 5 turbo declares tool choice support"
+    (Some true)
+    (supports_tool_choice_for_profile rendered "tier_fast"
+       "glm-coding:glm-5-turbo");
+  check (option bool) "tier_fast GLM 4.7 flashx declares tool choice support"
+    (Some true)
+    (supports_tool_choice_for_profile rendered "tier_fast"
+       "glm-coding:glm-4.7-flashx");
   check bool "default profile removed" true
     (match rendered |> member "default_models" with `Null -> true | _ -> false);
   check bool "governance profile removed" true

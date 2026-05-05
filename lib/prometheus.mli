@@ -790,6 +790,22 @@ val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
   (* Centralized metric constants for inline string replacement. *)
 val metric_keeper_tool_use_failure : string
+val metric_keeper_tool_not_allowed : string
+(** #13xxx: counter incremented every time the keeper dispatch layer
+    denies a tool call because the tool is not in the keeper's allowlist.
+    Surfaces preset drift (e.g. [board_core] group omitted from the
+    keeper's [tool_groups]) and deny-list collisions as a Prometheus
+    alert rather than requiring operators to grep
+    [keepers/*.decisions.jsonl] after the fact.
+    Labels:
+    - [keeper] — keeper name
+    - [tool]   — tool name attempted (bounded by tool registry, ~100)
+    - [reason] — [not_in_candidate_set | denied_by_policy |
+                  not_in_allow_set]
+    Operator alert: [rate(masc_keeper_tool_not_allowed_total[5m]) > 0]
+    on any [(keeper, tool)] pair means that keeper is looping without
+    making progress — its BDI is requesting a tool that its preset
+    does not permit. *)
 val metric_after_turn_response_model_empty : string
 val metric_after_turn_response_model_alias : string
 val metric_pricing_catalog_miss : string

@@ -171,7 +171,7 @@ let execute_keeper_tool_call_with_outcome
     let reason, hint =
       if not (StringSet.mem name lookup.candidate_set)
       then
-        ( "tool does not exist or is not available to your preset"
+        ( "not_in_candidate_set"
         , Printf.sprintf
             "'%s' is not a recognized tool. Check spelling or use keeper_tools_list to see available tools." name )
       else if StringSet.mem name lookup.deny_set
@@ -184,6 +184,10 @@ let execute_keeper_tool_call_with_outcome
         , Printf.sprintf
             "'%s' exists but your preset does not allow it. Use keeper_tools_list to see available tools." name )
     in
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_tool_not_allowed
+      ~labels:[("keeper", meta.name); ("tool", name); ("reason", reason)]
+      ();
     make_executed_tool_result
       (Yojson.Safe.to_string
          (`Assoc [

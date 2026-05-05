@@ -54,7 +54,7 @@ let test_alias_creates_redirect () =
      Auth.ensure_keeper_credential tmp ~agent_name:"keeper-foo-agent"
    with
    | Ok _ -> ()
-   | Error e -> failf "bootstrap failed: %s" (Types.masc_error_to_string e));
+   | Error e -> failf "bootstrap failed: %s" (Masc_domain.masc_error_to_string e));
   let canonical_path = credential_file_path tmp "keeper-foo-agent" in
   let canonical_target = alias_redirect_basename canonical_path in
   check bool "canonical is a redirect stub"
@@ -65,7 +65,7 @@ let test_alias_creates_redirect () =
        ~canonical_name:"keeper-foo-agent" ~alias_name:"foo"
    with
    | Ok () -> ()
-   | Error e -> failf "alias failed: %s" (Types.masc_error_to_string e));
+   | Error e -> failf "alias failed: %s" (Masc_domain.masc_error_to_string e));
   let alias_path = credential_file_path tmp "foo" in
   check bool "alias file exists" true (Sys.file_exists alias_path);
   check (option string) "alias points at the same UUID file"
@@ -76,7 +76,7 @@ let test_alias_creates_redirect () =
   let via_alias = Auth.load_credential tmp "foo" in
   check bool "direct lookup found" true (Option.is_some direct);
   check bool "alias lookup found" true (Option.is_some via_alias);
-  let token_of c = (Option.get c : Types.agent_credential).token in
+  let token_of c = (Option.get c : Masc_domain.agent_credential).token in
   check string "alias resolves to same token"
     (token_of direct) (token_of via_alias)
 
@@ -99,7 +99,7 @@ let test_alias_idempotent () =
    with
    | Ok () -> ()
    | Error e -> failf "second call failed: %s"
-                  (Types.masc_error_to_string e));
+                  (Masc_domain.masc_error_to_string e));
   let mtime_after = (Unix.stat alias_path).Unix.st_mtime in
   check (float 0.001) "second call did not rewrite the file (idempotent)"
     mtime_before mtime_after
@@ -116,7 +116,7 @@ let test_self_alias_noop () =
   with
   | Ok () -> ()
   | Error e -> failf "self-alias should be no-op: %s"
-                 (Types.masc_error_to_string e)
+                 (Masc_domain.masc_error_to_string e)
 
 let test_alias_missing_canonical () =
   let tmp = setup_test_room () in

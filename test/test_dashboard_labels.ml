@@ -59,7 +59,7 @@ let with_dashboard_label_thresholds ?quiet ?stuck f =
 let test_working_agent () =
   let (now, recent_iso) = make_timestamp_pair 60.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Active recent_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active recent_iso
   in
   Alcotest.(check string) "active+recent = working" "working" result
 
@@ -67,7 +67,7 @@ let test_quiet_threshold_override () =
   with_dashboard_label_thresholds ~quiet:30.0 ~stuck:900.0 @@ fun () ->
   let (now, quiet_iso) = make_timestamp_pair 60.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Active quiet_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active quiet_iso
   in
   Alcotest.(check bool) "override surfaces quiet warning" true
     (try
@@ -78,7 +78,7 @@ let test_quiet_threshold_override () =
 let test_stuck_agent () =
   let (now, old_iso) = make_timestamp_pair 1200.0 in (* 20 minutes ago *)
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Active old_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active old_iso
   in
   Alcotest.(check bool) "stuck agent contains STUCK" true
     (try
@@ -90,7 +90,7 @@ let test_stuck_threshold_override () =
   with_dashboard_label_thresholds ~quiet:300.0 ~stuck:60.0 @@ fun () ->
   let (now, stuck_iso) = make_timestamp_pair 120.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Busy stuck_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Busy stuck_iso
   in
   Alcotest.(check bool) "override surfaces stuck warning" true
     (try
@@ -102,7 +102,7 @@ let test_parse_iso_timestamp_matches_canonical_utc () =
   let ts = "2026-04-08T12:38:15Z" in
   match
     Lib.Dashboard_labels.parse_iso_timestamp ts,
-    Types.parse_iso8601_opt ts
+    Masc_domain.parse_iso8601_opt ts
   with
   | Some actual, Some expected ->
       Alcotest.(check bool) "dashboard parser matches canonical UTC parser" true
@@ -113,7 +113,7 @@ let test_parse_iso_timestamp_fractional_utc_normalizes () =
   let ts = "2026-04-08T12:38:15.123Z" in
   match
     Lib.Dashboard_labels.parse_iso_timestamp ts,
-    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+    Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
       Alcotest.(check bool) "fractional UTC keeps sub-second precision" true
@@ -126,7 +126,7 @@ let test_parse_iso_timestamp_offset_matches_utc () =
   let ts = "2026-04-08T21:38:15+09:00" in
   match
     Lib.Dashboard_labels.parse_iso_timestamp ts,
-    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+    Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
       Alcotest.(check bool) "numeric offset normalizes to UTC" true
@@ -137,7 +137,7 @@ let test_parse_iso_timestamp_fractional_offset_matches_utc () =
   let ts = "2026-04-08T21:38:15.250+09:00" in
   match
     Lib.Dashboard_labels.parse_iso_timestamp ts,
-    Types.parse_iso8601_opt "2026-04-08T12:38:15Z"
+    Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
       Alcotest.(check bool) "fractional offset keeps sub-second precision" true
@@ -184,7 +184,7 @@ let test_parse_iso_timestamp_partial_rejected () =
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Listening
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Listening
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "listening = idle" "idle" result
@@ -192,7 +192,7 @@ let test_idle_agent () =
 let test_offline_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Types.Inactive
+    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Inactive
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "inactive = offline" "offline" result
@@ -201,12 +201,12 @@ let test_offline_agent () =
 
 let test_classify_inactive_is_offline () =
   let now = Unix.gettimeofday () in
-  let agent : Types.agent =
+  let agent : Masc_domain.agent =
     {
       id = None;
       name = "test-agent";
       agent_type = "test";
-      status = Types.Inactive;
+      status = Masc_domain.Inactive;
       capabilities = [];
       current_task = None;
       joined_at = "2026-01-01T00:00:00Z";
@@ -220,12 +220,12 @@ let test_classify_inactive_is_offline () =
 
 let test_classify_listening_is_idle () =
   let now = Unix.gettimeofday () in
-  let agent : Types.agent =
+  let agent : Masc_domain.agent =
     {
       id = None;
       name = "test-agent";
       agent_type = "test";
-      status = Types.Listening;
+      status = Masc_domain.Listening;
       capabilities = [];
       current_task = None;
       joined_at = "2026-01-01T00:00:00Z";
@@ -240,12 +240,12 @@ let test_classify_listening_is_idle () =
 let test_classify_uses_stuck_threshold_override () =
   with_dashboard_label_thresholds ~stuck:60.0 @@ fun () ->
   let (now, stuck_iso) = make_timestamp_pair 120.0 in
-  let agent : Types.agent =
+  let agent : Masc_domain.agent =
     {
       id = None;
       name = "test-agent";
       agent_type = "test";
-      status = Types.Active;
+      status = Masc_domain.Active;
       capabilities = [];
       current_task = None;
       joined_at = "2026-01-01T00:00:00Z";

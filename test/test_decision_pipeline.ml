@@ -213,7 +213,7 @@ let make_obs_meta name =
     ("trace_id", `String ("trace-obs-" ^ name));
     ("goal", `String "observer test");
   ] in
-  match KTypes.meta_of_json json with
+  match KMasc_domain.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
 

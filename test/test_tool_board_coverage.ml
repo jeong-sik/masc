@@ -799,7 +799,7 @@ let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let names = List.map (fun (t : Types.tool_schema) -> t.name) Tool_board.tools in
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Tool_board.tools in
   let unique = List.sort_uniq String.compare names in
   Alcotest.(check int) "all names unique" (List.length names) (List.length unique)
 
@@ -807,7 +807,7 @@ let test_tools_all_have_descriptions () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  List.iter (fun (t : Types.tool_schema) ->
+  List.iter (fun (t : Masc_domain.tool_schema) ->
     Alcotest.(check bool) (Printf.sprintf "%s has description" t.name) true
       (String.length t.description > 0)
   ) Tool_board.tools

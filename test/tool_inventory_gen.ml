@@ -7,7 +7,7 @@ let sorted_unique_strings lst =
 let () =
   let names =
     Masc_mcp.Config.raw_all_tool_schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique_strings
   in
   Printf.printf

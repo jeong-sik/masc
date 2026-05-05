@@ -34,7 +34,7 @@ let build_keeper_index () =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let tool_entries =
     List.map
-      (fun (t : Types.tool_schema) ->
+      (fun (t : Masc_domain.tool_schema) ->
          Keeper_agent_tool_surface.tool_index_entry
            ~name:t.name ~description:t.description)
       tool_schemas
@@ -264,7 +264,7 @@ let test_search_alias_entries_target_keeper_universe () =
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   let tool_names =
     Keeper_exec_tools.keeper_universe_model_tools meta
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let missing =
     Keeper_agent_tool_surface.tool_search_alias_entries

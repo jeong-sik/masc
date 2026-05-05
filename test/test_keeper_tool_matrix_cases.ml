@@ -16,7 +16,7 @@ type expectation = Generic.expectation =
 type keeper_case = {
   init_mode : init_mode;
   prepare : fixture -> unit;
-  arguments : fixture -> Types.tool_schema -> Yojson.Safe.t;
+  arguments : fixture -> Masc_domain.tool_schema -> Yojson.Safe.t;
   expectation : expectation;
 }
 
@@ -40,10 +40,10 @@ let keeper_matrix_guard_fragments =
     "unregistered_masc_tool";
   ]
 
-let dedupe_tool_schemas (schemas : Types.tool_schema list) =
+let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in
   List.filter
-    (fun (schema : Types.tool_schema) ->
+    (fun (schema : Masc_domain.tool_schema) ->
       if Hashtbl.mem seen schema.name then
         false
       else (
@@ -116,7 +116,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
 let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
   KET.keeper_allowed_model_tools (make_meta ())
-  |> List.sort (fun (left : Types.tool_schema) right ->
+  |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
 
 let all_keeper_tool_schemas () =
@@ -125,7 +125,7 @@ let all_keeper_tool_schemas () =
 
 let all_keeper_tool_names =
   all_keeper_tool_schemas_raw ()
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   init_keeper_bridge ();
@@ -211,7 +211,7 @@ let prepare_keeper_name fixture name =
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
 
-let keeper_arguments fixture (schema : Types.tool_schema) =
+let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   let name = schema.name in
   match name with
   | "keeper_time_now"
@@ -492,7 +492,7 @@ let evaluate_expectation ~name expectation = function
                    message)
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
-    (schema : Types.tool_schema) =
+    (schema : Masc_domain.tool_schema) =
   let saved_home = Sys.getenv_opt "HOME" in
   let saved_env =
     [
@@ -526,28 +526,28 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
       (fun () ->
         Unix.putenv "HOME" base_path;
         try
-          let case = case_for_name schema.Types.name in
+          let case = case_for_name schema.Masc_domain.name in
           let fixture =
             make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
               case.init_mode
           in
           case.prepare fixture;
           let args = case.arguments fixture schema in
-          match find_tool fixture schema.Types.name with
+          match find_tool fixture schema.Masc_domain.name with
           | None ->
               Error
-                (Printf.sprintf "missing keeper Tool.t for %s" schema.Types.name)
+                (Printf.sprintf "missing keeper Tool.t for %s" schema.Masc_domain.name)
           | Some tool ->
               let outcome = Tool.execute tool args in
-              if String.equal schema.Types.name "masc_heartbeat_start" then
+              if String.equal schema.Masc_domain.name "masc_heartbeat_start" then
                 Heartbeat.list ()
                 |> List.iter (fun (hb : Heartbeat.t) ->
                        ignore (Heartbeat.stop hb.id));
-              evaluate_expectation ~name:schema.Types.name case.expectation
+              evaluate_expectation ~name:schema.Masc_domain.name case.expectation
                 outcome
         with exn ->
           Error
             (Printf.sprintf "%s raised during keeper case: %s"
-               schema.Types.name (Printexc.to_string exn)))
+               schema.Masc_domain.name (Printexc.to_string exn)))
   in
   (base_path, result)

@@ -28,7 +28,7 @@ let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_tar
 
 let room_message content =
   {
-    Types.seq = 1;
+    Masc_domain.seq = 1;
     from_agent = "tester";
     msg_type = "broadcast";
     content;

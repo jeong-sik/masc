@@ -55,7 +55,7 @@ let test_predefined_loggers_signature_stable () =
 
 (** Accepting an [int turn_id] specifically (not just [None]) catches
     any signature drift to a different argument type (e.g. [string]
-    or [Types.Ids.Turn_id.t]).  The [Step 0a] wiring uses [int] (the
+    or [Masc_domain.Ids.Turn_id.t]).  The [Step 0a] wiring uses [int] (the
     [meta.runtime.usage.total_turns + 1] monotonic counter). *)
 let test_turn_id_is_int () =
   Anchor.info ~turn_id:42 ~keeper_name:"alice" "%s" "[15d-anchor]";

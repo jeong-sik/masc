@@ -37,7 +37,7 @@ let test_session_lock_contention () =
     for _ = 1 to iterations_per_agent do
       Session.update_activity registry ~agent_name ();
       ignore (Session.check_rate_limit_ex registry ~agent_name
-                ~category:Types.GeneralLimit ~role:Types.Worker);
+                ~category:Masc_domain.GeneralLimit ~role:Masc_domain.Worker);
     done
   in
 
@@ -51,7 +51,7 @@ let test_session_lock_contention () =
   (* Verify no negative rate limits *)
   List.iter (fun name ->
     let status =
-      Session.get_rate_limit_status registry ~agent_name:name ~role:Types.Worker
+      Session.get_rate_limit_status registry ~agent_name:name ~role:Masc_domain.Worker
     in
     let open Yojson.Safe.Util in
     let burst_remaining = status |> member "burst_remaining" |> to_int in

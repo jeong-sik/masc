@@ -7,7 +7,7 @@
     The module has two exposed functions:
 
     - [default_room_state config] — pure (modulo [now_iso ()] for
-      [started_at]) constructor for [Types.room_state].
+      [started_at]) constructor for [Masc_domain.room_state].
     - [ensure_room_bootstrap config] — idempotent FS bootstrap
       that creates [.masc/<dirs>] and seed [room_state.json] /
       [backlog.json] under both root and scoped layouts.

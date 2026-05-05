@@ -201,7 +201,7 @@ let test_dispatch_unknown_tool () =
 let test_remove_schema_requires_only_task_id () =
   let schema =
     Tool_worktree.schemas
-    |> List.find (fun (s : Types.tool_schema) ->
+    |> List.find (fun (s : Masc_domain.tool_schema) ->
          String.equal s.name "masc_worktree_remove")
   in
   let open Yojson.Safe.Util in
@@ -648,11 +648,11 @@ let test_worktree_path_rejects_traversal_name () =
   match Masc_mcp.Coord.ensure_worktree_path root "../escape" with
   | Ok (worktree_path, _) ->
       fail ("expected invalid worktree path, got: " ^ worktree_path)
-  | Error (Types.System (Types.System_error.IoError msg)) ->
+  | Error (Masc_domain.System (Masc_domain.System_error.IoError msg)) ->
       check_contains "message mentions invalid worktree path"
         "Invalid worktree path" msg
   | Error err ->
-      fail ("expected IoError, got: " ^ Types.masc_error_to_string err)
+      fail ("expected IoError, got: " ^ Masc_domain.masc_error_to_string err)
 
 let test_worktree_create_rejects_existing_non_git_worktree_path () =
   let base_path = temp_dir () in
@@ -737,7 +737,7 @@ let test_worktree_create_concurrent_same_name_converges () =
     | Some (Error err) ->
         fail
           (Printf.sprintf "%s failed: %s" label
-             (Types.masc_error_to_string err))
+             (Masc_domain.masc_error_to_string err))
     | None -> fail (label ^ " did not run")
   in
   let left_msg = unwrap "left create" !left in

@@ -537,7 +537,7 @@ let test_compact_syncs_oas_context () =
 (* ================================================================ *)
 let test_agent_completed_includes_usage () =
   let open Agent_sdk in
-  let usage : Types.api_usage =
+  let usage : Masc_domain.api_usage =
     {
       input_tokens = 500;
       output_tokens = 150;
@@ -546,7 +546,7 @@ let test_agent_completed_includes_usage () =
       cost_usd = Some 0.003;
     }
   in
-  let resp : Types.api_response =
+  let resp : Masc_domain.api_response =
     {
       id = "msg-test";
       model = "test-model";

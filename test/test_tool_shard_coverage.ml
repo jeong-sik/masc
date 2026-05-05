@@ -40,7 +40,7 @@ let test_shard_filesystem_exists () =
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
-    let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
+    let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) s.tools in
     Alcotest.(check bool) "contains fs_read" true
       (List.mem "keeper_fs_read" names);
     Alcotest.(check bool) "contains fs_edit" true
@@ -63,7 +63,7 @@ let test_shard_coding_exists () =
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
-    let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
+    let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) s.tools in
     (* keeper_bash is the coding shard's shell bridge.
        keeper_shell (incl. op=gh) lives in shard_shell, not coding. *)
     Alcotest.(check bool) "contains keeper_bash" true (List.mem "keeper_bash" names);
@@ -304,7 +304,7 @@ let test_schemas_count () =
   Alcotest.(check int) "3 schemas" 3 (List.length Tool_shard.schemas)
 
 let test_schemas_names () =
-  let names = List.map (fun (s : Types.tool_schema) -> s.name)
+  let names = List.map (fun (s : Masc_domain.tool_schema) -> s.name)
     Tool_shard.schemas in
   List.iter (fun expected ->
     Alcotest.(check bool) (expected ^ " present") true
@@ -316,14 +316,14 @@ let test_schemas_names () =
    ============================================================ *)
 
 let test_base_tools_names () =
-  let names = List.map (fun (t : Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     Tool_shard.base_tools in
   Alcotest.(check bool) "has time_now" true (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has context_status" true (List.mem "keeper_context_status" names);
   Alcotest.(check bool) "has memory_search" true (List.mem "keeper_memory_search" names)
 
 let test_board_tools_names () =
-  let names = List.map (fun (t : Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     Tool_shard.board_tools in
   Alcotest.(check bool) "has board_post" true (List.mem "keeper_board_post" names);
   Alcotest.(check bool) "has board_list" true (List.mem "keeper_board_list" names);
@@ -333,7 +333,7 @@ let test_board_tools_names () =
 let test_keeper_board_post_schema_supports_judgment () =
   match
     List.find_opt
-      (fun (tool : Types.tool_schema) -> tool.name = "keeper_board_post")
+      (fun (tool : Masc_domain.tool_schema) -> tool.name = "keeper_board_post")
       Tool_shard.board_tools
   with
   | None -> Alcotest.fail "keeper_board_post schema missing"
@@ -353,7 +353,7 @@ let test_keeper_board_post_schema_supports_judgment () =
 let test_voice_tools_names () =
   let voice_shard = match Tool_shard.get_shard "voice" with
     | Some s -> s | None -> Alcotest.failf "voice shard missing" in
-  let names = List.map (fun (t : Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     voice_shard.Tool_shard.tools in
   Alcotest.(check bool) "has voice_speak" true (List.mem "keeper_voice_speak" names);
   Alcotest.(check bool) "has voice_listen" true (List.mem "keeper_voice_listen" names);
@@ -363,7 +363,7 @@ let test_voice_tools_names () =
   Alcotest.(check bool) "has voice_session_end" true (List.mem "keeper_voice_session_end" names)
 
 let test_keeper_model_excludes_voice_tools () =
-  let names = List.map (fun (t : Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     Tool_shard.keeper_model_tools in
   Alcotest.(check bool) "keeper_model no voice_speak" false
     (List.mem "keeper_voice_speak" names);
@@ -378,14 +378,14 @@ let test_keeper_model_excludes_voice_tools () =
 let test_revoke_voice_removes_all_tools () =
   let all_shards = Tool_shard.default_shard_names @ [ "voice" ] in
   let tools_before = Tool_shard.tools_of_shards all_shards in
-  let voice_before = List.filter (fun (t : Types.tool_schema) ->
+  let voice_before = List.filter (fun (t : Masc_domain.tool_schema) ->
     let n = t.name in
     String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_before in
   Alcotest.(check bool) "voice tools present before revoke" true (List.length voice_before >= 1);
   match Tool_shard.revoke_shard all_shards "voice" with
   | Ok shards_after ->
     let tools_after = Tool_shard.tools_of_shards shards_after in
-    let voice_after = List.filter (fun (t : Types.tool_schema) ->
+    let voice_after = List.filter (fun (t : Masc_domain.tool_schema) ->
       let n = t.name in
       String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_after in
     Alcotest.(check int) "0 voice tools after revoke" 0 (List.length voice_after)
@@ -406,10 +406,10 @@ let all_keeper_shard_tool_names () : string list =
     |> List.map (fun (name, _, _) -> name)
   in
   Tool_shard.tools_of_shards all_shard_names
-  |> List.filter (fun (t : Types.tool_schema) ->
+  |> List.filter (fun (t : Masc_domain.tool_schema) ->
        String.length t.name >= 7
        && String.sub t.name 0 7 = "keeper_")
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
+  |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
   |> List.sort_uniq String.compare
 
 (** Verify that every keeper_ tool in any shard also appears in
@@ -422,16 +422,16 @@ let test_keeper_dispatch_coverage () =
     match Tool_shard.get_shard shard_name with
     | Some shard ->
       shard.Tool_shard.tools
-      |> List.map (fun (t : Types.tool_schema) -> t.name)
+      |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     | None -> []
   in
   let reachable =
     List.concat [
       (Tool_shard.keeper_model_tools
-       |> List.map (fun (t : Types.tool_schema) -> t.name));
+       |> List.map (fun (t : Masc_domain.tool_schema) -> t.name));
       shard_tool_names "voice";
       (Tool_shard.coding_tools
-       |> List.map (fun (t : Types.tool_schema) -> t.name));
+       |> List.map (fun (t : Masc_domain.tool_schema) -> t.name));
     ]
     |> List.sort_uniq String.compare
   in
@@ -446,11 +446,11 @@ let test_keeper_dispatch_coverage () =
 let test_coding_tools_included_in_defaults () =
   let default_names =
     Tool_shard.keeper_model_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name)
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
   in
   let coding_names =
     Tool_shard.coding_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name)
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
   in
   let missing = List.filter (fun n -> not (List.mem n default_names)) coding_names in
   if missing <> [] then
@@ -483,7 +483,7 @@ let test_set_agent_shards_from_persona () =
   Alcotest.(check bool) "no shell" false (List.mem "shell" active);
   (* Verify tools_of_shards returns restricted set *)
   let tools = Tool_shard.tools_of_shards active in
-  let tool_names = List.map (fun (t : Types.tool_schema) -> t.name) tools in
+  let tool_names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) tools in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" tool_names);
   Alcotest.(check bool) "no keeper_bash" false
@@ -525,11 +525,11 @@ let () =
       Alcotest.test_case "has no retired swarm front doors" `Quick (fun () ->
         let tools = Tool_shard.autoresearch_keeper_tools in
         let has_swarm =
-          List.exists (fun (t : Types.tool_schema) ->
+          List.exists (fun (t : Masc_domain.tool_schema) ->
             t.name = "masc_autoresearch_swarm_start") tools
         in
         let has_repo_synthesis =
-          List.exists (fun (t : Types.tool_schema) ->
+          List.exists (fun (t : Masc_domain.tool_schema) ->
             t.name = "masc_repo_synthesis_swarm_start") tools
         in
         Alcotest.(check bool) "no swarm_start" false has_swarm;
@@ -538,15 +538,15 @@ let () =
       Alcotest.test_case "has cycle" `Quick (fun () ->
         let tools = Tool_shard.autoresearch_keeper_tools in
         let has_cycle =
-          List.exists (fun (t : Types.tool_schema) ->
+          List.exists (fun (t : Masc_domain.tool_schema) ->
             t.name = "masc_autoresearch_cycle") tools
         in
         let has_record =
-          List.exists (fun (t : Types.tool_schema) ->
+          List.exists (fun (t : Masc_domain.tool_schema) ->
             t.name = "masc_autoresearch_record_finding") tools
         in
         let has_search =
-          List.exists (fun (t : Types.tool_schema) ->
+          List.exists (fun (t : Masc_domain.tool_schema) ->
             t.name = "masc_autoresearch_search_findings") tools
         in
         Alcotest.(check bool) "has cycle" true has_cycle;

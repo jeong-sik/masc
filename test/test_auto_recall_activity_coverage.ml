@@ -341,7 +341,7 @@ let test_recent_activity_accepts_iso_string_created_at_for_board_posts () =
     (str_contains stderr_output "board post missing/invalid created_at");
   let items = Activity_feed.recent_activity config ~limit:10 () in
   check int "valid ISO board post survives" 1 (List.length items);
-  match items, Types.parse_iso8601_opt iso_created_at with
+  match items, Masc_domain.parse_iso8601_opt iso_created_at with
   | [item], Some expected_ts ->
       check string "summary preserved" "Posted: Hello" item.summary;
       check (float 0.01) "ISO timestamp preserved" expected_ts item.created_at

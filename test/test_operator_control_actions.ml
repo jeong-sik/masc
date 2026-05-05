@@ -40,15 +40,15 @@ let make_review_required_verdict ?(run_id = "review-run-001") () :
 
 let claim_and_start config ~agent_name ~task_id =
   (match
-     Coord.transition_task_r config ~agent_name ~task_id ~action:Types.Claim ()
+     Coord.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()
    with
   | Ok _ -> ()
-  | Error err -> Alcotest.fail (Types.show_masc_error err));
+  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err));
   match
-    Coord.transition_task_r config ~agent_name ~task_id ~action:Types.Start ()
+    Coord.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Start ()
   with
   | Ok _ -> ()
-  | Error err -> Alcotest.fail (Types.show_masc_error err)
+  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
 
 let test_task_inject_executes_immediately () =
   Eio_main.run @@ fun env ->

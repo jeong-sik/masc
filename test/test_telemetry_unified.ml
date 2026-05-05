@@ -630,7 +630,7 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
        (`Assoc
           [
             ("ts", `Float now);
-            ("ts_iso", `String (Types.iso8601_of_unix_seconds now));
+            ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds now));
             ("turn", `Int 1);
             ("round", `Int 1);
             ("tool_name", `String "keeper_bash");
@@ -651,8 +651,8 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
   write_jsonl receipt_dir
     [ `Assoc
         [
-          ("recorded_at", `String (Types.iso8601_of_unix_seconds now));
-          ("ended_at", `String (Types.iso8601_of_unix_seconds now));
+          ("recorded_at", `String (Masc_domain.iso8601_of_unix_seconds now));
+          ("ended_at", `String (Masc_domain.iso8601_of_unix_seconds now));
           ("keeper_name", `String "alice");
           ("trace_id", `String "trace-1");
           ("outcome", `String "completed");
@@ -811,7 +811,7 @@ let test_goal_event_source_and_summary () =
     (Yojson.Safe.to_string
        (`Assoc
           [
-            ("ts", `String (Types.iso8601_of_unix_seconds older_ts));
+            ("ts", `String (Masc_domain.iso8601_of_unix_seconds older_ts));
             ("goal_id", `String "goal-1");
             ("event_type", `String "transition_requested");
             ("payload", `Assoc [ ("phase", `String "active") ]);
@@ -821,7 +821,7 @@ let test_goal_event_source_and_summary () =
     (Yojson.Safe.to_string
        (`Assoc
           [
-            ("ts", `String (Types.iso8601_of_unix_seconds newer_ts));
+            ("ts", `String (Masc_domain.iso8601_of_unix_seconds newer_ts));
             ("goal_id", `String "goal-1");
             ("event_type", `String "transition_completed");
             ("payload", `Assoc [ ("phase", `String "done") ]);

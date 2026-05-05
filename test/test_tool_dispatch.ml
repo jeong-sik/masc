@@ -7,7 +7,7 @@ module Types = Masc_domain
 
 (** Helper: create a minimal tool_schema for registration. *)
 let make_schema name =
-  { Types.name; description = "test tool " ^ name;
+  { Masc_domain.name; description = "test tool " ^ name;
     input_schema = `Assoc [("type", `String "object")] }
 
 (** Helper: a handler that returns (true, "ok:<name>"). *)
@@ -50,7 +50,7 @@ let () =
                   [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]
               in
               Tool_dispatch.register_module ~schemas ~handler:echo_handler;
-              List.iter (fun s -> Tool_dispatch.register_name_tag ~tool_name:s.Types.name ~tag:Mod_misc) schemas;
+              List.iter (fun s -> Tool_dispatch.register_name_tag ~tool_name:s.Masc_domain.name ~tag:Mod_misc) schemas;
               List.iter
                 (fun name ->
                   check bool (name ^ " registered") true

@@ -461,8 +461,8 @@ let append_execution_receipt ?(outcome = "ok")
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
   in
-  let started_at = Types.now_iso () in
-  let ended_at = Types.now_iso () in
+  let started_at = Masc_domain.now_iso () in
+  let ended_at = Masc_domain.now_iso () in
   let receipt : Lib.Keeper_execution_receipt.t =
     {
       keeper_name;

@@ -225,7 +225,7 @@ let test_transition_release_call_guidance () =
 
 (* Structural: all tool names in guidance output exist in Config.all_tool_schemas *)
 let all_schema_names =
-  List.map (fun (s : Types.tool_schema) -> s.name) Masc_mcp.Config.all_tool_schemas
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Masc_mcp.Config.all_tool_schemas
 
 let check_tool_exists_in_schemas name =
   if not (List.mem name all_schema_names) then

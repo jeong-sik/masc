@@ -63,7 +63,7 @@ let run_registered_hook ?schema ~tool_name ~(args : Yojson.Safe.t) () =
   Tool_dispatch.clear_hooks ();
   (match schema with
    | Some input_schema ->
-     let schema_def : Types.tool_schema =
+     let schema_def : Masc_domain.tool_schema =
        { name = tool_name; description = "test"; input_schema }
      in
      Tool_dispatch.register_module_tag ~schemas:[schema_def] ~tag:Mod_misc
@@ -306,7 +306,7 @@ let test_registered_hook_bypasses_empty_schema () =
     (Yojson.Safe.equal forwarded args)
 
 let find_schema_exn name schemas =
-  match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
+  match List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name) schemas with
   | Some schema -> schema.input_schema
   | None -> failwith ("missing schema: " ^ name)
 

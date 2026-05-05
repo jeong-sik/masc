@@ -951,8 +951,8 @@ let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
       write_file
         (Filename.concat legacy_tasks "backlog.json")
         (Yojson.Safe.to_string
-           (Types.backlog_to_yojson
-              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+           (Masc_domain.backlog_to_yojson
+              { tasks = []; last_updated = Masc_domain.now_iso (); version = 7 }));
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       let root_backlog =
         Yojson.Safe.from_string
@@ -974,8 +974,8 @@ let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () 
       write_file
         (Filename.concat legacy_tasks "backlog.json")
         (Yojson.Safe.to_string
-           (Types.backlog_to_yojson
-              { tasks = []; last_updated = Types.now_iso (); version = 11 }));
+           (Masc_domain.backlog_to_yojson
+              { tasks = []; last_updated = Masc_domain.now_iso (); version = 11 }));
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       let root_backlog =
         Yojson.Safe.from_string
@@ -999,13 +999,13 @@ let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
       write_file
         (Filename.concat alpha_tasks "backlog.json")
         (Yojson.Safe.to_string
-           (Types.backlog_to_yojson
-              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+           (Masc_domain.backlog_to_yojson
+              { tasks = []; last_updated = Masc_domain.now_iso (); version = 7 }));
       write_file
         (Filename.concat beta_tasks "backlog.json")
         (Yojson.Safe.to_string
-           (Types.backlog_to_yojson
-              { tasks = []; last_updated = Types.now_iso (); version = 11 }));
+           (Masc_domain.backlog_to_yojson
+              { tasks = []; last_updated = Masc_domain.now_iso (); version = 11 }));
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
       let root_backlog_promoted =
@@ -1033,8 +1033,8 @@ let test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs () =
       write_file
         (Filename.concat spaced_tasks "backlog.json")
         (Yojson.Safe.to_string
-           (Types.backlog_to_yojson
-              { tasks = []; last_updated = Types.now_iso (); version = 13 }));
+           (Masc_domain.backlog_to_yojson
+              { tasks = []; last_updated = Masc_domain.now_iso (); version = 13 }));
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
       let root_backlog_promoted =
@@ -1559,13 +1559,13 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
       let stale_hash =
         match
           Auth.save_raw_token_credential dir
-            ~agent_name:"codex-mcp-client" ~role:Types.Worker
+            ~agent_name:"codex-mcp-client" ~role:Masc_domain.Worker
             ~raw_token:"stale-codex-raw-token"
         with
         | Ok cred -> cred.token
         | Error err ->
             Alcotest.failf "failed to seed stale codex credential: %s"
-              (Types.masc_error_to_string err)
+              (Masc_domain.masc_error_to_string err)
       in
       write_file token_path stale_hash;
       let env =
@@ -1617,7 +1617,7 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
             | None -> Alcotest.fail "missing codex-mcp-client credential after startup"
           in
           Alcotest.(check bool) "existing role preserved" true
-            (credential.role = Types.Worker);
+            (credential.role = Masc_domain.Worker);
           Alcotest.(check (option string)) "codex credential does not expire"
             None credential.expires_at;
           Alcotest.(check string) "raw token hashes to stored credential"
@@ -1629,7 +1629,7 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
            | Ok _ -> ()
            | Error err ->
                Alcotest.failf "repaired raw token should verify: %s"
-                 (Types.masc_error_to_string err));
+                 (Masc_domain.masc_error_to_string err));
           List.iter
             (fun agent_name ->
               let path = Filename.concat auth_dir (agent_name ^ ".token") in
@@ -1654,7 +1654,7 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
               | Ok _ -> ()
               | Error err ->
                   Alcotest.failf "%s raw token should verify: %s"
-                    agent_name (Types.masc_error_to_string err))
+                    agent_name (Masc_domain.masc_error_to_string err))
             [ "claude"; "gemini" ]))
 
 let test_codex_mcp_config_sync_updates_only_masc_section () =
@@ -1826,7 +1826,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
             "keeper-masc-improver-agent" alias_cred.agent_name
       | Error err ->
           Alcotest.failf "bootable keeper token should verify exactly: %s"
-            (Types.masc_error_to_string err))
+            (Masc_domain.masc_error_to_string err))
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
@@ -1840,7 +1840,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
       let seed agent_name =
         match
           Auth.save_raw_token_credential dir ~agent_name
-            ~role:Types.Worker ~raw_token:shared_raw_token
+            ~role:Masc_domain.Worker ~raw_token:shared_raw_token
         with
         | Ok _ ->
             Auth.save_private_text_file
@@ -1848,7 +1848,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
               shared_raw_token
         | Error err ->
             Alcotest.failf "failed to seed shared credential for %s: %s"
-              agent_name (Types.masc_error_to_string err)
+              agent_name (Masc_domain.masc_error_to_string err)
       in
       seed "keeper-analyst-agent";
       seed "keeper-executor-agent";
@@ -1894,7 +1894,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
              | Error err ->
                  Alcotest.failf
                    "%s rotated raw token should verify after boot repair: %s"
-                   agent_name (Types.masc_error_to_string err)))
+                   agent_name (Masc_domain.masc_error_to_string err)))
 
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->

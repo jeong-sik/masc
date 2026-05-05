@@ -31,7 +31,7 @@ let opt_metrics =
       map
         (fun (usage_count, avg_score_int, last_used_int) ->
           Some
-            Types.
+            Masc_domain.
               {
                 usage_count;
                 avg_score = float_of_int avg_score_int /. 100.0;
@@ -40,7 +40,7 @@ let opt_metrics =
         (triple nat_small (int_range 0 1000) nat_small);
     ]
 
-let gen_prompt_entry : Types.prompt_entry QCheck.Gen.t =
+let gen_prompt_entry : Masc_domain.prompt_entry QCheck.Gen.t =
   let open QCheck.Gen in
   let* id = string_small in
   let* template = string_small in
@@ -50,15 +50,15 @@ let gen_prompt_entry : Types.prompt_entry QCheck.Gen.t =
   let* created_at = map float_of_int nat_small in
   let* deprecated = bool in
   return
-    Types.
+    Masc_domain.
       { id; template; version; variables; metrics; created_at; deprecated }
 
-let show_prompt_entry (e : Types.prompt_entry) : string =
-  Yojson.Safe.pretty_to_string (Types.prompt_entry_to_yojson e)
+let show_prompt_entry (e : Masc_domain.prompt_entry) : string =
+  Yojson.Safe.pretty_to_string (Masc_domain.prompt_entry_to_yojson e)
 
 let arb_prompt_entry = QCheck.make ~print:show_prompt_entry gen_prompt_entry
 
-let saturated_prompt_entry : Types.prompt_entry =
+let saturated_prompt_entry : Masc_domain.prompt_entry =
   {
     id = "code-review-v2";
     template = "Review {{x}}";
@@ -82,8 +82,8 @@ let mutate_top f json =
 let prop_roundtrip =
   QCheck.Test.make ~count:200
     ~name:"prompt_entry JSON round-trip" arb_prompt_entry (fun r ->
-      let json = Types.prompt_entry_to_yojson r in
-      match Types.prompt_entry_of_yojson json with
+      let json = Masc_domain.prompt_entry_to_yojson r in
+      match Masc_domain.prompt_entry_of_yojson json with
       | Ok r' -> r = r'
       | Error _ -> false)
 
@@ -91,9 +91,9 @@ let prop_null_absorption =
   QCheck.Test.make ~count:1
     ~name:"prompt_entry: nulling [metrics] still parses" QCheck.unit
     (fun () ->
-      let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
+      let base = Masc_domain.prompt_entry_to_yojson saturated_prompt_entry in
       let mutated = mutate_top (null_field "metrics") base in
-      match Types.prompt_entry_of_yojson mutated with
+      match Masc_domain.prompt_entry_of_yojson mutated with
       | Ok _ -> true
       | Error _ -> false)
 
@@ -101,9 +101,9 @@ let prop_drop_absorption =
   QCheck.Test.make ~count:1
     ~name:"prompt_entry: dropping [metrics] still parses" QCheck.unit
     (fun () ->
-      let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
+      let base = Masc_domain.prompt_entry_to_yojson saturated_prompt_entry in
       let mutated = mutate_top (drop_field "metrics") base in
-      match Types.prompt_entry_of_yojson mutated with
+      match Masc_domain.prompt_entry_of_yojson mutated with
       | Ok _ -> true
       | Error _ -> false)
 

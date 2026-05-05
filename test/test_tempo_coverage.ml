@@ -114,7 +114,7 @@ let test_state_of_json_roundtrip () =
    is_pending_task Tests
    ============================================================ *)
 
-let make_task ~id ~status : Types.task = {
+let make_task ~id ~status : Masc_domain.task = {
   id;
   title = "Test Task";
   description = "";
@@ -130,34 +130,34 @@ let make_task ~id ~status : Types.task = {
 }
 
 let test_is_pending_task_todo () =
-  let task = make_task ~id:"t1" ~status:Types.Todo in
+  let task = make_task ~id:"t1" ~status:Masc_domain.Todo in
   check bool "todo is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_claimed () =
-  let task = make_task ~id:"t2" ~status:(Types.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" }) in
+  let task = make_task ~id:"t2" ~status:(Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" }) in
   check bool "claimed is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_in_progress () =
-  let task = make_task ~id:"t3" ~status:(Types.InProgress { assignee = "claude"; started_at = "2024-01-01T00:00:00Z" }) in
+  let task = make_task ~id:"t3" ~status:(Masc_domain.InProgress { assignee = "claude"; started_at = "2024-01-01T00:00:00Z" }) in
   check bool "in_progress is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_done () =
-  let task = make_task ~id:"t4" ~status:(Types.Done { assignee = "claude"; completed_at = "2024-01-01T00:00:00Z"; notes = None }) in
+  let task = make_task ~id:"t4" ~status:(Masc_domain.Done { assignee = "claude"; completed_at = "2024-01-01T00:00:00Z"; notes = None }) in
   check bool "done is not pending" false (Tempo.is_pending_task task)
 
 let test_is_pending_task_cancelled () =
-  let task = make_task ~id:"t5" ~status:(Types.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01T00:00:00Z"; reason = Some "test" }) in
+  let task = make_task ~id:"t5" ~status:(Masc_domain.Cancelled { cancelled_by = "user"; cancelled_at = "2024-01-01T00:00:00Z"; reason = Some "test" }) in
   check bool "cancelled is not pending" false (Tempo.is_pending_task task)
 
 (* ============================================================
    calculate_adaptive_tempo Tests
    ============================================================ *)
 
-let make_task_with_priority ~id ~priority : Types.task = {
+let make_task_with_priority ~id ~priority : Masc_domain.task = {
   id;
   title = "Task";
   description = "";
-  task_status = Types.Todo;
+  task_status = Masc_domain.Todo;
   goal_id = None;
   priority;
   files = [];

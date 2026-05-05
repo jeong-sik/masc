@@ -212,10 +212,10 @@ let test_body_with_canonical_http_actor_uses_token_owner () =
       let raw_token = "codex-token" in
       (match
          Auth.save_raw_token_credential dir ~agent_name:"codex"
-           ~role:Types.Worker ~raw_token
+           ~role:Masc_domain.Worker ~raw_token
        with
        | Ok _ -> ()
-       | Error e -> fail (Types.masc_error_to_string e));
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
       let headers =
         Httpun.Headers.of_list
           [

@@ -153,7 +153,7 @@ let run_tool_case_process tool_name =
 let test_known_tool_inventory_matches_raw_schemas () =
   let schema_names =
     Masc_mcp.Config.raw_all_tool_schemas
-    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique_strings
   in
   let known_names = sorted_unique_strings Cases.all_known_tool_names in
@@ -179,14 +179,14 @@ let test_full_registry_tools_call_matrix () =
   Masc_mcp.Config.raw_all_tool_schemas
   |> (match requested with
      | None ->
-         List.filter (fun (schema : Types.tool_schema) ->
+         List.filter (fun (schema : Masc_domain.tool_schema) ->
              not (List.mem schema.name Cases.generic_matrix_excluded_names))
      | Some requested ->
-         List.filter (fun (schema : Types.tool_schema) ->
+         List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name requested))
-  |> List.sort (fun (left : Types.tool_schema) right ->
+  |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
-  |> List.iter (fun (schema : Types.tool_schema) ->
+  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
          match run_tool_case_process schema.name with
          | Ok () -> ()
          | Error message ->

@@ -3,23 +3,23 @@ open Alcotest
 module WT = Masc_mcp.Keeper_wake_telemetry
 module Types = Agent_sdk.Types
 
-let text_msg role s : Types.message =
-  { role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
+let text_msg role s : Masc_domain.message =
+  { role; content = [ Masc_domain.Text s ]; name = None; tool_call_id = None; metadata = [] }
 
-let tool_use_msg id name input : Types.message =
+let tool_use_msg id name input : Masc_domain.message =
   {
-    role = Types.Assistant;
-    content = [ Types.ToolUse { id; name; input } ];
+    role = Masc_domain.Assistant;
+    content = [ Masc_domain.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
       metadata = [];
   }
 
-let tool_result_msg ~tool_use_id ~content : Types.message =
+let tool_result_msg ~tool_use_id ~content : Masc_domain.message =
   {
-    role = Types.Tool;
+    role = Masc_domain.Tool;
     content =
-      [ Types.ToolResult { tool_use_id; content; is_error = false; json = None } ];
+      [ Masc_domain.ToolResult { tool_use_id; content; is_error = false; json = None } ];
     name = None;
     tool_call_id = Some tool_use_id;
       metadata = [];
@@ -29,7 +29,7 @@ let sum_counts counts =
   List.fold_left (fun acc (_, n) -> acc + n) 0 counts
 
 let test_text_only_message () =
-  let m = text_msg Types.User "hello" in
+  let m = text_msg Masc_domain.User "hello" in
   check int "text length only" 5 (WT.bytes_of_message m)
 
 let test_tool_use_bytes () =
@@ -48,13 +48,13 @@ let test_tool_result_bytes () =
     (WT.bytes_of_message m)
 
 let test_thinking_and_redacted () =
-  let m : Types.message =
+  let m : Masc_domain.message =
     {
-      role = Types.Assistant;
+      role = Masc_domain.Assistant;
       content =
         [
-          Types.Thinking { thinking_type = "extended"; content = "ponder" };
-          Types.RedactedThinking "redacted-blob";
+          Masc_domain.Thinking { thinking_type = "extended"; content = "ponder" };
+          Masc_domain.RedactedThinking "redacted-blob";
         ];
       name = None;
       tool_call_id = None;
@@ -66,11 +66,11 @@ let test_thinking_and_redacted () =
     (WT.bytes_of_message m)
 
 let test_role_key_mapping () =
-  check string "system -> system" "system" (WT.role_key Types.System);
-  check string "user -> user" "user" (WT.role_key Types.User);
+  check string "system -> system" "system" (WT.role_key Masc_domain.System);
+  check string "user -> user" "user" (WT.role_key Masc_domain.User);
   check string "assistant -> assistant" "assistant"
-    (WT.role_key Types.Assistant);
-  check string "tool -> tool" "tool" (WT.role_key Types.Tool)
+    (WT.role_key Masc_domain.Assistant);
+  check string "tool -> tool" "tool" (WT.role_key Masc_domain.Tool)
 
 let test_role_counts_adds_pending_user_on_empty_history () =
   let counts = WT.role_counts_with_pending_user [] in
@@ -81,11 +81,11 @@ let test_role_counts_adds_pending_user_on_empty_history () =
 let test_role_counts_sum_matches_message_count () =
   let history =
     [
-      text_msg Types.System "sys";
-      text_msg Types.User "first question";
-      text_msg Types.Assistant "first answer";
-      text_msg Types.User "second question";
-      text_msg Types.Assistant "second answer";
+      text_msg Masc_domain.System "sys";
+      text_msg Masc_domain.User "first question";
+      text_msg Masc_domain.Assistant "first answer";
+      text_msg Masc_domain.User "second question";
+      text_msg Masc_domain.Assistant "second answer";
     ]
   in
   let sizes =
@@ -103,8 +103,8 @@ let test_role_counts_sum_matches_message_count () =
 let test_compute_sizes_bytes_breakdown () =
   let history =
     [
-      text_msg Types.User "A";    (* 1 byte *)
-      text_msg Types.Assistant "BB";  (* 2 bytes *)
+      text_msg Masc_domain.User "A";    (* 1 byte *)
+      text_msg Masc_domain.Assistant "BB";  (* 2 bytes *)
     ]
   in
   let tools = [] in
@@ -121,19 +121,19 @@ let test_compute_sizes_bytes_breakdown () =
 
 let test_compute_sizes_invariant_across_shapes () =
   (* Random-ish mixtures: every call must satisfy the invariant. *)
-  let samples : Types.message list list =
+  let samples : Masc_domain.message list list =
     [
       [];
-      [ text_msg Types.User "x" ];
-      [ text_msg Types.System "s"; text_msg Types.User "u" ];
+      [ text_msg Masc_domain.User "x" ];
+      [ text_msg Masc_domain.System "s"; text_msg Masc_domain.User "u" ];
       List.init 20 (fun i ->
-        if i mod 2 = 0 then text_msg Types.User (string_of_int i)
-        else text_msg Types.Assistant (string_of_int i));
+        if i mod 2 = 0 then text_msg Masc_domain.User (string_of_int i)
+        else text_msg Masc_domain.Assistant (string_of_int i));
       [
-        text_msg Types.Assistant "think";
+        text_msg Masc_domain.Assistant "think";
         tool_use_msg "id1" "search" (`Assoc [ ("q", `String "x") ]);
         tool_result_msg ~tool_use_id:"id1" ~content:"result payload";
-        text_msg Types.Assistant "final";
+        text_msg Masc_domain.Assistant "final";
       ];
     ]
   in
@@ -154,9 +154,9 @@ let test_compute_sizes_invariant_across_shapes () =
 let test_role_counts_are_stably_sorted () =
   let history =
     [
-      text_msg Types.Assistant "a";
-      text_msg Types.Tool "t";
-      text_msg Types.System "s";
+      text_msg Masc_domain.Assistant "a";
+      text_msg Masc_domain.Tool "t";
+      text_msg Masc_domain.System "s";
     ]
   in
   let counts = WT.role_counts_with_pending_user history in

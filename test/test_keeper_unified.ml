@@ -275,7 +275,7 @@ let minimal_policy_meta =
 let room_signal_meta =
   { minimal_meta with room_signal_prompt_enabled = true }
 
-let contract_requiring_tools required_tools : Types.task_contract =
+let contract_requiring_tools required_tools : Masc_domain.task_contract =
   {
     strict = false;
     completion_contract = [];

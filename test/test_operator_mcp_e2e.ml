@@ -382,24 +382,24 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
       let supervisor_token =
         match
           Masc_mcp.Auth.create_token config.base_path ~agent_name:supervisor_nickname
-            ~role:Types.Admin
+            ~role:Masc_domain.Admin
         with
         | Ok (token, _cred) -> token
         | Error err ->
             fail
               (Printf.sprintf "failed to create supervisor token: %s"
-                 (Types.masc_error_to_string err))
+                 (Masc_domain.masc_error_to_string err))
       in
       let create_worker_token agent_name =
         match
           Masc_mcp.Auth.create_token config.base_path ~agent_name
-            ~role:Types.Worker
+            ~role:Masc_domain.Worker
         with
         | Ok (token, _cred) -> token
         | Error err ->
             fail
               (Printf.sprintf "failed to create %s token: %s" agent_name
-                 (Types.masc_error_to_string err))
+                 (Masc_domain.masc_error_to_string err))
       in
       ( supervisor_token,
         create_worker_token planner_nickname,

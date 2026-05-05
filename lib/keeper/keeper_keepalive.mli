@@ -72,7 +72,12 @@ val reactive_turn_semaphore_value_for_test : unit -> int
 
 (** Diagnostic: keepers currently holding a slot in each pool, paired
     with how long (in seconds, relative to [now]) they have held it.
-    Sorted by descending hold time. *)
+    Sorted by descending hold time.
+
+    [~now] MUST come from {!Time_compat.now} to match the clock used
+    by {!Keeper_turn_slot} when recording [acquired_at]. Passing
+    [Unix.gettimeofday ()] or any other clock can produce nonsense
+    hold-time values. *)
 val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list

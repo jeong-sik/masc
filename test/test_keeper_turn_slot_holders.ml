@@ -21,7 +21,7 @@ let assert_eq ~msg ~expected ~actual =
     failwith (Printf.sprintf "%s: expected=%d actual=%d" msg expected actual)
 
 let test_turn_slot_holders_empty_when_no_slot_held () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let holders = KK.turn_slot_holders ~now in
   assert_eq ~msg:"turn holders empty" ~expected:0 ~actual:(List.length holders)
 
@@ -31,7 +31,7 @@ let test_autonomous_slot_holders_records_during_acquire () =
       ~keeper_name:"diagnostic-keeper"
       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
       (fun ~semaphore_wait_ms:_ ->
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         let holders = KK.autonomous_slot_holders ~now in
         let names = List.map fst holders in
         if not (List.mem "diagnostic-keeper" names) then
@@ -54,13 +54,17 @@ let test_autonomous_slot_holders_records_during_acquire () =
 let test_holders_released_after_slot_returned () =
   (* After the [with_keeper_turn_slot_for_test] block exits, the slot must
      be released and the holder dropped from the table. *)
-  let _ =
+  let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"diag-release"
       ~channel:Masc_mcp.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ -> ())
   in
-  let now = Unix.gettimeofday () in
+  (match result with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       failwith "unexpected semaphore wait timeout in test setup");
+  let now = Time_compat.now () in
   let names = List.map fst (KK.reactive_slot_holders ~now) in
   if List.mem "diag-release" names then
     failwith "diag-release still in reactive holders after release"

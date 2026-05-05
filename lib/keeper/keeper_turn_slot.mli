@@ -31,7 +31,12 @@ val reactive_turn_semaphore_value_for_test : unit -> int
     with how long (in seconds, relative to [now]) they have held it.
     Sorted by descending hold time so the longest-holding peer is first
     — that is typically the actual fleet blocker when [turn_available=0]
-    starves the rest. Pure read; no mutation. *)
+    starves the rest. Pure read; no mutation.
+
+    [~now] MUST come from {!Time_compat.now}, the same clock source
+    used to record [acquired_at] inside this module. Mixing
+    [Unix.gettimeofday ()] or any other clock can produce nonsense
+    hold-time values (negative, or off by the clock skew). *)
 val turn_slot_holders : now:float -> (string * float) list
 val autonomous_slot_holders : now:float -> (string * float) list
 val reactive_slot_holders : now:float -> (string * float) list

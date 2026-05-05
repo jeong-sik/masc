@@ -9,7 +9,7 @@ export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
 }
 
-export function missionTargetTypeLabel(value?: string | null): string {
+function missionTargetTypeLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'namespace':
       return '프로젝트'
@@ -28,7 +28,7 @@ export function missionTargetTypeLabel(value?: string | null): string {
   }
 }
 
-export function signalClassLabel(value?: string | null): string | null {
+function signalClassLabel(value?: string | null): string | null {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'metadata_gap':
       return '메타데이터 부족'
@@ -41,7 +41,7 @@ export function signalClassLabel(value?: string | null): string | null {
   }
 }
 
-export function liveStateClass(status?: string | null, health?: string | null): string {
+function liveStateClass(status?: string | null, health?: string | null): string {
   const s = (status ?? health ?? '').trim().toLowerCase()
   if (s === 'offline' || s === 'inactive' || s === 'archived') return 'mission-state-offline'
   if (s === 'idle' || s === 'quiet' || s === 'stale' || s === 'paused' || s === 'blocked') return 'mission-state-idle'
@@ -50,7 +50,7 @@ export function liveStateClass(status?: string | null, health?: string | null): 
 }
 
 /** Tailwind bg override for the status dot based on live state */
-export function dotStateBg(stateClass: string): string {
+function dotStateBg(stateClass: string): string {
   if (stateClass === 'mission-state-idle') return 'bg-[var(--color-status-warn)]'
   if (stateClass === 'mission-state-offline') return 'bg-[var(--color-state-offline)]'
   return ''

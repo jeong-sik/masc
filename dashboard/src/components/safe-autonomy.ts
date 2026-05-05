@@ -19,7 +19,7 @@ import {
   isRecord,
 } from './common/normalize'
 
-export type DomainStatus = 'pass' | 'warn' | 'fail'
+type DomainStatus = 'pass' | 'warn' | 'fail'
 
 interface ScorecardSummary {
   global_score: number
@@ -128,7 +128,7 @@ export function normalizeSummary(value: unknown): ScorecardSummary {
   }
 }
 
-export function normalizeDomain(value: unknown): ScorecardItem {
+function normalizeDomain(value: unknown): ScorecardItem {
   const item = isRecord(value) ? value : {}
   return {
     id: asString(item.id, 'domain'),
@@ -162,7 +162,7 @@ export function normalizeKeeper(value: unknown): KeeperItem {
   }
 }
 
-export function normalizeFinding(value: unknown): FindingItem {
+function normalizeFinding(value: unknown): FindingItem {
   const item = isRecord(value) ? value : {}
   return {
     reason_code: asString(item.reason_code, 'unknown'),

@@ -49,6 +49,32 @@ function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly ha
   return firstFile?.path ?? null
 }
 
+function isManagedMirrorRepository(repository: Repository): boolean {
+  return repository.local_path === `.masc/repos/${repository.id}`
+    || repository.local_path.startsWith('.masc/repos/')
+}
+
+function isWorkspaceRepository(repository: Repository): boolean {
+  return repository.local_path.startsWith('/')
+    && !repository.local_path.includes('/.masc/')
+}
+
+export function selectPreferredIdeRepositoryId(
+  repositories: ReadonlyArray<Repository>,
+  current: string | null,
+): string | null {
+  if (current && repositories.some(repository => repository.id === current)) {
+    return current
+  }
+
+  return repositories.find(repository => repository.id === 'masc-mcp')?.id
+    ?? repositories.find(repository => repository.name === 'masc-mcp')?.id
+    ?? repositories.find(isWorkspaceRepository)?.id
+    ?? repositories.find(repository => !isManagedMirrorRepository(repository))?.id
+    ?? repositories[0]?.id
+    ?? null
+}
+
 export function createIdeDataCoordinator(): IdeDataCoordinator {
   const documentStore = createCodeDocumentStore({
     file_path: activeIdeFile.value,
@@ -67,10 +93,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
-    const nextActive = current && repositories.some(repository => repository.id === current)
-      ? current
-      : repositories[0]?.id ?? null
-    activeRepositoryIdSignal.value = nextActive
+    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current)
     repositoriesSignal.value = repositories
   }
 

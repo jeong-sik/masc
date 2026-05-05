@@ -92,6 +92,85 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- core opam-deps installed guard ------------------------------------
+# Catch the "deps declared but not installed" failure mode before Dune
+# emits a wall of cryptic abstract-cmi errors:
+#
+#   Error: Unbound module Httpun
+#   Type Httpun.Method.t is abstract because no corresponding cmi file
+#   was found in path.
+#
+# Pin guard above checks that agent_sdk *would resolve to* the right
+# SHA, but does not catch the case where the operator added a new opam
+# switch and forgot `opam install . --deps-only -y`.  Hardcoded list
+# covers the four packages whose absence produces the worst error
+# spew; full validation belongs to opam itself (the wrapper deliberately
+# stays cheap).
+#
+# Skipped under the same envelope as the pin guard plus
+# MASC_SKIP_DEPS_CHECK=1.
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_SKIP_DEPS_CHECK:-0}" != "1" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${args[0]:-build}" != "clean" ]]; then
+  if command -v opam >/dev/null 2>&1; then
+    _core_deps=(httpun httpun-eio httpun-ws agent_sdk)
+    _missing=()
+    for _pkg in "${_core_deps[@]}"; do
+      if ! opam list --installed --short "${_pkg}" 2>/dev/null \
+           | grep -qx "${_pkg}"; then
+        _missing+=("${_pkg}")
+      fi
+    done
+    if [[ ${#_missing[@]} -gt 0 ]]; then
+      printf '[dune-local] missing opam packages in switch %s: %s\n' \
+        "$(opam switch show 2>/dev/null || echo '?')" \
+        "${_missing[*]}" >&2
+      printf '[dune-local] symptom you would otherwise see:\n' >&2
+      printf '[dune-local]   Error: Unbound module <Pkg>\n' >&2
+      printf '[dune-local]   Type <Pkg>.<T>.t is abstract because no corresponding cmi file...\n' >&2
+      printf '[dune-local] repair: opam install . --deps-only -y\n' >&2
+      printf '[dune-local] set MASC_SKIP_DEPS_CHECK=1 to bypass this guard\n' >&2
+      exit 1
+    fi
+  fi
+fi
+# -----------------------------------------------------------------------
+
+# --- OCaml minimum version guard ---------------------------------------
+# Several lib/ call sites use stdlib APIs added in OCaml 5.1 (notably
+# [Unix.mkdtemp], used by test/test_dune_local_script.ml).  Building
+# under a 4.x switch surfaces as:
+#
+#   Error: Unbound value Unix.mkdtemp
+#   Hint: Did you mean Unix.mktime?
+#
+# which is the same misleading "did-you-mean" pattern the dependency
+# guard above protects against.  Fail fast with the explicit minimum.
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_SKIP_OCAML_VERSION_CHECK:-0}" != "1" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${args[0]:-build}" != "clean" ]]; then
+  if command -v ocaml >/dev/null 2>&1; then
+    _ocaml_v="$(ocaml -version 2>/dev/null \
+                | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')"
+    if [[ -n "${_ocaml_v}" ]]; then
+      _major="${_ocaml_v%%.*}"
+      _minor="${_ocaml_v##*.}"
+      if [[ "${_major}" -lt 5 \
+            || ( "${_major}" -eq 5 && "${_minor}" -lt 1 ) ]]; then
+        printf '[dune-local] OCaml %s detected; this repo requires >= 5.1\n' \
+          "${_ocaml_v}" >&2
+        printf '[dune-local] symptom under older switch: Error: Unbound value Unix.mkdtemp\n' >&2
+        printf '[dune-local] repair: opam switch create 5.4.1 + opam install . --deps-only -y\n' >&2
+        printf '[dune-local] set MASC_SKIP_OCAML_VERSION_CHECK=1 to bypass this guard\n' >&2
+        exit 1
+      fi
+    fi
+  fi
+fi
+# -----------------------------------------------------------------------
+
 printf '[dune-local] DUNE_JOBS=%s DUNE_BUILD_DIR=%s\n' \
   "${DUNE_JOBS:-auto}" "${DUNE_BUILD_DIR:-_build}" >&2
 printf '[dune-local] command:' >&2

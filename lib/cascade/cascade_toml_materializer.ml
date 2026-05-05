@@ -302,6 +302,17 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Ok value ->
           Ok [ (profile_name ^ "_fallback_cascade", `String value) ]
       | Error _ as err -> err)
+  | "required_capability_profile" -> (
+      (* RFC-0027 PR-2.  String-typed; loader (cascade_config_loader.ml)
+         parses through Cascade_capability_profile.profile_of_string and
+         fails with a [Catalog_error] on unknown values.  Materializer
+         only enforces nonempty-string here; profile-name validity is
+         the loader's responsibility (single source of truth for the
+         enumeration). *)
+      match trimmed_nonempty_string ~path:profile_path field_value with
+      | Ok value ->
+          Ok [ (profile_name ^ "_required_capability_profile", `String value) ]
+      | Error _ as err -> err)
   | "keeper_assignable" -> (
       match bool_value ~path:profile_path field_value with
       | Ok value ->
@@ -332,7 +343,7 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Error _ as err -> err)
   | other ->
       errorf
-        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, keeper_assignable, fallback_cascade, api_key_env, keep_alive, num_ctx, timeout_sec"
+        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec"
         other profile_name
 
 let profile_table_json_fields ~profile_name value =

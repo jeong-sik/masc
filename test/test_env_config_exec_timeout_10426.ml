@@ -38,6 +38,18 @@ let cases =
     E.Autoresearch_git_meta, 10.0;
     E.Autoresearch_git_mutation, 30.0;
     E.Shell_probe, 2.0;
+    (* #13081 — added with the refactor; each preserves the literal
+       its call site previously held inline.  See module .mli. *)
+    E.Graphql, 10.0;
+    E.Http, 15.0;
+    E.Startup, 30.0;
+    E.Auto_responder, 120.0;
+    E.Build_identity, 5.0;
+    E.Voice, 60.0;
+    E.Coord_identity, 5.0;
+    E.Dashboard, 3.0;
+    E.Http_routes, 15.0;
+    E.Test, 30.0;
   ]
 
 let test_known_default_pin () =

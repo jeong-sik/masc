@@ -495,7 +495,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
                 base_url ^ Masc_network_defaults.openai_chat_completions_path
               in
               let body_json = chat_contract_probe_body ~model_id in
-              match http_post_json_text_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Http ()) ~url ~body_json with
+              match http_post_json_text_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Http ()) ~url ~body_json with
               | Ok (status_code, payload) -> (status_code, Some payload, None)
               | Error err -> (None, None, Some err)
         in

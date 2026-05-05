@@ -31,17 +31,17 @@ type caller =
   | Git_meta                  (** local git metadata (rev-parse, remote get-url) (10s) *)
   | Autoresearch_git_meta     (** autoresearch local git metadata reads (10s) *)
   | Autoresearch_git_mutation (** autoresearch local git mutations (30s) *)
-  | Shell_probe
-  | Graphql
-  | Http
-  | Startup
-  | Auto_responder
-  | Build_identity
-  | Voice
-  | Coord_identity
-  | Dashboard
-  | Http_routes
-  | Test               (** PATH probes via [command -v] (2s) *)
+  | Shell_probe               (** PATH probes via [command -v <name>] (2s) *)
+  | Graphql                   (** Graphql_client.{request,query,mutate} HTTP calls (10s) *)
+  | Http                      (** http_post_json_text_with_status probes (15s) *)
+  | Startup                   (** server bootstrap docker preflight + room takeover read (30s) *)
+  | Auto_responder            (** auto_responder cli spawn with stdin prompt (120s) *)
+  | Build_identity            (** build identity git probe (5s) *)
+  | Voice                     (** voice bridge local playback subprocess (60s) *)
+  | Coord_identity            (** coord tty identity probe (5s) *)
+  | Dashboard                 (** dashboard safe_autonomy short heartbeat (3s) *)
+  | Http_routes               (** workspace api git command via http (15s) *)
+  | Test                      (** test fixtures driving exec runtime (30s) *)
   | Unknown of string
 
 (** Hardcoded default seconds for each known caller.  Preserves
@@ -66,17 +66,17 @@ let caller_key = function
   | Git_meta -> "git_meta"
   | Autoresearch_git_meta -> "autoresearch_git_meta"
   | Autoresearch_git_mutation -> "autoresearch_git_mutation"
-  | Shell_probe
-  | Graphql
-  | Http
-  | Startup
-  | Auto_responder
-  | Build_identity
-  | Voice
-  | Coord_identity
-  | Dashboard
-  | Http_routes
-  | Test -> "shell_probe"
+  | Shell_probe -> "shell_probe"
+  | Graphql -> "graphql"
+  | Http -> "http"
+  | Startup -> "startup"
+  | Auto_responder -> "auto_responder"
+  | Build_identity -> "build_identity"
+  | Voice -> "voice"
+  | Coord_identity -> "coord_identity"
+  | Dashboard -> "dashboard"
+  | Http_routes -> "http_routes"
+  | Test -> "test"
   | Unknown caller -> caller
 
 (** Exported for tests that pin the per-caller default table. *)
@@ -131,16 +131,20 @@ let known_default_sec = function
   | Memory_audit -> Some 3.0
   | Git_meta | Autoresearch_git_meta -> Some 10.0
   | Autoresearch_git_mutation -> Some 30.0
-  | Graphql -> Some 30.0
-  | Http -> Some 30.0
-  | Startup -> Some 30.0
-  | Auto_responder -> Some 30.0
-  | Build_identity -> Some 30.0
-  | Voice -> Some 30.0
-  | Coord_identity -> Some 30.0
-  | Dashboard -> Some 30.0
-  | Http_routes -> Some 30.0
-  | Test -> Some 30.0
+  (* Defaults for the new variants below preserve the literals each
+     site previously held — see #10426 review (#13081) for the
+     site-by-site mapping.  Operators can override via
+     MASC_EXEC_TIMEOUT_<CALLER>_SEC without touching the others. *)
+  | Graphql -> Some 10.0          (* relation_materializer / dashboard graphql 8-10s *)
+  | Http -> Some 15.0             (* tool_local_runtime_verify probe was 15s *)
+  | Startup -> Some 30.0          (* server_bootstrap docker preflight 30s *)
+  | Auto_responder -> Some 120.0  (* auto_responder cli spawn was 120s — under-budget regression risk *)
+  | Build_identity -> Some 5.0    (* git probe was 5s *)
+  | Voice -> Some 60.0            (* local playback was 60s — under-budget regression risk *)
+  | Coord_identity -> Some 5.0    (* tty probe was 5s *)
+  | Dashboard -> Some 3.0         (* short heartbeat was 3s *)
+  | Http_routes -> Some 15.0      (* workspace git command via http was 15s *)
+  | Test -> Some 30.0             (* test fixtures, slow_command path keeps 30s ceiling *)
   | Unknown _ -> None
 
 let upper_case s =
@@ -192,3 +196,15 @@ let timeout_sec ~caller () =
         Safe_ops.float_of_string_with_default
           ~default:global_default_sec v
       | None -> global_default_sec
+
+(** [timeout_sec_int ~caller ()] resolves the same value as
+    [timeout_sec] but rounded UP to the nearest second.  Use this at
+    call sites whose downstream helper signs [~timeout_sec:int] (e.g.
+    {!Tool_local_runtime_http.http_post_json_text_with_status},
+    {!Worker_runtime_docker.run_process_with_timeout}).  Rounding up
+    rather than truncating preserves the operator's intended budget
+    when the env var is fractional. *)
+let timeout_sec_int ~caller () =
+  let f = timeout_sec ~caller () in
+  if Float.is_nan f || f <= 0.0 then 1
+  else int_of_float (Float.ceil f)

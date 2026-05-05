@@ -181,7 +181,7 @@ let persist_stderr_artifact (spec : Worker_execution_spec.t) stderr =
 let best_effort_remove_container ?clock_opt name =
   ignore
     (run_process_with_timeout ~clock_opt
-       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()) ~prog:"docker"
+       ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ()) ~prog:"docker"
        ~argv:[ "docker"; "rm"; "-f"; name ]
        ~env:(Unix.environment ()) ())
 
@@ -222,7 +222,7 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
   else
       let info_result =
         run_process_with_timeout ~clock_opt
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()) ~prog:"docker"
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ()) ~prog:"docker"
           ~argv:[ "docker"; "info" ]
           ~env:(Unix.environment ()) ()
     in
@@ -233,7 +233,7 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
     else
         let image_result =
           run_process_with_timeout ~clock_opt
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()) ~prog:"docker"
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ()) ~prog:"docker"
             ~argv:[ "docker"; "image"; "inspect"; image ]
             ~env:(Unix.environment ()) ()
       in

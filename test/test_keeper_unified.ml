@@ -3865,6 +3865,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
         ();
       let hooks =
         HK.make_hooks
+          ~config
           ~meta_ref
           ~generation:9
           ~pre_tool_use_guard:(fun ~tool_name:_ ~input:_ ->

@@ -1,7 +1,7 @@
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { describe, it, expect, afterEach } from 'vitest'
-import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
+import type { Keeper, KeeperMetricPoint} from '../types'
 import {
   autonomyHint,
   formatDuration,
@@ -59,7 +59,6 @@ describe('formatDuration', () => {
   })
 })
 
-// ── formatFingerprint ─────────────────────────────────────────
 
 describe('InferenceTelemetryPanel', () => {
   it('separates wall tok/s from hardware decode tok/s', () => {

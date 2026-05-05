@@ -58,6 +58,7 @@
   margin: 0;
   overflow: visible;
   clip: auto;
+  clip-path: none;
   white-space: normal;
   border-width: 1px;
   background: var(--color-bg-page);

@@ -245,5 +245,12 @@ val run_unified_turn :
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?yield_and_reacquire_slot:'a ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
+(** [yield_and_reacquire_slot] is accepted and ignored.  Retained as a
+    no-op parameter for backward compatibility with #12885 callers
+    that were not all updated when the heuristic was reverted in
+    #12910.  The wrapper in {!val:run_unified_turn} (defined in
+    [keeper_unified_turn.ml]) discards the argument and forwards the
+    rest to {!val:run_keeper_cycle}. *)

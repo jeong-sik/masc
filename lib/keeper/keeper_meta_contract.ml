@@ -94,6 +94,14 @@ type blocker_class =
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider
+  | Fiber_unresolved
+    (** 2026-05-05: turn fiber finished without invoking [resolve_done]
+        (cancelled mid-turn, raised an exception not handled by the
+        body, or the OAS request returned but the keeper switch tore
+        down before completion bookkeeping ran).  Maps 1:1 to the
+        supervisor's [Keeper_registry.Fiber_unresolved] cohort key
+        used by self-preservation, so blocker_class stamping mirrors
+        the same diagnosis on keeper_meta. *)
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
@@ -106,6 +114,7 @@ let blocker_class_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Completion_contract_violation -> "completion_contract_violation"
   | No_tool_capable_provider -> "no_tool_capable_provider"
+  | Fiber_unresolved -> "fiber_unresolved"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -119,6 +128,7 @@ let blocker_class_of_serialized_string = function
   | "turn_timeout" -> Some Turn_timeout
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "no_tool_capable_provider" -> Some No_tool_capable_provider
+  | "fiber_unresolved" -> Some Fiber_unresolved
   | _ -> None
 ;;
 

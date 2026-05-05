@@ -144,6 +144,7 @@ type blocker_class =
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider
+  | Fiber_unresolved
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator

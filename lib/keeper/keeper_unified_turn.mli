@@ -245,6 +245,5 @@ val run_unified_turn :
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
   ?shared_context:Agent_sdk.Context.t ->
-  ?yield_and_reacquire_slot:(unit -> (int, [> `Semaphore_wait_timeout of float ]) result) ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

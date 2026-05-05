@@ -308,8 +308,8 @@ let is_main_worktree_boundary_exempt_with_input
 
     [keeper_broadcast]: duplicate broadcast is noise, not data loss.
     [keeper_task_done]: completing the same task twice is a no-op.
-    [keeper_task_claim] is NOT safe: claim_next_r auto-releases a
-    previous claim and selects a new task, so retries are not idempotent.
+    [keeper_task_claim] is NOT safe: it can claim new work and alter the
+    keeper/task binding, so retries are not idempotent.
 
     Read-only tools (board_list, board_get) are excluded: they never
     appear in [committed_mutating_tools] so including them here would

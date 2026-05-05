@@ -908,4 +908,42 @@ module KeeperRetryBackoff = struct
     Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
 end
 
+(** RFC-0022 §9 rollout flag for the in-attempt streaming liveness gate.
+
+    Default {!CascadeAttemptLiveness.Observe} is *non-enforcing*: the
+    FSM runs, kills are logged and counted on
+    [masc_cascade_attempt_liveness_kill_total], but the cascade FSM
+    never sees them. Flip to [enforce] only after observation has
+    produced calibration data per §9 Phase B. *)
+module CascadeAttemptLiveness = struct
+  type mode =
+    | Off
+    | Observe
+    | Enforce
+
+  let mode_label = function
+    | Off -> "off"
+    | Observe -> "observe"
+    | Enforce -> "enforce"
+
+  let warned_unknown = ref false
+
+  let mode () : mode =
+    let raw = get_string ~default:"observe" "MASC_CASCADE_ATTEMPT_LIVENESS" in
+    match String.lowercase_ascii (String.trim raw) with
+    | "off" | "0" | "false" -> Off
+    | "" | "observe" -> Observe
+    | "enforce" | "on" | "1" | "true" -> Enforce
+    | other ->
+        if not !warned_unknown then begin
+          warned_unknown := true;
+          prerr_endline
+            (Printf.sprintf
+               "[env_config_keeper] WARN: MASC_CASCADE_ATTEMPT_LIVENESS=%s \
+                unrecognised, defaulting to observe"
+               other)
+        end;
+        Observe
+end
+
 (** Print configuration summary for debugging *)

@@ -15,6 +15,7 @@ import {
   themeExt,
   languageExt,
   blameExtensions,
+  keeperLineSelectExt,
   pushOwnership,
   internalDocumentSync,
 } from './ide-editor-extensions'
@@ -33,6 +34,7 @@ interface IdeEditorProps {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly diffRows: () => ReadonlyArray<UnifiedDiffRow>
+  readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
@@ -52,6 +54,7 @@ export function IdeEditor({
   documentStore,
   ownershipStore,
   diffRows,
+  onKeeperLineSelect,
 }: IdeEditorProps) {
   const [, forceRender] = useState(0)
 
@@ -106,6 +109,7 @@ export function IdeEditor({
               ownershipStore=${ownershipStore}
               showBlame=${activeView === 'blame'}
               keepers=${keepers}
+              onKeeperLineSelect=${onKeeperLineSelect}
             />`
       }
     </div>
@@ -120,11 +124,13 @@ function CodeMirrorEditor({
   ownershipStore,
   showBlame,
   keepers,
+  onKeeperLineSelect,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly showBlame: boolean
   readonly keepers: ReadonlyArray<string>
+  readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -152,6 +158,9 @@ function CodeMirrorEditor({
           readOnlyExt(),
           themeExt(),
           lang,
+          ...(onKeeperLineSelect
+            ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
+            : []),
           ...blameExts,
         ],
       })
@@ -176,7 +185,7 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, documentStore, showBlame])
+  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame])
 
   // Push document updates. The first file response can arrive before
   // the CM6 instance is ready or before this component subscribes, so

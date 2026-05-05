@@ -210,8 +210,9 @@ let test_config_uses_live_catalog () =
       {
         "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
         "custom_live_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
-        "governance_judge_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
-        "governance_judge_keeper_assignable": false,
+        "system_review_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "system_review_keeper_assignable": false,
+        "tool_rerank_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
         "tool_rerank_temperature": 0.0,
         "tool_rerank_max_tokens": 200,
         "tool_rerank_keeper_assignable": false
@@ -223,8 +224,8 @@ let test_config_uses_live_catalog () =
       check bool "includes dynamic live profile" true
         (List.mem "custom_live" names);
       check bool "includes system-only live profile" true
-        (List.mem "governance_judge" names);
-      check bool "includes profiles declared by non-model schema keys" true
+        (List.mem "system_review" names);
+      check bool "includes explicit tool rerank profile" true
         (List.mem "tool_rerank" names);
       let assert_keeper_assignable name expected =
         match profile_by_name j name with
@@ -235,7 +236,7 @@ let test_config_uses_live_catalog () =
         | None -> fail (Printf.sprintf "missing profile %s" name)
       in
       assert_keeper_assignable "custom_live" true;
-      assert_keeper_assignable "governance_judge" false;
+      assert_keeper_assignable "system_review" false;
       assert_keeper_assignable "tool_rerank" false;
       check (option string) "config_path reflects active root"
         (Some cascade_path)
@@ -579,6 +580,12 @@ let test_provider_entry_json_adds_declared_and_status () =
   (* Behavioural fields are still present — PR is strictly additive. *)
   (match member "events_in_window" j with
    | `Int 0 -> () | _ -> fail "events_in_window should be int 0");
+  (match member "trust_score" j with
+   | `Float f -> check (float 0.0) "trust_score" 1.0 f
+   | _ -> fail "trust_score should be float 1.0");
+  (match member "health_score" j with
+   | `Int 100 -> ()
+   | _ -> fail "health_score should be int 100");
   (match member "in_cooldown" j with
    | `Bool false -> () | _ -> fail "in_cooldown should be false")
 
@@ -592,18 +599,18 @@ let test_declared_provider_schemes_reads_all_profiles () =
   let cascade_contents =
     {|{
   "_comment": "Fixture for declared_provider_schemes_of_config",
-  "default_models": [
+  "primary_route_models": [
     { "model": "codex_cli:auto", "weight": 1 },
     { "model": "kimi_cli:kimi-for-coding", "weight": 1 }
   ],
-  "default_temperature": 0.2,
-  "default_max_tokens": 16384,
-  "big_three_models": [
+  "primary_route_temperature": 0.2,
+  "primary_route_max_tokens": 16384,
+  "secondary_route_models": [
     { "model": "codex_cli:auto", "weight": 1 },
     { "model": "glm-coding:auto", "weight": 1 }
   ],
-  "local_only_models": [ "ollama:auto" ],
-  "big_three_temperature": 0.2
+  "local_route_models": [ "ollama:auto" ],
+  "secondary_route_temperature": 0.2
 }
 |}
   in
@@ -833,21 +840,13 @@ let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
 
 module DC = Masc_mcp.Dashboard_cascade
 
-(* #10441: [trust_score] and [same_fingerprint_count] were removed from
-   [provider_info] by the Phase 1 revert (#10412).  Drop them from the
-   constructor signature and ignore the optional args so existing call
-   sites that still pass them keep type-checking until the recommendation
-   tests below are updated. *)
 let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     ?(in_cooldown = false) ?(cooldown_expires_at = None)
     ?(events_in_window = 0) ?(rejected_in_window = 0)
     ?(top_fingerprints = []) ?(last_failure_at = None)
     ?(p50_latency_ms = None) ?(p95_latency_ms = None) ?(latency_samples = 0)
-    ?(avg_confidence = None) ?(confidence_samples = 0)
-    ?(trust_score = 1.0) ?(same_fingerprint_count = 0) provider_key
+    ?(avg_confidence = None) ?(confidence_samples = 0) provider_key
   : Masc_mcp.Cascade_health_tracker.provider_info =
-  let _ = trust_score in
-  let _ = same_fingerprint_count in
   { provider_key
   ; success_rate
   ; consecutive_failures
@@ -865,15 +864,14 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
   }
 
 let test_recommendation_healthy_returns_none () =
-  let info = mk_info "p" ~trust_score:1.0 ~events_in_window:10 in
+  let info = mk_info "p" ~success_rate:1.0 ~events_in_window:10 in
   match DC.classify_recommendation info with
   | None -> ()
   | Some _ -> failwith "healthy provider should not yield a recommendation"
 
 let test_recommendation_reduce_weight_for_partial_failure () =
   let info =
-    mk_info "p" ~trust_score:0.2 ~events_in_window:10
-      ~same_fingerprint_count:1
+    mk_info "p" ~success_rate:0.25 ~events_in_window:10
       ~top_fingerprints:[("timeout|abc12345", 4)]
   in
   match DC.classify_recommendation info with
@@ -884,8 +882,7 @@ let test_recommendation_reduce_weight_for_partial_failure () =
 
 let test_recommendation_disable_for_decayed_provider () =
   let info =
-    mk_info "p" ~trust_score:0.05 ~events_in_window:10
-      ~same_fingerprint_count:2
+    mk_info "p" ~success_rate:0.0 ~events_in_window:10
       ~top_fingerprints:[("failure|deadbeef", 3)]
   in
   match DC.classify_recommendation info with
@@ -896,10 +893,10 @@ let test_recommendation_disable_for_decayed_provider () =
 
 let test_recommendation_investigate_for_stuck_streak () =
   let info =
-    mk_info "p" ~trust_score:0.5  (* trust above the disable/reduce
+    mk_info "p" ~success_rate:0.8  (* trust above the disable/reduce
                                       thresholds, so the stuck-streak
                                       branch is what trips the rule *)
-      ~events_in_window:8 ~same_fingerprint_count:6
+      ~events_in_window:8
       ~top_fingerprints:[("runtime_mcp_auth|cafed00d", 6)]
   in
   match DC.classify_recommendation info with
@@ -910,9 +907,8 @@ let test_recommendation_investigate_for_stuck_streak () =
 
 let test_recommendation_investigate_high_volume_overrides_disable () =
   let info =
-    mk_info "p" ~trust_score:0.05 ~events_in_window:50
-      ~same_fingerprint_count:1  (* not stuck-streak *)
-      ~top_fingerprints:[("failure|11223344", 12)]
+    mk_info "p" ~success_rate:0.0 ~events_in_window:50
+      ~top_fingerprints:[("failure|11223344", 1)]
   in
   match DC.classify_recommendation info with
   | Some r -> check string "investigate (high volume + very low trust)"
@@ -922,10 +918,10 @@ let test_recommendation_investigate_high_volume_overrides_disable () =
 
 let test_recommendations_sorted_by_trust () =
   let infos = [
-    mk_info "high" ~trust_score:0.25 ~events_in_window:5;
-    mk_info "low"  ~trust_score:0.05 ~events_in_window:5;
-    mk_info "mid"  ~trust_score:0.15 ~events_in_window:5;
-    mk_info "ok"   ~trust_score:0.9  ~events_in_window:5;  (* skipped *)
+    mk_info "high" ~success_rate:0.25 ~events_in_window:5;
+    mk_info "low"  ~success_rate:0.0  ~events_in_window:5;
+    mk_info "mid"  ~success_rate:0.15 ~events_in_window:5;
+    mk_info "ok"   ~success_rate:0.9  ~events_in_window:5;  (* skipped *)
   ] in
   let recs = DC.low_trust_recommendations infos in
   check int "count" 3 (List.length recs);
@@ -934,8 +930,7 @@ let test_recommendations_sorted_by_trust () =
 
 let test_recommendation_to_json_shape () =
   let info =
-    mk_info "p" ~trust_score:0.05 ~events_in_window:30
-      ~same_fingerprint_count:1
+    mk_info "p" ~success_rate:0.0 ~events_in_window:30
       ~top_fingerprints:[("timeout|f00d", 3)]
   in
   match DC.classify_recommendation info with
@@ -1024,23 +1019,20 @@ let () =
       test_case "canonical cascade: raw == canonical (UI renders —)"
         `Quick test_keeper_profile_canonical_matches_when_raw_is_canonical;
     ];
-    (* #10441: Phase 1 was reverted in #10412, removing [trust_score]
-       and [same_fingerprint_count] from [provider_info].  The
-       Phase-2a classifier reads those fields and now stubs to
-       [None] until the trust pipeline is reinstated, so the six
-       recommendation-firing tests (reduce_weight / disable /
-       stuck-streak / high-volume / sort / JSON shape) have no
-       data to exercise.  Keep the healthy-provider test which is
-       still meaningful (verifies the stub path) and drop the
-       rest until #10428 redesigns the classifier. *)
     "recommendations", [
       test_case "healthy provider yields no recommendation" `Quick
         test_recommendation_healthy_returns_none;
+      test_case "partial failure suggests reduce_weight" `Quick
+        test_recommendation_reduce_weight_for_partial_failure;
+      test_case "decayed provider suggests disable" `Quick
+        test_recommendation_disable_for_decayed_provider;
+      test_case "stuck fingerprint suggests investigate" `Quick
+        test_recommendation_investigate_for_stuck_streak;
+      test_case "high-volume low trust suggests investigate" `Quick
+        test_recommendation_investigate_high_volume_overrides_disable;
+      test_case "recommendations sort by trust" `Quick
+        test_recommendations_sorted_by_trust;
+      test_case "recommendation JSON shape" `Quick
+        test_recommendation_to_json_shape;
     ];
   ]
-let _ = test_recommendation_reduce_weight_for_partial_failure
-let _ = test_recommendation_disable_for_decayed_provider
-let _ = test_recommendation_investigate_for_stuck_streak
-let _ = test_recommendation_investigate_high_volume_overrides_disable
-let _ = test_recommendations_sorted_by_trust
-let _ = test_recommendation_to_json_shape

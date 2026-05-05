@@ -238,10 +238,10 @@ let test_hard_quota_cooldown_is_long () =
      | Some expires ->
        let remaining = expires -. now in
        (* Should be close to hard_quota_cooldown_sec (default 3600.0),
-          significantly longer than cooldown_sec (60.0).  Use 300s as
+          significantly longer than cooldown_sec (30.0).  Use 300s as
           the lower bound to be robust to env overrides in CI. *)
        check bool
-         (Printf.sprintf "hard_quota cooldown (%.0fs) >> regular cooldown (60s)" remaining)
+         (Printf.sprintf "hard_quota cooldown (%.0fs) >> regular cooldown (30s)" remaining)
          true (remaining > 300.0))
 
 let test_hard_quota_effective_weight_zero () =
@@ -393,7 +393,7 @@ let test_terminal_failure_cooldown_is_long () =
      | Some expires ->
        let remaining = expires -. now in
        check bool
-         (Printf.sprintf "terminal_failure cooldown (%.0fs) >> regular cooldown (60s)" remaining)
+         (Printf.sprintf "terminal_failure cooldown (%.0fs) >> regular cooldown (30s)" remaining)
          true (remaining > 300.0))
 
 let test_terminal_failure_effective_weight_zero () =
@@ -768,7 +768,7 @@ let () =
     "hard_quota", [
       test_case "single event trips immediate cooldown" `Quick
         test_hard_quota_triggers_immediate_cooldown;
-      test_case "cooldown duration is long (≫ 60s)" `Quick
+      test_case "cooldown duration is long (≫ 30s)" `Quick
         test_hard_quota_cooldown_is_long;
       test_case "effective_weight = 0 during hard_quota cooldown" `Quick
         test_hard_quota_effective_weight_zero;
@@ -796,7 +796,7 @@ let () =
     "terminal_failure", [
       test_case "single event trips immediate cooldown" `Quick
         test_terminal_failure_triggers_immediate_cooldown;
-      test_case "cooldown duration is long (≫ 60s)" `Quick
+      test_case "cooldown duration is long (≫ 30s)" `Quick
         test_terminal_failure_cooldown_is_long;
       test_case "effective_weight = 0 during terminal_failure cooldown" `Quick
         test_terminal_failure_effective_weight_zero;

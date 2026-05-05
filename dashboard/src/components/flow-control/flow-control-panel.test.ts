@@ -2,6 +2,17 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+type MockOperatorSnapshot = {
+  admission_queue?: {
+    mode: string
+    throttle_owner: string
+    max_concurrent: number
+    active: number
+    available: number
+    queue_depth: number
+  } | null
+} | null
+
 const {
   fetchPauseStatus,
   pauseRoom,
@@ -13,6 +24,7 @@ const {
   maintenanceResult,
   maintenanceLoading,
   shellAuthSummary,
+  operatorSnapshot,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
   pauseRoom: vi.fn().mockResolvedValue(undefined),
@@ -24,6 +36,7 @@ const {
   maintenanceResult: { value: null as string | null },
   maintenanceLoading: { value: false },
   shellAuthSummary: { value: null },
+  operatorSnapshot: { value: null as MockOperatorSnapshot },
 }))
 
 vi.mock('./flow-control-state', () => ({
@@ -40,6 +53,10 @@ vi.mock('./flow-control-state', () => ({
 
 vi.mock('../../store', () => ({
   shellAuthSummary,
+}))
+
+vi.mock('../../operator-store', () => ({
+  operatorSnapshot,
 }))
 
 vi.mock('../../lib/dashboard-auth-access', () => ({
@@ -69,6 +86,7 @@ describe('FlowControlPanel', () => {
     maintenanceResult.value = null
     maintenanceLoading.value = false
     shellAuthSummary.value = null
+    operatorSnapshot.value = null
   })
 
   afterEach(() => {
@@ -85,5 +103,27 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('Pause')
     expect(container.textContent).toContain('Resume')
     expect(container.textContent).not.toContain('Refresh')
+  })
+
+  it('shows admission queue mode and throttle owner when present', async () => {
+    operatorSnapshot.value = {
+      admission_queue: {
+        mode: 'passthrough',
+        throttle_owner: 'oas_cascade',
+        max_concurrent: 3,
+        active: 1,
+        available: 2,
+        queue_depth: 0,
+      },
+    }
+
+    render(html`<${FlowControlPanel} />`, container)
+    await flushUi()
+
+    const status = container.querySelector('[data-testid="flow-admission-mode"]')
+    expect(status).not.toBeNull()
+    expect(status!.textContent).toContain('passthrough')
+    expect(status!.textContent).toContain('OAS cascade')
+    expect(status!.textContent).toContain('1/3')
   })
 })

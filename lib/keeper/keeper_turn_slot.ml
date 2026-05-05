@@ -365,6 +365,18 @@ type keeper_turn_slot_state = {
   autonomous_ticket : int option ref;
 }
 
+let after_acquire_flag_hook_for_test :
+  (label:string -> keeper_name:string -> unit) option ref =
+  ref None
+
+let set_after_acquire_flag_hook_for_test hook =
+  after_acquire_flag_hook_for_test := hook
+
+let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
+  match !after_acquire_flag_hook_for_test with
+  | None -> ()
+  | Some hook -> hook ~label ~keeper_name
+
 (* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
    Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
    keeper fiber is being cancelled.  If a mutex acquisition raises
@@ -705,6 +717,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
                  leaks; if it arrives after the flag set, release path
                  calls drop_holder (no-op when no entry exists). *)
               slot_state.acquired_autonomous := true;
+              run_after_acquire_flag_hook_for_test
+                ~label:"autonomous" ~keeper_name;
               record_holder ~label:"autonomous" ~keeper_name
                 ~acquired_at:(Time_compat.now ());
               drop_autonomous_waiter ~ticket;
@@ -729,6 +743,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
             | Ok () ->
               (* Cancel-race fix: flag THEN record_holder. *)
               slot_state.acquired_reactive := true;
+              run_after_acquire_flag_hook_for_test
+                ~label:"reactive" ~keeper_name;
               record_holder ~label:"reactive" ~keeper_name
                 ~acquired_at:(Time_compat.now ());
               Ok ()
@@ -741,6 +757,8 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         | Ok () ->
           (* Cancel-race fix: flag THEN record_holder. *)
           slot_state.acquired_turn := true;
+          run_after_acquire_flag_hook_for_test
+            ~label:"turn" ~keeper_name;
           record_holder ~label:"turn" ~keeper_name
             ~acquired_at:(Time_compat.now ());
           let semaphore_wait_ms =

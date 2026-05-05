@@ -533,6 +533,73 @@ let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
   check (float 0.001) "prompt count unchanged" 0.0
     (prompt_count_after -. prompt_count_before)
 
+let slot json name = json |> member "slots" |> member name
+
+let string_list_field json key =
+  match json |> member key with
+  | `List values -> List.map to_string values
+  | `Null -> []
+  | other ->
+      failf "expected %s list, got %s" key (Yojson.Safe.to_string other)
+
+let check_string_list_contains label needle values =
+  check bool label true (List.mem needle values)
+
+let check_string_list_not_contains label needle values =
+  check bool label false (List.mem needle values)
+
+let test_hook_introspection_reports_current_runtime_slots () =
+  let json =
+    Hooks.hook_introspection_json
+      ~max_cost_usd:0.25
+      ~destructive_check:false
+      ()
+  in
+  check string "scope" "keeper_runtime_composite"
+    (json |> member "scope" |> to_string);
+  check int "slot_count" 14 (json |> member "slot_count" |> to_int);
+  check int "active slots" 9
+    (json |> member "active_slot_count" |> to_int);
+  check int "inactive slots" 5
+    (json |> member "inactive_slot_count" |> to_int);
+  check bool "before_turn active" true
+    (slot json "before_turn" |> member "active" |> to_bool);
+  check_string_list_contains "before_turn includes work discovery"
+    "work_discovery_nudge"
+    (string_list_field (slot json "before_turn") "features");
+  check bool "before_turn_params active" true
+    (slot json "before_turn_params" |> member "active" |> to_bool);
+  check string "before_turn_params source" "keeper_run_tools"
+    (slot json "before_turn_params" |> member "source" |> to_string);
+  let pre_tool_gates = string_list_field (slot json "pre_tool_use") "gates" in
+  List.iter
+    (fun gate ->
+      check_string_list_contains ("pre_tool gate " ^ gate) gate pre_tool_gates)
+    [
+      "timing";
+      "custom_guard";
+      "streak_gate";
+      "keeper_deny_list";
+      "cost_budget";
+      "destructive_pattern_off";
+      "governance_approval";
+    ];
+  let failure_effects =
+    string_list_field (slot json "post_tool_use_failure") "effects"
+  in
+  check_string_list_contains "failure hook records counter"
+    "tool_use_failure_metric" failure_effects;
+  check_string_list_not_contains "failure hook no stale heuristic label"
+    "heuristic_metrics" failure_effects;
+  check bool "on_idle_escalated inactive" false
+    (slot json "on_idle_escalated" |> member "active" |> to_bool);
+  check bool "pre_compact inactive" false
+    (slot json "pre_compact" |> member "active" |> to_bool);
+  check bool "post_compact inactive" false
+    (slot json "post_compact" |> member "active" |> to_bool);
+  check bool "on_context_compacted inactive" false
+    (slot json "on_context_compacted" |> member "active" |> to_bool)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
@@ -578,5 +645,9 @@ let () =
             test_record_llm_tok_s_metrics_zero_value_is_skipped
         ; test_case "telemetry=None is a safe no-op" `Quick
             test_record_llm_tok_s_metrics_none_telemetry_is_noop
+        ] )
+    ; ( "hook_introspection",
+        [ test_case "reports current runtime slots" `Quick
+            test_hook_introspection_reports_current_runtime_slots
         ] )
     ]

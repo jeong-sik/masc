@@ -517,10 +517,20 @@ export interface KeeperRecoverResult {
   up?: unknown
 }
 
+export interface AdmissionQueueSnapshot {
+  mode: string
+  throttle_owner: string
+  max_concurrent: number
+  active: number
+  available: number
+  queue_depth: number
+}
+
 export interface OperatorSnapshot {
   root: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
+  admission_queue?: AdmissionQueueSnapshot | null
   operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]

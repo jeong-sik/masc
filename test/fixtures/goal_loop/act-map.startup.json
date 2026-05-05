@@ -1,6 +1,7 @@
 {
   "D-EMERGENCY-1": [
-    "PR#13218 keeper credential auto-recovery"
+    "PR#13218 keeper credential auto-recovery",
+    "PR#13231 keeper slot forced-reclaim regression"
   ],
   "D-EMERGENCY-2": [
     "PR#13124 provider health probes"

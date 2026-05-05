@@ -44,6 +44,12 @@ val persistence_utf8_repair_stats : unit -> utf8_repair_stats
 val reset_persistence_utf8_repair_stats_for_tests : unit -> unit
 (** Reset {!persistence_utf8_repair_stats}. Test-only. *)
 
+val persistence_utf8_repair_log_entry_limit_for_tests : unit -> int
+(** Current UTF-8 repair warning rate-limit table bound. Test-only. *)
+
+val persistence_utf8_repair_log_key_count_for_tests : unit -> int
+(** Current UTF-8 repair warning rate-limit table size. Test-only. *)
+
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)
 

@@ -529,6 +529,13 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
         Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
+      let admission = Yojson.Safe.Util.member "admission_queue" json in
+      Alcotest.(check bool) "admission queue present" true
+        (admission <> `Null);
+      Alcotest.(check string) "admission mode" "passthrough"
+        Yojson.Safe.Util.(admission |> member "mode" |> to_string);
+      Alcotest.(check string) "admission throttle owner" "oas_cascade"
+        Yojson.Safe.Util.(admission |> member "throttle_owner" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
         | `List _ -> true

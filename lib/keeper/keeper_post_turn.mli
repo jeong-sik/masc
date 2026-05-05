@@ -77,6 +77,45 @@ val apply_post_turn_lifecycle :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
+val apply_post_turn_lifecycle_with_resilience_handles :
+  resilience_audit_store:Shared_audit.Store.t option ->
+  resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
+  on_compaction_started:(unit -> unit) ->
+  on_handoff_started:(unit -> unit) ->
+  base_dir:string ->
+  meta:Keeper_types.keeper_meta ->
+  model:string ->
+  primary_model_max_tokens:int ->
+  current_turn_overflow_blocker:string option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
+  post_turn_lifecycle
+(** Variant of {!apply_post_turn_lifecycle} for callers that own
+    concrete resilience recovery handles.
+
+    Valid combinations of the two new arguments are:
+    - both [None]: equivalent to {!apply_post_turn_lifecycle}; no
+      audit envelope, no recovery side effect (legacy path).
+    - both [Some]: the feature-flagged resilience wire-in writes a
+      durable [RecoveryAttempted] envelope through the audit store
+      before invoking the executor, preserving auditability.
+
+    Passing [resilience_strategy_executor:(Some _)] together with
+    [resilience_audit_store:None] is rejected ({!Invalid_argument})
+    because retry/fallback/handoff/abort callbacks would mutate
+    live state without the pre-flight envelope that
+    [keeper_bridge] relies on.
+
+    @raise Invalid_argument when an executor is supplied without an
+      audit store.
+
+    Concurrency: [Shared_audit.Store.t] is a mutable single-writer
+    chain ([latest_hash] + append with no internal locking).  The
+    same store instance must not be threaded through concurrent
+    keeper turns — sharing one across fibers can produce envelopes
+    with duplicate [prev_hash] values and break audit-chain
+    verification.  Callers own serialization; the typical pattern
+    is one store per keeper, owned by the keeper bridge. *)
+
 (** Build the relaxed-policy meta used during forced overflow
     retry: zero compaction gates so the next compaction always
     fires. *)

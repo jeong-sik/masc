@@ -1478,6 +1478,25 @@ let make_hooks
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,
     and the deny list. Used by the dashboard to display hook status. *)
+let hook_slot_json ?(features = []) ?(gates = []) ?(effects = [])
+    ?reason ~(active : bool) ~(source : string) () : Yojson.Safe.t =
+  let list_field name values =
+    match values with
+    | [] -> []
+    | xs -> [ (name, `List (List.map (fun s -> `String s) xs)) ]
+  in
+  `Assoc
+    ([
+       ("active", `Bool active);
+       ("source", `String source);
+     ]
+     @ (match reason with
+       | None -> []
+       | Some value -> [ ("reason", `String value) ])
+     @ list_field "features" features
+     @ list_field "gates" gates
+     @ list_field "effects" effects)
+
 let hook_introspection_json
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
@@ -1489,64 +1508,156 @@ let hook_introspection_json
   let destructive_json =
     `String "dynamic_boundary (Tool_dispatch.is_destructive)"
   in
+  (* Build (name, active, json) triples in one place so the active
+     flag is captured at construction time rather than recovered by
+     re-inspecting the just-built JSON later. *)
+  let slot ?features ?gates ?effects ?reason ~active ~source name =
+    let features = Option.value features ~default:[] in
+    let gates = Option.value gates ~default:[] in
+    let effects = Option.value effects ~default:[] in
+    let json =
+      hook_slot_json ~features ~gates ~effects ?reason ~active ~source ()
+    in
+    (name, active, json)
+  in
+  let slot_entries =
+    [
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~features:
+          [
+            "work_discovery_nudge";
+            "passive_loop_nudge";
+            "utf8_guard";
+          ]
+        "before_turn";
+      slot
+        ~active:true
+        ~source:"keeper_run_tools"
+        ~features:
+          [
+            "dynamic_context";
+            "adaptive_thinking_budget";
+            "tool_surface_selection";
+            "memory_injection";
+          ]
+        "before_turn_params";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:
+          [
+            "sse_broadcast";
+            "cost_event";
+            "metrics";
+            "usage_trust";
+            "tool_streak_reset";
+          ]
+        "after_turn";
+      slot
+        ~active:true
+        ~source:"keeper_guards"
+        ~gates:
+          [
+            "timing";
+            "custom_guard";
+            "streak_gate";
+            "keeper_deny_list";
+            (if Option.is_some max_cost_usd
+             then "cost_budget"
+             else "cost_budget_off");
+            (if destructive_check
+             then "destructive_pattern"
+             else "destructive_pattern_off");
+            "governance_approval";
+          ]
+        "pre_tool_use";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~features:
+          [
+            "tool_callback";
+            "tool_call_log";
+            "trajectory";
+            "board_write_detection";
+            "tool_emission_capture";
+          ]
+        "post_tool_use";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "tool_use_failure_metric" ]
+        "post_tool_use_failure";
+      slot
+        ~active:false
+        ~source:"not_registered"
+        ~reason:"keeper runtime has no stop hook"
+        "on_stop";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~features:[ "repeated_tool_nudge"; "stay_silent_skip" ]
+        "on_idle";
+      slot
+        ~active:false
+        ~source:"not_registered"
+        ~reason:"keeper runtime uses legacy on_idle hook"
+        "on_idle_escalated";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "wirein_failure_metric"; "keeper_error_log" ]
+        "on_error";
+      slot
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "wirein_failure_metric"; "keeper_error_log" ]
+        "on_tool_error";
+      slot
+        ~active:false
+        ~source:"not_registered"
+        ~reason:"compaction is handled by keeper_post_turn"
+        "pre_compact";
+      slot
+        ~active:false
+        ~source:"not_registered"
+        ~reason:"compaction is handled by keeper_post_turn"
+        "post_compact";
+      slot
+        ~active:false
+        ~source:"not_registered"
+        ~reason:"compaction is handled by keeper_post_turn"
+        "on_context_compacted";
+    ]
+  in
+  (* Reviewer #13225: counts used to be derived by re-parsing the
+     just-built JSON [Assoc] for an "active" field.  If
+     [hook_slot_json]'s shape ever drifts (extra wrapper, renamed
+     field) the counts would silently desync from reality.  Track
+     [active] alongside each slot at build time so the counts are
+     decided where the slot is constructed, not by inspecting JSON. *)
+  let active_count =
+    List.fold_left
+      (fun acc (_name, active, _json) -> if active then acc + 1 else acc)
+      0 slot_entries
+  in
+  let total_count = List.length slot_entries in
+  let inactive_count = total_count - active_count in
+  let slot_names =
+    `List (List.map (fun (name, _, _) -> `String name) slot_entries)
+  in
+  let slot_assoc =
+    List.map (fun (name, _active, json) -> (name, json)) slot_entries
+  in
   `Assoc [
-    ("slots", `Assoc [
-      ("before_turn_params", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_agent_run");
-        ("features", `List [
-          `String "dynamic_context";
-          `String "bm25_progressive_disclosure";
-        ]);
-      ]);
-      ("pre_tool_use", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-        ("gates", `List [
-          `String "keeper_deny_list";
-          `String (if Option.is_some max_cost_usd
-                   then "cost_budget" else "cost_budget_off");
-          `String (if destructive_check
-                   then "destructive_pattern" else "destructive_pattern_off");
-        ]);
-      ]);
-      ("after_turn", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-        ("effects", `List [
-          `String "sse_broadcast";
-          `String "cost_event";
-          `String "metrics";
-        ]);
-      ]);
-      ("post_tool_use", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-        ("features", `List [
-          `String "tool_callback";
-          `String "board_write_detection";
-        ]);
-      ]);
-      ("on_idle", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-      ]);
-      ("on_error", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-      ]);
-      ("on_tool_error", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-      ]);
-      ("post_tool_use_failure", `Assoc [
-        ("active", `Bool true);
-        ("source", `String "keeper_hooks_oas");
-        ("effects", `List [
-          `String "heuristic_metrics";
-        ]);
-      ]);
-    ]);
+    ("scope", `String "keeper_runtime_composite");
+    ("slots", `Assoc slot_assoc);
+    ("slot_names", slot_names);
+    ("slot_count", `Int total_count);
+    ("active_slot_count", `Int active_count);
+    ("inactive_slot_count", `Int inactive_count);
     ("deny_list", denied_json);
     ("deny_list_count", `Int (List.length keeper_denied_tools));
     ("destructive_check_tools", destructive_json);

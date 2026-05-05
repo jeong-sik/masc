@@ -1,6 +1,11 @@
 {
   "prs": [
     {
+      "number": 13231,
+      "state": "OPEN",
+      "title": "test(keeper): pin slot reclaim after acquire flag"
+    },
+    {
       "number": 13218,
       "state": "OPEN",
       "title": "fix(keeper): self-heal archived credentials"

@@ -598,12 +598,19 @@ let test_goal_attainment_camel_case_percent_metric_is_percent () =
   check string "camelCase metric unit is percent" "percent"
     (attainment |> member "unit" |> to_string)
 
-(* Post-#13131 follow-up: [float_of_string_opt] accepts [nan]/[inf]
-   tokens; without the [Float.is_finite] guard the resulting non-
-   finite numeric crashed [pct_of_float] via [int_of_float (floor
-   nan)].  Pin the projection at unparseable / unmeasured for the
-   "nan" target rather than relying on tests not to crash. *)
-let test_goal_attainment_rejects_non_finite_target () =
+(* Post-#13131 follow-up: [float_of_string_opt] accepts the literal
+   "nan" / "inf" tokens; without the [Float.is_finite] guard the
+   resulting non-finite numeric crashed [pct_of_float] via
+   [int_of_float (floor nan)].  Pin the projection at
+   unparseable / unmeasured for the "nan" target.
+
+   Distinct from [test_goal_attainment_rejects_non_finite_target]
+   above (which exercises overflow-to-infinity via a 400-digit
+   decimal): both cases must individually round-trip through the
+   guard.  Post-#13170 review caught the earlier instance where
+   both bindings had the same top-level name and OCaml shadowing
+   silently disabled one of them. *)
+let test_goal_attainment_rejects_non_finite_target_nan_token () =
   with_room @@ fun config ->
   let goal, _kind =
     match
@@ -627,6 +634,32 @@ let test_goal_attainment_rejects_non_finite_target () =
     (attainment |> member "target_numeric" = `Null);
   check bool "non-finite target has no pct" true
     (attainment |> member "attainment_pct" = `Null)
+
+(* Post-#13170 review: tokenizer must split acronym-prefixed
+   PascalCase metric names.  [APIRatio] / [PRCount] should infer
+   percent so dashboards keep treating these common metric forms
+   as percent targets. *)
+let test_goal_attainment_acronym_pascal_case_percent_metric_is_percent () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Acronym-prefixed percent metric"
+        ~metric:"APIRatio" ~target_value:"80" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Done evidence";
+  let attainment =
+    Dashboard_goals.dashboard_goals_tree_json ~config
+    |> root_node
+    |> member "attainment"
+  in
+  check string "acronym-prefix metric inferred as percent target"
+    "metric_target_percent"
+    (attainment |> member "basis" |> to_string);
+  check string "acronym-prefix metric unit is percent" "percent"
+    (attainment |> member "unit" |> to_string)
 
 let test_blocked_phase_projects_blocked_health () =
   with_room @@ fun config ->
@@ -898,8 +931,11 @@ let () =
             test_goal_attainment_rejects_substring_pr_metric;
           test_case "goal attainment handles camelCase percent metric"
             `Quick test_goal_attainment_camel_case_percent_metric_is_percent;
-          test_case "goal attainment rejects non-finite target" `Quick
-            test_goal_attainment_rejects_non_finite_target;
+          test_case "goal attainment handles acronym-prefix percent metric"
+            `Quick
+            test_goal_attainment_acronym_pascal_case_percent_metric_is_percent;
+          test_case "goal attainment rejects non-finite target (nan token)"
+            `Quick test_goal_attainment_rejects_non_finite_target_nan_token;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
           test_case

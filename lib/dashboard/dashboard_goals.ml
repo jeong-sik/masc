@@ -276,39 +276,60 @@ let attainment_unit_to_string = function
 let contains_ci haystack needle =
   String_util.contains_substring_ci haystack needle
 
-(* Token-split that also respects camelCase boundaries.  An uppercase
-   letter that immediately follows a lowercase letter starts a new
-   token (so "successRate" → ["success"; "rate"]) — this keeps the
-   percent-inference accurate for free-form camelCase metric names
-   while still rejecting substring false positives like "iterate"
-   matching "rate".  Consecutive uppercase letters stay in the current
-   token to avoid mangling abbreviations. *)
+(* Token-split that respects camelCase AND acronym boundaries.
+
+   - lower → upper splits (so [successRate] → [success; rate])
+   - upper → upper-followed-by-lower splits (so [APIRatio] →
+     [api; ratio]; [PRCount] → [pr; count])
+   - consecutive uppercase letters not followed by a lowercase stay
+     glued (so [API] → [api], [HTTP] → [http])
+
+   Without the acronym rule, common acronym-prefixed metric names
+   regressed against percent inference: post-#13170 review noted
+   that names like [APIRatio] / [PRCount] still missed the percent
+   token even after the camelCase fix.  The split point is the
+   *last* uppercase letter in a run — that is the start of the
+   following lowercase word — not every uppercase letter, so
+   abbreviations stay intact. *)
 let metric_word_tokens raw =
+  let len = String.length raw in
   let tokens = ref [] in
   let current = Buffer.create 16 in
-  let prev_was_lower = ref false in
   let flush () =
     if Buffer.length current > 0 then (
       tokens := Buffer.contents current :: !tokens;
-      Buffer.clear current);
-    prev_was_lower := false
+      Buffer.clear current)
   in
-  String.iter
-    (fun ch ->
-      match ch with
-      | 'A' .. 'Z' ->
-          if !prev_was_lower then flush ();
-          Buffer.add_char current (Char.lowercase_ascii ch);
-          prev_was_lower := false
-      | 'a' .. 'z' ->
-          Buffer.add_char current ch;
-          prev_was_lower := true
-      | '0' .. '9' ->
-          Buffer.add_char current ch;
-          prev_was_lower := false
-      | _ ->
-          flush ())
-    raw;
+  let is_lower c = c >= 'a' && c <= 'z' in
+  let is_upper c = c >= 'A' && c <= 'Z' in
+  let is_alpha c = is_lower c || is_upper c in
+  let next_at i = if i + 1 < len then Some raw.[i + 1] else None in
+  let prev_at i = if i > 0 then Some raw.[i - 1] else None in
+  for i = 0 to len - 1 do
+    let ch = raw.[i] in
+    match ch with
+    | 'A' .. 'Z' ->
+        let prev_lower =
+          match prev_at i with Some c -> is_lower c | None -> false
+        in
+        let next_lower =
+          match next_at i with Some c -> is_lower c | None -> false
+        in
+        let prev_was_alpha =
+          match prev_at i with Some c -> is_alpha c | None -> false
+        in
+        (* Split before this uppercase letter when:
+           1. Previous char was lowercase (camelCase: aA boundary)
+           2. Previous char was uppercase AND next char is lowercase
+              (acronym→word: end-of-acronym boundary) *)
+        if prev_lower then flush ()
+        else if prev_was_alpha && next_lower then flush ();
+        Buffer.add_char current (Char.lowercase_ascii ch)
+    | 'a' .. 'z' | '0' .. '9' ->
+        Buffer.add_char current ch
+    | _ ->
+        flush ()
+  done;
   flush ();
   List.rev !tokens
 

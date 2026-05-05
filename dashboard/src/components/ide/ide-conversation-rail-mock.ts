@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import { KeeperBadge } from '../keeper-badge'
 import {
   fetchKeeperDecisions,
   type KeeperDecision,
@@ -133,7 +134,7 @@ export function IdeConversationRailMock() {
   return html`
     <div
       role="region"
-      aria-label="CONVERSATION"
+      aria-label="REACTION THREAD"
       style=${{
         display: 'flex',
         flexDirection: 'column',
@@ -152,7 +153,7 @@ export function IdeConversationRailMock() {
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>CONVERSATION</span>
+        <span>REACTION THREAD</span>
         <span>
           ${visibleCounts.thread}/${posts.length} threads ·
           ${visibleCounts.decision}/${decisions.length} decisions ·
@@ -276,7 +277,7 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
       >
         <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[kind]}</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color: keeperColor }}>${post.author_identity}</span>
+          <${KeeperBadge} id=${post.author_identity} variant="full" size="sm" />
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(createdMs)}</span>
         </div>
         ${post.hearth ? html`
@@ -320,7 +321,7 @@ function DecisionCard(item: Extract<ReplayRailItem, { source: 'decision' }>) {
       >
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-status-info)', letterSpacing: '0.05em' }}>DECISION</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color }}>${keeper}</span>
+          <${KeeperBadge} id=${keeper} variant="full" size="sm" />
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>

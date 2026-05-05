@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
   type KeeperPresenceEntry,
@@ -171,7 +171,7 @@ export function IdePresenceStrip() {
   return html`
     <div
       role="status"
-      aria-label="IDE keeper presence"
+      aria-label="Live workspace keeper presence"
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
@@ -195,6 +195,7 @@ export function IdePresenceStrip() {
           margin: 0,
           padding: 0,
           minWidth: 0,
+          overflow: 'hidden',
         }}
       >
         ${entries.map(entry => html`<${PresenceChip} entry=${entry} />`)}
@@ -204,11 +205,11 @@ export function IdePresenceStrip() {
 }
 
 function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
-  const hue = keeperHueIndex(entry.keeper_id)
-  const keeperColor = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
+  const isActive = entry.status === 'active'
   return html`
     <li
       title=${`${entry.keeper_id} · ${entry.role} · ${entry.branch}`}
+      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}`}
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
@@ -218,15 +219,18 @@ function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
         whiteSpace: 'nowrap',
       }}
     >
-      <span
-        aria-hidden="true"
-        class="size-[6px] shrink-0 rounded-full"
-        style=${{ background: keeperColor, opacity: entry.status === 'active' ? 0.95 : 0.45 }}
-      />
+      <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" beat=${isActive} />
       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ${entry.keeper_id}@${entry.workspace_label}
+      </span>
+      <span
+        style=${{
+          color: isActive ? 'var(--color-status-ok)' : 'var(--color-fg-muted)',
+          fontSize: 'var(--fs-10)',
+        }}
+      >
+        ${entry.status}
       </span>
     </li>
   `
 }
-

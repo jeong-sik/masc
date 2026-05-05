@@ -415,7 +415,7 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
 }
 
 function boardPostKindFromEvent(event: SSEEvent): BoardPost['post_kind'] {
-  const rawKind = (event.post_kind ?? 'direct').toLowerCase()
+  const rawKind = (typeof event.post_kind === 'string' ? event.post_kind : 'direct').toLowerCase()
   return rawKind === 'system' || rawKind === 'automation' ? rawKind : 'direct'
 }
 
@@ -426,6 +426,10 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
   // Author filtering is server-defined today, so a filtered view should be
   // reconciled through the board endpoint instead of guessing client-side.
   if (boardAuthorFilter.value.trim() !== '') return false
+
+  if (typeof event.post_kind !== 'string' && (boardExcludeSystem.value || boardExcludeAutomation.value)) {
+    return false
+  }
 
   const postKind = boardPostKindFromEvent(event)
   if (postKind === 'system' && boardExcludeSystem.value) return false

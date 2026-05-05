@@ -167,6 +167,7 @@ function CommentItem({
   childrenMap,
   descendantCounts,
   forceThreadExpanded = false,
+  suppressCollapseToggle = false,
 }: {
   comment: BoardComment
   postId: string
@@ -174,6 +175,7 @@ function CommentItem({
   childrenMap: ReadonlyMap<string, readonly BoardComment[]>
   descendantCounts: ReadonlyMap<string, number>
   forceThreadExpanded?: boolean
+  suppressCollapseToggle?: boolean
 }) {
   const contentChars = Array.from(comment.content ?? '')
   const needsTruncation = contentChars.length > 300
@@ -189,8 +191,11 @@ function CommentItem({
   const replies = childrenMap.get(comment.id) ?? []
   const replyCount = descendantCounts.get(comment.id) ?? 0
   const cappedByDepth = !forceThreadExpanded && !deepExpanded && depth >= MAX_INLINE_COMMENT_DEPTH && replies.length > 0
-  const showReplies = replies.length > 0 && !collapsed && !cappedByDepth
+  const collapsedByUser = collapsed && !forceThreadExpanded
+  const showReplies = replies.length > 0 && !collapsedByUser && !cappedByDepth
   const childForceExpanded = forceThreadExpanded || deepExpanded
+  const repliesExpanded = !collapsedByUser
+  const canToggleReplies = replies.length > 0 && !cappedByDepth && !suppressCollapseToggle && !forceThreadExpanded
   const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
@@ -211,14 +216,14 @@ function CommentItem({
     <div style=${indentStyle}>
       <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
-          ${replies.length > 0 && !cappedByDepth ? html`
+          ${canToggleReplies ? html`
             <button
               type="button"
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
-              aria-expanded=${!collapsed}
-              aria-label=${collapsed ? `답글 ${replyCount}개 펼치기` : `답글 ${replyCount}개 접기`}
+              aria-expanded=${repliesExpanded}
+              aria-label=${repliesExpanded ? `답글 ${replyCount}개 접기` : `답글 ${replyCount}개 펼치기`}
               onClick=${() => setCollapsed(!collapsed)}
-            >${collapsed ? '+' : '−'}</button>
+            >${repliesExpanded ? '−' : '+'}</button>
           ` : null}
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
           <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
@@ -279,7 +284,7 @@ function CommentItem({
             </div>
           </div>
         ` : null}
-        ${collapsed && replyCount > 0 ? html`
+        ${collapsedByUser && replyCount > 0 ? html`
           <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">답글 ${replyCount}개 접힘</div>
         ` : null}
         ${cappedByDepth ? html`
@@ -292,7 +297,7 @@ function CommentItem({
       </div>
       ${showReplies ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} />`)}
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} suppressCollapseToggle=${suppressCollapseToggle} />`)}
         </div>
       ` : null}
     </div>
@@ -347,7 +352,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기<//>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${isFiltering} />`)}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${isFiltering} suppressCollapseToggle=${isFiltering} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
 import { route } from '../../router'
-import { boardHearths, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
+import { boardHearths, boardHearthsError, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -152,6 +152,7 @@ describe('BoardSurface Component', () => {
     boardAuthorFilter.value = ''
     boardHearthFilter.value = ''
     boardHearths.value = [{ name: 'ops', count: 0 }]
+    boardHearthsError.value = false
     showNewPostForm.value = false
     newPostHearth.value = ''
     newPostSubmitting.value = false
@@ -228,6 +229,26 @@ describe('BoardSurface Component', () => {
 
     expect(boardHearthFilter.value).toBe('ops')
     expect(screen.getByRole('button', { name: 'hearth ops 2 posts' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('keeps hearth refresh available without showing an error for a valid empty list', () => {
+    boardHearths.value = []
+    boardHearthsError.value = false
+
+    render(h(BoardSurface, null))
+
+    expect(screen.queryByText('hearth 목록을 불러오지 못했습니다')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'hearth 목록 새로고침' })).toBeInTheDocument()
+  })
+
+  it('shows the hearth load error only after a failed refresh', () => {
+    boardHearths.value = []
+    boardHearthsError.value = true
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByText('hearth 목록을 불러오지 못했습니다')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'hearth 목록 새로고침' })).toBeInTheDocument()
   })
 
   it('prefills the compose hearth from the active hearth filter', () => {

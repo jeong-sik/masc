@@ -98,6 +98,15 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  it('rejects malformed board post kind metadata at the SSE boundary', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'post_created',
+      post_id: 'post-1',
+      post_kind: 1,
+    })
+    expect(r.success).toBe(false)
+  })
+
   it('rejects missing type discriminator', () => {
     const r = SSEMessageSchema.safeParse({ agent: 'nobody' })
     expect(r.success).toBe(false)

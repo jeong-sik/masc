@@ -52,6 +52,7 @@ type board_sse_event =
       author : string;
       title : string;
       content : string;
+      post_kind : Board.post_kind;
       hearth : string option;
     }
   | Comment_added of {

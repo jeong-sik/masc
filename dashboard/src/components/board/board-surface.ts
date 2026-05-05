@@ -33,6 +33,7 @@ import {
   boardHearthFilter,
   boardHearths,
   boardHearthsLoading,
+  boardHearthsError,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -296,7 +297,9 @@ function HearthFilterBar() {
   if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) {
     return html`
       <div class="flex items-center gap-1.5 flex-wrap">
-        <span class="text-2xs text-[var(--color-fg-muted)]" aria-hidden="true">hearth 목록을 불러오지 못했습니다</span>
+        ${boardHearthsError.value ? html`
+          <span class="text-2xs text-[var(--color-fg-muted)]" aria-hidden="true">hearth 목록을 불러오지 못했습니다</span>
+        ` : null}
         <button
           type="button"
           class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"

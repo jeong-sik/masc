@@ -551,6 +551,10 @@ let list_reactions ~target_type ~target_id ?user_id () =
   match backend () with
   | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
 
+let list_reactions_batch ~targets ?user_id () =
+  match backend () with
+  | Jsonl store -> Board.list_reactions_batch store ~targets ?user_id ()
+
 let stats () =
   match backend () with
   | Jsonl store -> Board.stats store

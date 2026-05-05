@@ -301,6 +301,16 @@ val list_reactions :
   unit ->
   (reaction_summary list, board_error) Result.t
 
+val list_reactions_batch :
+  store ->
+  targets:(reaction_target_type * string) list ->
+  ?user_id:string ->
+  unit ->
+  ((reaction_target_type * string) * reaction_summary list) list
+(** Returns reaction summaries for all requested [targets] after one
+    scan of the reaction table. Intended for callers that already hold
+    valid post/comment ids from the board store. *)
+
 val toggle_reaction :
   store ->
   target_type:reaction_target_type ->

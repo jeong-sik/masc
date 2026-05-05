@@ -171,6 +171,18 @@ let board_reactions_for_comment ~voter ~comment_id =
         comment_id (Board_types.show_board_error err);
       []
 
+let board_reactions_batch ~targets ~voter =
+  match targets with
+  | [] -> []
+  | _ -> Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
+
+let board_reactions_lookup rows =
+  let table = Hashtbl.create (List.length rows) in
+  List.iter
+    (fun (target, summaries) -> Hashtbl.replace table target summaries)
+    rows;
+  fun target -> Hashtbl.find_opt table target |> Option.value ~default:[]
+
 let board_reaction_fields = function
   | None -> []
   | Some summaries ->

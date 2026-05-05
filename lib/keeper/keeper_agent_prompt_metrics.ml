@@ -222,7 +222,7 @@ let build_ctx_composition_metrics
     ~(temporal_context : string)
     ~(user_message : string)
     ~(history_messages : Agent_sdk.Types.message list)
-    ~(actual_input_tokens : int) : ctx_composition_metrics =
+    ~(actual_input_tokens : int option) : ctx_composition_metrics =
   let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
   let add_text_segment bucket text =
     let metric = prompt_segment_metrics_of_text text in
@@ -253,7 +253,9 @@ let build_ctx_composition_metrics
       0 segments
   in
   let actual_input_tokens =
-    if actual_input_tokens > 0 then Some actual_input_tokens else None
+    match actual_input_tokens with
+    | Some n when n > 0 -> Some n
+    | Some _ | None -> None
   in
   let display_total_tokens =
     match actual_input_tokens with

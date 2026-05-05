@@ -50,3 +50,24 @@ let run_in_systhread f =
     Eio_unix.run_in_systhread f
   else
     f ()
+
+(** Cooperatively yield without raising if the Eio scheduler is unavailable. *)
+let yield_if_ready () =
+  if Atomic.get ready then
+    Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
+
+type yield_meter = {
+  interval : int;
+  steps : int Atomic.t;
+}
+
+let create_yield_meter ?(interval = 1000) () =
+  { interval = max 1 interval; steps = Atomic.make 0 }
+
+let yield_step meter =
+  let rec bump () =
+    let current = Atomic.get meter.steps in
+    let next = if current + 1 >= meter.interval then 0 else current + 1 in
+    if Atomic.compare_and_set meter.steps current next then next = 0 else bump ()
+  in
+  if bump () then yield_if_ready ()

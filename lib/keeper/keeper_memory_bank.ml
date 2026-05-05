@@ -623,7 +623,9 @@ let compact_memory_bank_if_needed
               let selected_rev = ref [] in
               let selected_count = ref 0 in
               let fallback_kind_cap = max 8 (target_notes / 8) in
+              let yield_meter = Eio_guard.create_yield_meter () in
               let add_row ~ignore_kind_cap (row : keeper_memory_row_raw) =
+                Eio_guard.yield_step yield_meter;
                 if !selected_count >= target_notes then
                   ()
                 else

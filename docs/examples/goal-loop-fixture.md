@@ -25,10 +25,11 @@ python3 scripts/goal_loop_status.py \
 Expected key facts:
 
 - `overall_status` is `critical`.
-- Decide reports `act_linked_count=4` and `act_missing_count=1`.
-- Act remains critical because `D-EMERGENCY-1` is still missing a linked ACT
-  artifact.
-- Verify remains `FAIL`, so the loop must not be marked complete.
+- Decide reports `act_linked_count=5` and `act_missing_count=0`.
+- Act is no longer critical in the fixture: every startup decision has at least
+  one linked PR artifact.
+- Verify remains `FAIL` because the startup replay is pre-ACT evidence, so the
+  loop must not be marked complete until a post-ACT live verify passes.
 
 Use the JSON status form when another tool needs to consume the replay:
 

@@ -10,7 +10,11 @@ let () =
    | Board_signal -> ()
    | other ->
      Alcotest.fail (Printf.sprintf "expected Board_signal, got %s"
-       (match other with Bootstrap -> "Bootstrap" | Unsupported s -> "Unsupported("^s^")" | Board_signal -> "Board_signal")));
+       (match other with
+        | Bootstrap -> "Bootstrap"
+        | Unsupported s -> "Unsupported("^s^")"
+        | Board_signal -> "Board_signal"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
 
   let live_comment_payload =
     {|{"source":"board_signal","kind":"comment","post_id":"p2","author":"alice","title":"Long board event","content":"this mirrors the long live payload that used to miss the prefix check","hearth":null,"wake_reason":"scope_message"}|}
@@ -22,7 +26,11 @@ let () =
    | Board_signal -> ()
    | other ->
      Alcotest.fail (Printf.sprintf "expected live comment Board_signal, got %s"
-       (match other with Bootstrap -> "Bootstrap" | Unsupported s -> "Unsupported("^s^")" | Board_signal -> "Board_signal")));
+       (match other with
+        | Bootstrap -> "Bootstrap"
+        | Unsupported s -> "Unsupported("^s^")"
+        | Board_signal -> "Board_signal"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
 
   (* --- classify: bootstrap --- *)
   let bootstrap_stim = {
@@ -33,7 +41,11 @@ let () =
    | Bootstrap -> ()
    | other ->
      Alcotest.fail (Printf.sprintf "expected Bootstrap, got %s"
-       (match other with Board_signal -> "Board_signal" | Unsupported s -> "Unsupported("^s^")" | Bootstrap -> "Bootstrap")));
+       (match other with
+        | Board_signal -> "Board_signal"
+        | Unsupported s -> "Unsupported("^s^")"
+        | Bootstrap -> "Bootstrap"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
 
   (* --- classify: unsupported --- *)
   let unknown_stim = {
@@ -63,7 +75,11 @@ let () =
    | Unsupported _ -> ()
    | other ->
      Alcotest.fail (Printf.sprintf "empty payload should be Unsupported, got %s"
-       (match other with Board_signal -> "Board_signal" | Bootstrap -> "Bootstrap" | Unsupported _ -> "Unsupported")));
+       (match other with
+        | Board_signal -> "Board_signal"
+        | Bootstrap -> "Bootstrap"
+        | Unsupported _ -> "Unsupported"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
 
   (* --- queue operations preserved --- *)
   let q = empty in

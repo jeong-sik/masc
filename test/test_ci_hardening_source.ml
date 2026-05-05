@@ -464,9 +464,30 @@ let test_oas_pin_source_contracts () =
     (file_contains_pattern "scripts/check-oas-pin.sh" "agent_sdk.cmxa");
   check bool "oas pin check validates llm provider native archive" true
     (file_contains_pattern "scripts/check-oas-pin.sh" "llm_provider.cmxa");
+  (* #13095: Metric_contract is consumed by autoresearch_metric.ml; if
+     check-oas-pin.sh stops verifying its cmi, a stale opam switch can
+     pass the artifact gate and produce an incomprehensible build
+     failure later in lib/. *)
+  check bool "oas pin check validates Metric_contract artifact" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "agent_sdk__metric_contract.cmi");
   check bool "oas pin check gives rebuild guidance" true
     (file_contains_pattern "scripts/check-oas-pin.sh"
-       "scripts/opam-pin-external-deps.sh --install")
+       "scripts/opam-pin-external-deps.sh --install");
+  (* #13095: dune-local.sh must run --local-only check-oas-pin.sh
+     before delegating to dune.  Two anchors keep the contract
+     self-documenting: the call line itself, and the env-var bypass
+     that lets operators opt out for clean/fmt/subst when the switch
+     is intentionally drifting (e.g. mid-bump). *)
+  check bool "dune-local.sh asserts oas pin before invoking dune" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "scripts/check-oas-pin.sh\" --local-only");
+  check bool "dune-local.sh exposes MASC_SKIP_PIN_CHECK bypass" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "MASC_SKIP_PIN_CHECK");
+  check bool "dune-local.sh skips pin check inside GitHub Actions" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "GITHUB_ACTIONS")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true

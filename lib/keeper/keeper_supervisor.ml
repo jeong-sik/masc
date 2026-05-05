@@ -347,8 +347,22 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             end
           end
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
+        | Eio.Cancel.Cancelled _ ->
+          (* Swallow cleanup cancellation without incrementing the cleanup
+             failure counter. Re-raising Cancelled here is what the docstring
+             above warns against: [Fun.protect] would wrap it as
+             [Fun.Finally_raised], masking the body exception and crashing
+             the supervisor. See 2026-05-05 cycle9 incident: 5+ FATALs/day
+             traced to a re-raise at this exact site (commit bb10b80ee4
+             leftover from #12910 revert). *)
+          Log.Keeper.debug
+            "%s: supervisor finally cleanup cancelled (suppressed to avoid Fun.Finally_raised)"
+            meta.name
         | exn ->
+          (* Swallow non-cancellation cleanup failures too. Cleanup is
+             advisory; re-raising here would still become [Fun.Finally_raised]
+             and could mask the body outcome. Count only these unexpected
+             cleanup exceptions so the metric remains actionable. *)
           Prometheus.inc_counter
             Prometheus.metric_keeper_supervisor_cleanup_failures
             ~labels:[("keeper", meta.name)]

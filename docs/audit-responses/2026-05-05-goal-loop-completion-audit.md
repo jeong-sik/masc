@@ -50,8 +50,20 @@
   test/fixtures/goal_loop/orient.startup.json --decide-json
   /tmp/goal-loop-decide-audit.json --verify-json
   test/fixtures/goal_loop/verify.fail.json --loop-iteration '#fixture'
-  --format text` checked at 2026-05-05T11:30:45Z, confidence High:
-  `next_action` is `D-EMERGENCY-1`, the missing ACT item.
+  --format text` checked at 2026-05-05T14:54:50Z, confidence High:
+  the fixture remains critical because Verify is still red, while ACT linkage
+  now reports `act_linked_count=5` and `act_missing_count=0`.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json --format text`
+  checked at 2026-05-05T14:54:50Z, confidence High: the external 206-audit
+  claim catalog is `INCOMPLETE`, with 18 itemized findings and 188 missing
+  itemized rows.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --require-complete-catalog` checked at 2026-05-05T14:54:50Z, confidence
+  High: exits non-zero until the full 206-row corpus is attached or checked in.
 
 ## Current Completion State
 
@@ -62,9 +74,9 @@
 | Alive-but-stuck recovery ACT | **PARTIAL** | #13123 adds recovery side effect; #13126 adds timeout phase diagnostics. Runtime recovery success SLO remains unproven. |
 | Keeper TOML unknown-key visibility | **PARTIAL** | #13138 surfaces unknown keys in health; strict schema rejection is not yet enforced. |
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
-| Slot forced reclaim + credential auto-recovery | **FAIL** | `D-EMERGENCY-1` is still `ACT_MISSING` in `act-map.startup.json`. |
-| Full 206-finding Orient engine | **NOT PROVEN** | Current deterministic fixture covers 10 startup findings, not all 206 audit findings. |
-| Full Verify pipeline | **FAIL BY DESIGN** | `verify.fail.json` intentionally keeps the replay red until missing ACT is linked and runtime checks pass. |
+| Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; post-ACT live runtime verification is still pending. |
+| Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 18 of the claimed 206 findings. |
+| Full Verify pipeline | **FAIL BY DESIGN** | `verify.fail.json` intentionally keeps the replay red until post-ACT live runtime checks pass. |
 
 ## Section-by-Section Audit
 
@@ -79,14 +91,17 @@ fallback, unknown TOML keys, all-zero metrics, linear warmup.
 - `test/fixtures/goal_loop/observe.startup.json`
 - `test/fixtures/goal_loop/orient.startup.json`
 - `test/fixtures/goal_loop/verify.fail.json`
+- `test/fixtures/goal_loop/audit-corpus.external-claim.json`
 - `docs/examples/goal-loop-fixture.md`
 
 **Status**: **PARTIAL**.
 
 The fixture pins concrete startup evidence for NF-1, NF-2, NF-3, NF-4, and
-NF-6. It does not yet prove all 206 audit findings from live production state,
-and several prompt claims remain evidence-absent in the fixture (`NF-5`,
-`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
+NF-6. The external claim catalog itemizes 18 finding IDs from the supplied
+documents and records the source paths that claim 206 findings. It does not
+yet prove all 206 audit findings from live production state; 188 rows remain
+missing from the itemized corpus, and several prompt claims remain
+evidence-absent in the fixture (`NF-5`, `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
 
 **Verification command**:
 
@@ -99,6 +114,17 @@ python3 scripts/goal_loop_status.py \
   --loop-iteration "#fixture" \
   --format text
 ```
+
+**206-claim catalog guard**:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-complete-catalog
+```
+
+This command must fail until the full 206-row corpus is attached or checked in.
 
 ### 1. GOAL LOOP Architecture
 
@@ -147,12 +173,15 @@ current runtime/code state, including 206 findings.
 - `orient_goal_loop_logs.py` classifies startup findings into
   `EVIDENCE_PRESENT` and `EVIDENCE_ABSENT`.
 - `orient.startup.json` produces 10 deterministic finding rows.
+- `audit-corpus.external-claim.json` lets Orient replay the itemized portion of
+  the external 206-finding claim and exposes the missing itemized rows.
 
 **Status**: **PARTIAL**.
 
-The Orient skeleton is testable, but the prompt's full 206-finding audit set is
-not encoded. Current output should be treated as startup-regression coverage,
-not complete audit closure.
+The Orient skeleton is testable, and the prompt's external 206-finding claim is
+now machine-visible. The full set is still not encoded: current catalog replay
+reports 18 itemized findings, 188 missing itemized rows, and 8 itemized rows
+that are not evaluable from the startup log patterns.
 
 ### 4. DECIDE
 
@@ -163,13 +192,16 @@ queue.
 
 - `decide_goal_loop_findings.py` maps evidence-present findings to:
   `D-EMERGENCY-1`, `D-EMERGENCY-2`, `D-P1-1`, `D-P1-2`, `D-P2-1`, `D-P2-2`.
-- `act-map.startup.json` links four decisions to real PR artifacts.
+- `act-map.startup.json` links all five startup evidence-present decisions to
+  real PR artifacts.
 - `validate_goal_loop_act_map.py` verifies PR-shaped ACT artifacts.
 
 **Status**: **PARTIAL**.
 
-The priority queue is deterministic. It intentionally reports
-`D-EMERGENCY-1` as `ACT_MISSING`, so Decide cannot be considered complete.
+The priority queue is deterministic and the startup ACT map is fully linked.
+Decide still cannot be considered complete for the original 206-finding claim
+because several itemized catalog findings have no source decision mapping and
+the full 206-row corpus is absent.
 
 ### 5. ACT
 
@@ -178,15 +210,16 @@ decisions.
 
 | Decision | Finding | ACT status | Evidence |
 |----------|---------|------------|----------|
-| `D-EMERGENCY-1` | `NF-2` credential archived starvation | **MISSING** | No linked ACT artifact. |
+| `D-EMERGENCY-1` | `NF-2` credential archived starvation | **LINKED** | #13218 credential auto-recovery, #13231 slot forced-reclaim regression, #13246 crash-path force release. |
 | `D-EMERGENCY-2` | `NF-1` provider health skipped | **LINKED** | #13124 `fix: probe local providers in cascade catalog`. |
 | `D-P1-1` | `NF-3`, `R-FATAL-1` recovery/fallback | **LINKED** | #13123 recovery side effect, #13126 timeout phase diagnostics. |
 | `D-P1-2` | `CF-1` pricing catalog miss | **NOT QUEUED IN FIXTURE** | `CF-1` is `EVIDENCE_ABSENT` in `orient.startup.json`; needs live-pricing audit if seen again. |
 | `D-P2-1` | `NF-6` unknown keeper TOML keys | **LINKED** | #13138 health visibility. |
 | `D-P2-2` | `NF-4` governance fallback | **LINKED** | #13143 fallback counters. |
 
-**Status**: **FAIL** until `D-EMERGENCY-1` has an ACT PR or the Orient evidence
-is disproven by live replay.
+**Status**: **PARTIAL**. All startup evidence-present decisions are linked to
+ACT PRs, but post-ACT live replay has not disproven the startup evidence and
+the external 206-finding corpus is not fully mapped to ACT decisions.
 
 ### 6. VERIFY
 
@@ -202,7 +235,8 @@ log verification, metric verification, and Orient re-check.
 **Status**: **FAIL BY DESIGN**.
 
 This is correct current behavior. A PASS would be unsafe because the fixture
-still contains `NF-2` and `D-EMERGENCY-1` is missing ACT.
+still contains `NF-2` startup evidence and no post-ACT live Verify artifact has
+re-collected runtime logs.
 
 ### 7. GOAL LOOP Dashboard
 
@@ -231,7 +265,8 @@ findings escalate.
 
 - #13178 adds an ACT-reference guard so artifact strings cannot silently point
   to nonexistent PR numbers.
-- The fixture explicitly fails when a P0 decision has no ACT artifact.
+- `--require-complete-catalog` explicitly fails while the claimed 206-finding
+  corpus is not fully itemized.
 
 **Status**: **PARTIAL**.
 
@@ -248,17 +283,17 @@ healthy and `STILL_PRESENT < 20`; after one month, `STILL_PRESENT = 0`.
 No convergence claim is valid yet. The only safe current statement is:
 
 - The deterministic fixture still reports overall critical.
-- Four ACT artifacts are linked and merged.
-- One P0 ACT artifact is missing.
+- Five startup ACT decisions are linked and merged.
+- The external 206-finding claim is not fully itemized in repo-local evidence.
 - Live runtime replay is required before any "fixed" or "healthy" claim.
 
 ## Next Concrete ACT
 
-1. Implement or disprove `D-EMERGENCY-1`: slot forced reclaim plus keeper
-   credential auto-recovery for `NF-2`.
-2. Extend Orient input from the 10 startup fixture findings to the full
-   206-finding audit corpus, or attach the corpus source path if it already
-   exists outside this repo.
+1. Attach or check in the full 206-row audit corpus. The current
+   `audit-corpus.external-claim.json` records source paths and 18 itemized
+   findings, but `--require-complete-catalog` still fails with 188 missing rows.
+2. Re-run Orient against the complete corpus without changing code and update
+   the replay counts in this audit.
 3. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
 4. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
@@ -268,7 +303,7 @@ No convergence claim is valid yet. The only safe current statement is:
 
 Do not mark the GOAL LOOP objective complete while any of these are true:
 
-- `D-EMERGENCY-1` remains absent from `act-map.startup.json`.
 - `verify.fail.json` is the latest Verify fixture.
-- The full 206-finding audit corpus is not replayed by Orient.
+- The full 206-finding audit corpus is not replayed by Orient with
+  `--require-complete-catalog` passing.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.

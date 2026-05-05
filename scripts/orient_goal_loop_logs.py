@@ -22,6 +22,9 @@ class FindingSpec:
     title: str
     severity: str
     patterns: tuple[str, ...]
+    decision_id: str | None = None
+    actionability: str = "actionable"
+    source: dict[str, Any] | None = None
 
 
 @dataclass
@@ -33,6 +36,9 @@ class FindingReport:
     count: int
     patterns: list[str]
     samples: list[dict[str, Any]]
+    decision_id: str | None
+    actionability: str
+    source: dict[str, Any] | None
 
 
 @dataclass
@@ -42,6 +48,7 @@ class OrientReport:
     matched_lines: int
     summary: dict[str, int]
     findings: list[FindingReport]
+    audit_catalog: dict[str, Any] | None = None
 
 
 FINDINGS: tuple[FindingSpec, ...] = (
@@ -108,6 +115,16 @@ FINDINGS: tuple[FindingSpec, ...] = (
 )
 
 
+def load_audit_catalog_input(path: str | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    with Path(path).open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("expected audit catalog JSON object")
+    return data
+
+
 def load_json_input(path: str) -> dict[str, Any]:
     if path == "-":
         return load_json_handle(sys.stdin)
@@ -140,7 +157,112 @@ def pattern_samples(patterns: dict[str, Any], name: str) -> list[dict[str, Any]]
     return [sample for sample in samples if isinstance(sample, dict)]
 
 
-def orient_scan(scan: dict[str, Any]) -> OrientReport:
+def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
+    if catalog is None:
+        return []
+    findings_raw = catalog.get("findings", [])
+    if not isinstance(findings_raw, list):
+        raise ValueError("audit catalog findings must be a list")
+
+    specs: list[FindingSpec] = []
+    for index, raw in enumerate(findings_raw):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"audit catalog finding at index {index} must be an object"
+            )
+        finding_id = raw.get("finding_id")
+        title = raw.get("title")
+        severity = raw.get("severity")
+        if not isinstance(finding_id, str) or not finding_id:
+            raise ValueError(
+                f"audit catalog finding at index {index} missing finding_id"
+            )
+        if not isinstance(title, str) or not title:
+            raise ValueError(f"audit catalog finding {finding_id} missing title")
+        if severity not in ("critical", "warning", "info"):
+            raise ValueError(f"audit catalog finding {finding_id} has invalid severity")
+
+        patterns_raw = raw.get("patterns", [])
+        if not isinstance(patterns_raw, list):
+            raise ValueError(
+                f"audit catalog finding {finding_id} patterns must be a list"
+            )
+        patterns = tuple(item for item in patterns_raw if isinstance(item, str))
+        if len(patterns) != len(patterns_raw):
+            raise ValueError(
+                f"audit catalog finding {finding_id} has non-string pattern"
+            )
+
+        decision_id = raw.get("decision_id")
+        if decision_id is not None and not isinstance(decision_id, str):
+            raise ValueError(
+                f"audit catalog finding {finding_id} decision_id must be string"
+            )
+        actionability = raw.get("actionability", "actionable")
+        if not isinstance(actionability, str) or not actionability:
+            raise ValueError(
+                f"audit catalog finding {finding_id} actionability missing"
+            )
+        source = raw.get("source")
+        if source is not None and not isinstance(source, dict):
+            raise ValueError(
+                f"audit catalog finding {finding_id} source must be object"
+            )
+
+        specs.append(
+            FindingSpec(
+                finding_id=finding_id,
+                title=title,
+                severity=severity,
+                patterns=patterns,
+                decision_id=decision_id,
+                actionability=actionability,
+                source=source,
+            )
+        )
+    return specs
+
+
+def merged_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
+    merged: dict[str, FindingSpec] = {spec.finding_id: spec for spec in FINDINGS}
+    ordered_ids = [spec.finding_id for spec in FINDINGS]
+    for spec in catalog_specs(catalog):
+        if spec.finding_id not in merged:
+            ordered_ids.append(spec.finding_id)
+        merged[spec.finding_id] = spec
+    return [merged[finding_id] for finding_id in ordered_ids]
+
+
+def audit_catalog_summary(catalog: dict[str, Any] | None) -> dict[str, Any] | None:
+    if catalog is None:
+        return None
+    specs = catalog_specs(catalog)
+    expected_raw = catalog.get("expected_findings_total")
+    expected = expected_raw if isinstance(expected_raw, int) else None
+    itemized = len(specs)
+    missing = max(expected - itemized, 0) if expected is not None else None
+    if expected is None:
+        status = "UNBOUNDED"
+    elif itemized == expected:
+        status = "COMPLETE"
+    else:
+        status = "INCOMPLETE"
+    return {
+        "catalog_id": catalog.get("catalog_id", "unknown"),
+        "source_status": catalog.get("source_status", "unknown"),
+        "status": status,
+        "expected_findings_total": expected,
+        "itemized_findings_total": itemized,
+        "missing_itemized_findings": missing,
+        "external_sources": catalog.get("external_sources", []),
+    }
+
+
+def orient_scan(
+    scan: dict[str, Any],
+    *,
+    audit_catalog: dict[str, Any] | None = None,
+) -> OrientReport:
     patterns_raw = scan.get("patterns", {})
     patterns = patterns_raw if isinstance(patterns_raw, dict) else {}
     files_raw = scan.get("files", [])
@@ -151,24 +273,31 @@ def orient_scan(scan: dict[str, Any]) -> OrientReport:
     )
 
     findings: list[FindingReport] = []
-    for spec in FINDINGS:
+    for spec in merged_specs(audit_catalog):
         count = sum(pattern_count(patterns, name) for name in spec.patterns)
         samples: list[dict[str, Any]] = []
         for name in spec.patterns:
             samples.extend(pattern_samples(patterns, name))
+        status = "EVIDENCE_PRESENT" if count > 0 else "EVIDENCE_ABSENT"
+        if not spec.patterns:
+            status = "NOT_EVALUATED"
         findings.append(
             FindingReport(
                 finding_id=spec.finding_id,
                 title=spec.title,
                 severity=spec.severity,
-                status="EVIDENCE_PRESENT" if count > 0 else "EVIDENCE_ABSENT",
+                status=status,
                 count=count,
                 patterns=list(spec.patterns),
                 samples=samples[:3],
+                decision_id=spec.decision_id,
+                actionability=spec.actionability,
+                source=spec.source,
             )
         )
 
     present = sum(1 for finding in findings if finding.status == "EVIDENCE_PRESENT")
+    not_evaluated = sum(1 for finding in findings if finding.status == "NOT_EVALUATED")
     critical_present = sum(
         1
         for finding in findings
@@ -180,11 +309,13 @@ def orient_scan(scan: dict[str, Any]) -> OrientReport:
         matched_lines=int(scan.get("matched_lines", 0) or 0),
         summary={
             "evidence_present": present,
-            "evidence_absent": len(findings) - present,
+            "evidence_absent": len(findings) - present - not_evaluated,
             "critical_present": critical_present,
+            "not_evaluated": not_evaluated,
             "findings_total": len(findings),
         },
         findings=findings,
+        audit_catalog=audit_catalog_summary(audit_catalog),
     )
 
 
@@ -205,6 +336,13 @@ def report_to_text(report: OrientReport) -> str:
             f"{report.summary['critical_present']} critical present"
         ),
     ]
+    if report.audit_catalog is not None:
+        lines.append(
+            "audit_catalog: "
+            f"{report.audit_catalog['status']} "
+            f"itemized={report.audit_catalog['itemized_findings_total']} "
+            f"expected={report.audit_catalog['expected_findings_total']}"
+        )
     for finding in report.findings:
         if finding.status == "EVIDENCE_ABSENT":
             continue
@@ -245,17 +383,38 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="none",
         help="Exit non-zero when oriented findings match this condition.",
     )
+    parser.add_argument(
+        "--audit-catalog",
+        help=(
+            "Optional audit corpus catalog JSON. Catalog findings are merged "
+            "with the built-in startup findings and reported in audit_catalog."
+        ),
+    )
+    parser.add_argument(
+        "--require-complete-catalog",
+        action="store_true",
+        help="Exit non-zero when --audit-catalog is absent or incomplete.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    report = orient_scan(load_json_input(args.scan_json))
+    report = orient_scan(
+        load_json_input(args.scan_json),
+        audit_catalog=load_audit_catalog_input(args.audit_catalog),
+    )
     if args.format == "json":
         print(report_to_json(report))
     else:
         print(report_to_text(report))
-    return 1 if should_fail(report, args.fail_on) else 0
+    if should_fail(report, args.fail_on):
+        return 1
+    if args.require_complete_catalog:
+        if report.audit_catalog is None:
+            return 1
+        return 0 if report.audit_catalog.get("status") == "COMPLETE" else 1
+    return 0
 
 
 if __name__ == "__main__":

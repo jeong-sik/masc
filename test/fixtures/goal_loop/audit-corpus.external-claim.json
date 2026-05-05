@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "expected_findings_total": 206,
+  "source_status": "external_claim_not_itemized",
+  "external_sources": [
+    {
+      "path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md",
+      "line_refs": [4, 9, 331, 334, 335, 336, 340, 348, 352, 359, 382, 402, 531, 589],
+      "claim": "Claims 206 audit findings and itemizes 18 finding IDs, but does not contain the full 206-row corpus."
+    },
+    {
+      "path": "/Users/dancer/Downloads/fundamental_roadmap.md",
+      "line_refs": [3, 1934],
+      "claim": "Claims the roadmap is based on 206 audit findings, but does not contain the full 206-row corpus."
+    },
+    {
+      "path": "/Users/dancer/Downloads/live_incident_analysis.md",
+      "line_refs": [215],
+      "claim": "Claims the live logs prove the 206-audit result, but does not contain the full 206-row corpus."
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "R-FATAL-1",
+      "title": "acquire_sem_bounded_timeout_no_fallback",
+      "severity": "critical",
+      "patterns": ["keeper_skipping_turn"],
+      "actionability": "actionable",
+      "decision_id": "D-P1-1",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [295, 340, 390]}
+    },
+    {
+      "finding_id": "R-FATAL-5",
+      "title": "pre_dispatch_gates_silent_skip",
+      "severity": "critical",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": "D-P2-2",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [348, 402]}
+    },
+    {
+      "finding_id": "CD-1",
+      "title": "holder_table_denormalized",
+      "severity": "warning",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [345]}
+    },
+    {
+      "finding_id": "CD-2",
+      "title": "autonomous_wait_queue_duplicate",
+      "severity": "warning",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [346]}
+    },
+    {
+      "finding_id": "CD-5",
+      "title": "admission_queue_passthrough",
+      "severity": "critical",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [309, 342]}
+    },
+    {
+      "finding_id": "CD-8",
+      "title": "recovery_strategy_created_not_executed",
+      "severity": "critical",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": "D-P1-1",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [315, 341, 390]}
+    },
+    {
+      "finding_id": "CD-10",
+      "title": "dashboard_random_spark",
+      "severity": "warning",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [349]}
+    },
+    {
+      "finding_id": "CE-1",
+      "title": "env_config_keeper_godfile",
+      "severity": "warning",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": "D-P2-1",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [285, 344, 398]}
+    },
+    {
+      "finding_id": "CE-3",
+      "title": "env_config_meaningless_wrapper",
+      "severity": "warning",
+      "patterns": [],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [291]}
+    },
+    {
+      "finding_id": "CF-1",
+      "title": "capabilities_static_table",
+      "severity": "critical",
+      "patterns": ["pricing_catalog_miss"],
+      "actionability": "actionable",
+      "decision_id": "D-P1-2",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [302, 343, 394]}
+    },
+    {
+      "finding_id": "NF-1",
+      "title": "provider_health_skipped_all_models",
+      "severity": "critical",
+      "patterns": ["provider_health_skipped"],
+      "actionability": "actionable",
+      "decision_id": "D-EMERGENCY-2",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [352, 386]}
+    },
+    {
+      "finding_id": "NF-2",
+      "title": "credential_archived_all_keepers",
+      "severity": "critical",
+      "patterns": ["credential_archived_starvation"],
+      "actionability": "actionable",
+      "decision_id": "D-EMERGENCY-1",
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [353, 382]}
+    },
+    {
+      "finding_id": "NF-3",
+      "title": "alive_but_stuck_no_recovery",
+      "severity": "critical",
+      "patterns": ["alive_but_stuck"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [354]}
+    },
+    {
+      "finding_id": "NF-4",
+      "title": "governance_judge_unparseable_fallback",
+      "severity": "warning",
+      "patterns": ["governance_unparseable", "lenient_json_fallback"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [355]}
+    },
+    {
+      "finding_id": "NF-5",
+      "title": "autoboot_warmup_linear",
+      "severity": "warning",
+      "patterns": ["autoboot_warmup"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [356]}
+    },
+    {
+      "finding_id": "NF-6",
+      "title": "config_unknown_keys_ignored",
+      "severity": "warning",
+      "patterns": ["config_unknown_key"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [357]}
+    },
+    {
+      "finding_id": "NF-7",
+      "title": "tool_policy_unknown_tools",
+      "severity": "warning",
+      "patterns": ["tool_policy_unknown_tools"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [358]}
+    },
+    {
+      "finding_id": "NF-8",
+      "title": "keeper_checkpoint_migration_data_loss",
+      "severity": "critical",
+      "patterns": ["keeper_checkpoint_migration_data_loss"],
+      "actionability": "actionable",
+      "decision_id": null,
+      "source": {"path": "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md", "line_refs": [359]}
+    }
+  ]
+}

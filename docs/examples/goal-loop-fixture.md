@@ -54,3 +54,20 @@ python3 scripts/validate_goal_loop_act_map.py \
 
 For live validation, capture a current PR snapshot first and pass that file as
 `--known-prs-json`.
+
+Replay the external 206-audit claim catalog through Orient:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --format text
+```
+
+Expected key facts:
+
+- `audit_catalog` is `INCOMPLETE`.
+- The source documents claim 206 findings, but only 18 finding IDs are
+  itemized in the checked artifacts.
+- `--require-complete-catalog` intentionally exits non-zero until the full
+  206-row corpus is attached or checked in.

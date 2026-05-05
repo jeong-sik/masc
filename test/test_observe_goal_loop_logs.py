@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "observe_goal_loop_logs.py"
 ORIENT_SCRIPT_PATH = REPO_ROOT / "scripts" / "orient_goal_loop_logs.py"
 DECIDE_SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
 VERIFY_SCRIPT_PATH = REPO_ROOT / "scripts" / "verify_goal_loop_logs.py"
+FIXTURE_DIR = REPO_ROOT / "test" / "fixtures" / "goal_loop"
 
 spec = importlib.util.spec_from_file_location("observe_goal_loop_logs", SCRIPT_PATH)
 assert spec is not None
@@ -48,6 +50,12 @@ verify_goal_loop_logs = importlib.util.module_from_spec(verify_spec)
 assert verify_spec.loader is not None
 sys.modules[verify_spec.name] = verify_goal_loop_logs
 verify_spec.loader.exec_module(verify_goal_loop_logs)
+
+
+def json_from_fixture(name: str) -> dict[str, object]:
+    data = json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
 
 
 class ObserveGoalLoopLogsTest(unittest.TestCase):
@@ -156,6 +164,46 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(by_id["NF-2"].status, "EVIDENCE_ABSENT")
         self.assertEqual(report.summary["evidence_present"], 2)
         self.assertEqual(report.summary["critical_present"], 1)
+
+    def test_orient_catalog_exposes_incomplete_206_claim(self) -> None:
+        scan = json_from_fixture("observe.startup.json")
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+
+        report = orient_goal_loop_logs.orient_scan(scan, audit_catalog=catalog)
+        by_id = {finding.finding_id: finding for finding in report.findings}
+
+        self.assertIsNotNone(report.audit_catalog)
+        assert report.audit_catalog is not None
+        self.assertEqual(report.audit_catalog["status"], "INCOMPLETE")
+        self.assertEqual(report.audit_catalog["expected_findings_total"], 206)
+        self.assertEqual(report.audit_catalog["itemized_findings_total"], 18)
+        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 188)
+        self.assertEqual(report.summary["findings_total"], 18)
+        self.assertEqual(report.summary["not_evaluated"], 8)
+        self.assertEqual(by_id["NF-2"].status, "EVIDENCE_PRESENT")
+        self.assertEqual(by_id["CD-8"].status, "NOT_EVALUATED")
+        self.assertEqual(by_id["CD-8"].decision_id, "D-P1-1")
+
+    def test_orient_cli_can_fail_on_incomplete_catalog(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ORIENT_SCRIPT_PATH),
+                str(FIXTURE_DIR / "observe.startup.json"),
+                "--audit-catalog",
+                str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                "--require-complete-catalog",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"status": "INCOMPLETE"', result.stdout)
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

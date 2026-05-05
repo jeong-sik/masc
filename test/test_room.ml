@@ -209,6 +209,17 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
    | msgs ->
      Alcotest.failf "expected one replacement message, got %d" (List.length msgs));
 
+  let normal_update =
+    "Normal update: blocked by task-001 while I wait for review context."
+  in
+  let normal_result =
+    Coord.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
+  in
+  Alcotest.(check bool)
+    "normal task mention is not invalidated"
+    false
+    (str_contains normal_result "[cache_invalidated]");
+
   let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 

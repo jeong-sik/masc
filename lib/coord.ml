@@ -318,14 +318,14 @@ let () =
 
 (* #13460: cache desync invalidation counter. Coord_broadcast emits this when
    it replaces an active-claim/release message for a terminal backlog task with
-   a cache_invalidated broadcast. *)
-let record_cache_desync_cleared ~module_name ~task_id ~status =
+   a cache_invalidated broadcast.  Keep labels fleet-bounded; the task id stays
+   in the replacement message, not the Prometheus series key. *)
+let record_cache_desync_cleared ~module_name ~task_id:_ ~status =
   Prometheus.inc_counter
     Prometheus.metric_cache_desync_cleared
     ~labels:
       [
         ("module", module_name);
-        ("task_id", task_id);
         ("status", status);
       ]
     ()

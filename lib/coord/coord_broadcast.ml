@@ -61,14 +61,17 @@ let broadcast_channel config =
 let on_broadcast_mention : (string option -> unit) ref =
   ref (fun _mention -> ())
 
-let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast")
+    ?(task_cache_invariant_checked = false) config ~from_agent ~content =
   ensure_initialized config;
   let content =
-    Coord_task_cache_invariant.rewrite_broadcast_content
-      ~config
-      ~from_agent
-      ~module_name:"coord_broadcast"
-      ~content
+    if task_cache_invariant_checked then content
+    else
+      Coord_task_cache_invariant.rewrite_broadcast_content
+        ~config
+        ~from_agent
+        ~module_name:"coord_broadcast"
+        ~content
   in
   let seq = Coord_state.next_seq config in
   let mention = Mention.extract content in

@@ -16,5 +16,6 @@ val broadcast_channel : Coord_utils_backend_setup.config -> string
 val on_broadcast_mention : (string option -> unit) ref
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
+           ?task_cache_invariant_checked:bool ->
            Coord_utils_backend_setup.config ->
            from_agent:string -> content:string -> string

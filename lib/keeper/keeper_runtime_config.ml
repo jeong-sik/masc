@@ -55,6 +55,8 @@ let key_to_env =
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     "turn.adaptive_thinking_mode",      "MASC_KEEPER_ADAPTIVE_THINKING_MODE";
+    "turn.degraded_retry_slot_phase_budget_sec",
+                                        "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC";
     (* [watchdog] *)
     "watchdog.stale_sec",               "MASC_KEEPER_WATCHDOG_STALE_SEC";
     "watchdog.poll_sec",                "MASC_KEEPER_WATCHDOG_POLL_SEC";

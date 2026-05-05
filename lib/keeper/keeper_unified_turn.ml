@@ -1251,6 +1251,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ~attempted_cascades:
                               (next_execution_cascade_name :: attempted_cascades))
                   | Degraded_retry_budget_exhausted degraded_retry ->
+                      (* #13120 review: record the rejection so downstream
+                         receipts/decision records show "rotation considered,
+                         budget exhausted" rather than a generic provider
+                         failure.  [degraded_retry_info] also flips so
+                         [degraded_retry_applied] reflects that we evaluated
+                         a fallback and explicitly declined it. *)
+                      record_cascade_rotation_attempt
+                        ~from_cascade:execution.cascade_name
+                        ~retry:degraded_retry
+                        ~outcome:"budget_exhausted"
+                        err;
+                      degraded_retry_info := Some degraded_retry;
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
                         meta.name execution_cascade_name
@@ -1261,6 +1273,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       mark_terminal_error err;
                       Error err
                   | Degraded_retry_slot_phase_exhausted degraded_retry ->
+                      (* #13120 review: same evidence trail as the
+                         budget-exhausted branch above — operator dashboards
+                         must see "slot-phase exhausted" as a distinct
+                         outcome to attribute keeper churn correctly. *)
+                      record_cascade_rotation_attempt
+                        ~from_cascade:execution.cascade_name
+                        ~retry:degraded_retry
+                        ~outcome:"slot_phase_exhausted"
+                        err;
+                      degraded_retry_info := Some degraded_retry;
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but productive slot phase budget %.1fs is exhausted after %.1fs; ending this cycle to release the outer turn slot: %s"
                         meta.name execution_cascade_name

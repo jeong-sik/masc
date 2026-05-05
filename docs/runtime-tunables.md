@@ -165,6 +165,7 @@ the categorization roadmap (`@category` tags are a follow-up).
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | 280 |  |
 | `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | 181 | Dead tombstone TTL: seconds before Dead entries are cleaned up |
 | `MASC_KEEPER_DEBUG` | feature_flag | 299 | Enable keeper debug logging. Default: false. |
+| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | 268 | #13120: productive slot-phase budget for cascade degraded retry.  Once a turn has spent more than this many seconds inside the slot, further degraded-retry rotations are blocked even if the outer turn budget would otherwise allow them — the keeper releases the slot back to its peers instead of churning under it. Default: 60.0. Min: 5.0. |
 | `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` | typed:float | 305 | Daily budget for keeper deliberation (USD). Default: 0.10. Re-readable within the process. Live operator control shou... |
 | `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | 739 | Docker container name for keeper playground execution. Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playgrou... |
 | `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | 749 |  |

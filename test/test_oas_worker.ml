@@ -2236,7 +2236,63 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
     [ "claude_code:fallback-0"; "claude_code:fallback-1" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
-(* #10681: filter rejection diagnostics. When [filter_*] empties the
+(* §M backward-compat dual-emit: successful swap emits BOTH the legacy
+   [detail="swapped"] series AND the new [detail="swapped:<kind>"] series
+   so existing dashboards continue to fire while operators migrate. *)
+let test_filter_candidate_providers_secondary_swap_dual_emit () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let legacy_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_fallback_triggered
+      ~labels:[("kind", "dual_track_swap"); ("detail", "swapped")]
+      ()
+  in
+  let new_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_fallback_triggered
+      ~labels:[("kind", "dual_track_swap"); ("detail", "swapped:claude_code")]
+      ()
+  in
+  let _ =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~secondary_resolver:
+        (fun provider_index provider_cfg ->
+           if provider_index = 0
+              && provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+           then Some (make_claude_code_provider_cfg ())
+           else None)
+      ~label:"tool_use_strict"
+      [ make_codex_cli_provider_cfg () ]
+  in
+  let legacy_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_fallback_triggered
+      ~labels:[("kind", "dual_track_swap"); ("detail", "swapped")]
+      ()
+  in
+  let new_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_fallback_triggered
+      ~labels:[("kind", "dual_track_swap"); ("detail", "swapped:claude_code")]
+      ()
+  in
+  Alcotest.(check (float 0.0001))
+    "legacy detail=swapped series incremented (backward compat)"
+    (legacy_before +. 1.0) legacy_after;
+  Alcotest.(check (float 0.0001))
+    "new detail=swapped:claude_code series incremented"
+    (new_before +. 1.0) new_after When [filter_*] empties the
    cascade, the WARN log now lists each rejected provider with its
    classification — these tests pin the classifier to its 3-stage
    short-circuit so a regression in any check surfaces here instead
@@ -4219,6 +4275,10 @@ let () =
         "provider-normalized secondary resolver receives candidate index"
         `Quick
         test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_index;
+      Alcotest.test_case
+        "secondary swap emits legacy + new detail series (§M dual-emit)"
+        `Quick
+        test_filter_candidate_providers_secondary_swap_dual_emit;
       Alcotest.test_case
         "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
         `Quick test_classify_filter_rejection_codex_keeper_bound_actor;

@@ -128,3 +128,14 @@ val request_alive_but_stuck_recovery_for_test :
 
 val alive_but_stuck_reset_for_test : unit -> unit
 (** Test-only: clear the alive-but-stuck dedup table. *)
+
+val alive_but_stuck_should_emit_for_test :
+  now:float ->
+  dedup_ttl_sec:float ->
+  string ->
+  bool
+(** Test-only: expose the per-keeper dedup gate so tests can verify
+    the "at-most-one queued wakeup per dedup window" invariant (§D).
+    Returns [true] and records [now] on the first call within
+    [dedup_ttl_sec]; returns [false] on subsequent calls within the
+    window; returns [true] again once the window expires. *)

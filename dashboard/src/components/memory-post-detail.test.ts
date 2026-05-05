@@ -55,7 +55,7 @@ vi.mock('./memory-state', () => ({
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread, PostDetail, filterCommentTree } from './memory-post-detail'
+import { CommentThread, PostDetail, countCommentDescendants, filterCommentTree } from './memory-post-detail'
 import type { BoardComment } from '../types/core'
 
 afterEach(() => {
@@ -181,6 +181,37 @@ describe('filterCommentTree', () => {
     for (const [k, v] of childrenSnapshot) {
       expect([...(childrenMap.get(k) ?? [])]).toEqual([...v])
     }
+  })
+})
+
+describe('countCommentDescendants', () => {
+  // Tree:
+  //   r1 "alpha"
+  //     c11 "beta"
+  //       c111 "gamma"
+  //   r2 "delta"
+  //     c21 "epsilon"
+  const countsMap = new Map<string, readonly any[]>([
+    ['r1', [{ id: 'c11' }]],
+    ['c11', [{ id: 'c111' }]],
+    ['r2', [{ id: 'c21' }]],
+  ])
+
+  it('counts all descendants for a root with nested replies', () => {
+    expect(countCommentDescendants('r1', countsMap)).toBe(2)
+  })
+
+  it('counts direct children when there are no deeper descendants', () => {
+    expect(countCommentDescendants('r2', countsMap)).toBe(1)
+  })
+
+  it('counts leaf nodes as zero', () => {
+    expect(countCommentDescendants('c111', countsMap)).toBe(0)
+    expect(countCommentDescendants('c21', countsMap)).toBe(0)
+  })
+
+  it('returns zero for a missing id', () => {
+    expect(countCommentDescendants('missing', countsMap)).toBe(0)
   })
 })
 

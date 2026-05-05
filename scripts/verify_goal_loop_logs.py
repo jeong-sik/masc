@@ -131,6 +131,17 @@ def iter_log_handle(path: str, handle: TextIO) -> Iterable[tuple[str, int, str]]
         yield path, line_no, line.rstrip("\n")
 
 
+def _dedupe_patterns(patterns: list[str]) -> list[str]:
+    """Return unique patterns preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in patterns:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
 def verify_log_contract(
     paths: list[str],
     *,
@@ -138,6 +149,11 @@ def verify_log_contract(
     must_not_contain: list[str],
     max_samples: int,
 ) -> LogContractReport:
+    # Dedupe at call time; duplicate patterns would produce duplicated
+    # violation reports for the same pattern (thread ncQa/ncQp).
+    must_contain = _dedupe_patterns(must_contain)
+    must_not_contain = _dedupe_patterns(must_not_contain)
+
     required = [(pattern, re.compile(pattern)) for pattern in must_contain]
     forbidden = [(pattern, re.compile(pattern)) for pattern in must_not_contain]
     required_counts = {pattern: 0 for pattern, _ in required}
@@ -148,8 +164,11 @@ def verify_log_contract(
     forbidden_samples: dict[str, list[LogMatchSample]] = {
         pattern: [] for pattern, _ in forbidden
     }
-    checked_files: list[str] = []
-    checked_files_seen: set[str] = set()
+    # Pre-populate checked_files from non-stdin input paths so that an
+    # empty log file (zero lines) is still reported rather than showing
+    # '<stdin>' in the output (thread ncQ5).
+    checked_files: list[str] = [p for p in paths if p != "-"]
+    checked_files_seen: set[str] = set(checked_files)
     total_lines = 0
 
     for path, line_no, line in iter_log_lines(paths):
@@ -250,13 +269,31 @@ def log_contract_report_to_text(report: LogContractReport) -> str:
     return "\n".join(lines)
 
 
+def _regex_type(value: str) -> str:
+    """Argparse type that validates a string is a valid Python regex."""
+    try:
+        re.compile(value)
+    except re.error as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid regular expression {value!r}: {exc}"
+        ) from exc
+    return value
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "orient_json",
         nargs="?",
         default="-",
-        help="Orient JSON path, or '-' for stdin (default).",
+        # In --mode orient this is the Orient JSON path; in --mode log-contract
+        # it doubles as a log path when no --log flags are given.  Use '-' for
+        # stdin in both modes (thread ncRK: neutral positional name).
+        help=(
+            "In --mode orient: path to Orient JSON, or '-' for stdin (default). "
+            "In --mode log-contract: treated as an extra log path when no --log "
+            "flags are supplied; use '-' for stdin."
+        ),
     )
     parser.add_argument(
         "--policy",
@@ -280,12 +317,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--must-contain",
         action="append",
         default=[],
+        type=_regex_type,
         help="Regex that must appear at least once in --mode log-contract.",
     )
     parser.add_argument(
         "--must-not-contain",
         action="append",
         default=[],
+        type=_regex_type,
         help="Regex that must be absent in --mode log-contract.",
     )
     parser.add_argument(

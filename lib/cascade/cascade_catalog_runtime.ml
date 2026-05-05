@@ -1123,11 +1123,15 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     The function never raises; observability for swap success/failure
     flows through the unified
     [Llm_metric_bridge.emit_fallback_triggered ~kind:"dual_track_swap"]
-    counter that the caller in [oas_worker_named_cascade] increments —
-    successful swaps tag [~detail:"swapped"], secondary rejections tag
-    [~detail:<filter_rejection_reason>]. (#13097 review: removed stale
-    [cascade_secondary_swap_total] reference; that name was never
-    registered, the unified counter is the SSOT.) *)
+    counter that the caller in [oas_worker_named_cascade] increments.
+    §M backward-compat dual-emit contract (one release):
+    - successful swap emits BOTH [~detail:"swapped"] (legacy) and
+      [~detail:"swapped:<secondary_kind>"] (new per-secondary series)
+    - secondary rejected emits BOTH [~detail:<filter_rejection_reason>]
+      (legacy) and [~detail:"rejected:<secondary_kind>:<reason>"] (new)
+    (#13097 review: removed stale [cascade_secondary_swap_total]
+    reference; that name was never registered, the unified counter is
+    the SSOT.) *)
 let resolve_secondary_provider_for_primary ?sw ?net ?clock
     ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with

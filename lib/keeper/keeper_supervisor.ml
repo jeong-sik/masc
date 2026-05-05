@@ -1664,6 +1664,11 @@ let alive_but_stuck_reset_for_test () =
   Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
     Hashtbl.clear alive_but_stuck_last_alert)
 
+(** Test-only: expose the dedup gate so tests can verify the
+    at-most-one-per-window invariant without needing a full Eio context
+    with a clock (thread §D). *)
+let alive_but_stuck_should_emit_for_test = alive_but_stuck_should_emit
+
 let request_alive_but_stuck_recovery ~base_path ~elapsed
     (entry : Keeper_registry.registry_entry) =
   let kill_class =

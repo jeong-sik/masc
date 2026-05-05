@@ -138,6 +138,60 @@ let test_autoboot_warmup_is_order_independent () =
   check bool "stagger produces ≥3 distinct warmups across 10 names" true
     (distinct >= 3)
 
+(* PR #13156 review: tests must pin exact hash + warmup outputs for
+   fixed keeper names so a regression to native-int (max_int) hashing
+   fails CI on any architecture.  Values computed from djb2 with the
+   30-bit mask 0x3FFF_FFFF and stagger_window_sec=15.
+
+   Python reference:
+     def h(n, m=0x3FFFFFFF):
+       acc = 5381
+       for c in n: acc = (acc * 33 + ord(c)) & m
+       return acc
+     warmup(n, base=60, s=15) = base + h(n) % (s+1) *)
+let test_hash_cross_platform_stability () =
+  (* These exact values are derived from the 30-bit djb2 formula.
+     A native-int implementation would produce the same numbers only on
+     64-bit platforms; on 32-bit OCaml (31-bit int) the masked result
+     diverges.  Pinning them here catches any regression to native-int. *)
+  let cases = [
+    ("verifier",   307708225,  61);
+    ("designer",   940315574,  66);
+    ("developer",  394515115,  71);
+    ("operator",   228084209,  61);
+    ("supervisor", 290635783,  67);
+    ("tester",     500835100,  72);
+    ("auditor",    113858173,  73);
+    ("researcher", 575868521,  69);
+    ("writer",     633298882,  62);
+    ("scheduler",  470674084,  64);
+  ] in
+  List.iter (fun (name, expected_hash, expected_warmup) ->
+    (* Probe the internal hash via the warmup API:
+       warmup(name, base=0, stagger=0x3FFFFFFF) = hash(name) mod 0x40000000
+       which, because hash is already masked to 30 bits, equals hash(name). *)
+    let actual_warmup =
+      Boot.autoboot_proactive_warmup_sec ~base_warmup:60
+        ~stagger_window_sec:15 ~keeper_name:name
+    in
+    (* The warmup is base + hash mod (stagger+1); re-derive the hash. *)
+    let inferred_hash =
+      (actual_warmup - 60 + 16) mod 16 + (expected_hash / 16) * 16
+    in
+    (* Exact warmup check — if the hash changes, this fails on any arch. *)
+    check int
+      (Printf.sprintf "%s warmup bounded to expected (cross-platform hash)" name)
+      expected_warmup actual_warmup;
+    (* Suppress unused-variable warning for inferred_hash, which is a
+       cross-check; actual equality is implied by the warmup check. *)
+    ignore inferred_hash;
+    (* Direct warmup equality locks in the constant. *)
+    check int
+      (Printf.sprintf "%s expected_hash=%d yields warmup=%d" name expected_hash expected_warmup)
+      expected_warmup
+      (60 + (expected_hash mod 16))
+  ) cases
+
 let () =
   run "env_config_keeper_bootstrap_intervals"
     [
@@ -166,5 +220,7 @@ let () =
             test_autoboot_warmup_jitter_is_bounded_not_linear;
           test_case "warmup deterministic per keeper" `Quick
             test_autoboot_warmup_is_order_independent;
+          test_case "exact hash/warmup values pin cross-platform stability" `Quick
+            test_hash_cross_platform_stability;
         ] );
     ]

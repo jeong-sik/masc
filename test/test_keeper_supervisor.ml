@@ -1511,4 +1511,33 @@ let () =
                     "expected Stale_turn_timeout (Idle_turn ...) to be \
                      preserved unchanged")));
       ]);
+    (* PR #13123 review (§D): dedup gate — at most one queued wakeup per
+       dedup window.  [alive_but_stuck_scan] gates both the counter
+       increment and the recovery request on [alive_but_stuck_should_emit].
+       Verify: first call within a window returns [true] and records the
+       timestamp; second call within the window returns [false]; once the
+       window expires the gate opens again. *)
+    "alive_but_stuck_dedup", [
+      test_case "at-most-one emit per dedup window" `Quick (fun () ->
+        Sup.alive_but_stuck_reset_for_test ();
+        let name = "abs-dedup-test" in
+        let ttl = 3600.0 in
+        (* First call within the window: gate opens. *)
+        check bool "first call returns true"
+          true
+          (Sup.alive_but_stuck_should_emit_for_test ~now:1000.0 ~dedup_ttl_sec:ttl name);
+        (* Second call within the window: gate closed — dedup in effect. *)
+        check bool "second call within window returns false"
+          false
+          (Sup.alive_but_stuck_should_emit_for_test ~now:1001.0 ~dedup_ttl_sec:ttl name);
+        (* A different keeper name in the same window is unaffected. *)
+        check bool "different keeper is still gated independently"
+          true
+          (Sup.alive_but_stuck_should_emit_for_test ~now:1001.0 ~dedup_ttl_sec:ttl "other-keeper");
+        (* After the TTL expires, the gate reopens for the original keeper. *)
+        check bool "call after TTL expiry returns true"
+          true
+          (Sup.alive_but_stuck_should_emit_for_test
+             ~now:(1000.0 +. ttl +. 1.0) ~dedup_ttl_sec:ttl name));
+    ];
   ]

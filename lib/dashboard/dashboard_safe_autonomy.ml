@@ -770,11 +770,11 @@ let build_keeper_snapshot
    a slow Docker daemon costs [timeout * keeper_count] before the dashboard can
    return any bytes.
 
-   Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
-   through [Log.warn]-style sites that format duration with [%.0f],
-   which would render the 0.25s budget as "0s" and confuse operators
-   reading "command timed out after 0s".  1.0s produces a
-   self-explanatory diagnostic when Docker is genuinely slow.
+   1.0s per-probe budget for Docker container status queries.  Docker p99
+   response is in the tens-of-ms range on a healthy daemon; the 1.0s floor
+   absorbs transient daemon lag without holding the dashboard response too
+   long.  (PR #13113 review: Process_eio timeout messages now use %.2f so
+   sub-second budgets, should any future caller use them, render accurately.)
 
    Worst-case budget bookkeeping (PR #13113 review):
    [Keeper_sandbox_runtime.list_containers] internally runs TWO

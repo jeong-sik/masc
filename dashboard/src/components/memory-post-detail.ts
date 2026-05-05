@@ -65,6 +65,48 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
 }
 
 /**
+ * Count total descendants of a comment, recursing through childrenMap.
+ *
+ * Exported for use in pre-computed descendant-count maps (see
+ * `buildDescendantCountMap`) so each CommentItem can look up its count
+ * in O(1) rather than re-traversing the tree on every render (§H2 fix).
+ */
+export function countCommentDescendants(
+  commentId: string,
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>,
+): number {
+  const children = childrenMap.get(commentId) ?? []
+  let count = 0
+  for (const child of children) {
+    count += 1 + countCommentDescendants(child.id, childrenMap)
+  }
+  return count
+}
+
+/**
+ * Precompute a map of comment id → total descendant count for the
+ * entire tree in a single O(n) pass (post-order).  Callers should
+ * memoize this map and look up per-comment counts in O(1).
+ */
+function buildDescendantCountMap(
+  roots: readonly BoardComment[],
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>,
+): Map<string, number> {
+  const result = new Map<string, number>()
+  const visit = (id: string): number => {
+    const children = childrenMap.get(id) ?? []
+    let total = 0
+    for (const child of children) {
+      total += 1 + visit(child.id)
+    }
+    result.set(id, total)
+    return total
+  }
+  for (const r of roots) visit(r.id)
+  return result
+}
+
+/**
  * Pure tree-aware text filter on a comment forest.
  *
  * Case-insensitive substring match on `comment.content`.
@@ -121,11 +163,13 @@ function CommentItem({
   postId,
   depth = 0,
   childrenMap,
+  descendantCounts,
 }: {
   comment: BoardComment
   postId: string
   depth?: number
   childrenMap: ReadonlyMap<string, readonly BoardComment[]>
+  descendantCounts?: ReadonlyMap<string, number>
 }) {
   const contentChars = Array.from(comment.content ?? '')
   const needsTruncation = contentChars.length > 300
@@ -191,7 +235,7 @@ function CommentItem({
       </div>
       ${replies.length > 0 ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} />`)}
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} />`)}
         </div>
       ` : null}
     </div>
@@ -209,12 +253,20 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
     () => filterCommentTree(roots, childrenMap, query.value),
     [roots, childrenMap, query.value],
   )
+  // Precompute descendant counts once per filtered tree mount (§H2: avoid
+  // O(n²) per-render recursion in CommentItem).
+  const descendantCounts = useMemo(
+    () => buildDescendantCountMap(filteredRoots, filteredChildrenMap),
+    [filteredRoots, filteredChildrenMap],
+  )
 
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
   const isFiltering = query.value.trim() !== ''
   const hiddenCount = filteredRoots.length - INITIAL_SHOW
-  const visible = expanded || filteredRoots.length <= INITIAL_SHOW
+  // §H1: bypass INITIAL_SHOW depth cap while a filter query is active so
+  // matches are never hidden behind the "show more" button.
+  const visible = isFiltering || expanded || filteredRoots.length <= INITIAL_SHOW
     ? filteredRoots
     : filteredRoots.slice(-INITIAL_SHOW)
 
@@ -234,7 +286,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
       ${isFiltering && filteredRoots.length === 0 ? html`
         <${EmptyState} message=${`"${query.value.trim()}" 일치하는 댓글 없음`} compact />
       ` : null}
-      ${!expanded && hiddenCount > 0 ? html`
+      ${!isFiltering && !expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"
           size="sm"
@@ -242,8 +294,8 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기<//>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
-      ${expanded && hiddenCount > 0 ? html`
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} />`)}
+      ${!isFiltering && expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"
           size="sm"

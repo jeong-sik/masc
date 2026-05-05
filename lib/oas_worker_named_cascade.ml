@@ -293,11 +293,22 @@ let cascade_empty_should_emit_first ~label ~signature =
     in [kept], on failure (or when no secondary is configured) the
     primary stays in [rejected].
 
-    Observability:
-    - Successful swap -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"swapped"]
-    - Secondary also rejected -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"<secondary_reason>"]
-    - No secondary configured -> no extra metric (the caller's existing
-      [cascade_empty:<reason>] capability_drop already covers this case).
+    Observability (RFC-0027 PR-9c + §M backward-compat dual-emit):
+    Successful swap emits TWO counters:
+    - [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"swapped"]
+      (legacy series, kept for one release so existing dashboards/rules
+      that query [detail="swapped"] continue to fire)
+    - [emit_fallback_triggered ~kind:"dual_track_swap"
+        ~detail:"swapped:<secondary_kind>"]
+      (new per-secondary series for drill-down by backend kind)
+    Secondary rejected emits TWO counters:
+    - [emit_fallback_triggered ~kind:"dual_track_swap"
+        ~detail:"<filter_rejection_reason_label>"]
+      (legacy series)
+    - [emit_fallback_triggered ~kind:"dual_track_swap"
+        ~detail:"rejected:<secondary_kind>:<filter_rejection_reason_label>"]
+      (new per-secondary+reason series)
+    No secondary configured → no extra metric.
     The function is total and never raises; secondary parsing errors are
     surfaced as [None] by the resolver. *)
 let attempt_secondary_swap
@@ -314,6 +325,11 @@ let attempt_secondary_swap
   match secondary_resolver provider_index primary with
   | None -> Either.Right (primary, primary_reason)
   | Some secondary -> (
+      (* RFC-0027 PR-9c: per-secondary accounting label.
+         Cardinality bounded by [provider_kind] enum size. *)
+      let secondary_kind_label =
+        Llm_provider.Provider_config.string_of_provider_kind secondary.kind
+      in
       match
         classify_filter_rejection
           ~keeper_name ?runtime_mcp_policy ~tools
@@ -321,18 +337,33 @@ let attempt_secondary_swap
           secondary
       with
       | None ->
+          (* §M dual-emit: keep legacy series alive for one release so
+             dashboards/recording-rules querying [detail="swapped"] still
+             fire while operators migrate to the per-secondary label. *)
           Llm_metric_bridge.emit_fallback_triggered
             ~kind:"dual_track_swap" ~detail:"swapped";
+          Llm_metric_bridge.emit_fallback_triggered
+            ~kind:"dual_track_swap"
+            ~detail:(Printf.sprintf "swapped:%s" secondary_kind_label);
           Either.Left secondary
       | Some secondary_reason ->
           (* Both primary and secondary rejected: keep the primary in
              rejected so the cascade-empty WARN signature stays anchored
              on the user-declared model. The secondary's rejection is
              surfaced as a separate metric so operators can audit which
-             dual-track entries are uselessly configured. *)
+             dual-track entries are uselessly configured. The kind label
+             rides on the rejection detail too, so the same
+             [secondary_kind] series is queryable across swap success /
+             swap failure outcomes.
+             §M dual-emit: legacy series preserved alongside new series. *)
+          let reason_label = filter_rejection_reason_label secondary_reason in
           Llm_metric_bridge.emit_fallback_triggered
             ~kind:"dual_track_swap"
-            ~detail:(filter_rejection_reason_label secondary_reason);
+            ~detail:reason_label;
+          Llm_metric_bridge.emit_fallback_triggered
+            ~kind:"dual_track_swap"
+            ~detail:(Printf.sprintf "rejected:%s:%s"
+                       secondary_kind_label reason_label);
           Either.Right (primary, primary_reason))
 
 let filter_candidate_providers_for_tool_support

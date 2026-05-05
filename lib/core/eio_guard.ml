@@ -56,12 +56,16 @@ let yield_if_ready () =
   if Atomic.get ready then
     Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
+let fair_yield = yield_if_ready
+
+let default_fair_yield_interval = 1000
+
 type yield_meter = {
   interval : int;
   steps : int Atomic.t;
 }
 
-let create_yield_meter ?(interval = 1000) () =
+let create_yield_meter ?(interval = default_fair_yield_interval) () =
   { interval = max 1 interval; steps = Atomic.make 0 }
 
 let yield_step meter =

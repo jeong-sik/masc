@@ -1075,6 +1075,21 @@ let metric_keeper_stale_broadcast_emit_failures =
    keeper_unified_metrics.ml. *)
 let metric_keeper_tool_use_failure =
   "masc_keeper_tool_use_failure_total"
+(* #13xxx: keeper dispatch layer denied a tool call because the
+   tool is not in the keeper's allowlist (preset drift, deny-list,
+   or unknown tool name).  Distinct from [metric_keeper_tool_use_failure]
+   (post-execution hook failure) and
+   [metric_keeper_turn_gate_rejected_terminal] (pre_tool_use guard
+   hard-reject).  Labels:
+   - [keeper] — keeper name (fleet-bounded)
+   - [tool]   — tool name attempted (registry-bounded, ~100 tools)
+   - [reason] — vocabulary:
+       "not_in_candidate_set" (unknown / not available to this preset)
+       "denied_by_policy"     (explicit deny-list entry)
+       "not_in_allow_set"     (tool exists but preset omits it)
+   Cardinality: ~16 keepers × ~100 tools × 3 reasons = ~4800 series. *)
+let metric_keeper_tool_not_allowed =
+  "masc_keeper_tool_not_allowed_total"
 let metric_after_turn_response_model_empty =
   "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias =
@@ -1972,6 +1987,17 @@ let init () =
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_keeper_tool_use_failure
     "Total keeper tool use failures during OAS hooks. Labels: keeper, tool." Counter;
+  add metric_keeper_tool_not_allowed
+    "Total keeper tool calls denied because the tool is not in the keeper's \
+     allowlist (preset drift, deny-list, or unknown tool name). \
+     Labels: keeper, tool, reason. \
+     reason ∈ {not_in_candidate_set, denied_by_policy, not_in_allow_set}. \
+     Alert on a non-zero rate for any (keeper, tool) pair: it means the \
+     keeper's BDI is attempting tools that its preset/policy does not \
+     permit, causing the keeper to loop without making progress. \
+     Distinct from masc_keeper_tool_use_failure_total (post-execution \
+     hook failure) and masc_keeper_turn_gate_rejected_terminal_total \
+     (pre_tool_use guard hard-reject)." Counter;
   add metric_after_turn_response_model_empty
     "After-turn response model resolution returned empty string." Counter;
   add metric_after_turn_response_model_alias

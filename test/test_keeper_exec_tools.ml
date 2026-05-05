@@ -142,6 +142,109 @@ let test_execute_with_outcome_policy_gate_is_failure () =
       check string "policy gate error" "tool_not_allowed"
         Yojson.Safe.Util.(member "error" json |> to_string))
 
+let counter_for_tool_not_allowed ~keeper ~tool ~reason =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_tool_not_allowed
+    ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
+    ()
+
+(* #13xxx: tool_not_allowed Prometheus counter *)
+let test_tool_not_allowed_increments_counter () =
+  (* A keeper with only keeper_tools_list allowed tries to call
+     keeper_fs_read — should land in reason=not_in_allow_set. *)
+  let keeper = "test-exec-tools-not-allowed-a" in
+  let tool = "keeper_fs_read" in
+  let reason = "not_in_allow_set" in
+  with_exec_fixture
+    ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
+    "keeper_exec_tools_not_allowed_counter"
+    (fun ~config ~meta ~ctx_work ->
+      let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
+      ignore
+        (KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta:{ meta with name = keeper }
+           ~ctx_work ~exec_cache:None
+           ~name:tool
+           ~input:(`Assoc [ ("path", `String "blocked.txt") ])
+           ());
+      check (float 0.0001) "not_in_allow_set counter +1"
+        (before +. 1.0)
+        (counter_for_tool_not_allowed ~keeper ~tool ~reason))
+
+let test_tool_not_allowed_denied_by_policy_counter () =
+  (* A keeper whose denylist contains keeper_board_post should land in
+     reason=denied_by_policy. *)
+  let keeper = "test-exec-tools-not-allowed-b" in
+  let tool = "keeper_board_post" in
+  let reason = "denied_by_policy" in
+  (* Build meta that has board_post in the allowlist but also on the denylist
+     so can_execute returns false via the deny-set path. *)
+  let meta_with_deny =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ ("name", `String keeper)
+          ; ("agent_name", `String keeper)
+          ; ("trace_id", `String "test-not-allowed-b")
+          ; ("allowed_paths", `List [ `String "*" ])
+          ; ( "tool_access"
+            , Masc_mcp.Keeper_types.tool_access_to_json
+                (Masc_mcp.Keeper_types.Custom [ "keeper_board_post" ]) )
+          ; ( "tool_denylist"
+            , `List [ `String "keeper_board_post" ] )
+          ])
+    with
+    | Ok m -> m
+    | Error e -> failwith ("meta_of_json_fixture: " ^ e)
+  in
+  let dir =
+    let d = Filename.temp_file "keeper_exec_not_allowed_b" "" in
+    Unix.unlink d; Unix.mkdir d 0o755; d
+  in
+  let cleanup () =
+    let rec rm t =
+      if Sys.file_exists t then
+        if Sys.is_directory t then begin
+          Sys.readdir t |> Array.iter (fun n -> rm (Filename.concat t n));
+          Unix.rmdir t
+        end else Unix.unlink t
+    in
+    try rm dir with _ -> ()
+  in
+  Fun.protect ~finally:cleanup (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Masc_mcp.Coord.default_config dir in
+    let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
+    ignore
+      (KET.execute_keeper_tool_call_with_outcome
+         ~config ~meta:meta_with_deny ~ctx_work:(make_ctx ())
+         ~exec_cache:None ~name:tool ~input:(`Assoc []) ());
+    check (float 0.0001) "denied_by_policy counter +1"
+      (before +. 1.0)
+      (counter_for_tool_not_allowed ~keeper ~tool ~reason))
+
+let test_tool_not_allowed_reason_label_is_bounded () =
+  (* Verify that the reason label written into the JSON payload is one
+     of the three bounded vocabulary values, not a free-form string. *)
+  with_exec_fixture
+    ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
+    "keeper_exec_tools_reason_bounded"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_fs_read"
+          ~input:(`Assoc [ ("path", `String "x") ])
+          ()
+      in
+      let json = Yojson.Safe.from_string result.raw_output in
+      let reason = Yojson.Safe.Util.(member "reason" json |> to_string) in
+      let valid = [ "not_in_candidate_set"; "denied_by_policy"; "not_in_allow_set" ] in
+      check bool "reason label is bounded vocabulary"
+        true (List.mem reason valid))
+
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
@@ -365,6 +468,14 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
+    ]);
+    ("tool_not_allowed_counter", [
+      test_case "increments for not_in_allow_set" `Quick
+        test_tool_not_allowed_increments_counter;
+      test_case "increments for denied_by_policy" `Quick
+        test_tool_not_allowed_denied_by_policy_counter;
+      test_case "reason label is bounded vocabulary" `Quick
+        test_tool_not_allowed_reason_label_is_bounded;
     ]);
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick

@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [0.19.8] - 2026-05-05
+
+### Added
+- Cascade_capability_profile module (RFC-0027 PR-1): closed enumeration of named capability profiles (tool_strict / inline_tools / lite / local) with provider satisfaction predicate. Pure addition; no call sites yet.
+
 ## [0.19.7] - 2026-05-05
 
 ### Added

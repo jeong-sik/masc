@@ -11,6 +11,17 @@
 <!-- Tests, harness runs, screenshots, logs, or other proof. -->
 - If tool-call behavior or provider tool support changed: include replay-harness or `ToolCallContract` evidence.
 
+## GOAL LOOP ACT checklist
+
+<!-- Complete this section for operational/runtime fixes. Leave unchecked items with a brief N/A reason. -->
+
+- [ ] Observe — metric/log/trace evidence for the failure or drift is linked or pasted above
+- [ ] Orient — mapped to a finding, live-log pattern, audit item, or explicit new finding
+- [ ] Decide — priority/risk rationale is stated, including why this scope is the next action
+- [ ] Act — code/config/docs changed in the smallest bounded scope; rollback path is clear
+- [ ] Verify — regression test, focused local command, CI job, or production-log check proves PASS/FAIL
+- [ ] Loop — remaining follow-up is linked as an issue/PR/handoff, or explicitly marked none
+
 ## Review evidence
 
 <!-- Cross-model review result, reviewer model, and fallback reason if any. -->

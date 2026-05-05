@@ -42,7 +42,7 @@ let test_success_shape () =
     Oas_worker_cascade.cascade_attempt_terminal_event_json
       ~model_id:"glm-coding:glm-4.7"
       ~model_label:(Some "glm-coding:glm-4.7") ~latency_ms:(Some 35921)
-      ~error:None
+      ~error:None ()
   in
   Alcotest.(check string)
     "event tag" "cascade_attempt_terminal" (assoc_string "event" json);
@@ -58,14 +58,30 @@ let test_success_shape () =
   | Some `Null -> ()
   | other ->
       Alcotest.failf "error_message expected `Null on success, got %s"
-        (Yojson.Safe.to_string (Option.value other ~default:`Null)))
+        (Yojson.Safe.to_string (Option.value other ~default:`Null)));
+  (match assoc_field "slot_release_at_phase" json with
+  | Some `Null -> ()
+  | other ->
+      Alcotest.failf "slot_release_at_phase expected `Null by default, got %s"
+        (Yojson.Safe.to_string (Option.value other ~default:`Null)));
+  (match assoc_field "productive_phase_elapsed_ms" json with
+  | Some `Null -> ()
+  | other ->
+      Alcotest.failf
+        "productive_phase_elapsed_ms expected `Null by default, got %s"
+        (Yojson.Safe.to_string (Option.value other ~default:`Null)));
+  match assoc_field "retry_phase_elapsed_ms" json with
+  | Some `Null -> ()
+  | other ->
+      Alcotest.failf "retry_phase_elapsed_ms expected `Null by default, got %s"
+        (Yojson.Safe.to_string (Option.value other ~default:`Null))
 
 let test_failure_shape () =
   let json =
     Oas_worker_cascade.cascade_attempt_terminal_event_json
       ~model_id:"gemini_cli:gemini-2.5-pro" ~model_label:None
       ~latency_ms:(Some 1200)
-      ~error:(Some "OAS budget timeout after 600.0s")
+      ~error:(Some "OAS budget timeout after 600.0s") ()
   in
   Alcotest.(check string)
     "event tag" "cascade_attempt_terminal" (assoc_string "event" json);
@@ -89,13 +105,37 @@ let test_failure_with_no_latency () =
     Oas_worker_cascade.cascade_attempt_terminal_event_json
       ~model_id:"codex_cli:gpt-5.3-codex-spark"
       ~model_label:(Some "codex_cli:gpt-5.3-codex-spark") ~latency_ms:None
-      ~error:(Some "rollout thread not found")
+      ~error:(Some "rollout thread not found") ()
   in
   Alcotest.(check string) "outcome" "failure" (assoc_string "outcome" json);
   match assoc_field "latency_ms" json with
   | Some `Null -> ()
   | other ->
       Alcotest.failf "latency_ms expected `Null, got %s"
+        (Yojson.Safe.to_string (Option.value other ~default:`Null))
+
+let test_slot_phase_shape () =
+  let json =
+    Oas_worker_cascade.cascade_attempt_terminal_event_json
+      ~slot_release_at_phase:"productive_phase_exhausted"
+      ~productive_phase_elapsed_ms:174000 ~retry_phase_elapsed_ms:0
+      ~model_id:"anthropic:claude-sonnet-4.5"
+      ~model_label:(Some "anthropic:claude-sonnet-4.5")
+      ~latency_ms:(Some 174000)
+      ~error:(Some "OAS budget timeout") ()
+  in
+  Alcotest.(check string)
+    "slot release phase" "productive_phase_exhausted"
+    (assoc_string "slot_release_at_phase" json);
+  (match assoc_field "productive_phase_elapsed_ms" json with
+  | Some (`Int 174000) -> ()
+  | other ->
+      Alcotest.failf "productive_phase_elapsed_ms expected 174000, got %s"
+        (Yojson.Safe.to_string (Option.value other ~default:`Null)));
+  match assoc_field "retry_phase_elapsed_ms" json with
+  | Some (`Int 0) -> ()
+  | other ->
+      Alcotest.failf "retry_phase_elapsed_ms expected 0, got %s"
         (Yojson.Safe.to_string (Option.value other ~default:`Null))
 
 let () =
@@ -108,5 +148,7 @@ let () =
             test_failure_shape;
           Alcotest.test_case "failure terminal shape no latency" `Quick
             test_failure_with_no_latency;
+          Alcotest.test_case "slot phase telemetry shape" `Quick
+            test_slot_phase_shape;
         ] );
     ]

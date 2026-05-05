@@ -318,8 +318,9 @@ let record_attempt_start (capture : cascade_metrics_capture)
     "why did the cascade exhaust" signals. Errors are recorded verbatim — no
     string-based classification at this layer (see #12817 spirit and the
     project memory rule "no string matching for classification"). *)
-let cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
-    ~error =
+let cascade_attempt_terminal_event_json ?slot_release_at_phase
+    ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id ~model_label
+    ~latency_ms ~error () =
   let outcome = if Option.is_some error then "failure" else "success" in
   `Assoc
     [
@@ -332,13 +333,21 @@ let cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
       ("outcome", `String outcome);
       ( "error_message",
         match error with Some s -> `String s | None -> `Null );
+      ( "slot_release_at_phase",
+        match slot_release_at_phase with Some s -> `String s | None -> `Null );
+      ( "productive_phase_elapsed_ms",
+        match productive_phase_elapsed_ms with
+        | Some n -> `Int n
+        | None -> `Null );
+      ( "retry_phase_elapsed_ms",
+        match retry_phase_elapsed_ms with Some n -> `Int n | None -> `Null );
     ]
 
 let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   let outcome = if Option.is_some error then "failure" else "success" in
   let details =
     cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
-      ~error
+      ~error ()
   in
   let summary =
     Printf.sprintf

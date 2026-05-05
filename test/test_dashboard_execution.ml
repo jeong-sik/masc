@@ -525,6 +525,9 @@ let append_execution_receipt ?(outcome = "ok")
                 Lib.Keeper_config.local_recovery_cascade_name;
             reason = "turn_timeout";
             outcome = "retry_scheduled";
+            slot_release_at_phase = Some "productive_phase_exhausted";
+            productive_phase_elapsed_ms = Some 174000;
+            retry_phase_elapsed_ms = Some 0;
             error_kind =
               Some (Lib.Keeper_execution_receipt.error_kind_of_string "internal");
             error_message = Some "turn timeout";
@@ -735,7 +738,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               |> List.find (fun keeper ->
                      keeper |> member "name" |> to_string = "sangsu")
             in
-            check string "compact keeper row exposes trust outcome" "ok"
+            check string "compact keeper row exposes trust outcome" "receipt_done"
               (compact_row |> member "trust" |> member "last_outcome"
              |> to_string);
             check string "compact keeper row exposes trust contract result"
@@ -774,6 +777,16 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
              |> member "to_cascade" |> to_string);
+            check int "execution trust row preserves productive phase elapsed"
+              174000
+              (trust_row |> member "trust" |> member "cascade"
+             |> member "rotation_attempts" |> to_list |> List.hd
+             |> member "productive_phase_elapsed_ms" |> to_int);
+            check string "execution trust row preserves slot release phase"
+              "productive_phase_exhausted"
+              (trust_row |> member "trust" |> member "cascade"
+             |> member "rotation_attempts" |> to_list |> List.hd
+             |> member "slot_release_at_phase" |> to_string);
             check (list string) "execution trust row preserves unexpected tools"
               [ "WebSearch" ]
               (trust_row |> member "trust" |> member "unexpected_tools"

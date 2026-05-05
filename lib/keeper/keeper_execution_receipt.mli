@@ -99,6 +99,9 @@ type cascade_rotation_attempt =
   ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
+  ; slot_release_at_phase : string option
+  ; productive_phase_elapsed_ms : int option
+  ; retry_phase_elapsed_ms : int option
   ; error_kind : error_kind option
   ; error_message : string option
   ; recorded_at : string

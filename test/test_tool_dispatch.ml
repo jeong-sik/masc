@@ -1,6 +1,7 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_result = Masc_mcp.Tool_result
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module KE = Masc_mcp.Keeper_exec_tools
 module Types = Masc_domain

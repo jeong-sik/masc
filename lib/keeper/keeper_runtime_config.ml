@@ -67,6 +67,8 @@ let key_to_env =
     "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";
     "supervisor.backoff_max_sec",       "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S";
     "supervisor.sweep_sec",             "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
+    "supervisor.alive_but_stuck_recovery_enabled",
+                                        "MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED";
     (* [lifecycle] *)
     "lifecycle.self_preservation_ratio","MASC_KEEPER_SELF_PRESERVATION_RATIO";
     "lifecycle.self_preservation_min",  "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES";

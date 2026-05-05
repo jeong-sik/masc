@@ -1601,9 +1601,10 @@ let liveness_recovery_scan (ctx : _ context) =
 
    This detector emits a Prometheus counter and requests a supervised
    restart through the same [failure_reason + fiber_stop] path as the
-   stale watchdog.  The next sweep can then force unresolved
-   watchdog-stopped entries into the normal crash/restart pipeline
-   instead of leaving the keeper at detection-only.
+   stale watchdog.  It also queues an Event Layer recovery wakeup so the
+   wake path is visible as structured stimulus.  The next sweep can then
+   force unresolved watchdog-stopped entries into the normal crash/restart
+   pipeline instead of leaving the keeper at detection-only.
    ────────────────────────────────────────────────────────────────── *)
 
 (** Pure detection: is this keeper alive-but-stuck at [now]?
@@ -1658,6 +1659,50 @@ let alive_but_stuck_should_emit ~now ~dedup_ttl_sec name =
     | _ ->
       Hashtbl.replace alive_but_stuck_last_alert name now;
       true)
+
+let alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec
+    (entry : Keeper_registry.registry_entry) =
+  Float.max stall_floor_sec
+    (float_of_int entry.meta.proactive.cooldown_sec
+     *. float_of_int stall_multiplier)
+
+let alive_but_stuck_recovery_stimulus ~now ~elapsed ~threshold
+    (entry : Keeper_registry.registry_entry) : Keeper_event_queue.stimulus =
+  let payload =
+    `Assoc [
+      "source", `String "alive_but_stuck_recovery";
+      "keeper", `String entry.name;
+      "elapsed_sec", `Float elapsed;
+      "threshold_sec", `Float threshold;
+      "autonomous_turns", `Int entry.meta.runtime.autonomous_turn_count;
+      "proactive_count_total", `Int entry.meta.runtime.proactive_rt.count_total;
+      "message",
+      `String
+        "supervisor detected a frozen scheduled-autonomous timestamp; run a recovery cycle";
+    ]
+    |> Yojson.Safe.to_string
+  in
+  {
+    Keeper_event_queue.post_id = "alive-but-stuck:" ^ entry.name;
+    urgency = Keeper_event_queue.Immediate;
+    arrived_at = now;
+    payload;
+  }
+
+let queue_alive_but_stuck_recovery ~base_path ~now ~elapsed ~threshold
+    (entry : Keeper_registry.registry_entry) =
+  if not Env_config.KeeperSupervisor.alive_but_stuck_recovery_enabled then
+    "disabled"
+  else if entry.phase <> Keeper_state_machine.Running then
+    "skipped_not_running"
+  else begin
+    let stimulus =
+      alive_but_stuck_recovery_stimulus ~now ~elapsed ~threshold entry
+    in
+    Keeper_registry.enqueue_event ~base_path entry.name stimulus;
+    Keeper_registry.wakeup ~base_path entry.name;
+    "queued"
+  end
 
 (** Test-only: clear the dedup table so each test case starts fresh. *)
 let alive_but_stuck_reset_for_test () =
@@ -1746,20 +1791,30 @@ let alive_but_stuck_scan (ctx : _ context) =
       | None -> ()
       | Some elapsed ->
         if alive_but_stuck_should_emit ~now ~dedup_ttl_sec entry.name then begin
+          let threshold =
+            alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec entry
+          in
+          let recovery =
+            queue_alive_but_stuck_recovery ~base_path ~now ~elapsed
+              ~threshold entry
+          in
           Prometheus.inc_counter
             Prometheus.metric_keeper_alive_but_stuck
             ~labels:[("keeper", entry.name)]
             ();
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_alive_but_stuck_recovery
+            ~labels:[("keeper", entry.name); ("outcome", recovery)]
+            ();
           Log.Keeper.warn
             "%s: alive-but-stuck detected (elapsed=%.0fs, threshold=%.0fs, \
-             autonomous_turns=%d, proactive_count_total=%d)"
-            entry.name elapsed
-            (Float.max stall_floor_sec
-               (float_of_int entry.meta.proactive.cooldown_sec
-                *. float_of_int stall_multiplier))
+             autonomous_turns=%d, proactive_count_total=%d, recovery=%s)"
+            entry.name elapsed threshold
             entry.meta.runtime.autonomous_turn_count
-            entry.meta.runtime.proactive_rt.count_total;
-          request_alive_but_stuck_recovery ~base_path ~elapsed entry
+            entry.meta.runtime.proactive_rt.count_total
+            recovery;
+          if String.equal recovery "queued" then
+            request_alive_but_stuck_recovery ~base_path ~elapsed entry
         end
     ) entries
   end

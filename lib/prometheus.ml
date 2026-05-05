@@ -255,6 +255,11 @@ let metric_keeper_alive_but_stuck =
 let metric_keeper_alive_but_stuck_recovery_requests =
   "masc_keeper_alive_but_stuck_recovery_requests_total"
 
+(** #12838 follow-up: bounded recovery wakeups queued by
+    [alive_but_stuck_scan].  Labels: keeper, outcome. *)
+let metric_keeper_alive_but_stuck_recovery =
+  "masc_keeper_alive_but_stuck_recovery_total"
+
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent
@@ -1615,7 +1620,7 @@ let init () =
     Counter;
   add metric_keeper_stimulus_consumed
     "Total stimuli consumed at turn entry, classified by stimulus_class. \
-     Labels: keeper, class (board_signal|bootstrap|unsupported). \
+     Labels: keeper, class (board_signal|bootstrap|alive_but_stuck_recovery|unsupported). \
      Pairs with masc_keeper_unsupported_stimulus_total for unsupported-only \
      drill-down with payload prefix."
     Counter;
@@ -1957,6 +1962,15 @@ let init () =
     Counter;
   add metric_keeper_contract_violations
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, kind={passive|text_only}). #10530."
+    Counter;
+  add metric_keeper_alive_but_stuck
+    "Keepers detected as alive-but-stuck: non-Dead, non-paused, \
+     keepalive-running, but proactive_rt.last_ts has been frozen while \
+     autonomous turns kept advancing. Labels: keeper."
+    Counter;
+  add metric_keeper_alive_but_stuck_recovery
+    "Bounded recovery wakeups queued by alive_but_stuck_scan. \
+     Labels: keeper, outcome."
     Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)

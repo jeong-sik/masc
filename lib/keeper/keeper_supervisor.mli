@@ -110,13 +110,23 @@ val detect_alive_but_stuck :
 val alive_but_stuck_scan : 'a context -> unit
 (** Scan all keepers in [Keeper_registry].  For each keeper detected as
     alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
-    increment and a single warn log line, with per-keeper dedup so the
-    counter is at most incremented once per
-    [alive_but_stuck_dedup_ttl_sec] window.  Also request supervised
-    recovery by setting the keeper's structured failure reason plus
-    [fiber_stop]/[fiber_wakeup], allowing the next sweep to route it
-    through the existing crash/restart path.  Gated behind
-    [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true). *)
+    increment and write a single warn log line.  Per-keeper dedup keeps
+    counter / wakeup emission at most once per
+    [alive_but_stuck_dedup_ttl_sec] window.
+
+    The recovery side effect is queued only when BOTH gates are on:
+    - [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true) — the
+      detector itself; turning this off skips the entire scan, no
+      counters or warns are emitted.
+    - [MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED] (default: true)
+      — the recovery action.  When this is off, the detector still
+      runs (counter + warn), but no Event Layer wakeup or supervised
+      restart request is queued; this lets operators observe the signal
+      in production before turning on the side-effect.  When enabled,
+      [alive_but_stuck_scan] enqueues an Event Layer stimulus and sets
+      [failure_reason] plus [fiber_stop]/[fiber_wakeup] so the next
+      sweep can route the keeper through the existing crash/restart
+      path.  PR #13123. *)
 
 val request_alive_but_stuck_recovery_for_test :
   base_path:string ->

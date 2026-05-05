@@ -145,6 +145,7 @@ the categorization roadmap (`@category` tags are a follow-up).
 | `MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL` | typed:string | 128 |  |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC` | typed:float | 253 |  |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED` | typed:bool | 232 | Detection-only signal for alive-but-stuck keepers (#12838) — keepers that are not Dead/Zombie and not paused, but w... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED` | typed:bool | 238 | Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits.  The recovery uses the Event Layer queue plus [fi... |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC` | typed:float | 246 |  |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER` | typed:int | 238 | Multiplier on the keeper's own [proactive.cooldown_sec] before a stalled keeper is flagged.  Default: 10 (10 cooldown... |
 | `MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC` | typed:float | 292 |  |

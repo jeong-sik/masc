@@ -62,6 +62,8 @@ val summary : t -> string
 type stimulus_class =
   | Board_signal   (** JSON payload with {"source":"board_signal", ...} *)
   | Bootstrap      (** Plain string "Keeper bootstrap signal" *)
+  | Alive_but_stuck_recovery
+      (** JSON payload with {"source":"alive_but_stuck_recovery", ...} *)
   | Unsupported of string  (** Unrecognized: payload prefix (max 40 chars) for audit *)
 
 val classify : stimulus -> stimulus_class

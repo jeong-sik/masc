@@ -55,18 +55,25 @@ let sort_by_urgency (queue : t) : t =
 type stimulus_class =
   | Board_signal
   | Bootstrap
+  | Alive_but_stuck_recovery
   | Unsupported of string
 
 let classify (s : stimulus) : stimulus_class =
+  let has_prefix prefix =
+    let payload_len = String.length s.payload in
+    let prefix_len = String.length prefix in
+    payload_len >= prefix_len
+    && String.equal (String.sub s.payload 0 prefix_len) prefix
+  in
   if String.equal s.payload "Keeper bootstrap signal" then Bootstrap
+  else if has_prefix "{\"source\":\"alive_but_stuck_recovery\"" then
+    Alive_but_stuck_recovery
+  (* Board signals carry JSON with "source":"board_signal". Lightweight
+     prefix check avoids a full Yojson parse in the data layer. *)
+  else if has_prefix "{\"source\":\"board_signal\"" then Board_signal
   else
-    (* Board signals carry JSON with "source":"board_signal". Lightweight
-       prefix check avoids a full Yojson parse in the data layer. *)
-    if String.starts_with ~prefix:"{\"source\":\"board_signal\"" s.payload
-    then Board_signal
-    else
-      Unsupported
-        (String.sub s.payload 0 (min 40 (String.length s.payload)))
+    Unsupported
+      (String.sub s.payload 0 (min 40 (String.length s.payload)))
 
 let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"

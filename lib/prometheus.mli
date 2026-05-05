@@ -88,6 +88,10 @@ val metric_keeper_alive_but_stuck : string
     [failure_reason] plus [fiber_stop]/[fiber_wakeup]. Labels: keeper. *)
 val metric_keeper_alive_but_stuck_recovery_requests : string
 
+(** #12838 follow-up: bounded recovery wakeups queued by
+    [Keeper_supervisor.alive_but_stuck_scan]. Labels: keeper, outcome. *)
+val metric_keeper_alive_but_stuck_recovery : string
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.
@@ -629,7 +633,8 @@ val metric_keeper_event_queue_override : string
 
 val metric_keeper_stimulus_consumed : string
 (** Total stimuli consumed at turn entry, classified by [stimulus_class].
-    Labels: [keeper], [class] (board_signal|bootstrap|unsupported).
+    Labels: [keeper], [class]
+    (board_signal|bootstrap|alive_but_stuck_recovery|unsupported).
     Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
     drill-down with payload prefix. *)
 

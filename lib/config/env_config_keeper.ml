@@ -223,13 +223,19 @@ module KeeperSupervisor = struct
   let liveness_recovery_max_attempts =
     max 1 (get_int ~default:5 "MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS")
 
-  (** Detection-only signal for alive-but-stuck keepers (#12838) —
+  (** Signal for alive-but-stuck keepers (#12838) —
       keepers that are not Dead/Zombie and not paused, but whose
       [proactive_rt.last_ts] has been frozen while autonomous turns
-      keep advancing.  Defaults to enabled because emission is a
-      Prometheus counter only (no board posts, no transitions). *)
+      keep advancing. *)
   let alive_but_stuck_enabled =
     get_bool ~default:true "MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED"
+
+  (** Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits.
+      The recovery uses the Event Layer queue plus [fiber_wakeup]; it does
+      not restart the keeper or create a board post.  Dedup is still bounded
+      by [alive_but_stuck_dedup_ttl_sec].  Default: true. *)
+  let alive_but_stuck_recovery_enabled =
+    get_bool ~default:true "MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED"
 
   (** Multiplier on the keeper's own [proactive.cooldown_sec] before a
       stalled keeper is flagged.  Default: 10 (10 cooldowns elapsed

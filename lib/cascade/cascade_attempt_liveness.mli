@@ -135,16 +135,32 @@ val is_terminal : state -> bool
 (** {1 Event}
 
     Inputs to {!step}. The decision table in RFC-0022 §4.5 enumerates
-    every (state, event) pair. *)
+    every (state, event) pair.
+
+    {2 Timestamp contract (caller responsibility)}
+
+    All [float] timestamps in [Chunk] / [Tick] payloads ([received_at],
+    [now]) MUST satisfy:
+
+    - {b finite}: not [Float.nan], [Float.infinity] or [neg_infinity]
+    - {b non-negative}: a monotonic seconds reading from the same
+      clock source used to construct {!initial}'s [started_at]
+    - {b monotonically non-decreasing} across consecutive events fed
+      to the same FSM instance
+
+    Validation lives in the wiring layer (PR-2 [cascade_runtime.ml]
+    + PR-3 [keeper_hooks_oas.ml]) — this module is a pure FSM and
+    trusts its inputs. Feeding non-finite or out-of-order timestamps
+    produces undefined liveness behaviour. *)
 
 type event =
   | Chunk of Stream_chunk.kind * float
       (** Provider emitted a chunk. The [float] is the monotonic
-          [received_at]. *)
+          [received_at]; see Timestamp contract above. *)
 
   | Tick of float
       (** Clock tick at monotonic time. Triggers TTFT, inter-chunk and
-          wall checks. *)
+          wall checks; see Timestamp contract above. *)
 
   | Provider_wire_error of string
       (** Provider returned an error (HTTP, network, parse). The string
@@ -170,6 +186,27 @@ type output =
 
     {b Pure}: no IO, no clock read, no allocation outside what OCaml
     pattern-match constructs. Tests exercise the full decision table
-    by feeding hand-crafted [(state, event)] pairs. *)
+    by feeding hand-crafted [(state, event)] pairs.
+
+    {2 Event ordering contract}
+
+    Deadlines fire on [Tick] only — by design (RFC-0022 §4.5 + §4.4
+    Invariant S1). To bound the late-chunk window the {b caller} MUST:
+
+    {ol
+    {- emit [Tick] at a cadence ≤ [min budget.ttft_max
+       budget.inter_chunk_max] for the active state, and}
+    {- when both an overdue [Tick] and a late [Chunk] are observable
+       at the wiring layer, deliver the overdue [Tick] {b first} so
+       the FSM can transition to [Failed] before the chunk reopens
+       the streaming clock.}}
+
+    Concretely the PR-2 wiring (`cascade_runtime.ml`) drives this via
+    a single fiber that drains the chunk queue and emits a [Tick]
+    after each empty poll; PR-3 (`keeper_hooks_oas.ml`) carries the
+    same ordering guarantee into the RFC-0012 lockstep clock. Callers
+    that fan chunks and ticks across separate fibers must enforce this
+    ordering themselves (e.g. via a single [Lwt_stream] / [Eio.Stream]
+    pulled by one consumer). *)
 
 val step : budget -> state -> event -> state * output

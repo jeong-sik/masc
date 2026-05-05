@@ -588,6 +588,25 @@ let run_keepalive_unified_turn
           ~keeper_name:meta_after_triage.name
           ~channel:turn_decision.channel
           ~kind:Semaphore_wait_pending;
+        (* RFC-0026 PR-E-1.6+1.7 shadow: ask the new admission router
+           what it WOULD have decided, increment the shadow outcome
+           counter, then fall through to the existing semaphore path
+           unchanged.
+
+           [init_once_from_base_path] populates the registry from
+           [<base_path>/.masc/config/cascade.json] [admission.*]
+           sub-tables on first call.  When the JSON has no admission
+           blocks the registry stays empty and [observe] returns
+           [Legacy_path] always — counter increment still proves the
+           call site is alive.  When admission blocks are present,
+           the counter starts emitting the [dispatch]/[wait]/[surface]
+           label distribution that PR-E-1.8 will act on. *)
+        Keeper_admission_runtime.init_once_from_base_path
+          ~base_path:ctx.config.base_path;
+        let (_ : Keeper_admission_glue.outcome) =
+          Keeper_admission_runtime.observe
+            ~keeper_id:meta_after_triage.name
+        in
         match
           Keeper_turn_slot.with_keeper_turn_slot ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->

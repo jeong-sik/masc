@@ -197,6 +197,10 @@ val metric_keeper_operator_clear : string
     [kind="out_of_roots"|"not_found_relative"]. *)
 val metric_keeper_path_rejection : string
 
+val metric_keeper_admission_shadow_outcome : string
+(** RFC-0026 PR-E-1.6 shadow observation. Counter; labels
+    [keeper] and [outcome \in {legacy, dispatch, wait, surface}]. *)
+
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string

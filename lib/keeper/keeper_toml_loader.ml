@@ -488,6 +488,7 @@ let toml_int_opt (doc : toml_doc) (key : string) : int option =
 let toml_float_opt (doc : toml_doc) (key : string) : float option =
   match List.assoc_opt key doc with
   | Some (Toml_float f) -> Some f
+  | Some (Toml_int i) -> Some (float_of_int i)
   | _ -> None
 ;;
 

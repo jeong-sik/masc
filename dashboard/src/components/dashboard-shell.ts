@@ -21,6 +21,7 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
@@ -31,6 +32,11 @@ import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
+import {
+  isWidgetSoloRoute,
+  WidgetSoloBar,
+  widgetSoloUrlForRoute,
+} from './widget-solo'
 
 const buildIdentityOpen = signal(false)
 
@@ -673,6 +679,7 @@ function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
+  const soloUrl = widgetSoloUrlForRoute(route.value)
 
   const description = currentSection?.description ?? currentView?.description ?? null
   const title = currentSection?.label ?? currentView?.label ?? 'Home'
@@ -713,6 +720,17 @@ function SurfaceLead() {
               size=${14}
             />`
           : null}
+        <a
+          href=${soloUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class=${`inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+          title="Open this surface in a solo view"
+          aria-label="Open this surface in a solo view"
+          data-testid="dashboard-widget-solo-link"
+        >
+          <${ExternalLink} size=${14} aria-hidden="true" />
+        </a>
       </div>
       ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
     </div>
@@ -725,6 +743,7 @@ export function DashboardMain() {
   }
 
   const routeLabel = dashboardRouteBoundaryKey(route.value)
+  const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code'
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${immersiveSurface
@@ -733,6 +752,26 @@ export function DashboardMain() {
       Server data warming; this view will refresh automatically.
     </div>
   ` : null
+
+  if (soloMode) {
+    const soloBodyClass = route.value.tab === 'code'
+      ? 'min-h-0 flex-1 overflow-hidden'
+      : 'min-h-0 flex-1 overflow-y-auto p-3 max-[520px]:p-2'
+
+    return html`
+      <div class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
+        <${WidgetSoloBar} routeState=${route.value} />
+        <div class=${soloBodyClass}>
+          ${warmingBanner}
+          <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+            <div class=${route.value.tab === 'code' ? 'h-full min-h-0 overflow-hidden' : 'animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both'}>
+              <${TabContent} />
+            </div>
+          <//>
+        </div>
+      </div>
+    `
+  }
 
   if (immersiveSurface) {
     return html`

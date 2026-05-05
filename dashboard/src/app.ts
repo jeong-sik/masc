@@ -44,6 +44,7 @@ import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
+import { isWidgetSoloRoute } from './components/widget-solo'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -222,11 +223,15 @@ export function App() {
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
   const isCodeSurface = currentTab === 'code'
+  const widgetSoloMode = isWidgetSoloRoute(route.value)
 
   return html`
-    <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
+    <div
+      class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
+      data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
+    >
       <${SkipLink} />
-      <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
+      <header class=${widgetSoloMode ? 'hidden' : 'relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl'}>
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
@@ -277,17 +282,25 @@ export function App() {
         </div>
       </header>
 
-      <${Suspense} fallback=${null}>
-        <${LazyRemoteWarningBanner} />
-      <//>
+      ${widgetSoloMode
+        ? null
+        : html`
+          <${Suspense} fallback=${null}>
+            <${LazyRemoteWarningBanner} />
+          <//>
+        `}
 
-      <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
-        <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
-          <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
-        </aside>
+      <div class=${widgetSoloMode ? 'flex flex-1 overflow-hidden p-0' : 'flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
+        ${widgetSoloMode
+          ? null
+          : html`
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+              <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
+            </aside>
+          `}
 
-        <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
-          <div class=${isCodeSurface ? 'h-full overflow-hidden p-0' : 'h-full overflow-y-auto p-4'}>
+        <main id="main-content" tabindex=${-1} class=${widgetSoloMode ? 'min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
+          <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : 'h-full overflow-y-auto p-4'}>
             <${DashboardMain} />
           </div>
         </main>

@@ -80,3 +80,18 @@ temperature = 0.2
 max_tokens = 4096
 keeper_assignable = false
 fallback_cascade = "big_three"
+
+[tier_fast]
+comment = "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion."
+models = [
+  "claude_code:claude-haiku-4-5-20251001",
+  "codex_cli:gpt-5.3-codex-spark",
+  "gemini_cli:gemini-3-flash-preview",
+  "gemini_cli:gemini-3.1-flash-lite-preview",
+  "glm-coding:glm-5-turbo",
+  "glm-coding:glm-4.7-flashx",
+]
+temperature = 0.2
+max_tokens = 8192
+keeper_assignable = true
+fallback_cascade = "big_three"

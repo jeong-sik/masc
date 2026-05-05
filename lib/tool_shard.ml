@@ -508,7 +508,7 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
   {
     name = "keeper_pr_review_comment";
     description = "Submit a PR review with optional inline comments. \
-Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires delivery or coding preset. \
+Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires research, delivery, coding, or full preset. \
 Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -532,7 +532,7 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
   };
   {
     name = "keeper_pr_review_reply";
-    description = "Reply to a specific PR review comment. Requires delivery or coding preset. \
+    description = "Reply to a specific PR review comment. Requires research, delivery, coding, or full preset. \
 Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");

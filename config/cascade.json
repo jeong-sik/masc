@@ -16,7 +16,10 @@
     "openai_compat": "big_three",
     "persona_generation": "big_three",
     "provider_benchmark": "big_three",
-    "llm_rerank": "tool_rerank"
+    "llm_rerank": "tool_rerank",
+    "simple_task": "tier_small",
+    "moderate_task": "tier_medium",
+    "complex_task": "big_three"
   },
   "_comment_big_three": "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names.",
   "big_three_models": [
@@ -42,5 +45,28 @@
   ],
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
-  "tool_rerank_keeper_assignable": false
+  "tool_rerank_keeper_assignable": false,
+  "_comment_tier_small": "4B-class local models for simple tasks (classification, format, short summary). Operator opt-in: uncomment models when Ollama is running locally.",
+  "tier_small_models": [],
+  "tier_small_temperature": 0.3,
+  "tier_small_max_tokens": 1000,
+  "tier_small_keeper_assignable": false,
+  "tier_small_fallback_cascade": "tier_medium",
+  "_comment_tier_medium": "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion.",
+  "tier_medium_models": [ "glm-coding:glm-4.7-flashx" ],
+  "tier_medium_temperature": 0.2,
+  "tier_medium_max_tokens": 4096,
+  "tier_medium_keeper_assignable": false,
+  "tier_medium_fallback_cascade": "big_three",
+  "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
+  "tier_fast_models": [
+    "claude_code:claude-haiku-4-5-20251001", "codex_cli:gpt-5.3-codex-spark",
+    "gemini_cli:gemini-3-flash-preview",
+    "gemini_cli:gemini-3.1-flash-lite-preview", "glm-coding:glm-5-turbo",
+    "glm-coding:glm-4.7-flashx"
+  ],
+  "tier_fast_temperature": 0.2,
+  "tier_fast_max_tokens": 8192,
+  "tier_fast_keeper_assignable": true,
+  "tier_fast_fallback_cascade": "big_three"
 }

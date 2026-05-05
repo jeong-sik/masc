@@ -124,6 +124,10 @@ let autonomous_turn_semaphore_value_for_test () =
 let reactive_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value reactive_turn_semaphore
 
+let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
+let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
+let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -263,27 +267,51 @@ type keeper_turn_slot_state = {
   autonomous_ticket : int option ref;
 }
 
+(* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
+   Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
+   keeper fiber is being cancelled.  If a mutex acquisition raises
+   [Eio.Cancel.Cancelled] (the fiber's cancellation context is already
+   triggered), we MUST still execute the [Eio.Semaphore.release] calls
+   below — otherwise the slot is leaked and the fleet deadlocks at
+   [turn_available=0] (see 2026-05-05 fleet-stuck cycle, 14 keepers
+   idle 20+min behind a 3-slot semaphore that was never released). *)
+let safe_bookkeeping ~op f =
+  try f () with
+  | Eio.Cancel.Cancelled _ ->
+    (* Bookkeeping (holder table / waiter queue / completion stamp) is
+       advisory and self-healing; skipping under fiber cancellation is
+       acceptable.  The semaphore release that follows must still run. *)
+    Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
+  | exn ->
+    Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
+      op (Printexc.to_string exn)
+
 let release_keeper_turn_slot ~keeper_name state =
-  Option.iter
-    (fun ticket -> drop_autonomous_waiter ~ticket)
-    !(state.autonomous_ticket);
+  safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
+    Option.iter
+      (fun ticket -> drop_autonomous_waiter ~ticket)
+      !(state.autonomous_ticket));
   (* Release exactly what we acquired. The turn, autonomous, and reactive
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
-    drop_holder ~label:"turn" ~keeper_name;
+    safe_bookkeeping ~op:"drop_holder turn" (fun () ->
+      drop_holder ~label:"turn" ~keeper_name);
     Eio.Semaphore.release turn_semaphore
   end;
   if !(state.acquired_autonomous) then begin
     (* Stamp completion time BEFORE releasing the semaphore so that
        [maybe_yield_for_fairness] can measure the correct interval
        when this keeper's heartbeat loops back immediately. *)
-    record_autonomous_completion ~keeper_name;
-    drop_holder ~label:"autonomous" ~keeper_name;
+    safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+      record_autonomous_completion ~keeper_name);
+    safe_bookkeeping ~op:"drop_holder autonomous" (fun () ->
+      drop_holder ~label:"autonomous" ~keeper_name);
     Eio.Semaphore.release autonomous_turn_semaphore
   end;
   if !(state.acquired_reactive) then begin
-    drop_holder ~label:"reactive" ~keeper_name;
+    safe_bookkeeping ~op:"drop_holder reactive" (fun () ->
+      drop_holder ~label:"reactive" ~keeper_name);
     Eio.Semaphore.release reactive_turn_semaphore
   end
 
@@ -307,8 +335,14 @@ let reset_autonomous_completion_for_test () : unit =
    window with 0 restart.
 
    Promote to [Keeper_fiber_crash] after [oas_timeout_budget_strike_limit]
-   consecutive strikes so a fresh fiber retries with a clean context.
-   Counter is reset on any successful turn (see [Ok updated] branch). *)
+   consecutive strikes so the supervisor pauses the keeper instead of
+   restarting into the same budget loop.
+
+   Counter is in-memory for the common same-server case and is reset on
+   any successful turn (see [Ok updated] branch). On first bump after a
+   process restart, callers may seed it from the persisted
+   [Oas_timeout_budget_loop] failure reason so restart cannot erase a
+   partially observed loop. *)
 let consecutive_budget_exhaustions : (string, int) Hashtbl.t =
   Hashtbl.create 16
 let consecutive_budget_exhaustions_mutex = Eio.Mutex.create ()
@@ -317,15 +351,19 @@ let oas_timeout_budget_strike_limit = 3
 let with_budget_exhaustions f =
   Eio.Mutex.use_rw ~protect:true consecutive_budget_exhaustions_mutex f
 
-let bump_budget_exhaustion ~keeper_name : int =
+let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
   with_budget_exhaustions (fun () ->
     let prior =
-      Hashtbl.find_opt consecutive_budget_exhaustions keeper_name
-      |> Option.value ~default:0
+      match Hashtbl.find_opt consecutive_budget_exhaustions keeper_name with
+      | Some strikes -> strikes
+      | None -> max 0 prior_strikes
     in
     let next = prior + 1 in
     Hashtbl.replace consecutive_budget_exhaustions keeper_name next;
     next)
+
+let bump_budget_exhaustion ~keeper_name : int =
+  bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes:0
 
 let reset_budget_exhaustion ~keeper_name : unit =
   with_budget_exhaustions (fun () ->
@@ -398,7 +436,15 @@ let maybe_yield_for_fairness ~(keeper_name : string) : unit =
       keeper_name remaining;
     match Eio_context.get_clock_opt () with
     | Some clock -> Eio.Time.sleep clock remaining
-    | None -> Eio.Fiber.yield ()
+    | None ->
+        (* No Eio clock available: bound the wait with [Unix.sleepf] so the
+           fairness loop does not spin under contention. [Eio.Fiber.yield]
+           imposes no minimum delay — under heavy keeper churn it returns
+           immediately and the caller re-enters the queue with the same
+           [last_autonomous_completion] timestamp, defeating the cooldown.
+           5ms is a fairness hint (not a tunable); production paths always
+           have a clock and take the [Some clock] branch above. *)
+        Unix.sleepf 0.005
   end
 
 let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)

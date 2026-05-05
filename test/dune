@@ -27,7 +27,7 @@
 (tests
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
         test_attempt_state
-        test_sse test_cancellation test_graphql_api
+        test_sse test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
@@ -230,7 +230,7 @@
         )
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
-          test_sse test_cancellation test_graphql_api
+          test_sse test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
@@ -628,6 +628,7 @@
         test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
+        test_keeper_prompt_external
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
@@ -822,6 +823,7 @@
         test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
+        test_keeper_prompt_external
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
@@ -857,7 +859,7 @@
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
+        test_orchestrator_coverage
         test_web_dashboard_coverage test_auth_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
@@ -889,7 +891,7 @@
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
+        test_orchestrator_coverage
         test_web_dashboard_coverage test_auth_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
@@ -1009,9 +1011,13 @@
 (include stanzas/test_briefing_gaps.inc)
 (include stanzas/test_briefing_json_helpers.inc)
 (include stanzas/test_cascade_attempt_liveness.inc)
+(include stanzas/test_cascade_attempt_liveness_config.inc)
+(include stanzas/test_cascade_attempt_liveness_counters.inc)
 (include stanzas/test_cascade_attempt_liveness_driver.inc)
 (include stanzas/test_cascade_attempt_liveness_oas_adapter.inc)
+(include stanzas/test_cascade_attempt_liveness_observer.inc)
 (include stanzas/test_cascade_attempt_liveness_runtime.inc)
+(include stanzas/test_oas_worker_named_liveness_integration.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)
 (include stanzas/test_cascade_config_validity.inc)
@@ -1022,6 +1028,7 @@
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)
+(include stanzas/test_cascade_routes_bigthree_ssot.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
 (include stanzas/test_cascade_trust_persist.inc)
@@ -1034,6 +1041,7 @@
 (include stanzas/test_codex_cli_omission_dedup_10097.inc)
 (include stanzas/test_context_max_observed_9953.inc)
 (include stanzas/test_continuity_forward_filter.inc)
+(include stanzas/test_coord_bootstrap.inc)
 (include stanzas/test_dashboard_feature_health.inc)
 (include stanzas/test_dashboard_goals.inc)
 (include stanzas/test_dashboard_governance_metrics.inc)
@@ -1123,12 +1131,15 @@
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
+(include stanzas/test_keeper_turn_slot_holders.inc)
+(include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 (include stanzas/test_keeper_turn_up_create_meta_retry.inc)
 (include stanzas/test_keeper_usage_trust_anthropic_cache_9959.inc)
 (include stanzas/test_keeper_wfq_overflow.inc)
 (include stanzas/test_local_review_script.inc)
 (include stanzas/test_magentic_ledger_cap.inc)
 (include stanzas/test_masc_dirname_ssot.inc)
+(include stanzas/test_masc_error_is_retryable.inc)
 (include stanzas/test_mcp_post_sse_e2e.inc)
 (include stanzas/test_mcp_tool_matrix.inc)
 (include stanzas/test_meta_cognition_snapshot.inc)

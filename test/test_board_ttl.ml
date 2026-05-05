@@ -2,6 +2,19 @@
 
 open Masc_mcp.Board
 
+(* #9903 test isolation: [create_post] now persists through
+   [Env_config_core.base_path ()], which raises [Config_error] in test
+   executables when the resolved path falls under HOME (PR #12584 moved
+   persistence outside the board lock and onto the live ledger path).
+   Pin [MASC_BASE_PATH] to a per-run tmp dir so the persist guard is
+   satisfied and ledger writes stay isolated from production. *)
+let () =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-board-ttl-%06x" (Random.bits ()))
+  in
+  Unix.putenv "MASC_BASE_PATH" dir
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let with_eio f () =

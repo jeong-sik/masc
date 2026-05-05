@@ -59,9 +59,21 @@ let sort_order_of_string_opt s =
 type board_backend =
   | Jsonl of Board.store
 
+(** Marker carried inside [Active] tracking whether the flusher fiber has
+    been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
+    [unit], so there's no cancel handle to thread through; the [bool]
+    placeholder keeps the structural fact - "we are active and the flusher
+    is (or is not) running" - inseparable from the backend itself.
+
+    Tier D D-7: this used to live in a sibling [flusher_started : bool
+    Atomic.t], which allowed [Active && not flusher_started] /
+    [not Active && flusher_started] to be representable across two
+    independent CAS sites.  Folding the flag in collapses that surface. *)
+type flusher_handle = bool
+
 type backend_state =
   | Uninitialized
-  | Active of board_backend
+  | Active of board_backend * flusher_handle
 
 type keeper_board_signal_kind =
   | Board_post_created
@@ -83,7 +95,6 @@ type board_sse_event =
   | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
-let flusher_started : bool Atomic.t = Atomic.make false
 
 let start_flusher_actor ~sw store =
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -105,19 +116,39 @@ let start_flusher_actor ~sw store =
     done
   )
 
+(** CAS [Active (b, false) -> Active (b, true)] for the current [b], then
+    spawn the flusher daemon.  If the CAS loses (someone else flipped the
+    flag concurrently, or the state went back to [Uninitialized]), bail
+    out without spawning.  On daemon-spawn failure, roll the flag back so
+    a later caller can retry.
+
+    Pre-D-7 this was a sibling [Atomic.compare_and_set flusher_started
+    false true]; the flag now lives in the variant so it cannot drift
+    away from the [Active] state. *)
 let ensure_flusher_actor store =
   match Eio_context.get_switch_opt () with
   | None -> ()
   | Some sw ->
-      if Atomic.compare_and_set flusher_started false true then
-        try start_flusher_actor ~sw store
-        with exn ->
-          Atomic.set flusher_started false;
-          match exn with
-          | Invalid_argument msg when String.equal msg "Switch finished!" ->
-              Log.BoardLog.warn
-                "Skipping board flusher actor startup on finished switch"
-          | _ -> raise exn
+      let current = Atomic.get backend_state in
+      (match current with
+       | Uninitialized -> ()
+       | Active (_, true) -> ()
+       | Active (b, false) ->
+           if Atomic.compare_and_set backend_state current (Active (b, true)) then
+             try start_flusher_actor ~sw store
+             with exn ->
+               (* Roll the flag back so a future caller can retry.  Only
+                  roll back if the state hasn't been swapped out from
+                  under us. *)
+               let _ : bool =
+                 Atomic.compare_and_set backend_state
+                   (Active (b, true)) (Active (b, false))
+               in
+               match exn with
+               | Invalid_argument msg when String.equal msg "Switch finished!" ->
+                   Log.BoardLog.warn
+                     "Skipping board flusher actor startup on finished switch"
+               | _ -> raise exn)
 
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
@@ -156,7 +187,7 @@ let init_jsonl () =
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
   else begin
     let store = Board.global () in
-    let backend = Active (Jsonl store) in
+    let backend = Active (Jsonl store, false) in
     if Atomic.compare_and_set backend_state Uninitialized backend then begin
       ensure_flusher_actor store;
       Log.BoardLog.info "JSONL backend initialized"
@@ -165,8 +196,9 @@ let init_jsonl () =
   end
 
 let reset_for_test () =
+  (* D-7: dropping [Active] also drops the flusher-started flag, since
+     it now lives inside the variant. *)
   Atomic.set backend_state Uninitialized;
-  Atomic.set flusher_started false;
   Atomic.set keeper_board_signal_hook None;
   Atomic.set board_sse_hook None
 
@@ -177,17 +209,17 @@ let jsonl_forced () =
 
 let backend () =
   match Atomic.get backend_state with
-  | Active (Jsonl store as backend) ->
+  | Active (Jsonl store as backend, _) ->
       ensure_flusher_actor store;
       backend
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
       let store = Board.global () in
       let b = Jsonl store in
-      let backend_val = Active b in
+      let backend_val = Active (b, false) in
       let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
       match Atomic.get backend_state with
-      | Active (Jsonl active_store as active_b) ->
+      | Active (Jsonl active_store as active_b, _) ->
           ensure_flusher_actor active_store;
           active_b
       | Uninitialized ->
@@ -449,7 +481,7 @@ let search ~query ~limit =
 
 let flush () =
   match Atomic.get backend_state with
-  | Active (Jsonl store) -> Board.flush_dirty store
+  | Active (Jsonl store, _) -> Board.flush_dirty store
   | Uninitialized -> ()
 
 let sweep () =
@@ -473,5 +505,5 @@ let reclassify_posts ?(limit = 5200) ?(dry_run = true) () =
 
 let backend_name () =
   match Atomic.get backend_state with
-  | Active (Jsonl _) -> "jsonl"
+  | Active (Jsonl _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"

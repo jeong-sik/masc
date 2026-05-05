@@ -61,6 +61,35 @@ let test_named_keeper_docker_defaults () =
   expect_keeper ~name:"masc-improver" ~persona:"analyst";
   expect_keeper ~name:"sangsu" ~persona:"sangsu"
 
+let test_committed_keepers_are_pr_work_capable () =
+  let config_dir =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some repo_root -> Filename.concat repo_root "config/keepers"
+    | None -> "config/keepers"
+  in
+  let pr_work_presets = [ "coding"; "research"; "delivery"; "full" ] in
+  let files =
+    Sys.readdir config_dir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".toml")
+    |> List.filter (fun f -> f <> "base.toml")
+    |> List.sort String.compare
+  in
+  check bool "at least one keeper manifest" true (files <> []);
+  List.iter
+    (fun file ->
+       let name = Filename.remove_extension file in
+       let path = Filename.concat config_dir file in
+       match KTP.load_keeper_toml path with
+       | Error e -> fail (Printf.sprintf "%s: %s" file e)
+       | Ok (_loaded_name, defaults) ->
+           let preset = defaults.tool_preset in
+           check bool (name ^ " preset can do PR work") true
+             (match preset with
+              | Some p -> List.mem p pr_work_presets
+              | None -> true))
+    files
+
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =
   let path = Filename.temp_file "keeper_test_" ".toml" in
@@ -189,8 +218,8 @@ keeper_assignable = false
       | Error e ->
           check bool "error lists live catalog profile" true
             (contains ~needle:"custom_live" e);
-          check bool "error lists reserved tool lane" true
-            (contains ~needle:"tool_use_strict" e))
+          check bool "error lists reserved bootstrap profile" true
+            (contains ~needle:Masc_mcp.Keeper_cascade_profile.default_name e))
 
 let test_cascade_name_accepts_catalog_entry () =
   (* "tool_use_strict" is a known catalog entry in cascade.json,
@@ -397,6 +426,8 @@ let () =
           test_case "all toml files parse" `Quick test_all_keeper_tomls_parse;
           test_case "named keepers default to docker" `Quick
             test_named_keeper_docker_defaults;
+          test_case "committed keepers can do PR work" `Quick
+            test_committed_keepers_are_pr_work_capable;
         ] );
       ( "cascade_name validation",
         [

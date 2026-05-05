@@ -9,6 +9,16 @@ open Alcotest
 
 module KTPR = Masc_mcp.Keeper_tool_pr_review
 
+let test_research_preset_can_mutate_pr_reviews () =
+  check bool "research can comment/approve through review tool" true
+    (KTPR.pr_review_mutation_preset_ok
+       (Some Masc_mcp.Keeper_types.Research))
+
+let test_social_preset_cannot_mutate_pr_reviews () =
+  check bool "social cannot mutate PR reviews" false
+    (KTPR.pr_review_mutation_preset_ok
+       (Some Masc_mcp.Keeper_types.Social))
+
 let test_detects_rest_404 () =
   let sample =
     "failed to run git: HTTP 404: Not Found \
@@ -38,6 +48,12 @@ let test_passes_through_unrelated_errors () =
 
 let () =
   Alcotest.run "Keeper PR review error UX" [
+    "preset_gate", [
+      test_case "research preset can mutate PR reviews" `Quick
+        test_research_preset_can_mutate_pr_reviews;
+      test_case "social preset cannot mutate PR reviews" `Quick
+        test_social_preset_cannot_mutate_pr_reviews;
+    ];
     "pr_not_found_in_output", [
       test_case "REST 404 (HTTP 404: Not Found)" `Quick test_detects_rest_404;
       test_case "GraphQL Could not resolve" `Quick

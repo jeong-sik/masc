@@ -161,20 +161,25 @@ let points_of (samples : Keepers_types.ctx_sample list) : string =
   |> String.concat ~sep:" "
 ;;
 
-(** Static fallback — mirrors the hand-coded 4 polyline mock. *)
-let polylines_static () =
-  [ polyline
-      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
-      ~stroke_var:"var(--t-llm)" ~dashed:false
-  ; polyline
-      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
-      ~stroke_var:"var(--t-tool)" ~dashed:false
-  ; polyline
-      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
-      ~stroke_var:"var(--t-wait)" ~dashed:false
-  ; polyline
-      ~points:"0,55 100,35 200,15 260,5"
-      ~stroke_var:"var(--t-err)" ~dashed:true
+(** Empty-state baseline — single dashed midline rendered when no keeper
+    telemetry is available. Mirrors cockpit-kit Spark/Heartbeat empty branch
+    (cb-shared.jsx:14-23, 29-50): a [data-empty="true"] svg with a dashed
+    baseline communicates absence rather than fabricating a curve that looks
+    like real data. Audit response 2026-05-05 §1.1. *)
+let empty_baseline () =
+  [ Node.create_svg "line"
+      ~attrs:
+        [ svg_a "x1" "0"
+        ; svg_a "y1" "50"
+        ; svg_a "x2" "600"
+        ; svg_a "y2" "50"
+        ; svg_a "stroke" "var(--color-fg-muted)"
+        ; svg_a "stroke-width" "1"
+        ; svg_a "stroke-dasharray" "3,3"
+        ; svg_a "opacity" "0.6"
+        ; svg_a "vector-effect" "non-scaling-stroke"
+        ]
+      []
   ]
 ;;
 
@@ -212,29 +217,35 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
     ; guide ~y:10 ~stroke_var:"var(--accent-blood)"     (* 90% danger *)
     ]
   in
+  let is_empty = List.is_empty keepers.keepers in
   let polylines =
-    match keepers.keepers with
-    | [] -> polylines_static ()
-    | live_keepers -> polylines_of_keepers live_keepers
+    if is_empty then empty_baseline ()
+    else polylines_of_keepers keepers.keepers
   in
   let meta_lines =
-    match keepers.keepers with
-    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
-    | live -> meta_lines_of live
+    if is_empty then [ "no keeper data" ]
+    else meta_lines_of keepers.keepers
   in
   let aria_desc =
-    "Context usage chart over 60 minutes. " ^ String.concat ~sep:"; " meta_lines
+    if is_empty then
+      "Context usage chart over 60 minutes. No keeper data available."
+    else
+      "Context usage chart over 60 minutes. "
+      ^ String.concat ~sep:"; " meta_lines
+  in
+  let svg_attrs =
+    let base =
+      [ svg_a "viewBox" "0 0 600 100"
+      ; svg_a "preserveAspectRatio" "none"
+      ; Style.svg
+      ; Attr.role "img"
+      ; Attr.create "aria-label" aria_desc
+      ]
+    in
+    if is_empty then base @ [ Attr.create "data-empty" "true" ] else base
   in
   let svg =
-    Node.create_svg "svg"
-      ~attrs:
-        [ svg_a "viewBox" "0 0 600 100"
-        ; svg_a "preserveAspectRatio" "none"
-        ; Style.svg
-        ; Attr.role "img"
-        ; Attr.create "aria-label" aria_desc
-        ]
-      (hairlines @ guides @ polylines)
+    Node.create_svg "svg" ~attrs:svg_attrs (hairlines @ guides @ polylines)
   in
   Node.div
     ~attrs:[ Swim.Style.swim ]

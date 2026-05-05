@@ -335,6 +335,16 @@ let metric_keeper_provider_cooldown_remaining_sec =
 let metric_keeper_provider_block_duration_sec =
   "masc_keeper_provider_block_duration_sec"
 
+(* #10569: board persist mutex acquire / held latency.  Recorded by
+   [Board_core.with_persist_lock] so operators can distinguish
+   queueing from syscall stall when keeper_board_post / comment / vote
+   tool calls hit the 60s default tool timeout. *)
+let metric_board_persist_lock_acquire_sec =
+  "masc_board_persist_lock_acquire_sec"
+
+let metric_board_persist_lock_held_sec =
+  "masc_board_persist_lock_held_sec"
+
 (* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
    observable via [autonomous_waiter_snapshot_for_test] but were
    only emitted as a debug log line.  Surfacing as a gauge lets
@@ -870,9 +880,15 @@ let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 
 (* RFC-0022 §9 attempt-liveness gate.  Counts would-be (Observe) and
    actual (Enforce) liveness kills broken down by failure class.
-   Labels: [kind, mode, provider]. *)
+   Labels: [kind, mode, provider].
+
+   [observed_total] is the per-attempt finalizer counter regardless of
+   outcome (success | kill | wire_error). Useful for the kill-rate
+   ratio kill / observed. *)
 let metric_cascade_attempt_liveness_kill =
   "masc_cascade_attempt_liveness_kill_total"
+let metric_cascade_attempt_liveness_observed =
+  "masc_cascade_attempt_liveness_observed_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
@@ -1274,6 +1290,16 @@ let init () =
   register_histogram ~name:metric_keeper_provider_block_duration_sec
     ~help:"Duration in seconds for which a provider is placed into cooldown \
            (observed each time a cooldown is applied or extended). Labels: provider." ();
+  (* #10569: board persist mutex diagnostic histograms.  acquire =
+     wait-for-lock, held = inside-lock disk I/O.  Operators read
+     these together to size the persist serialization bottleneck
+     before deciding queue vs timeout-tuning. *)
+  register_histogram ~name:metric_board_persist_lock_acquire_sec
+    ~help:"Seconds spent waiting to acquire the board persist mutex. \
+           High values indicate writer contention." ();
+  register_histogram ~name:metric_board_persist_lock_held_sec
+    ~help:"Seconds the board persist mutex is held by one fiber, \
+           covering the disk I/O performed inside the lock." ();
   add metric_keeper_slot_yield_total
     "Total autonomous turn slot yields (successfully yielded and reacquired). \
      Labels: keeper."

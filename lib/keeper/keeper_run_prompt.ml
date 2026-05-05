@@ -97,6 +97,9 @@ let build_turn_context
       (Keeper_exec_context.messages_of_context ctx_work)
   in
   let estimated_input_tokens =
+    (* Prompt build runs before the LLM call, so the actual input-token
+       count is unknown here; post-response code paths in
+       [Keeper_agent_run] pass the provider-reported value. *)
     let composition =
       Keeper_agent_prompt_metrics.build_ctx_composition_metrics
         ~system_prompt:turn_system_prompt
@@ -105,7 +108,7 @@ let build_turn_context
         ~temporal_context
         ~user_message
         ~history_messages
-        ~actual_input_tokens:0
+        ~actual_input_tokens:None
     in
     max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
         composition.Keeper_agent_prompt_metrics.display_total_tokens

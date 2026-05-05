@@ -80,7 +80,21 @@ let build_keeper_system_prompt
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
       ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
   in
-  let profile_policy = "Maintain high standard of reasoning, factual grounding, and clear communication." in
+  (* Tier C C-5a: profile_policy is the first behavior block migrated
+     out of OCaml source.  The .md file lives at
+     [<prompts_dir>/behavior/profile_policy.md] and is read once per
+     process via [Keeper_prompt_external.get].  The original literal
+     is kept as a fallback so a missing/unreadable file does not
+     brick keepers — instead the loader emits a WARN and we use the
+     in-source string.  Subsequent C-5b PRs migrate the remaining
+     blocks in this function. *)
+  let profile_policy =
+    Option.value
+      (Keeper_prompt_external.get "profile_policy")
+      ~default:
+        "Maintain high standard of reasoning, factual grounding, and clear communication."
+  in
+  let profile_policy = String.trim profile_policy in
   (* Layer 2 PR-B (commit 7): three normalize_self_model_text calls
      consolidated through [Keeper_personality_io.to_prompt_form]. The
      fallback strings below are the same; only the trim+truncate path

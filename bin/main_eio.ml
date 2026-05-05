@@ -529,9 +529,6 @@ let run_cmd host port base_path =
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
-  (* Initialize thread-safe token store for cancellation support *)
-  Masc_mcp.Cancellation.TokenStore.init ();
-
   (* Signal handlers stay side-effect free. The Eio watcher fiber performs
      all shutdown work inside the event loop. *)
   let pending_shutdown_signal = Atomic.make None in

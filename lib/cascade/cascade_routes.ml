@@ -32,13 +32,22 @@ type route_spec = {
   fallback_policy : fallback_policy;
 }
 
+(* Default last-resort profile name for keeper routes.  Must agree with
+   [Keeper_cascade_profile.default_name] — the SSOT for the profile string
+   "big_three".  Cross-module drift is guarded by
+   [test_cascade_routes_bigthree_ssot.ml].  Direct reference to
+   [Keeper_cascade_profile] is impossible from here because that module
+   already depends on this one (see [keeper_cascade_profile.ml:31]). *)
+let keeper_default_last_resort_profile = "big_three"
+
 let keeper_route use key aliases =
   {
     use;
     key;
     aliases;
     fallback_policy =
-      Prefer_keeper_assignable { last_resort_profile = "big_three" };
+      Prefer_keeper_assignable
+        { last_resort_profile = keeper_default_last_resort_profile };
   }
 
 let system_route use key aliases ~preferred_profiles ~last_resort_profile =

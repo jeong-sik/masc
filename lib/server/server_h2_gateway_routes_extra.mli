@@ -32,7 +32,7 @@ val dispatch :
     - [GET /api/v1/board/hearths] — hearth name+count list.
     - [GET /api/v1/board/flairs] — available flair list.
     - [GET /api/v1/board/<post_id>] — single post with
-      configurable [format] query param (defaults to ["nested"]).
+      configurable [format] query param (defaults to [nested]).
     - [GET /api/v1/board/sub-boards] — sub-board list.
     - [POST /api/v1/board/sub-boards] — create sub-board (auth required).
       Body: [{ slug, name, description, access? }].
@@ -46,7 +46,7 @@ val dispatch :
       [target_id], [delta], [ts], and [ts_iso].  Query params:
       [agent] (filter by recipient, case-sensitive),
       [limit] (clamped to [1..5000], default 500).  Response also
-      includes a [scoring_rule] field ([\"up=+1,down=0\"]) and a
+      includes a [scoring_rule] field ([up=+1,down=0]) and a
       [totals] summary identical to [GET /api/v1/karma].
 
     {2 Static assets}
@@ -65,12 +65,12 @@ val dispatch :
     {2 Failure modes}
 
     - Path-traversal attempts on the dashboard assets route return
-      [404 Not Found] (NOT [400 Bad Request] — the spec is "do not
+      [404 Not Found] (NOT [400 Bad Request] — the spec is to not
       reveal whether the path traversal was rejected vs the
-      filename was missing").  Pinned at the contract seam.
+      filename was missing).  Pinned at the contract seam.
     - Missing static asset files return [404 Not Found] with the
-      literal body [["404 Not Found"]].  Operator runbooks grep on
-      this exact string.
+      literal body [404 Not Found] (operator runbooks grep on this
+      exact string).
 
     Returns [false] for any route the dispatcher does not
     recognise — the parent gateway falls through to its catch-all

@@ -43,7 +43,12 @@ NOW="$(date +%s)"
 CUTOFF=$((NOW - WINDOW_MIN * 60))
 
 if [[ -n "$KEEPER_FILTER" ]]; then
-  files=("$KEEPERS_DIR/$KEEPER_FILTER.decisions.jsonl")
+  filter_file="$KEEPERS_DIR/$KEEPER_FILTER.decisions.jsonl"
+  if [[ ! -f "$filter_file" ]]; then
+    echo "no decision file for keeper '$KEEPER_FILTER' at $filter_file" >&2
+    exit 4
+  fi
+  files=("$filter_file")
 else
   files=()
   while IFS= read -r line; do files+=("$line"); done < <(

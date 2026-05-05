@@ -1167,7 +1167,11 @@ let tool_spec_read_only =
   ]
 
 let register () =
-  let handler = fun ~name ~args -> Some (Tool_result.to_legacy_compat (handle_tool name args)) in
+  let handler =
+    fun ~name ~args ->
+      let result = handle_tool name args in
+      Some (result.success, Tool_result.message result)
+  in
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"
     | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->

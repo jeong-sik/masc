@@ -12,7 +12,8 @@ let error_json ?(fields = []) (message : string) =
 ;;
 
 let tool_result_or_error (tr : Tool_result.t) =
-  let (ok, msg) = Tool_result.to_legacy_compat tr in
+  let ok = tr.success in
+  let msg = Tool_result.message tr in
   if ok then msg else error_json msg
 
 (** Phase B PR-5 precursor (2026-04-28): the action mapping itself,

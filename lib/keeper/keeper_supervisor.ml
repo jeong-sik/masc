@@ -1102,6 +1102,55 @@ let sweep_and_recover (ctx : _ context) =
       |> Option.map Keeper_registry.failure_reason_to_string
       |> Option.value ~default:"watchdog_stop_pending"
     in
+    (* 2026-05-05 cycle 9: stamp the cohort onto keeper_meta.runtime so
+       the per-keeper meta surface (and PR #12877's "차단된 키퍼"
+       dashboard card) shows the same diagnosis the supervisor used to
+       group the keeper into a self-preservation cohort.  Companion to
+       PR #12943 which added the same stamp on the [Fiber_unresolved]
+       finally branch; this branch — [force_unresolved_watchdog_crash]
+       — was the other silent path where the stamp was missing.
+       Mapping covers all three watchdog cohorts handled by
+       [watchdog_stop_pending]; only [Stale_turn_timeout] currently
+       has a dedicated [blocker_class] variant, the other two map to
+       it as a best-effort signal until they get their own variants. *)
+    let stamp_cohort =
+      match entry.last_failure_reason with
+      | Some (Keeper_registry.Stale_turn_timeout _)
+      | Some (Keeper_registry.Stale_termination_storm _)
+      | Some (Keeper_registry.Oas_timeout_budget_loop _) ->
+        Some Stale_turn_timeout
+      | _ -> None
+    in
+    (match stamp_cohort with
+     | None -> ()
+     | Some bc ->
+       (match Keeper_registry.get ~base_path entry.name with
+        | Some current ->
+          let stamped_meta =
+            { current.meta with
+              runtime =
+                { current.meta.runtime with
+                  last_blocker = msg;
+                  last_blocker_class = Some bc;
+                };
+            }
+          in
+          (match
+             write_meta_with_merge
+               ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+               ctx.config stamped_meta
+           with
+           | Ok () -> ()
+           | Error err ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_write_meta_failures
+               ~labels:[("keeper", entry.name);
+                        ("phase", "stale_turn_timeout_stamp")]
+               ();
+             Log.Keeper.warn
+               "%s: stale_turn_timeout meta stamp failed: %s"
+               entry.name err)
+        | None -> ()));
     Log.Keeper.warn
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name msg;

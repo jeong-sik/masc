@@ -52,6 +52,6 @@ type context = {
 
 (** Helper: run subprocess with 60s timeout *)
 let safe_exec args =
-  match Process_eio.run_argv_with_status ~timeout_sec:60.0 args with
+  match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) args with
   | Unix.WEXITED 0, output -> (true, output)
   | _, output -> (false, if String.equal output "" then "Command failed" else output)

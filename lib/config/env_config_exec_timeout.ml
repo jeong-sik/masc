@@ -31,7 +31,17 @@ type caller =
   | Git_meta                  (** local git metadata (rev-parse, remote get-url) (10s) *)
   | Autoresearch_git_meta     (** autoresearch local git metadata reads (10s) *)
   | Autoresearch_git_mutation (** autoresearch local git mutations (30s) *)
-  | Shell_probe               (** PATH probes via [command -v] (2s) *)
+  | Shell_probe
+  | Graphql
+  | Http
+  | Startup
+  | Auto_responder
+  | Build_identity
+  | Voice
+  | Coord_identity
+  | Dashboard
+  | Http_routes
+  | Test               (** PATH probes via [command -v] (2s) *)
   | Unknown of string
 
 (** Hardcoded default seconds for each known caller.  Preserves
@@ -56,7 +66,17 @@ let caller_key = function
   | Git_meta -> "git_meta"
   | Autoresearch_git_meta -> "autoresearch_git_meta"
   | Autoresearch_git_mutation -> "autoresearch_git_mutation"
-  | Shell_probe -> "shell_probe"
+  | Shell_probe
+  | Graphql
+  | Http
+  | Startup
+  | Auto_responder
+  | Build_identity
+  | Voice
+  | Coord_identity
+  | Dashboard
+  | Http_routes
+  | Test -> "shell_probe"
   | Unknown caller -> caller
 
 (** Exported for tests that pin the per-caller default table. *)
@@ -80,6 +100,16 @@ let known_callers () =
     Autoresearch_git_meta;
     Autoresearch_git_mutation;
     Shell_probe;
+    Graphql;
+    Http;
+    Startup;
+    Auto_responder;
+    Build_identity;
+    Voice;
+    Coord_identity;
+    Dashboard;
+    Http_routes;
+    Test;
   ]
 
 let known_default_sec = function
@@ -101,6 +131,16 @@ let known_default_sec = function
   | Memory_audit -> Some 3.0
   | Git_meta | Autoresearch_git_meta -> Some 10.0
   | Autoresearch_git_mutation -> Some 30.0
+  | Graphql -> Some 30.0
+  | Http -> Some 30.0
+  | Startup -> Some 30.0
+  | Auto_responder -> Some 30.0
+  | Build_identity -> Some 30.0
+  | Voice -> Some 30.0
+  | Coord_identity -> Some 30.0
+  | Dashboard -> Some 30.0
+  | Http_routes -> Some 30.0
+  | Test -> Some 30.0
   | Unknown _ -> None
 
 let upper_case s =

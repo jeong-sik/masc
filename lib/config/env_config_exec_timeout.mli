@@ -40,6 +40,16 @@ type caller =
           preserving the previous inline budget for add/commit/reset/
           worktree cleanup inside managed experiment loops. *)
   | Shell_probe
+  | Graphql
+  | Http
+  | Startup
+  | Auto_responder
+  | Build_identity
+  | Voice
+  | Coord_identity
+  | Dashboard
+  | Http_routes
+  | Test
       (** PATH availability probes (e.g. [command -v <name>]).
           Default 2.0s — pure OS lookup; longer timeouts mask
           shell-startup misconfiguration rather than helping. *)

@@ -138,6 +138,7 @@ let test_compute_overall_score_pure () =
       ~response_rate:1.0
       ~board_posts:10
       ~board_comments:10
+      ~thompson_confidence:1.0
   in
   check bool "score in [0,1]" true (score >= 0.0 && score <= 1.0)
 

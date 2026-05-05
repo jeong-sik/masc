@@ -247,6 +247,7 @@ let test_agent_reputation_penalizes_unsupported_claims () =
       let unpenalized =
         Agent_reputation.compute_overall_score ~completion_rate:1.0
           ~response_rate:0.0 ~board_posts:0 ~board_comments:0
+          ~thompson_confidence:1.0
       in
       let rep =
         Agent_reputation.compute_reputation config
@@ -519,7 +520,7 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
         |> Yojson.Safe.from_string
       in
       check string "warning present"
-        "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
+        "Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
         (string_member "routing_warning" result))
 
 let test_preflight_exposes_routing_hint_for_high_risk_keeper () =

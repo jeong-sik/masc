@@ -1,42 +1,42 @@
 import { h } from 'preact'
 import { render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Memory } from './memory'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../store'
-import { route } from '../router'
-import { contentCategory } from './memory-state'
-import type { BoardPost } from '../types'
+import { BoardSurface } from './board-surface'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../../store'
+import { route } from '../../router'
+import { contentCategory } from './board-state'
+import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
 
-vi.mock('../store', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../store')>()
+vi.mock('../../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store')>()
   return {
     ...actual,
     refreshBoard: vi.fn(),
   }
 })
 
-vi.mock('../router', () => ({
+vi.mock('../../router', () => ({
   route: { value: { params: {} } },
   navigate: vi.fn(),
   navigateToPost: vi.fn(),
 }))
 
-vi.mock('../api', () => ({
+vi.mock('../../api', () => ({
   fetchBoardPost: vi.fn(),
   votePost: vi.fn(),
   commentPost: vi.fn(),
   createPost: vi.fn(),
 }))
 
-vi.mock('../api/actions', () => ({
+vi.mock('../../api/actions', () => ({
   deleteBoardPost: vi.fn(),
 }))
 
-vi.mock('./memory-state', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('./memory-state')
-  const store = await vi.importMock<typeof import('../store')>('../store')
+vi.mock('./board-state', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('./board-state')
+  const store = await vi.importMock<typeof import('../../store')>('../../store')
   return {
     ...actual,
     ...store,
@@ -121,8 +121,8 @@ describe('contentCategory', () => {
   })
 })
 
-// ── Memory component rendering tests ──────────────────────────────
-describe('Memory Component', () => {
+// ── Board component rendering tests ───────────────────────────────
+describe('BoardSurface Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     boardPosts.value = []
@@ -136,14 +136,14 @@ describe('Memory Component', () => {
   })
 
   it('renders empty state when there are no posts', () => {
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
   it('renders loading state when loading', () => {
     boardLoading.value = true
-    render(h(Memory, null))
-    expect(screen.getByText(/메모리 피드 불러오는 중/)).toBeInTheDocument()
+    render(h(BoardSurface, null))
+    expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
   })
 
   it('renders article category for a tech exploration post', () => {
@@ -155,7 +155,7 @@ describe('Memory Component', () => {
         author: 'ani1999',
       }),
     ]
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
   })
 
@@ -169,8 +169,7 @@ describe('Memory Component', () => {
         post_kind: 'system',
       }),
     ]
-    render(h(Memory, null))
+    render(h(BoardSurface, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
   })
 })
-

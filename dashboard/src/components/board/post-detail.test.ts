@@ -3,40 +3,40 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
-vi.mock('../router', () => ({
+vi.mock('../../router', () => ({
   navigate: vi.fn(),
 }))
 
-vi.mock('../keeper-message', () => ({
+vi.mock('../../keeper-message', () => ({
   stripStateBlocks: (value: string) => value,
 }))
 
-vi.mock('./common/card', () => ({
+vi.mock('../common/card', () => ({
   Card: ({ children }: { children?: any }) => h('div', {}, children),
 }))
 
-vi.mock('./common/time-ago', () => ({
+vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
 
-vi.mock('./common/markdown', () => ({
+vi.mock('../common/markdown', () => ({
   Markdown: ({ text }: { text: string }) => h('div', {}, text),
 }))
 
-vi.mock('./common/toast', () => ({
+vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-vi.mock('./common/empty-state', () => ({
+vi.mock('../common/empty-state', () => ({
   EmptyState: ({ message }: { message: string }) => h('div', {}, message),
 }))
 
-vi.mock('./common/input', () => ({
+vi.mock('../common/input', () => ({
   TextInput: (props: Record<string, unknown>) => h('input', props),
   TextArea: (props: Record<string, unknown>) => h('textarea', props),
 }))
 
-vi.mock('./memory-state', () => ({
+vi.mock('./board-state', () => ({
   detailComments: { value: [] },
   detailLoading: { value: false },
   detailPostId: { value: null },
@@ -56,9 +56,9 @@ vi.mock('./memory-state', () => ({
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread, PostDetail, countCommentDescendants, filterCommentTree } from './memory-post-detail'
-import { voteComment } from './memory-state'
-import type { BoardComment } from '../types/core'
+import { CommentThread, PostDetail, countCommentDescendants, filterCommentTree } from './post-detail'
+import { voteComment } from './board-state'
+import type { BoardComment } from '../../types/core'
 
 afterEach(() => {
   cleanup()

@@ -77,13 +77,15 @@ val of_fields :
     - all [candidate.provider] strings are distinct
     - [weight >= 1] (default 1; persona-level priority for WFQ) *)
 
-val parse_toml_block :
-  keeper_id:string -> string -> (t, validation_error) result
-(** Parse the [\[admission\]] sub-table of a persona TOML file into a
-    policy.  Schema (informal):
+val parse_admission_json :
+  keeper_id:string -> Yojson.Safe.t -> (t, validation_error) result
+(** Parse the [admission] sub-object of a per-keeper config block (the
+    JSON view that [cascade_toml_materializer] produces from
+    [\[admission.<keeper_id>\]] sub-tables in [cascade.toml]).  Schema
+    (informal):
 
     {v
-    [admission]
+    [admission.analyst]
     weight = 1
     min_tier = "Acceptable"
     candidates = [
@@ -93,9 +95,27 @@ val parse_toml_block :
     ]
     v}
 
-    Missing block returns [Error Empty_candidate_list] — every persona
-    must declare its admission policy explicitly to make I5 (drift
-    observability) defensible. *)
+    The materializer lifts that to:
+
+    {v
+    {
+      "weight": 1,
+      "min_tier": "Acceptable",
+      "candidates": [
+        {"provider":"anthropic","model":"claude-sonnet-4-6","tier":"Preferred"},
+        ...
+      ]
+    }
+    v}
+
+    Missing fields default to: [weight = 1], [min_tier = "Acceptable"].
+    Missing or empty [candidates] returns [Error Empty_candidate_list]
+    — every persona must declare candidates explicitly to make I5
+    (drift observability) defensible.
+
+    Pure: no file I/O.  The caller is expected to read the JSON from
+    [cascade_config_loader.load_json] and select the appropriate
+    sub-object before calling this function. *)
 
 (** {1 Query} *)
 

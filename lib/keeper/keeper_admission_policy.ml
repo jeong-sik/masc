@@ -64,13 +64,63 @@ let of_fields ~keeper_id ~candidates ~weight ~min_tier =
           | Some p -> Error (Duplicate_provider p)
           | None -> Ok { keeper_id; candidates; weight; min_tier }
 
-let parse_toml_block ~keeper_id:_ (_toml_text : string) =
-  (* Implementation deferred to PR-B-2.  The mli signature is stable;
-     the parser will lift each TOML candidate row into a [candidate]
-     record and forward to [of_fields].  Returning [Error] from this
-     stub keeps any caller from accidentally building an empty policy
-     before the parser lands. *)
-  Error Empty_candidate_list
+(* JSON parsing helpers.  Avoid Yojson.Safe.Util to keep the diff
+   reviewable — direct match on `Assoc / `List / `String / `Int. *)
+
+let assoc_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let int_or_default ~default = function
+  | Some (`Int n) -> n
+  | _ -> default
+
+let string_field = function
+  | Some (`String s) -> Some s
+  | _ -> None
+
+let candidate_of_json json =
+  let provider = string_field (assoc_field "provider" json) in
+  let model = string_field (assoc_field "model" json) in
+  let tier_str = string_field (assoc_field "tier" json) in
+  match provider, model, tier_str with
+  | Some provider, Some model, Some tier_str ->
+      (match tier_of_label tier_str with
+       | Some tier -> Ok { provider; model; tier }
+       | None -> Error (Unknown_tier_label tier_str))
+  | _ -> Error Empty_candidate_list
+    (* Missing required field is treated as malformed input — the
+       caller's invariant is that every candidate row has provider /
+       model / tier. *)
+
+let candidates_of_json = function
+  | `List rows ->
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | row :: rest ->
+            (match candidate_of_json row with
+             | Ok c -> collect (c :: acc) rest
+             | Error e -> Error e)
+      in
+      collect [] rows
+  | _ -> Error Empty_candidate_list
+
+let parse_admission_json ~keeper_id (json : Yojson.Safe.t) =
+  let weight = int_or_default ~default:1 (assoc_field "weight" json) in
+  let min_tier_label =
+    Option.value ~default:"Acceptable"
+      (string_field (assoc_field "min_tier" json))
+  in
+  match tier_of_label min_tier_label with
+  | None -> Error (Unknown_tier_label min_tier_label)
+  | Some min_tier ->
+      (match assoc_field "candidates" json with
+       | None -> Error Empty_candidate_list
+       | Some candidates_json ->
+           (match candidates_of_json candidates_json with
+            | Error e -> Error e
+            | Ok candidates ->
+                of_fields ~keeper_id ~candidates ~weight ~min_tier))
 
 let keeper_id t = t.keeper_id
 let candidates t = t.candidates

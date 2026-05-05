@@ -65,7 +65,7 @@ export { buildFleetRows }
  *
  * Input is never mutated.
  */
-export function filterFleetRows(
+function filterFleetRows(
   rows: readonly FleetRow[],
   query: string,
 ): readonly FleetRow[] {

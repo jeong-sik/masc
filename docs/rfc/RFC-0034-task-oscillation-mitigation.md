@@ -3,7 +3,7 @@
 - **Status**: Draft
 - **Author**: Claude (autonomous, audit-driven from issue #13302 P0-4)
 - **Created**: 2026-05-06
-- **Related**: #10421 (implicit auto-release observability), #13302 (umbrella tracking)
+- **Related**: #10421 (claim-next preservation observability), #13302 (umbrella tracking)
 
 ## Problem
 
@@ -23,49 +23,31 @@ counter). The action surface is not: `coord_task.ml:390` explicitly states
 "Pure observation: does not block the release." Cycle thresholds at 5/10/20 fire
 WARN once per crossing and let the loop continue.
 
-### Why this happens (root cause)
+### Current semantics boundary
 
-`task_claim_next` semantics (introduced in #10421) implicitly auto-release any
-prior claim:
+#10421 no longer makes `task_claim_next` auto-release active work. The current
+implementation preserves an existing claim and surfaces
+`task_claim_next_preserved`; `released_task_id` is a legacy field retained for
+wire compatibility.
 
-```ocaml
-(* coord_task_schedule.ml:380-422 *)
-log_event ... ("type", `String "task_claim_next_auto_release") ...
-Log.RoomTask.warn
-  "task_claim_next auto-released prev claim: agent=%s task=%s ..."
-let updated = List.map (fun (t : Masc_domain.task) ->
-  if String.equal t.id prev.id then { t with task_status = Todo }
-  else t
-) backlog.tasks
-```
-
-A keeper that calls `task_claim_next` while still holding a task does not need to
-explicitly release/finish it — the prior task is silently moved back to `Todo`.
-This is by design (graceful re-entry from broken keeper turns), but it removes
-the contract that would otherwise prevent abandoned-mid-work churn:
-
-1. Keeper A calls `claim_next` → claims task-125.
-2. Keeper A calls `claim_next` again before finishing → task-125 returns to `Todo`.
-3. Keeper B calls `claim_next` → claims task-125.
-4. Keeper B calls `claim_next` again → task-125 returns to `Todo`.
-5. Loop continues until external intervention.
-
-`cycle_count` increments on every `Release` action (which the implicit auto-release
-also triggers via `task_claim_next_auto_release` → `Todo` transition), and the
-oscillation_major/severe WARNs fire, but no transition gates the next claim.
+This RFC therefore does not verify or depend on an implicit auto-release path.
+It proposes a new mitigation for any remaining oscillation path that still
+increments `cycle_count` through explicit releases, handoffs, or future
+transition sources. Before implementation, PR-2 must attach a concrete trace
+showing continued oscillation after #10421's preservation semantics; otherwise
+the RFC should be marked superseded by #10421.
 
 ## Goals
 
-1. **Stop sustained churn** without breaking the implicit auto-release semantic
-   that broken keeper turns rely on.
+1. **Stop sustained release/reclaim churn** when current traces prove it still
+   exists after #10421's claim-preservation behavior.
 2. **Escalate to human** when automated mitigation has been exhausted.
 3. **Preserve observability** wired in #10421 (counters, JSONL events).
 
 ## Non-Goals
 
-- Removing the implicit auto-release semantic of `task_claim_next` (Option C in
-  the audit comment) — too high a compatibility cost; requires touching every
-  keeper code path that relies on graceful re-entry.
+- Changing `task_claim_next` preservation semantics — active work should remain
+  protected while this RFC targets only proven residual oscillation.
 - Persisting cooldown state across server restarts (in-memory is enough for the
   common case; `cycle_count` itself is already on-disk and survives restarts).
 
@@ -76,7 +58,7 @@ oscillation_major/severe WARNs fire, but no transition gates the next claim.
 | Stage | Trigger | Action | Recovery |
 |-------|---------|--------|----------|
 | **Cooldown** | `cycle_count` reaches 10 (oscillation_major) | Set `task.cooldown_until = now() + COOLDOWN_SEC` (default 300s); claim attempts during cooldown are rejected with `TaskInCooldown` error | Auto-clear when `now() >= cooldown_until`; reset `cycle_count` to 0 on first claim after cooldown |
-| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to `paused_human` status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume` action |
+| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume` action |
 
 ### Domain changes
 
@@ -91,8 +73,28 @@ type task = {
 }
 ```
 
-`task_status` already has a `Paused_human` variant per recent additions (verify
-in `masc_domain.ml`); if not, add it.
+Add a new task status variant as part of PR-1; it does not exist today:
+
+```ocaml
+type task_status =
+  | ...
+  | PausedHuman of {
+      assignee: string option;
+      paused_at: string;
+      reason: string;
+    }
+```
+
+The wire string should be `paused_human`. Required surface:
+
+- `lib/types/types_core.ml`: add the variant and update
+  `task_status_to_string`, `task_status_icon`, assignee extraction, terminal
+  helpers, and schema enum witnesses.
+- `lib/coord/coord_task_schedule.ml`: exclude human-paused tasks from claim
+  candidates.
+- `lib/coord/coord_task.ml`: add severe escalation and resume transition.
+- Dashboard/cockpit task views: render the human-paused badge/state.
+- Tests: cover serialization compatibility and state-machine transitions.
 
 ### Claim path changes
 
@@ -105,7 +107,9 @@ let task_is_in_cooldown ~now (t : Masc_domain.task) =
   | Some until when until > now -> true
   | _ -> false
 
-let task_is_human_paused (t : Masc_domain.task) = t.paused_for_human
+let task_is_human_paused (t : Masc_domain.task) =
+  t.paused_for_human
+  || match t.task_status with PausedHuman _ -> true | _ -> false
 
 (* In claim candidate filter *)
 let claimable t =
@@ -134,13 +138,17 @@ In `coord_task.ml`, after the existing oscillation WARN block (line 392-417):
     else None
   in
 
-  (* New: paused_human at oscillation_severe *)
+  (* New: human-paused status at oscillation_severe *)
   let with_paused =
     if cc >= 20 && not task.paused_for_human then
       Some { task with
              paused_for_human = true;
              paused_at = Some (Masc_domain.now_iso ());
-             task_status = Paused_human;  (* if status variant exists *)
+             task_status = PausedHuman {
+               assignee = task_assignee_of_status task.task_status;
+               paused_at = Masc_domain.now_iso ();
+               reason = "task_oscillation_severe";
+             };
            }
     else None
   in
@@ -178,7 +186,7 @@ operator config):
 - Existing keepers continue to work — cooldown/paused_human only activate at high
   `cycle_count`, which by definition has not been reached for non-oscillating
   tasks.
-- `task_claim_next` implicit auto-release semantic (`#10421`) is preserved.
+- `task_claim_next` active-work preservation semantics (`#10421`) are preserved.
 - On-disk task JSON gains 3 optional fields, all `null` by default → backward-
   compatible with existing fixtures and tests.
 
@@ -188,16 +196,16 @@ operator config):
 |------|-----------|
 | Cooldown gate | After 10 release cycles, next `claim_next` returns `TaskInCooldown` until `cooldown_until` expires |
 | Cooldown expiry | After cooldown expires, claim succeeds and `cycle_count` reset to 0 |
-| Severe escalation | After 20 cycles, `task.task_status = Paused_human`, JSONL `task_oscillation_human_escalation` emitted |
+| Severe escalation | After 20 cycles, `task.task_status = PausedHuman`, JSONL `task_oscillation_human_escalation` emitted |
 | Human-paused gate | `claim_next` skips paused_human tasks even when other tasks are blocked |
 | `task_resume_after_human_escalation` | Restores task to claimable state, resets cycle_count |
-| Implicit auto-release preserved | Single-keeper churn (re-entrant claim_next without release) still works for `cycle_count < 10` |
+| Claim-next preservation preserved | Re-entrant `claim_next` while already holding work preserves the active task and does not create release churn |
 
 ## Implementation phases
 
 | Phase | Scope | Files |
 |-------|-------|-------|
-| **PR-1** | Domain fields + serialization | `lib/masc_domain.ml`, `lib/masc_domain.mli`, fixtures |
+| **PR-1** | Domain fields + new human-paused status serialization | `lib/types/types_core.ml`, task JSON fixtures |
 | **PR-2** | Cooldown gate at oscillation_major | `lib/coord/coord_task.ml`, `lib/coord/coord_task_schedule.ml`, env_config |
 | **PR-3** | Severe-level paused_human + resume action | `lib/coord/coord_task.ml`, MCP tool addition |
 | **PR-4** | Dashboard surface | `dashboard/src/components/...` |
@@ -211,7 +219,7 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
    reset the moment cooldown expires (background sweep) or on the first successful
    claim afterward? The latter avoids a sweep loop but delays observability of
    "this task is healthy now".
-2. **Paused_human auto-resume**: Should `paused_for_human` auto-clear after a
+2. **Human-paused auto-resume**: Should `paused_for_human` auto-clear after a
    long timeout (e.g. 24h with no further oscillation activity)? Or strictly
    manual intervention?
 3. **Cross-keeper attribution**: When task-125 oscillates between `executor` and
@@ -222,13 +230,14 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
 
 - **2026-05-06**: RFC drafted from issue #13302 P0-4 audit, after caller-context
   inspection of `coord_task_schedule.ml:380-422` and `coord_task.ml:380-417`.
-  Option C (claim_next strict mode) rejected for compatibility cost; A (cooldown)
-  + B (human escalation) chosen as the staged escalation path.
+  Follow-up review corrected the premise: `task_claim_next` now preserves active
+  work after #10421, so implementation must first prove a residual oscillation
+  path and then apply A (cooldown) + B (human escalation) only to that path.
 
 ## References
 
-- `#10421` — implicit auto-release observability
-- `lib/coord/coord_task_schedule.ml:380-422` — `task_claim_next_auto_release` emit
+- `#10421` — `task_claim_next` active-work preservation observability
+- `lib/coord/coord_task_schedule.ml:380-422` — `task_claim_next_preserved` handling
 - `lib/coord/coord_task.ml:380-417` — oscillation threshold detection (5/10/20)
 - `lib/coord/coord_hooks.ml:219` — `#10421` hook definition
 - Issue #13302 P0-4 audit: https://github.com/jeong-sik/masc-mcp/issues/13302#issuecomment-4380878513

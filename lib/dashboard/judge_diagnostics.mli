@@ -13,3 +13,7 @@ val format_lenient_fallback : judge_label:string -> string -> string
 val record_lenient_fallback : judge_label:string -> string -> string
 (** Increment the judge fallback metrics and return
     {!format_lenient_fallback}. *)
+
+val lenient_fallback_metrics_json : judge_label:string -> Yojson.Safe.t
+(** Current Prometheus counter values for a judge label, formatted for
+    dashboard/runtime JSON surfaces. *)

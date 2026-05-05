@@ -95,12 +95,66 @@ let test_empty_governance_structure () =
         (judge |> member "degraded_reason" = `Null);
       check string "keeper_name is governance-judge" "governance-judge"
         (judge |> member "keeper_name" |> to_string);
+      let fallback = judge |> member "lenient_json_fallback" in
+      check string "fallback metrics label is governance" "governance"
+        (fallback |> member "judge" |> to_string);
+      ignore
+        (fallback |> member "governance_judge_unparseable_total" |> to_int);
+      ignore
+        (fallback
+         |> member "governance_lenient_json_fallback_hit_total"
+         |> to_int);
       check bool "model_used is null when no judge started" true
         (judge |> member "model_used" = `Null);
       let judgments = json |> member "judgments" |> to_list in
       check int "judgments empty" 0 (List.length judgments);
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
+
+let governance_fallback_count metric_name =
+  int_of_float
+    (Lib.Prometheus.metric_value_or_zero
+       metric_name
+       ~labels:[("judge", "governance")]
+       ())
+
+let test_dashboard_surfaces_lenient_fallback_metrics () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let before_unparseable =
+        governance_fallback_count
+          Lib.Prometheus.metric_governance_judge_unparseable
+      in
+      let before_fallback =
+        governance_fallback_count
+          Lib.Prometheus.metric_governance_lenient_json_fallback_hit
+      in
+      ignore
+        (Lib.Judge_diagnostics.record_lenient_fallback
+           ~judge_label:"Governance"
+           "not-json");
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+          ~offset:0 ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let fallback =
+        json |> member "judge" |> member "lenient_json_fallback"
+      in
+      check int "unparseable fallback count surfaced"
+        (before_unparseable + 1)
+        (fallback |> member "governance_judge_unparseable_total" |> to_int);
+      check int "lenient fallback hit count surfaced"
+        (before_fallback + 1)
+        (fallback
+         |> member "governance_lenient_json_fallback_hit_total"
+         |> to_int))
 
 let test_runtime_status_and_judgments_are_live () =
   let dir = test_dir () in
@@ -651,6 +705,8 @@ let () =
         [
           test_case "empty governance structure" `Quick
             test_empty_governance_structure;
+          test_case "dashboard surfaces lenient fallback metrics" `Quick
+            test_dashboard_surfaces_lenient_fallback_metrics;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
           test_case "empty judgment disk scan uses cooldown" `Quick

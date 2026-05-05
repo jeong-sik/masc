@@ -34,3 +34,22 @@ let record_lenient_fallback ~judge_label raw =
     ~labels
     ();
   format_lenient_fallback ~judge_label raw
+
+let int_metric_value metric_name ~labels =
+  int_of_float (Prometheus.metric_value_or_zero metric_name ~labels ())
+
+let lenient_fallback_metrics_json ~judge_label =
+  let judge = String.lowercase_ascii judge_label in
+  let labels = [("judge", judge)] in
+  `Assoc
+    [
+      ("judge", `String judge);
+      ( "governance_judge_unparseable_total",
+        `Int
+          (int_metric_value Prometheus.metric_governance_judge_unparseable
+             ~labels) );
+      ( "governance_lenient_json_fallback_hit_total",
+        `Int
+          (int_metric_value
+             Prometheus.metric_governance_lenient_json_fallback_hit ~labels) );
+    ]

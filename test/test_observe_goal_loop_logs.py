@@ -72,8 +72,16 @@ def catalog_finding_ids(catalog: dict[str, object]) -> list[str]:
 
 def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
     body = "source line\n" * 2000
-    if Path(source_path).name == "GOAL_LOOP_INTEGRATION.md":
+    source_name = Path(source_path).name
+    if source_name == "INTEGRATED_IMPROVEMENT_DESIGN.md":
+        body += "214건 감사 결과\nGOAL: 36개 Keeper 동시 운영\n"
+    elif source_name == "GOAL_LOOP_INTEGRATION.md":
+        body += "206건 감사 결과\n206 findings from audit\n"
         body += "\n".join(ids) + "\n"
+    elif source_name == "fundamental_roadmap.md":
+        body += "206건 감사 결과\n"
+    elif source_name == "live_incident_analysis.md":
+        body += "206건의 감사 결과\n"
     return body
 
 
@@ -217,6 +225,20 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(by_id["CD-8"].status, "NOT_EVALUATED")
         self.assertEqual(by_id["CD-8"].decision_id, "D-P1-1")
 
+    def test_orient_catalog_can_use_compact_builtin_finding_rows(self) -> None:
+        scan = json_from_fixture("observe.startup.json")
+
+        report = orient_goal_loop_logs.orient_scan(
+            scan,
+            audit_catalog={"findings": [{"finding_id": "NF-1"}]},
+        )
+
+        by_id = {finding.finding_id: finding for finding in report.findings}
+        self.assertEqual(by_id["NF-1"].title, "provider_health_skipped_all_models")
+        self.assertEqual(by_id["NF-1"].severity, "critical")
+        self.assertEqual(by_id["NF-1"].patterns, ["provider_health_skipped"])
+        self.assertEqual(by_id["NF-1"].status, "EVIDENCE_PRESENT")
+
     def test_orient_catalog_can_validate_missing_source_artifacts(self) -> None:
         scan = json_from_fixture("observe.startup.json")
         catalog = orient_goal_loop_logs.load_audit_catalog_input(
@@ -241,10 +263,78 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 0)
         self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
         self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 18)
+        self.assertEqual(
+            source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
+        )
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 5)
         self.assertIn(
             "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
             source_artifacts["missing_paths"],
         )
+
+    def test_orient_catalog_rejects_source_escape_and_bad_line_refs(self) -> None:
+        catalog: dict[str, object] = {
+            "expected_findings_total": 1,
+            "source_documents_expected": 1,
+            "external_sources": [
+                {"path": "../secret.md", "line_refs": [1]},
+                {"path": "valid.md", "line_refs": [0, -1, 3]},
+            ],
+            "findings": [
+                {
+                    "finding_id": "NF-1",
+                    "title": "provider_health_skipped_all_models",
+                    "severity": "critical",
+                    "patterns": ["provider_health_skipped"],
+                    "source": {"path": "valid.md", "line_refs": [0, 3]},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            (root / "valid.md").write_text("NF-1\nsource line\n", encoding="utf-8")
+            summary = orient_goal_loop_logs.source_artifact_summary(catalog, root)
+
+        assert summary is not None
+        self.assertEqual(summary["status"], "INCOMPLETE")
+        self.assertEqual(summary["source_artifacts_invalid_paths"], 1)
+        self.assertEqual(summary["invalid_paths"], ["../secret.md"])
+        self.assertEqual(summary["line_ref_errors"], 1)
+        self.assertEqual(
+            summary["line_ref_error_samples"][0]["line_refs"],
+            [-1, 0, 3],
+        )
+
+    def test_orient_catalog_counts_only_valid_external_sources(self) -> None:
+        summary = orient_goal_loop_logs.audit_catalog_summary(
+            {
+                "expected_findings_total": 0,
+                "source_documents_expected": 1,
+                "external_sources": [
+                    {"path": "valid.md", "line_refs": [1]},
+                    {"path": "", "line_refs": [1]},
+                    {"path": "bad.md", "line_refs": "1"},
+                    "not-an-object",
+                ],
+                "findings": [],
+            }
+        )
+
+        assert summary is not None
+        self.assertEqual(summary["external_sources_total"], 1)
+        self.assertEqual(summary["external_sources_invalid"], 3)
+        self.assertEqual(summary["source_documents_status"], "COMPLETE")
+
+    def test_orient_catalog_merges_partial_builtin_overrides(self) -> None:
+        specs = orient_goal_loop_logs.merged_specs(
+            {"findings": [{"finding_id": "NF-1", "severity": "warning"}]}
+        )
+        nf1 = next(spec for spec in specs if spec.finding_id == "NF-1")
+
+        self.assertEqual(nf1.title, "provider_health_skipped_all_models")
+        self.assertEqual(nf1.severity, "warning")
+        self.assertEqual(nf1.patterns, ("provider_health_skipped",))
 
     def test_orient_catalog_can_validate_external_source_root(self) -> None:
         scan = json_from_fixture("observe.startup.json")
@@ -287,6 +377,76 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 18)
         self.assertEqual(source_artifacts["source_ids_missing_from_catalog"], 0)
         self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
+        self.assertEqual(source_artifacts["source_aggregate_claim_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 0)
+
+    def test_orient_catalog_can_detect_missing_aggregate_claim_evidence(self) -> None:
+        scan = json_from_fixture("observe.startup.json")
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        external_sources = catalog["external_sources"]
+        assert isinstance(external_sources, list)
+        ids = catalog_finding_ids(catalog)
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            for source in external_sources:
+                assert isinstance(source, dict)
+                source_path = source["path"]
+                assert isinstance(source_path, str)
+                body = "source line\n" * 2000
+                if Path(source_path).name == "GOAL_LOOP_INTEGRATION.md":
+                    body += "\n".join(ids) + "\n"
+                (root / Path(source_path).name).write_text(body, encoding="utf-8")
+
+            report = orient_goal_loop_logs.orient_scan(
+                scan,
+                audit_catalog=catalog,
+                audit_source_root=root,
+                audit_source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        self.assertIsNotNone(report.audit_catalog)
+        assert report.audit_catalog is not None
+        source_artifacts = report.audit_catalog["source_artifacts"]
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
+        self.assertEqual(
+            source_artifacts["source_aggregate_claim_status"], "INCOMPLETE"
+        )
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_total"], 5)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_verified"], 0)
+        self.assertEqual(source_artifacts["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(
+            source_artifacts["source_aggregate_claim_missing_samples"][0]["claim_id"],
+            "audit_total_206",
+        )
+
+    def test_orient_catalog_rejects_source_paths_outside_root(self) -> None:
+        catalog = {
+            "external_sources": [
+                {"path": "../outside.md", "line_refs": [1]},
+                {"path": "/tmp/outside.md", "line_refs": [1]},
+            ],
+            "findings": [],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                catalog,
+                Path(raw_dir),
+            )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_artifacts_invalid_paths"], 2)
+        self.assertEqual(
+            source_artifacts["invalid_paths"], ["../outside.md", "/tmp/outside.md"]
+        )
 
     def test_orient_cli_can_fail_on_incomplete_catalog(self) -> None:
         result = subprocess.run(
@@ -347,6 +507,9 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn('"consistency_findings_open": 1', result.stdout)
+
+    def test_orient_treats_malformed_consistency_finding_as_open(self) -> None:
+        self.assertTrue(orient_goal_loop_logs.consistency_finding_is_open("bad"))
 
     def test_orient_cli_can_pass_when_consistency_finding_resolved(self) -> None:
         catalog = orient_goal_loop_logs.load_audit_catalog_input(
@@ -423,6 +586,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"source_artifacts_resolved": 12', result.stdout)
         self.assertIn('"source_itemized_finding_ids_total": 18', result.stdout)
+        self.assertIn('"source_aggregate_claim_status": "COMPLETE"', result.stdout)
+        self.assertIn('"source_aggregate_claim_sources_verified": 5', result.stdout)
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

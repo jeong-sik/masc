@@ -124,17 +124,18 @@ into the public repository:
 python3 scripts/orient_goal_loop_logs.py \
   test/fixtures/goal_loop/observe.startup.json \
   --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
-  --audit-source-root /Users/dancer/Downloads \
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> \
   --audit-source-strip-prefix prompt_corpus/GOAL_LOOP \
   --require-source-artifacts
 ```
 
 Expected key fact: this can pass locally when the 12 prompt-supplied source
-files exist in Downloads. The source-artifact summary should show
+files exist under `<GOAL_LOOP_SOURCE_ROOT>`. The source-artifact summary should show
 `source_artifacts_resolved=12`, `source_itemized_finding_ids_total=18`,
-`catalog_itemized_finding_ids_total=18`, and zero source/catalog ID mismatch.
-`--require-complete-catalog` can still fail because the row-level 206 corpus is
-incomplete.
+`catalog_itemized_finding_ids_total=18`, zero source/catalog ID mismatch,
+`source_aggregate_claim_status=COMPLETE`, and
+`source_aggregate_claim_sources_verified=5`. `--require-complete-catalog` can
+still fail because the row-level 206 corpus is incomplete.
 
 Use the catalog-enriched Orient output in aggregate GOAL LOOP status when
 checking whether the goal can be closed:

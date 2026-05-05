@@ -87,12 +87,22 @@
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
-  --audit-source-root /Users/dancer/Downloads --audit-source-strip-prefix
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
   prompt_corpus/GOAL_LOOP --require-source-artifacts` checked at
   2026-05-06T06:03:00+09:00, confidence High: validates the current local
   external source artifacts without committing those documents to the public
   repository, with 12 resolved source artifacts, 18 source-itemized audit IDs,
-  18 catalog-itemized audit IDs, and zero ID mismatch or line-ref errors.
+  18 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, and 5/5
+  aggregate claim source checks verified from resolved documents.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
+  prompt_corpus/GOAL_LOOP --require-source-artifacts --format text` checked at
+  2026-05-06T06:17:46+09:00, confidence High: reports
+  `aggregate_claim_sources: COMPLETE verified=5 missing=0`, proving the
+  catalog's 206, 214, and 36-keeper aggregate claims are present in the
+  resolved source artifacts even though they remain mutually inconsistent.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json
@@ -224,9 +234,10 @@ The Orient skeleton is testable, and the prompt's external 206/214 aggregate
 claims are now machine-visible. The full set is still not encoded: current
 catalog replay reports 12/12 source documents named by the manifest, no checked
 source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
-external source artifacts resolvable from `/Users/dancer/Downloads` via
+external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
 `--audit-source-strip-prefix`, 18 source-itemized IDs matching the 18
-catalog-itemized findings, 188 missing 206-itemized rows, one open consistency
+catalog-itemized findings, 5/5 aggregate claim source checks verified from
+resolved documents, 188 missing 206-itemized rows, one open consistency
 finding for the 206-vs-214 count mismatch that fails
 `--require-consistency-resolved`, and 8 itemized rows that are not evaluable
 from the startup log patterns.
@@ -348,10 +359,12 @@ No convergence claim is valid yet. The only safe current statement is:
    `audit-corpus.external-claim.json` records all 12 prompt source paths,
    three aggregate claims, one 206-vs-214 consistency finding, and 18 itemized
    findings, but `--require-complete-catalog` still fails with 188 missing rows
-   against the 206 claim.
+   against the 206 claim. The aggregate claims are now source-verified at 5/5,
+   so the remaining gap is row-level completeness and consistency, not whether
+   the aggregate numbers appear in the supplied documents.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
-   passes via `/Users/dancer/Downloads` plus `--audit-source-strip-prefix`, but
+   passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, but
    public-repo replay still needs a stable non-user-local artifact policy.
 3. Reconcile whether the governing audit total is 206 or 214 before closing
    the GOAL LOOP objective so `--require-consistency-resolved` passes.

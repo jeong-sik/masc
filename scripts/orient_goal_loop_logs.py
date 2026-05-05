@@ -20,6 +20,10 @@ from typing import Any, TextIO
 AUDIT_FINDING_ID_RE = re.compile(r"\b(?:R-FATAL|CD|CE|CF|NF)-[0-9]+\b")
 
 
+def exact_number_pattern(value: int) -> str:
+    return rf"(?<!\d){value}(?!\d)"
+
+
 @dataclass(frozen=True)
 class FindingSpec:
     finding_id: str
@@ -163,11 +167,27 @@ def pattern_samples(patterns: dict[str, Any], name: str) -> list[dict[str, Any]]
 
 def consistency_finding_is_open(finding: Any) -> bool:
     if not isinstance(finding, dict):
-        return False
+        return True
     status = finding.get("status")
     if not isinstance(status, str):
         return True
     return status.upper() not in {"CLOSED", "COMPLETE", "DONE", "RESOLVED"}
+
+
+def valid_external_source(source: Any) -> dict[str, Any] | None:
+    if not isinstance(source, dict):
+        return None
+    path = source.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    line_refs = source.get("line_refs", [])
+    if line_refs is not None and not isinstance(line_refs, list):
+        return None
+    if isinstance(line_refs, list) and any(
+        not isinstance(item, int) for item in line_refs
+    ):
+        return None
+    return source
 
 
 def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
@@ -178,6 +198,7 @@ def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
         raise ValueError("audit catalog findings must be a list")
 
     specs: list[FindingSpec] = []
+    builtin_by_id = {spec.finding_id: spec for spec in FINDINGS}
     for index, raw in enumerate(findings_raw):
         if not isinstance(raw, dict):
             raise ValueError(
@@ -190,12 +211,19 @@ def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
             raise ValueError(
                 f"audit catalog finding at index {index} missing finding_id"
             )
+        base = builtin_by_id.get(finding_id)
+        if title is None and base is not None:
+            title = base.title
+        if severity is None and base is not None:
+            severity = base.severity
         if not isinstance(title, str) or not title:
             raise ValueError(f"audit catalog finding {finding_id} missing title")
         if severity not in ("critical", "warning", "info"):
             raise ValueError(f"audit catalog finding {finding_id} has invalid severity")
 
-        patterns_raw = raw.get("patterns", [])
+        patterns_raw = raw.get(
+            "patterns", list(base.patterns) if base is not None else []
+        )
         if not isinstance(patterns_raw, list):
             raise ValueError(
                 f"audit catalog finding {finding_id} patterns must be a list"
@@ -207,16 +235,21 @@ def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
             )
 
         decision_id = raw.get("decision_id")
+        if decision_id is None and base is not None:
+            decision_id = base.decision_id
         if decision_id is not None and not isinstance(decision_id, str):
             raise ValueError(
                 f"audit catalog finding {finding_id} decision_id must be string"
             )
-        actionability = raw.get("actionability", "actionable")
+        actionability = raw.get(
+            "actionability",
+            base.actionability if base is not None else "actionable",
+        )
         if not isinstance(actionability, str) or not actionability:
             raise ValueError(
                 f"audit catalog finding {finding_id} actionability missing"
             )
-        source = raw.get("source")
+        source = raw.get("source", base.source if base is not None else None)
         if source is not None and not isinstance(source, dict):
             raise ValueError(
                 f"audit catalog finding {finding_id} source must be object"
@@ -244,6 +277,83 @@ def merged_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
             ordered_ids.append(spec.finding_id)
         merged[spec.finding_id] = spec
     return [merged[finding_id] for finding_id in ordered_ids]
+
+
+def aggregate_claim_patterns(claim: dict[str, Any]) -> list[re.Pattern[str]]:
+    claimed_total = claim.get("claimed_total")
+    if not isinstance(claimed_total, int):
+        return []
+    number = exact_number_pattern(claimed_total)
+    claim_id = claim.get("claim_id")
+    claim_id_text = claim_id if isinstance(claim_id, str) else ""
+    if claim_id_text.startswith("audit_total"):
+        return [
+            re.compile(rf"{number}[^\n]{{0,40}}(?:건\s*)?감사", re.IGNORECASE),
+            re.compile(rf"{number}[^\n]{{0,40}}findings?", re.IGNORECASE),
+            re.compile(rf"(?:감사|findings?)[^\n]{{0,40}}{number}", re.IGNORECASE),
+        ]
+    if "keeper" in claim_id_text.lower():
+        return [
+            re.compile(rf"{number}[^\n]{{0,60}}keepers?", re.IGNORECASE),
+            re.compile(rf"(?:GOAL|목표)[^\n]{{0,100}}{number}", re.IGNORECASE),
+        ]
+    return [re.compile(number)]
+
+
+def aggregate_claim_source_summary(
+    catalog: dict[str, Any],
+    resolved_contents: dict[str, str],
+) -> dict[str, Any]:
+    aggregate_claims_raw = catalog.get("aggregate_claims", [])
+    aggregate_claims = (
+        aggregate_claims_raw if isinstance(aggregate_claims_raw, list) else []
+    )
+    missing_samples: list[dict[str, Any]] = []
+    checked_sources = 0
+    verified_sources = 0
+
+    for claim in aggregate_claims:
+        if not isinstance(claim, dict):
+            continue
+        source_paths_raw = claim.get("source_paths", [])
+        source_paths = source_paths_raw if isinstance(source_paths_raw, list) else []
+        patterns = aggregate_claim_patterns(claim)
+        for path_raw in source_paths:
+            if not isinstance(path_raw, str) or not path_raw:
+                continue
+            checked_sources += 1
+            content = resolved_contents.get(path_raw)
+            claim_found = content is not None and any(
+                pattern.search(content) for pattern in patterns
+            )
+            if claim_found:
+                verified_sources += 1
+                continue
+            missing_samples.append(
+                {
+                    "claim_id": claim.get("claim_id", "unknown"),
+                    "claimed_total": claim.get("claimed_total"),
+                    "path": path_raw,
+                }
+            )
+
+    missing_sources = checked_sources - verified_sources
+    if checked_sources == 0:
+        status = "NOT_APPLICABLE"
+    elif missing_sources == 0:
+        status = "COMPLETE"
+    else:
+        status = "INCOMPLETE"
+    return {
+        "source_aggregate_claim_status": status,
+        "source_aggregate_claims_total": len(
+            [claim for claim in aggregate_claims if isinstance(claim, dict)]
+        ),
+        "source_aggregate_claim_sources_total": checked_sources,
+        "source_aggregate_claim_sources_verified": verified_sources,
+        "source_aggregate_claim_sources_missing": missing_sources,
+        "source_aggregate_claim_missing_samples": missing_samples[:10],
+    }
 
 
 def source_artifact_summary(
@@ -299,36 +409,56 @@ def source_artifact_summary(
                 add_ref(source.get("path"), source.get("line_refs"))
 
     missing_paths: list[str] = []
+    invalid_paths: list[str] = []
     line_ref_errors: list[dict[str, Any]] = []
     resolved = 0
     source_finding_ids: set[str] = set()
     catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
+    resolved_contents: dict[str, str] = {}
 
-    def resolve_candidate(path_text: str) -> Path:
+    source_root_resolved = source_root.resolve(strict=False)
+
+    def resolve_candidate(path_text: str) -> Path | None:
         path = Path(path_text)
         if path.is_absolute():
-            return path
+            return None
         if source_strip_prefix is None:
-            return source_root / path
-        normalized_prefix = source_strip_prefix.strip("/")
-        normalized_path = path_text.strip("/")
-        prefix = f"{normalized_prefix}/"
-        if normalized_path.startswith(prefix):
-            return source_root / normalized_path[len(prefix) :]
-        return source_root / path
+            candidate = source_root / path
+        else:
+            normalized_prefix = source_strip_prefix.strip("/")
+            normalized_path = path_text.strip("/")
+            prefix = f"{normalized_prefix}/"
+            if normalized_path.startswith(prefix):
+                candidate = source_root / normalized_path[len(prefix) :]
+            else:
+                candidate = source_root / path
+        candidate_resolved = candidate.resolve(strict=False)
+        if not candidate_resolved.is_relative_to(source_root_resolved):
+            return None
+        return candidate
 
     for path_text, line_refs in sorted(refs.items()):
         candidate = resolve_candidate(path_text)
+        if candidate is None:
+            invalid_paths.append(path_text)
+            continue
         if not candidate.is_file():
             missing_paths.append(path_text)
             continue
         resolved += 1
         content = candidate.read_text(encoding="utf-8")
+        resolved_contents[path_text] = content
         source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
         if not line_refs:
             continue
         line_count = len(content.splitlines())
-        bad_refs = sorted({line_ref for line_ref in line_refs if line_ref > line_count})
+        bad_refs = sorted(
+            {
+                line_ref
+                for line_ref in line_refs
+                if line_ref < 1 or line_ref > line_count
+            }
+        )
         if bad_refs:
             line_ref_errors.append(
                 {
@@ -345,11 +475,15 @@ def source_artifact_summary(
         if not source_ids_missing_from_catalog and not catalog_ids_missing_from_source
         else "INCOMPLETE"
     )
+    aggregate_claims = aggregate_claim_source_summary(catalog, resolved_contents)
+    source_aggregate_claim_status = aggregate_claims["source_aggregate_claim_status"]
     status = (
         "COMPLETE"
-        if not missing_paths
+        if not invalid_paths
+        and not missing_paths
         and not line_ref_errors
         and source_itemized_id_status == "COMPLETE"
+        and source_aggregate_claim_status in {"COMPLETE", "NOT_APPLICABLE"}
         else "INCOMPLETE"
     )
     return {
@@ -359,12 +493,15 @@ def source_artifact_summary(
         "source_artifacts_total": len(refs),
         "source_artifacts_resolved": resolved,
         "source_artifacts_missing": len(missing_paths),
+        "source_artifacts_invalid_paths": len(invalid_paths),
         "line_ref_errors": len(line_ref_errors),
         "source_itemized_id_status": source_itemized_id_status,
         "source_itemized_finding_ids_total": len(source_finding_ids),
         "catalog_itemized_finding_ids_total": len(catalog_finding_ids),
         "source_ids_missing_from_catalog": len(source_ids_missing_from_catalog),
         "catalog_ids_missing_from_source": len(catalog_ids_missing_from_source),
+        **aggregate_claims,
+        "invalid_paths": invalid_paths[:10],
         "missing_paths": missing_paths[:10],
         "line_ref_error_samples": line_ref_errors[:10],
         "source_ids_missing_from_catalog_samples": source_ids_missing_from_catalog[:10],
@@ -384,9 +521,17 @@ def audit_catalog_summary(
     expected_raw = catalog.get("expected_findings_total")
     expected = expected_raw if isinstance(expected_raw, int) else None
     external_sources_raw = catalog.get("external_sources", [])
-    external_sources = (
+    external_sources_list = (
         external_sources_raw if isinstance(external_sources_raw, list) else []
     )
+    external_sources = [
+        source
+        for source in (
+            valid_external_source(source) for source in external_sources_list
+        )
+        if source is not None
+    ]
+    invalid_external_sources = len(external_sources_list) - len(external_sources)
     source_expected_raw = catalog.get("source_documents_expected")
     source_expected = (
         source_expected_raw if isinstance(source_expected_raw, int) else None
@@ -421,6 +566,7 @@ def audit_catalog_summary(
         "itemized_findings_total": itemized,
         "missing_itemized_findings": missing,
         "external_sources_total": source_covered,
+        "external_sources_invalid": invalid_external_sources,
         "source_documents_expected": source_expected,
         "source_documents_covered": source_covered,
         "source_documents_status": source_status,
@@ -546,6 +692,12 @@ def report_to_text(report: OrientReport) -> str:
                 f"missing={source_artifacts['source_artifacts_missing']} "
                 f"line_ref_errors={source_artifacts['line_ref_errors']} "
                 f"source_ids={source_artifacts['source_itemized_finding_ids_total']}"
+            )
+            lines.append(
+                "aggregate_claim_sources: "
+                f"{source_artifacts['source_aggregate_claim_status']} "
+                f"verified={source_artifacts['source_aggregate_claim_sources_verified']} "
+                f"missing={source_artifacts['source_aggregate_claim_sources_missing']}"
             )
         consistency_findings = report.audit_catalog.get("consistency_findings", [])
         if isinstance(consistency_findings, list) and consistency_findings:

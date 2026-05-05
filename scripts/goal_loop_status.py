@@ -64,7 +64,7 @@ def status_max(statuses: list[str]) -> str:
 
 def consistency_finding_is_open(finding: Any) -> bool:
     if not isinstance(finding, dict):
-        return False
+        return True
     status = finding.get("status")
     if not isinstance(status, str):
         return True
@@ -210,6 +210,15 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             )
             audit_catalog_summary["catalog_ids_missing_from_source"] = (
                 source_artifacts.get("catalog_ids_missing_from_source")
+            )
+            audit_catalog_summary["source_aggregate_claim_status"] = (
+                source_artifacts.get("source_aggregate_claim_status", "unknown")
+            )
+            audit_catalog_summary["source_aggregate_claim_sources_verified"] = (
+                source_artifacts.get("source_aggregate_claim_sources_verified")
+            )
+            audit_catalog_summary["source_aggregate_claim_sources_missing"] = (
+                source_artifacts.get("source_aggregate_claim_sources_missing")
             )
         else:
             audit_catalog_summary["source_artifacts_status"] = "NOT_CHECKED"

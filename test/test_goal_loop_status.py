@@ -153,6 +153,9 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_itemized_finding_ids_total": 18,
                         "source_ids_missing_from_catalog": 0,
                         "catalog_ids_missing_from_source": 18,
+                        "source_aggregate_claim_status": "INCOMPLETE",
+                        "source_aggregate_claim_sources_verified": 0,
+                        "source_aggregate_claim_sources_missing": 5,
                     },
                 },
             },
@@ -174,6 +177,9 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
         self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 18)
         self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 18)
+        self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
+        self.assertEqual(audit_catalog["source_aggregate_claim_sources_missing"], 5)
 
     def test_closed_catalog_consistency_findings_do_not_warn(self) -> None:
         report = goal_loop_status.build_status_report(
@@ -213,6 +219,9 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "catalog_itemized_finding_ids_total": 18,
                         "source_ids_missing_from_catalog": 0,
                         "catalog_ids_missing_from_source": 0,
+                        "source_aggregate_claim_status": "COMPLETE",
+                        "source_aggregate_claim_sources_verified": 0,
+                        "source_aggregate_claim_sources_missing": 0,
                     },
                 },
             },
@@ -225,6 +234,9 @@ class GoalLoopStatusTest(unittest.TestCase):
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
         self.assertEqual(audit_catalog["consistency_findings_open"], 0)
+
+    def test_malformed_catalog_consistency_finding_counts_open(self) -> None:
+        self.assertTrue(goal_loop_status.consistency_finding_is_open("bad"))
 
     def test_missing_catalog_source_artifacts_keeps_goal_warning(self) -> None:
         report = goal_loop_status.build_status_report(
@@ -262,6 +274,40 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.phases["orient"].status, "warning")
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
         self.assertEqual(audit_catalog["source_artifacts_status"], "NOT_CHECKED")
+
+    def test_malformed_catalog_consistency_finding_stays_open(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "source_documents_status": "COMPLETE",
+                    "consistency_findings": ["malformed"],
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 1)
 
     def test_next_action_prefers_missing_act_over_linked_decision(self) -> None:
         report = goal_loop_status.build_status_report(

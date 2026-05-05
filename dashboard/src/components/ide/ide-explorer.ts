@@ -286,7 +286,7 @@ function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
     <li
       role="treeitem"
       aria-expanded=${node.hasChildren ? (expanded ? 'true' : 'false') : undefined}
-      tabIndex=${node.hasChildren ? 0 : -1}
+      tabIndex=${0}
       onClick=${onClick}
       onKeyDown=${onKeyDown}
       style=${{
@@ -298,7 +298,7 @@ function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
         paddingLeft: `${4 + indent}px`,
         font: 'var(--type-body)',
         color: 'var(--color-fg-secondary)',
-        cursor: node.hasChildren ? 'pointer' : 'default',
+        cursor: 'pointer',
         userSelect: 'none',
       }}
     >
